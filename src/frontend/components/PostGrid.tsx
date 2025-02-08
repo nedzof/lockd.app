@@ -317,18 +317,18 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           {submissions.map((submission) => (
             <div
               key={submission.id}
-              className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/10 hover:border-[#00ffa3]/20 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.05)]"
+              className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/5 hover:border-[#00ffa3]/10 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.03)]"
             >
               <div className="relative aspect-square">
                 {submission.fileUrl.includes('placehold.co') ? (
-                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#2A2A40]/30 to-[#1A1B23]/30 p-6 text-center">
-                    <p className="text-gray-300 text-lg font-medium">{submission.description}</p>
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#2A2A40]/20 to-[#1A1B23]/20 p-6 text-center">
+                    <p className="text-gray-300/90 text-lg font-medium">{submission.description}</p>
                   </div>
                 ) : (
                   <video
                     ref={(el) => el && (videoRefs.current[submission.id] = el)}
                     src={submission.fileUrl}
-                    className="w-full h-full object-cover cursor-pointer"
+                    className="w-full h-full object-cover cursor-pointer opacity-90 group-hover:opacity-100 transition-opacity duration-300"
                     onClick={() => handleVideoClick(submission.id)}
                     onMouseEnter={(e) => handleVideoMouseEnter(e.target as HTMLVideoElement, submission.id)}
                     onMouseLeave={(e) => handleVideoMouseLeave(e.target as HTMLVideoElement, submission.id)}
@@ -344,22 +344,22 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                 )}
               </div>
 
-              <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/60 via-black/40 to-transparent backdrop-blur-[2px]">
+              <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/40 via-black/20 to-transparent backdrop-blur-[1px]">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center space-x-2">
-                    <div className="p-1.5 bg-[#00ffa3] bg-opacity-5 rounded-lg group-hover:bg-opacity-10 transition-all duration-300">
-                      <FiLock className="text-[#00ffa3] text-opacity-75 w-4 h-4" />
+                    <div className="p-1.5 bg-[#00ffa3] bg-opacity-3 rounded-lg group-hover:bg-opacity-5 transition-all duration-300">
+                      <FiLock className="text-[#00ffa3] text-opacity-60 w-4 h-4 group-hover:text-opacity-75" />
                     </div>
-                    <span className="text-[#00ffa3] text-opacity-75 font-medium group-hover:text-opacity-90 transition-opacity duration-300">{formatBSV(submission.totalLocked / 100000000)}</span>
+                    <span className="text-[#00ffa3] text-opacity-60 font-medium group-hover:text-opacity-75 transition-opacity duration-300">{formatBSV(submission.totalLocked / 100000000)}</span>
                   </div>
-                  <div className="text-sm text-gray-400/75 group-hover:text-gray-300 transition-colors duration-300">
+                  <div className="text-sm text-gray-400/60 group-hover:text-gray-300/75 transition-colors duration-300">
                     by {submission.creator}
                   </div>
                 </div>
 
-                <div className="relative h-1 bg-gray-800/20 rounded-full overflow-hidden mb-3">
+                <div className="relative h-0.5 bg-gray-800/10 rounded-full overflow-hidden mb-3">
                   <div
-                    className="absolute left-0 top-0 h-full transition-all duration-500 bg-gradient-to-r from-[#00ffa3]/60 to-[#00ff9d]/60"
+                    className="absolute left-0 top-0 h-full transition-all duration-500 bg-gradient-to-r from-[#00ffa3]/40 to-[#00ff9d]/40"
                     style={{
                       width: `${Math.min(
                         ((submission.totalLocked || 0) / (submission.threshold || 1000000000)) * 100,
@@ -375,13 +375,13 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                       type="number"
                       value={lockAmount}
                       onChange={(e) => setLockAmount(e.target.value)}
-                      className="flex-1 bg-black/20 border border-gray-700/30 rounded-lg px-3 py-1.5 text-white text-sm placeholder-gray-500 focus:border-[#00ffa3]/30 focus:outline-none transition-colors"
+                      className="flex-1 bg-black/10 border border-gray-700/20 rounded-lg px-3 py-1.5 text-white/90 text-sm placeholder-gray-500/75 focus:border-[#00ffa3]/20 focus:outline-none transition-colors"
                       placeholder="Amount in BSV"
                     />
                     <button
                       onClick={() => handleLockCoins(submission.id, parseFloat(lockAmount))}
                       disabled={lockingSubmissionId === submission.id || !lockAmount}
-                      className="flex items-center space-x-1 px-4 py-1.5 bg-gradient-to-r from-[#00ffa3]/90 to-[#00ff9d]/90 text-black rounded-lg font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 disabled:opacity-50"
+                      className="flex items-center space-x-1 px-4 py-1.5 bg-gradient-to-r from-[#00ffa3]/70 to-[#00ff9d]/70 text-black/90 rounded-lg font-medium hover:shadow-sm hover:from-[#00ff9d]/80 hover:to-[#00ffa3]/80 transition-all duration-300 disabled:opacity-40"
                     >
                       {lockingSubmissionId === submission.id ? (
                         <FiLoader className="animate-spin w-4 h-4" />
@@ -396,7 +396,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                 ) : (
                   <button
                     onClick={() => setShowLockInput(submission.id)}
-                    className="w-full flex items-center justify-center space-x-2 px-4 py-1.5 border border-[#00ffa3]/20 text-[#00ffa3]/75 rounded-lg font-medium hover:bg-[#00ffa3]/10 hover:border-[#00ffa3]/30 hover:text-[#00ffa3] transition-all duration-300"
+                    className="w-full flex items-center justify-center space-x-2 px-4 py-1.5 border border-[#00ffa3]/10 text-[#00ffa3]/60 rounded-lg font-medium hover:bg-[#00ffa3]/5 hover:border-[#00ffa3]/20 hover:text-[#00ffa3]/75 transition-all duration-300"
                   >
                     <FiHeart className="w-4 h-4" />
                     <span>Lock BSV</span>
