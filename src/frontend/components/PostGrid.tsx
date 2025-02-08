@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { FiLock, FiZap } from 'react-icons/fi';
+import * as React from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { FiLock, FiZap, FiLoader, FiPlus, FiHeart } from 'react-icons/fi';
 import { supabase } from '../utils/supabaseClient';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
@@ -7,11 +8,23 @@ import { MemeSubmission, Post, LockLike } from '../types';
 
 interface MemeSubmissionGridProps {
   onStatsUpdate: (stats: { totalLocked: number; participantCount: number; roundNumber: number }) => void;
+  timeFilter: string;
+  rankingFilter: string;
+  personalFilter: string;
+  userId?: string;
 }
 
-const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ onStatsUpdate }) => {
+const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ 
+  onStatsUpdate, 
+  timeFilter = 'all',
+  rankingFilter = 'top',
+  personalFilter = '',
+  userId = 'anon'
+}) => {
   const [submissions, setSubmissions] = useState<MemeSubmission[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
   const [activeVideo, setActiveVideo] = useState<string | null>(null);
   const [showLockInput, setShowLockInput] = useState<string | null>(null);
   const [lockAmount, setLockAmount] = useState<string>('');
@@ -80,36 +93,79 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ onStatsUpdate }
     }
   };
 
-  const fetchSubmissions = async () => {
+  const fetchSubmissions = useCallback(async () => {
     setIsLoading(true);
+    setError(null);
+    
     try {
-      const { data: posts, error } = await supabase
+      console.log('Starting to fetch submissions with filters:', { timeFilter, rankingFilter, personalFilter });
+      
+      // Build the base query
+      let query = supabase
         .from('Post')
         .select(`
           *,
           creator:Bitcoiner(*),
           locklikes:LockLike(*)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(9);
+        `);
 
-      if (error) throw error;
+      // Apply time filter
+      const now = new Date();
+      if (timeFilter !== 'all') {
+        const timeFilters = {
+          '1d': 1,
+          '7d': 7,
+          '30d': 30
+        };
+        const days = timeFilters[timeFilter as keyof typeof timeFilters];
+        if (days) {
+          const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+          query = query.gte('created_at', startDate.toISOString());
+        }
+      }
 
-      const submissionsWithStats = posts.map((post: Post) => {
-        const totalLockLiked = post.locklikes.reduce((sum: number, locklike: LockLike) => sum + locklike.amount, 0);
-        const totalAmountandLockLiked = post.amount + totalLockLiked;
+      // Apply personal filters
+      if (personalFilter === 'mylocks') {
+        query = query.contains('locklikes', [{ handle_id: userId }]);
+      } else if (personalFilter === 'locked') {
+        const currentTime = Math.floor(Date.now() / 1000);
+        query = query.contains('locklikes', [{ locked_until: { gte: currentTime } }]);
+      }
+
+      // Get the posts
+      let { data: posts, error } = await query
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase query error:', error);
+        throw error;
+      }
+
+      if (!posts || posts.length === 0) {
+        console.log('No posts found in database');
+        setSubmissions([]);
+        return;
+      }
+
+      // Process and enrich the posts
+      let submissionsWithStats = posts.map((post: Post) => {
+        const totalLockLiked = post.locklikes?.reduce((sum: number, locklike: LockLike) => {
+          return sum + (locklike?.amount || 0);
+        }, 0) || 0;
+        
+        const totalAmountandLockLiked = (post.amount || 0) + totalLockLiked;
 
         return {
           id: post.txid,
-          creator: post.creator.handle,
-          title: `Post by ${post.creator.handle}`,
-          description: post.content,
+          creator: post.creator?.handle || 'Anonymous',
+          title: `Post by ${post.creator?.handle || 'Anonymous'}`,
+          description: post.content || '',
           prompt: '',
           style: 'viral',
           duration: 30,
           format: 'video/mp4',
-          fileUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content)}`,
-          thumbnailUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content)}`,
+          fileUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
+          thumbnailUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
           txId: post.txid,
           locks: totalAmountandLockLiked,
           status: 'minted' as const,
@@ -120,10 +176,30 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ onStatsUpdate }
           threshold: 1000000000, // 10 BSV threshold
           isTop10Percent: totalAmountandLockLiked > 1000000000,
           isTop3: totalAmountandLockLiked > 2000000000,
-          locklikes: post.locklikes
+          locklikes: post.locklikes || []
         };
       });
 
+      // Apply ranking filters
+      submissionsWithStats.sort((a, b) => {
+        // First sort by total locked amount
+        const amountDiff = b.totalLocked - a.totalLocked;
+        if (amountDiff !== 0) return amountDiff;
+        
+        // If amounts are equal, sort by most recent
+        return b.createdAt.getTime() - a.createdAt.getTime();
+      });
+
+      // Apply limit based on filter
+      if (rankingFilter === 'top1') {
+        submissionsWithStats = submissionsWithStats.slice(0, 1);
+      } else if (rankingFilter === 'top3') {
+        submissionsWithStats = submissionsWithStats.slice(0, 3);
+      } else if (rankingFilter === 'top10') {
+        submissionsWithStats = submissionsWithStats.slice(0, 10);
+      }
+
+      console.log('Processed submissions:', submissionsWithStats);
       setSubmissions(submissionsWithStats);
 
       // Update stats
@@ -135,28 +211,118 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ onStatsUpdate }
       });
     } catch (error) {
       console.error('Failed to fetch submissions:', error);
+      setError(error instanceof Error ? error.message : 'Failed to load posts. Please try again later.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [timeFilter, rankingFilter, personalFilter, userId, onStatsUpdate]);
 
+  // Single useEffect for initialization and data fetching
   useEffect(() => {
-    fetchSubmissions();
-  }, [onStatsUpdate]);
+    const initializeAndFetch = async () => {
+      try {
+        console.log('Checking Supabase connection...');
+        
+        // First verify we have a valid client
+        if (!supabase) {
+          console.error('Supabase client is not initialized');
+          setError('Database client not initialized');
+          return;
+        }
+
+        // Test the connection with a simple query
+        const { data, error } = await supabase
+          .from('Post')
+          .select('count')
+          .limit(1);
+
+        if (error) {
+          console.error('Failed to connect to Supabase:', error);
+          setError('Database connection failed: ' + error.message);
+          return;
+        }
+
+        console.log('Successfully connected to Supabase. Count query result:', data);
+        setIsConnected(true);
+        
+        // Now that we're connected, fetch the submissions
+        await fetchSubmissions();
+      } catch (error) {
+        console.error('Error during initialization:', error);
+        setError('Failed to initialize: ' + (error instanceof Error ? error.message : String(error)));
+      }
+    };
+
+    initializeAndFetch();
+  }, [fetchSubmissions]);
+
+  if (!isConnected) {
+    return (
+      <div className="min-h-[400px] flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <FiLoader className="w-8 h-8 text-[#00ffa3] animate-spin" />
+          <p className="text-gray-400">Connecting to database...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[400px] flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <FiLoader className="w-8 h-8 text-[#00ffa3] animate-spin" />
+          <p className="text-gray-400">Loading posts...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-[400px] flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <p className="text-red-500">{error}</p>
+          <button 
+            onClick={fetchSubmissions}
+            className="px-4 py-2 text-[#00ffa3] border border-[#00ffa3] rounded-lg hover:bg-[#00ffa3] hover:text-black transition-all duration-300"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (submissions.length === 0) {
+    return (
+      <div className="min-h-[400px] flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <button 
+            className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] text-black rounded-lg font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 transform hover:scale-105"
+          >
+            <FiPlus className="w-5 h-5" />
+            <span>Create Post</span>
+          </button>
+          <p className="text-sm text-gray-400">Be the first to create a post!</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen text-white p-4 md:p-8">
+    <div className="min-h-screen">
       <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {submissions.map((submission) => (
             <div
               key={submission.id}
-              className="bg-[#2A2A40] rounded-lg overflow-hidden relative group aspect-square"
+              className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/10 hover:border-[#00ffa3]/20 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.05)]"
             >
-              <div className="relative h-3/4">
+              <div className="relative aspect-square">
                 {submission.fileUrl.includes('placehold.co') ? (
-                  <div className="w-full h-full flex items-center justify-center bg-[#1A1B23] p-4 text-center">
-                    <p className="text-[#00ffa3] text-lg">{submission.description}</p>
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#2A2A40]/30 to-[#1A1B23]/30 p-6 text-center">
+                    <p className="text-gray-300 text-lg font-medium">{submission.description}</p>
                   </div>
                 ) : (
                   <video
@@ -178,23 +344,22 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ onStatsUpdate }
                 )}
               </div>
 
-              <div className="p-3 h-1/4">
-                <div className="flex items-center justify-between mb-2">
+              <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/60 via-black/40 to-transparent backdrop-blur-[2px]">
+                <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center space-x-2">
-                    <FiLock className="text-[#00ffa3] w-4 h-4" />
-                    <span className="text-[#00ffa3] font-bold text-sm">{formatBSV(submission.totalLocked / 100000000)}</span>
+                    <div className="p-1.5 bg-[#00ffa3] bg-opacity-5 rounded-lg group-hover:bg-opacity-10 transition-all duration-300">
+                      <FiLock className="text-[#00ffa3] text-opacity-75 w-4 h-4" />
+                    </div>
+                    <span className="text-[#00ffa3] text-opacity-75 font-medium group-hover:text-opacity-90 transition-opacity duration-300">{formatBSV(submission.totalLocked / 100000000)}</span>
                   </div>
-                  <div className="text-sm text-gray-400">
+                  <div className="text-sm text-gray-400/75 group-hover:text-gray-300 transition-colors duration-300">
                     by {submission.creator}
                   </div>
                 </div>
 
-                <div className="relative h-1 bg-gray-700 rounded-full overflow-hidden mb-2">
+                <div className="relative h-1 bg-gray-800/20 rounded-full overflow-hidden mb-3">
                   <div
-                    className={`absolute left-0 top-0 h-full transition-all duration-500 ${getProgressColor(
-                      submission.totalLocked,
-                      submission.threshold
-                    )}`}
+                    className="absolute left-0 top-0 h-full transition-all duration-500 bg-gradient-to-r from-[#00ffa3]/60 to-[#00ff9d]/60"
                     style={{
                       width: `${Math.min(
                         ((submission.totalLocked || 0) / (submission.threshold || 1000000000)) * 100,
@@ -210,27 +375,31 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ onStatsUpdate }
                       type="number"
                       value={lockAmount}
                       onChange={(e) => setLockAmount(e.target.value)}
-                      className="flex-1 bg-[#1A1B23] border border-gray-700 rounded px-2 py-1 text-white text-sm"
+                      className="flex-1 bg-black/20 border border-gray-700/30 rounded-lg px-3 py-1.5 text-white text-sm placeholder-gray-500 focus:border-[#00ffa3]/30 focus:outline-none transition-colors"
                       placeholder="Amount in BSV"
                     />
                     <button
                       onClick={() => handleLockCoins(submission.id, parseFloat(lockAmount))}
                       disabled={lockingSubmissionId === submission.id || !lockAmount}
-                      className="bg-[#00ffa3] text-black px-3 py-1 rounded font-bold hover:bg-[#00ff9d] transition-colors disabled:opacity-50 text-sm"
+                      className="flex items-center space-x-1 px-4 py-1.5 bg-gradient-to-r from-[#00ffa3]/90 to-[#00ff9d]/90 text-black rounded-lg font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 disabled:opacity-50"
                     >
                       {lockingSubmissionId === submission.id ? (
-                        <FiZap className="animate-spin w-4 h-4" />
+                        <FiLoader className="animate-spin w-4 h-4" />
                       ) : (
-                        'Lock'
+                        <>
+                          <FiHeart className="w-4 h-4" />
+                          <span>Lock</span>
+                        </>
                       )}
                     </button>
                   </div>
                 ) : (
                   <button
                     onClick={() => setShowLockInput(submission.id)}
-                    className="w-full bg-[#1A1B23] text-[#00ffa3] px-3 py-1 rounded font-bold hover:bg-[#2A2A40] transition-colors text-sm"
+                    className="w-full flex items-center justify-center space-x-2 px-4 py-1.5 border border-[#00ffa3]/20 text-[#00ffa3]/75 rounded-lg font-medium hover:bg-[#00ffa3]/10 hover:border-[#00ffa3]/30 hover:text-[#00ffa3] transition-all duration-300"
                   >
-                    Lock BSV
+                    <FiHeart className="w-4 h-4" />
+                    <span>Lock BSV</span>
                   </button>
                 )}
               </div>
@@ -242,4 +411,4 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ onStatsUpdate }
   );
 };
 
-export default MemeSubmissionGrid; 
+export default MemeSubmissionGrid;

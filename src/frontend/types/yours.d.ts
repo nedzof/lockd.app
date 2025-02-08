@@ -3,14 +3,13 @@ import type { ReactNode } from 'react';
 declare module 'yours-wallet-provider' {
   export interface YoursWallet {
     isReady: boolean;
-    connect: () => Promise<string>;
+    connect: () => Promise<void>;
     disconnect: () => Promise<void>;
     isConnected: () => Promise<boolean>;
-    getAddresses: () => Promise<string[]>;
+    getAddresses: () => Promise<{ bsvAddress: string }>;
     getBalance: () => Promise<number>;
-    signMessage: (message: string) => Promise<{ signature: string }>;
-    on: (event: 'switchAccount' | 'signedOut', handler: () => void) => void;
-    off: (event: 'switchAccount' | 'signedOut', handler: () => void) => void;
+    on: (event: string, callback: Function) => void;
+    off: (event: string, callback: Function) => void;
   }
 
   export function useYoursWallet(): YoursWallet | undefined;
@@ -19,16 +18,8 @@ declare module 'yours-wallet-provider' {
 
 declare global {
   interface Window {
-    yours?: {
-      isReady: boolean;
-      connect: () => Promise<string>;
-      disconnect: () => Promise<void>;
-      isConnected: () => Promise<boolean>;
-      getAddresses: () => Promise<string[]>;
-      getBalance: () => Promise<number>;
-      signMessage: (message: string) => Promise<{ signature: string }>;
-      on: (event: 'switchAccount' | 'signedOut', handler: () => void) => void;
-      off: (event: 'switchAccount' | 'signedOut', handler: () => void) => void;
-    };
+    yours?: YoursWallet;
   }
-} 
+}
+
+export {}; 
