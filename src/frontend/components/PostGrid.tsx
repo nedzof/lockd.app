@@ -110,8 +110,8 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         `);
 
       // Apply time filter
-      const now = new Date();
-      if (timeFilter !== 'all') {
+      if (timeFilter) {
+        const now = new Date();
         const timeFilters = {
           '1d': 1,
           '7d': 7,
@@ -180,7 +180,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         };
       });
 
-      // Apply ranking filters
+      // Apply ranking filters only if a ranking filter is selected
       submissionsWithStats.sort((a, b) => {
         // First sort by total locked amount
         const amountDiff = b.totalLocked - a.totalLocked;
@@ -191,12 +191,14 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       });
 
       // Apply limit based on filter
-      if (rankingFilter === 'top1') {
-        submissionsWithStats = submissionsWithStats.slice(0, 1);
-      } else if (rankingFilter === 'top3') {
-        submissionsWithStats = submissionsWithStats.slice(0, 3);
-      } else if (rankingFilter === 'top10') {
-        submissionsWithStats = submissionsWithStats.slice(0, 10);
+      if (rankingFilter) {
+        if (rankingFilter === 'top1') {
+          submissionsWithStats = submissionsWithStats.slice(0, 1);
+        } else if (rankingFilter === 'top3') {
+          submissionsWithStats = submissionsWithStats.slice(0, 3);
+        } else if (rankingFilter === 'top10') {
+          submissionsWithStats = submissionsWithStats.slice(0, 10);
+        }
       }
 
       console.log('Processed submissions:', submissionsWithStats);
@@ -312,99 +314,101 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
   return (
     <div className="min-h-screen">
-      <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {submissions.map((submission) => (
-            <div
-              key={submission.id}
-              className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/5 hover:border-[#00ffa3]/10 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.03)]"
-            >
-              <div className="relative aspect-square">
-                {submission.fileUrl.includes('placehold.co') ? (
-                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#2A2A40]/20 to-[#1A1B23]/20 p-6 text-center">
-                    <p className="text-gray-300/90 text-lg font-medium">{submission.description}</p>
-                  </div>
-                ) : (
-                  <video
-                    ref={(el) => el && (videoRefs.current[submission.id] = el)}
-                    src={submission.fileUrl}
-                    className="w-full h-full object-cover cursor-pointer opacity-90 group-hover:opacity-100 transition-opacity duration-300"
-                    onClick={() => handleVideoClick(submission.id)}
-                    onMouseEnter={(e) => handleVideoMouseEnter(e.target as HTMLVideoElement, submission.id)}
-                    onMouseLeave={(e) => handleVideoMouseLeave(e.target as HTMLVideoElement, submission.id)}
-                    loop
-                    muted
-                    playsInline
-                  />
-                )}
-                {showConfetti === submission.id && (
-                  <div className="absolute inset-0 pointer-events-none">
-                    {/* Add your confetti animation here */}
-                  </div>
-                )}
-              </div>
-
-              <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/40 via-black/20 to-transparent backdrop-blur-[1px]">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center space-x-2">
-                    <div className="p-1.5 bg-[#00ffa3] bg-opacity-3 rounded-lg group-hover:bg-opacity-5 transition-all duration-300">
-                      <FiLock className="text-[#00ffa3] text-opacity-60 w-4 h-4 group-hover:text-opacity-75" />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-center">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 justify-items-center" style={{ maxWidth: 'fit-content' }}>
+            {submissions.map((submission) => (
+              <div
+                key={submission.id}
+                className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/10 hover:border-[#00ffa3]/20 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.05)] bg-[#1A1B23]/30 w-full max-w-md"
+              >
+                <div className="relative aspect-square">
+                  {submission.fileUrl.includes('placehold.co') ? (
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#2A2A40]/20 to-[#1A1B23]/20 p-6 text-center">
+                      <p className="text-gray-300/90 text-lg font-medium">{submission.description}</p>
                     </div>
-                    <span className="text-[#00ffa3] text-opacity-60 font-medium group-hover:text-opacity-75 transition-opacity duration-300">{formatBSV(submission.totalLocked / 100000000)}</span>
-                  </div>
-                  <div className="text-sm text-gray-400/60 group-hover:text-gray-300/75 transition-colors duration-300">
-                    by {submission.creator}
-                  </div>
-                </div>
-
-                <div className="relative h-0.5 bg-gray-800/10 rounded-full overflow-hidden mb-3">
-                  <div
-                    className="absolute left-0 top-0 h-full transition-all duration-500 bg-gradient-to-r from-[#00ffa3]/40 to-[#00ff9d]/40"
-                    style={{
-                      width: `${Math.min(
-                        ((submission.totalLocked || 0) / (submission.threshold || 1000000000)) * 100,
-                        100
-                      )}%`,
-                    }}
-                  />
-                </div>
-
-                {showLockInput === submission.id ? (
-                  <div className="flex space-x-2">
-                    <input
-                      type="number"
-                      value={lockAmount}
-                      onChange={(e) => setLockAmount(e.target.value)}
-                      className="flex-1 bg-black/10 border border-gray-700/20 rounded-lg px-3 py-1.5 text-white/90 text-sm placeholder-gray-500/75 focus:border-[#00ffa3]/20 focus:outline-none transition-colors"
-                      placeholder="Amount in BSV"
+                  ) : (
+                    <video
+                      ref={(el) => el && (videoRefs.current[submission.id] = el)}
+                      src={submission.fileUrl}
+                      className="w-full h-full object-cover cursor-pointer rounded-t-xl"
+                      onClick={() => handleVideoClick(submission.id)}
+                      onMouseEnter={(e) => handleVideoMouseEnter(e.target as HTMLVideoElement, submission.id)}
+                      onMouseLeave={(e) => handleVideoMouseLeave(e.target as HTMLVideoElement, submission.id)}
+                      loop
+                      muted
+                      playsInline
                     />
-                    <button
-                      onClick={() => handleLockCoins(submission.id, parseFloat(lockAmount))}
-                      disabled={lockingSubmissionId === submission.id || !lockAmount}
-                      className="flex items-center space-x-1 px-4 py-1.5 bg-gradient-to-r from-[#00ffa3]/70 to-[#00ff9d]/70 text-black/90 rounded-lg font-medium hover:shadow-sm hover:from-[#00ff9d]/80 hover:to-[#00ffa3]/80 transition-all duration-300 disabled:opacity-40"
-                    >
-                      {lockingSubmissionId === submission.id ? (
-                        <FiLoader className="animate-spin w-4 h-4" />
-                      ) : (
-                        <>
-                          <FiHeart className="w-4 h-4" />
-                          <span>Lock</span>
-                        </>
-                      )}
-                    </button>
+                  )}
+                  {showConfetti === submission.id && (
+                    <div className="absolute inset-0 pointer-events-none">
+                      {/* Add your confetti animation here */}
+                    </div>
+                  )}
+                </div>
+
+                <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-[#1A1B23]/95 via-[#1A1B23]/70 to-transparent backdrop-blur-[1px]">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center space-x-2">
+                      <div className="p-1.5 bg-[#00ffa3] bg-opacity-5 rounded-lg group-hover:bg-opacity-10 transition-all duration-300">
+                        <FiLock className="text-[#00ffa3] text-opacity-80 w-4 h-4" />
+                      </div>
+                      <span className="text-[#00ffa3] text-opacity-80 font-medium group-hover:text-opacity-95 transition-opacity duration-300">{formatBSV(submission.totalLocked / 100000000)}</span>
+                    </div>
+                    <div className="text-sm text-gray-300/80 group-hover:text-gray-200/90 transition-colors duration-300">
+                      by {submission.creator}
+                    </div>
                   </div>
-                ) : (
-                  <button
-                    onClick={() => setShowLockInput(submission.id)}
-                    className="w-full flex items-center justify-center space-x-2 px-4 py-1.5 border border-[#00ffa3]/10 text-[#00ffa3]/60 rounded-lg font-medium hover:bg-[#00ffa3]/5 hover:border-[#00ffa3]/20 hover:text-[#00ffa3]/75 transition-all duration-300"
-                  >
-                    <FiHeart className="w-4 h-4" />
-                    <span>Lock BSV</span>
-                  </button>
-                )}
+
+                  <div className="relative h-1 bg-[#2A2A40]/30 rounded-full overflow-hidden mb-3">
+                    <div
+                      className="absolute left-0 top-0 h-full transition-all duration-500 bg-gradient-to-r from-[#00ffa3]/70 to-[#00ff9d]/70"
+                      style={{
+                        width: `${Math.min(
+                          ((submission.totalLocked || 0) / (submission.threshold || 1000000000)) * 100,
+                          100
+                        )}%`,
+                      }}
+                    />
+                  </div>
+
+                  {showLockInput === submission.id ? (
+                    <div className="flex space-x-2">
+                      <input
+                        type="number"
+                        value={lockAmount}
+                        onChange={(e) => setLockAmount(e.target.value)}
+                        className="flex-1 bg-[#2A2A40]/30 border border-gray-700/20 rounded-lg px-3 py-1.5 text-white text-sm placeholder-gray-400/70 focus:border-[#00ffa3]/30 focus:outline-none transition-colors"
+                        placeholder="Amount in BSV"
+                      />
+                      <button
+                        onClick={() => handleLockCoins(submission.id, parseFloat(lockAmount))}
+                        disabled={lockingSubmissionId === submission.id || !lockAmount}
+                        className="flex items-center space-x-1 px-4 py-1.5 bg-gradient-to-r from-[#00ffa3]/80 to-[#00ff9d]/80 text-black rounded-lg font-medium hover:shadow-lg hover:from-[#00ff9d]/90 hover:to-[#00ffa3]/90 transition-all duration-300 disabled:opacity-50"
+                      >
+                        {lockingSubmissionId === submission.id ? (
+                          <FiLoader className="animate-spin w-4 h-4" />
+                        ) : (
+                          <>
+                            <FiHeart className="w-4 h-4" />
+                            <span>Lock</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowLockInput(submission.id)}
+                      className="w-full flex items-center justify-center space-x-2 px-4 py-1.5 border border-[#00ffa3]/30 text-[#00ffa3]/85 rounded-lg font-medium hover:bg-[#00ffa3]/10 hover:border-[#00ffa3]/40 hover:text-[#00ffa3]/95 transition-all duration-300"
+                    >
+                      <FiHeart className="w-4 h-4" />
+                      <span>Lock BSV</span>
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </div>

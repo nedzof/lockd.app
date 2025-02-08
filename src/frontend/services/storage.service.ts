@@ -1,22 +1,26 @@
-import { MemeVideoMetadata } from '../../shared/types/metadata';
-import { supabase } from '../utils/supabaseClient';
+import { createClient } from '@supabase/supabase-js';
 import type { Database } from '../../types/supabase';
+import { WalletError } from '../../shared/utils/errors';
+import { supabase } from '../utils/supabaseClient';
+import { MemeSubmission as MemeVideoMetadata } from '../types';
 
-interface Post {
-  content: string;
-  mediaUrl?: string | null;
-  lockUntilBlock: number;
-  amount: number;
-  initialVibes: number;
-  timestamp: number;
-  txid: string;
-}
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://armwtaxnwajmunysmbjr.supabase.co';
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFybXd0YXhud2FqbXVueXNtYmpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzg5MjI1MDQsImV4cCI6MjA1NDQ5ODUwNH0.RN5aElUBDafoPqdHI6xTL4EycZ72wxuOyFzWHJ0Un2g';
 
-class StorageService {
-  private currentBlockHeight: number = 0;
+export class StorageService {
+  private static instance: StorageService;
+  private supabase = createClient<Database>(supabaseUrl, supabaseKey);
+  private currentBlockHeight: number = 830000; // Default block height
 
   constructor() {
     this.fetchCurrentBlockHeight();
+  }
+
+  static getInstance(): StorageService {
+    if (!StorageService.instance) {
+      StorageService.instance = new StorageService();
+    }
+    return StorageService.instance;
   }
 
   private async fetchCurrentBlockHeight(): Promise<void> {
@@ -31,7 +35,118 @@ class StorageService {
   }
 
   private calculateVibes(amount: number, lockPeriod: number): number {
-    return (amount / 100000000) * Math.log(lockPeriod);
+    return amount * Math.log(lockPeriod + 1);
+  }
+
+  async createBitcoiner(handle: string, pubkey: string, avatar?: string) {
+    try {
+      const { data, error } = await this.supabase
+        .from('Bitcoiner')
+        .insert([
+          {
+            handle,
+            pubkey,
+            avatar: avatar || null,
+            created_at: new Date().toISOString()
+          }
+        ]);
+
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      throw new WalletError('Failed to create bitcoiner');
+    }
+  }
+
+  async getBitcoiner(handle: string) {
+    try {
+      const { data, error } = await this.supabase
+        .from('Bitcoiner')
+        .select('*')
+        .eq('handle', handle)
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      throw new WalletError('Failed to get bitcoiner');
+    }
+  }
+
+  async createPost(txid: string, handle: string, content: string, amount: number, mediaUrl?: string) {
+    try {
+      const { data, error } = await this.supabase
+        .from('Post')
+        .insert([
+          {
+            txid,
+            handle_id: handle,
+            content,
+            amount,
+            media_url: mediaUrl || null,
+            created_at: new Date().toISOString()
+          }
+        ]);
+
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      throw new WalletError('Failed to create post');
+    }
+  }
+
+  async getPosts() {
+    try {
+      const { data, error } = await this.supabase
+        .from('Post')
+        .select(`
+          *,
+          creator:Bitcoiner(*),
+          locklikes:LockLike(*)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      throw new WalletError('Failed to get posts');
+    }
+  }
+
+  async createLockLike(txid: string, handle: string, postId: string, amount: number, lockedUntil: number) {
+    try {
+      const { data, error } = await this.supabase
+        .from('LockLike')
+        .insert([
+          {
+            txid,
+            handle_id: handle,
+            post_id: postId,
+            amount,
+            locked_until: lockedUntil,
+            created_at: new Date().toISOString()
+          }
+        ]);
+
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      throw new WalletError('Failed to create lock like');
+    }
+  }
+
+  async getLockLikes(postId: string) {
+    try {
+      const { data, error } = await this.supabase
+        .from('LockLike')
+        .select('*')
+        .eq('post_id', postId);
+
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      throw new WalletError('Failed to get lock likes');
+    }
   }
 
   async getMemeVideos(page: number, limit: number): Promise<MemeVideoMetadata[]> {
@@ -61,57 +176,33 @@ class StorageService {
         }, 0) || 0;
 
         return {
-          id: post.txid,
-          creator: post.creator?.handle || 'anon',
-          title: `Post by ${post.creator?.handle || 'anon'}`,
-          description: post.content || '',
-          prompt: '',
-          style: 'viral',
-          duration: 30,
-          format: 'video/mp4',
-          fileUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
-          thumbnailUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
+          id: post.id,
+          creator: post.creator.handle,
+          title: post.title || `Post by ${post.creator.handle}`,
+          description: post.content,
+          prompt: post.prompt || '',
+          style: post.style || 'viral',
+          duration: post.duration || 30,
+          format: post.format || 'video/mp4',
+          fileUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content)}`,
+          thumbnailUrl: post.thumbnail_url || post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content)}`,
           txId: post.txid,
           locks: totalAmountandLockLiked,
-          status: 'minted' as const,
-          tags: ['meme', 'viral'],
+          status: 'minted',
+          tags: post.tags || ['meme', 'viral'],
           createdAt: new Date(post.created_at),
-          updatedAt: new Date(post.created_at),
-          initialVibes,
-          totalLockLikeVibes,
-          totalVibes: initialVibes + totalLockLikeVibes,
-          locklikes: post.locklikes?.map((locklike: any) => ({
-            txid: locklike.txid,
-            amount: locklike.amount,
-            locked_until: locklike.locked_until,
-            created_at: new Date(locklike.created_at)
-          })) || []
+          updatedAt: new Date(post.updated_at || post.created_at),
+          totalLocked: totalAmountandLockLiked,
+          threshold: 1000000000, // 10 BSV threshold
+          isTop10Percent: totalAmountandLockLiked > 1000000000,
+          isTop3: totalAmountandLockLiked > 2000000000,
+          locklikes: post.locklikes,
+          vibes: initialVibes + totalLockLikeVibes
         };
       });
     } catch (error) {
-      console.error('Failed to fetch posts:', error);
-      throw error;
-    }
-  }
-
-  async createPost(post: Post): Promise<void> {
-    try {
-      const { error } = await supabase
-        .from('Post')
-        .insert({
-          txid: post.txid,
-          amount: Math.floor(post.amount * 100000000), // Convert BSV to satoshis
-          content: post.content,
-          media_url: post.mediaUrl || null,
-          locked_until: post.lockUntilBlock,
-          handle_id: 'anon', // For now, use anon handle
-          created_at: new Date(post.timestamp).toISOString()
-        });
-
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error creating post:', error);
-      throw error;
+      console.error('Failed to fetch meme videos:', error);
+      return [];
     }
   }
 
@@ -156,5 +247,4 @@ class StorageService {
   }
 }
 
-export const storageService = new StorageService();
-export default storageService; 
+export const storageService = new StorageService(); 

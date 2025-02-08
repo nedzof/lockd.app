@@ -1,19 +1,16 @@
-import * as React from 'react';
-import * as ReactDOM from 'react-dom/client';
-import { YoursProvider } from 'yours-wallet-provider';
+import React from 'react';
+import ReactDOM from 'react-dom/client';
 import App from './frontend/pages/App';
-import { WalletProvider } from './frontend/providers/WalletProvider';
 import './index.css';
+import { WalletProvider } from './frontend/providers/WalletProvider';
 
 // Create a root component to properly organize providers
 const Root = () => {
   return (
     <React.StrictMode>
-      <YoursProvider>
-        <WalletProvider>
-          <App />
-        </WalletProvider>
-      </YoursProvider>
+      <WalletProvider>
+        <App />
+      </WalletProvider>
     </React.StrictMode>
   );
 };

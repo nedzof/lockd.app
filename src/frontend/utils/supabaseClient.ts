@@ -1,15 +1,56 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '../../types/supabase';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://armwtaxnwajmunysmbjr.supabase.co';
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFybXd0YXhud2FqbXVueXNtYmpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzg5MjI1MDQsImV4cCI6MjA1NDQ5ODUwNH0.RN5aElUBDafoPqdHI6xTL4EycZ72wxuOyFzWHJ0Un2g';
+// Log all environment variables (except sensitive ones)
+console.log('Environment variables:', {
+  VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL ? 'present' : 'missing',
+  NODE_ENV: import.meta.env.MODE,
+  DEV: import.meta.env.DEV,
+});
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error('Missing Supabase environment variables:', {
+    url: supabaseUrl ? 'present' : 'missing',
+    key: supabaseKey ? 'present' : 'missing'
+  });
+  throw new Error('Missing required Supabase configuration');
+}
+
+console.log('Initializing Supabase client with URL:', supabaseUrl);
 
 declare global {
   var supabase: ReturnType<typeof createClient<Database>> | undefined;
 }
 
-const supabaseClient = globalThis.supabase ?? createClient<Database>(supabaseUrl, supabaseKey);
+let supabaseClient: ReturnType<typeof createClient<Database>>;
 
-if (process.env.NODE_ENV !== 'production') globalThis.supabase = supabaseClient;
+try {
+  supabaseClient = globalThis.supabase ?? createClient<Database>(supabaseUrl, supabaseKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+    },
+  });
 
-export default supabaseClient; 
+  // Test the connection
+  supabaseClient.from('Post').select('count').limit(1).then(({ data, error }) => {
+    if (error) {
+      console.error('Failed to connect to Supabase:', error);
+    } else {
+      console.log('Successfully connected to Supabase');
+    }
+  });
+
+  if (import.meta.env.DEV) {
+    globalThis.supabase = supabaseClient;
+    console.log('Supabase client initialized in development mode');
+  }
+} catch (error) {
+  console.error('Failed to initialize Supabase client:', error);
+  throw error;
+}
+
+export const supabase = supabaseClient;

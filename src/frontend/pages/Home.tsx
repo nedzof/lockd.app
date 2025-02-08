@@ -16,9 +16,17 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const isPosts = location.pathname === '/posts' || location.pathname === '/';
   const isStats = location.pathname === '/stats';
   const isSettings = location.pathname === '/settings';
-  const [timeFilter, setTimeFilter] = useState('all');
+  const [timeFilter, setTimeFilter] = useState('');
   const [rankingFilter, setRankingFilter] = useState('top1');
   const [personalFilter, setPersonalFilter] = useState('');
+
+  const handleTimeFilter = (filter: string) => {
+    setTimeFilter(timeFilter === filter ? '' : filter);
+  };
+
+  const handleRankingFilter = (filter: string) => {
+    setRankingFilter(rankingFilter === filter ? '' : filter);
+  };
 
   const handleStatsUpdate = (stats: { totalLocked: number; participantCount: number; roundNumber: number }) => {
     console.log('Stats updated:', stats);
@@ -41,17 +49,17 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
             <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800/10">
               {/* Time Filters */}
               <div className="flex items-center space-x-1">
-                {['1d', '7d', '30d', 'all'].map((filter) => (
+                {['1d', '7d', '30d'].map((filter) => (
                   <button
                     key={filter}
-                    onClick={() => setTimeFilter(filter)}
+                    onClick={() => handleTimeFilter(filter)}
                     className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
                       timeFilter === filter
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    {filter === 'all' ? 'All Time' : filter.toUpperCase()}
+                    {filter.toUpperCase()}
                   </button>
                 ))}
               </div>
@@ -68,7 +76,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 ].map(({ id, label }) => (
                   <button
                     key={id}
-                    onClick={() => setRankingFilter(id)}
+                    onClick={() => handleRankingFilter(id)}
                     className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
                       rankingFilter === id
                         ? 'bg-white/10 text-white'

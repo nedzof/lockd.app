@@ -1,12 +1,11 @@
-import * as React from 'react';
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { useYoursWallet } from 'yours-wallet-provider';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useYoursWallet, NetWork } from 'yours-wallet-provider';
 
 type YoursEvent = 'switchAccount' | 'signedOut';
 
 interface SignMessage {
   message: string;
-  encoding: 'utf8';
+  encoding?: 'utf8';
 }
 
 interface SignedMessage {
@@ -66,8 +65,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       throw new Error('No wallet connected');
     }
 
-    const result = await yoursWallet.signMessage(message);
-    return result.signature;
+    const signRequest: SignMessage = { message, encoding: 'utf8' };
+    const result = await yoursWallet.signMessage(signRequest) as SignedMessage;
+    return result.sig;
   };
 
   const connect = async () => {
@@ -126,8 +126,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.log('Yours wallet addresses:', addresses);
         
         // Use bsvAddress from Yours wallet
-        if (addresses && addresses[0]) {
-          const address = addresses[0];
+        if (addresses && 'bsvAddress' in addresses) {
+          const address = addresses.bsvAddress;
           console.log('Using BSV address:', address);
           
           const balance = await yoursWallet.getBalance();
@@ -208,7 +208,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     yoursWallet.on('signedOut', handleSignedOut);
 
     return () => {
-      if (yoursWallet?.removeListener) {
+      if (yoursWallet) {
         yoursWallet.removeListener('switchAccount', handleSwitchAccount);
         yoursWallet.removeListener('signedOut', handleSignedOut);
       }
@@ -221,6 +221,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       await handleYoursWalletState();
     }
   }, [connected, handleYoursWalletState]);
+
+  // Check network state
+  useEffect(() => {
+    const checkNetworkState = async () => {
+      if (yoursWallet && connected) {
+        try {
+          const network = await yoursWallet.getNetwork();
+          setIsTestnetState(network === NetWork.Testnet);
+        } catch (error) {
+          console.error('Error checking network state:', error);
+        }
+      }
+    };
+
+    checkNetworkState();
+  }, [connected, yoursWallet]);
 
   return (
     <WalletContext.Provider
