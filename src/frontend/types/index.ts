@@ -21,6 +21,8 @@ export interface Post {
   created_at: string;
   locked_until: number;
   media_url: string | null;
+  media_type?: string;
+  description?: string;
   creator: {
     handle: string;
   };
@@ -56,6 +58,8 @@ export interface HODLTransaction {
   handle_id: string;
   content: string;
   media_url?: string;
+  media_type?: string;
+  description?: string;
   amount: number;
   created_at: Date;
   locklikes: LockLike[];

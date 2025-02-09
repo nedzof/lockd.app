@@ -1,9 +1,10 @@
 import * as React from 'react';
 import { useState } from 'react';
-import { FiSend, FiX } from 'react-icons/fi';
+import { FiSend, FiX, FiImage, FiTrash2 } from 'react-icons/fi';
 import { createPost } from '../services/post.service';
 import { toast } from 'react-hot-toast';
 import { useWallet } from '../providers/WalletProvider';
+import ImageUploading, { ImageListType } from 'react-images-uploading';
 
 interface CreatePostProps {
   isOpen: boolean;
@@ -15,14 +16,28 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
   const { bsvAddress, wallet } = useWallet();
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [images, setImages] = useState<ImageListType>([]);
+
+  const onImagesChange = (imageList: ImageListType) => {
+    setImages(imageList);
+  };
 
   const handleSubmit = async () => {
-    if (!wallet || !bsvAddress || !content.trim()) return;
+    if (!wallet || !bsvAddress || (!content.trim() && !images.length)) {
+      toast.error('Please provide either text content or an image');
+      return;
+    }
     
     setIsSubmitting(true);
     try {
-      await createPost(content, bsvAddress, wallet);
+      await createPost(
+        content, 
+        bsvAddress, 
+        wallet,
+        images[0]?.file
+      );
       setContent('');
+      setImages([]);
       onPostCreated?.();
       onClose();
     } catch (error) {
@@ -50,10 +65,54 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
 
         {/* Content */}
         <div className="p-6 space-y-4">
+          {/* Image Upload */}
+          <ImageUploading value={images} onChange={onImagesChange} maxNumber={1} dataURLKey="data_url">
+            {({ imageList, onImageUpload, onImageRemove, isDragging, dragProps }) => (
+              <div className="space-y-4">
+                {/* Upload Button */}
+                {imageList.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={onImageUpload}
+                    {...dragProps}
+                    className={`w-full p-4 border-2 border-dashed rounded-lg transition-colors ${
+                      isDragging 
+                        ? 'border-[#00ffa3] bg-[#00ffa3]/5' 
+                        : 'border-gray-800 hover:border-[#00ffa3]/50'
+                    }`}
+                  >
+                    <div className="flex flex-col items-center gap-2 text-gray-400">
+                      <FiImage className="w-8 h-8" />
+                      <span>Click or drag image here</span>
+                    </div>
+                  </button>
+                )}
+
+                {/* Image Preview */}
+                {imageList.map((image, index) => (
+                  <div key={index} className="relative">
+                    <img
+                      src={image.data_url}
+                      alt="Upload preview"
+                      className="w-full h-48 object-cover rounded-lg"
+                    />
+                    <button
+                      onClick={() => onImageRemove(index)}
+                      className="absolute top-2 right-2 p-2 bg-red-500/80 hover:bg-red-500 rounded-full text-white transition-colors"
+                    >
+                      <FiTrash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ImageUploading>
+
+          {/* Text content field (optional for images) */}
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="What's on your mind?"
+            placeholder={images.length > 0 ? "Add a description (optional)..." : "What's on your mind?"}
             className="w-full h-40 px-4 py-3 text-white bg-[#1A1B23] border border-gray-800 rounded-lg focus:outline-none focus:border-[#00ffa3] resize-none"
             disabled={isSubmitting}
           />
@@ -77,7 +136,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
           </button>
           <button
             onClick={handleSubmit}
-            disabled={isSubmitting || !content.trim()}
+            disabled={isSubmitting || (!content.trim() && !images.length)}
             className="group relative px-6 py-2 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl transition-all duration-300"></div>
