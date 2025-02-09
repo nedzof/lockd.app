@@ -100,13 +100,13 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     try {
       console.log('Starting to fetch submissions with filters:', { timeFilter, rankingFilter, personalFilter });
       
-      // Build the base query
+      // Build the base query with proper joins
       let query = supabase
         .from('Post')
         .select(`
           *,
-          creator:Bitcoiner(*),
-          locklikes:LockLike(*)
+          Bitcoiner!Post_author_address_fkey (*),
+          LockLike!LockLike_post_id_fkey (*)
         `);
 
       // Apply time filter
@@ -126,10 +126,10 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
       // Apply personal filters
       if (personalFilter === 'mylocks') {
-        query = query.contains('locklikes', [{ handle_id: userId }]);
+        query = query.eq('LockLike.handle_id', userId);
       } else if (personalFilter === 'locked') {
         const currentTime = Math.floor(Date.now() / 1000);
-        query = query.contains('locklikes', [{ locked_until: { gte: currentTime } }]);
+        query = query.gte('LockLike.locked_until', currentTime);
       }
 
       // Get the posts
@@ -148,17 +148,17 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       }
 
       // Process and enrich the posts
-      let submissionsWithStats = posts.map((post: Post) => {
-        const totalLockLiked = post.locklikes?.reduce((sum: number, locklike: LockLike) => {
+      let submissionsWithStats = posts.map((post: any) => {
+        const totalLockLiked = post.LockLike?.reduce((sum: number, locklike: any) => {
           return sum + (locklike?.amount || 0);
         }, 0) || 0;
         
         const totalAmountandLockLiked = (post.amount || 0) + totalLockLiked;
 
         return {
-          id: post.txid,
-          creator: post.creator?.handle || 'Anonymous',
-          title: `Post by ${post.creator?.handle || 'Anonymous'}`,
+          id: post.id,
+          creator: post.Bitcoiner?.handle || 'Anonymous',
+          title: `Post by ${post.Bitcoiner?.handle || 'Anonymous'}`,
           description: post.description || post.content || '',
           prompt: '',
           style: 'viral',
@@ -166,7 +166,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           format: post.media_type || 'text/plain',
           fileUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
           thumbnailUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
-          txId: post.txid,
+          txId: post.id,
           locks: totalAmountandLockLiked,
           status: 'minted' as const,
           tags: ['meme', 'viral'],
@@ -176,7 +176,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           threshold: 1000000000, // 10 BSV threshold
           isTop10Percent: totalAmountandLockLiked > 1000000000,
           isTop3: totalAmountandLockLiked > 2000000000,
-          locklikes: post.locklikes || []
+          locklikes: post.LockLike || []
         };
       });
 
@@ -249,6 +249,46 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         
         // Now that we're connected, fetch the submissions
         await fetchSubmissions();
+
+        // Subscribe to real-time updates
+        const postSubscription = supabase
+          .channel('posts-channel')
+          .on('postgres_changes', 
+            { 
+              event: '*', 
+              schema: 'public', 
+              table: 'Post' 
+            }, 
+            async (payload) => {
+              console.log('Received real-time update:', payload);
+              // Refresh submissions when a post is added or updated
+              await fetchSubmissions();
+            }
+          )
+          .subscribe();
+
+        // Subscribe to lock likes updates
+        const lockLikeSubscription = supabase
+          .channel('locklikes-channel')
+          .on('postgres_changes', 
+            { 
+              event: '*', 
+              schema: 'public', 
+              table: 'LockLike' 
+            }, 
+            async (payload) => {
+              console.log('Received lock like update:', payload);
+              // Refresh submissions when a lock like is added or updated
+              await fetchSubmissions();
+            }
+          )
+          .subscribe();
+
+        // Cleanup subscriptions on unmount
+        return () => {
+          postSubscription.unsubscribe();
+          lockLikeSubscription.unsubscribe();
+        };
       } catch (error) {
         console.error('Error during initialization:', error);
         setError('Failed to initialize: ' + (error instanceof Error ? error.message : String(error)));

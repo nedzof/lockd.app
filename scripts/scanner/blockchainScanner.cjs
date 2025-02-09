@@ -60,15 +60,21 @@ class BlockchainScanner {
     /** @type {import('@supabase/supabase-js').SupabaseClient} */
     this.supabase = createClient(process.env.VITE_SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
     this.isScanning = false;
-    this.lastScannedHeight = 883000; // Start from a recent block to avoid scanning the entire chain
+    this.lastScannedHeight = 1660424; // Start from testnet block
     this.SCAN_INTERVAL = 10000; // 10 seconds
+    this.MEMPOOL_SCAN_INTERVAL = 5000; // 5 seconds for mempool
     this.scanIntervalId = null;
+    this.mempoolIntervalId = null;
     this.API_DELAY = 1000; // 1 second delay between API calls
+    this.NETWORK = 'test'; // Use testnet
+    this.processedMempoolTxs = new Set(); // Track processed mempool transactions
 
     console.log('BlockchainScanner initialized with:');
     console.log(`- Supabase URL: ${process.env.VITE_SUPABASE_URL}`);
     console.log(`- Starting block height: ${this.lastScannedHeight}`);
+    console.log(`- Network: ${this.NETWORK}`);
     console.log(`- Scan interval: ${this.SCAN_INTERVAL}ms`);
+    console.log(`- Mempool scan interval: ${this.MEMPOOL_SCAN_INTERVAL}ms`);
     console.log(`- API delay: ${this.API_DELAY}ms`);
   }
 
@@ -94,7 +100,7 @@ class BlockchainScanner {
       console.log('Successfully connected to Supabase');
 
       // Test WhatsOnChain API
-      const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+      const response = await fetch(`https://api.whatsonchain.com/v1/bsv/${this.NETWORK}/chain/info`);
       if (!response.ok) {
         throw new Error(`WhatsOnChain API test failed: ${response.status} ${response.statusText}`);
       }
@@ -104,6 +110,9 @@ class BlockchainScanner {
       this.isScanning = false;
       return;
     }
+
+    // Start mempool scanning
+    this.startMempoolScanning();
     
     while (this.isScanning) {
       try {
@@ -118,11 +127,46 @@ class BlockchainScanner {
   }
 
   /**
-   * Stop the blockchain scanning process
+   * Start scanning the mempool for unconfirmed transactions
    */
-  stopScanning() {
-    this.isScanning = false;
-    console.log('Stopping blockchain scanner...');
+  async startMempoolScanning() {
+    console.log('Starting mempool scanner...');
+    this.mempoolIntervalId = setInterval(async () => {
+      try {
+        await this.scanMempool();
+      } catch (error) {
+        console.error('Error during mempool scan:', error);
+      }
+    }, this.MEMPOOL_SCAN_INTERVAL);
+  }
+
+  /**
+   * Scan mempool for unconfirmed transactions
+   */
+  async scanMempool() {
+    try {
+      const response = await fetch(`https://api.whatsonchain.com/v1/bsv/${this.NETWORK}/mempool/raw`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const mempoolTxs = await response.json();
+
+      console.log(`Found ${mempoolTxs.length} transactions in mempool`);
+
+      for (const txid of mempoolTxs) {
+        if (!this.processedMempoolTxs.has(txid)) {
+          await sleep(this.API_DELAY);
+          const tx = await this.getTransaction(txid);
+          if (tx) {
+            console.log(`Processing mempool transaction: ${txid}`);
+            await this.processTransactions([tx], true);
+            this.processedMempoolTxs.add(txid);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error scanning mempool:', error);
+    }
   }
 
   /**
@@ -165,7 +209,7 @@ class BlockchainScanner {
    */
   async getCurrentBlockHeight() {
     try {
-      const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+      const response = await fetch(`https://api.whatsonchain.com/v1/bsv/${this.NETWORK}/chain/info`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -186,35 +230,53 @@ class BlockchainScanner {
     const transactions = [];
     
     try {
+      console.log(`Fetching block at height ${height} from ${this.NETWORK} network...`);
+      
       // Get block hash
-      const hashResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/main/block/height/${height}`);
+      const hashUrl = `https://api.whatsonchain.com/v1/bsv/${this.NETWORK}/block/height/${height}`;
+      console.log(`Fetching block hash from: ${hashUrl}`);
+      const hashResponse = await fetch(hashUrl);
+      
       if (!hashResponse.ok) {
-        throw new Error(`HTTP error! status: ${hashResponse.status}`);
+        throw new Error(`Failed to get block hash: ${hashResponse.status} ${hashResponse.statusText}`);
       }
-      const blockHash = await hashResponse.text();
+      
+      const blockInfo = await hashResponse.json();
+      const blockHash = blockInfo.hash;
+      console.log(`Got block hash: ${blockHash}`);
       
       // Add delay before next API call
       await sleep(this.API_DELAY);
       
       // Get block details
-      const blockResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/main/block/hash/${blockHash}`);
+      const blockUrl = `https://api.whatsonchain.com/v1/bsv/${this.NETWORK}/block/hash/${blockHash}`;
+      console.log(`Fetching block details from: ${blockUrl}`);
+      const blockResponse = await fetch(blockUrl);
+      
       if (!blockResponse.ok) {
-        throw new Error(`HTTP error! status: ${blockResponse.status}`);
+        throw new Error(`Failed to get block details: ${blockResponse.status} ${blockResponse.statusText}`);
       }
+      
       const block = await blockResponse.json();
+      console.log(`Found ${block.tx.length} transactions in block`);
       
       // Process each transaction in the block
       for (const txid of block.tx) {
         // Add delay before next API call
         await sleep(this.API_DELAY);
         
+        console.log(`Checking transaction: ${txid}`);
         const tx = await this.getTransaction(txid);
         if (tx) {
+          console.log(`Found relevant transaction: ${txid}`);
           transactions.push(tx);
         }
       }
+      
+      console.log(`Found ${transactions.length} relevant transactions in block ${height}`);
     } catch (error) {
       console.error(`Error getting transactions for block ${height}:`, error);
+      throw error;
     }
 
     return transactions;
@@ -227,13 +289,18 @@ class BlockchainScanner {
    */
   async getTransaction(txid) {
     try {
-      const response = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/hash/${txid}`);
+      const txUrl = `https://api.whatsonchain.com/v1/bsv/${this.NETWORK}/tx/hash/${txid}`;
+      console.log(`Fetching transaction from: ${txUrl}`);
+      const response = await fetch(txUrl);
+      
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Failed to get transaction: ${response.status} ${response.statusText}`);
       }
+      
       const tx = await response.json();
       
       if (this.isRelevantTransaction(tx)) {
+        console.log(`Transaction ${txid} is relevant to our application`);
         return {
           txid: tx.txid,
           content: this.extractContent(tx),
@@ -244,6 +311,8 @@ class BlockchainScanner {
           media_type: this.extractMediaType(tx),
           description: this.extractDescription(tx)
         };
+      } else {
+        console.log(`Transaction ${txid} is not relevant to our application`);
       }
     } catch (error) {
       console.error(`Error getting transaction ${txid}:`, error);
@@ -259,13 +328,22 @@ class BlockchainScanner {
    */
   isRelevantTransaction(tx) {
     try {
-      return tx.vout.some(output => {
+      console.log('Checking transaction outputs for relevance...');
+      const isRelevant = tx.vout.some(output => {
         const script = output.scriptPubKey.hex;
         // Check if it's a post or lock transaction
-        return script.includes('6a') || // OP_RETURN
-               script.includes('63') || // OP_IF
-               script.includes('67');   // OP_ELSE
+        const hasOpReturn = script.includes('6a');
+        const hasOpIf = script.includes('63');
+        const hasOpElse = script.includes('67');
+        
+        console.log(`Output script: ${script}`);
+        console.log(`Has OP_RETURN: ${hasOpReturn}, Has OP_IF: ${hasOpIf}, Has OP_ELSE: ${hasOpElse}`);
+        
+        return hasOpReturn || hasOpIf || hasOpElse;
       });
+      
+      console.log(`Transaction relevance: ${isRelevant}`);
+      return isRelevant;
     } catch (error) {
       console.error('Error checking transaction relevance:', error);
       return false;
@@ -420,54 +498,71 @@ class BlockchainScanner {
   /**
    * Process a list of transactions
    * @param {BlockchainTransaction[]} transactions
+   * @param {boolean} [isMempool=false] - Whether these are mempool transactions
    * @returns {Promise<void>}
    */
-  async processTransactions(transactions) {
+  async processTransactions(transactions, isMempool = false) {
     for (const tx of transactions) {
       try {
-        // First, check if the transaction is already in the database
-        const { data: existingPost } = await this.supabase
+        // First, ensure the Bitcoiner record exists
+        const { error: bitcoinerError } = await this.supabase
+          .from('Bitcoiner')
+          .upsert({
+            address: tx.author_address,
+            handle: tx.author_address.slice(0, 10) // Using first 10 chars of address as handle for now
+          }, {
+            onConflict: 'address'
+          });
+
+        if (bitcoinerError) {
+          console.error('Error upserting bitcoiner:', bitcoinerError);
+          continue;
+        }
+
+        // Upsert the post with confirmed status
+        const { error: postError } = await this.supabase
           .from('Post')
-          .select('id')
-          .eq('id', tx.txid)
-          .single();
+          .upsert({
+            id: tx.txid,
+            content: tx.content,
+            author_address: tx.author_address,
+            is_locked: true,
+            created_at: new Date().toISOString(),
+            media_url: tx.media_url,
+            media_type: tx.media_type,
+            description: tx.description,
+            confirmed: !isMempool // Set confirmed status based on source
+          }, {
+            onConflict: 'id'
+          });
 
-        if (!existingPost) {
-          // Insert new post
-          const { error: postError } = await this.supabase
-            .from('Post')
-            .insert({
-              id: tx.txid,
-              content: tx.content,
-              author_address: tx.author_address,
-              is_locked: true,
-              created_at: new Date().toISOString(),
-              media_url: tx.media_url,
-              media_type: tx.media_type,
-              description: tx.description
-            });
+        if (postError) {
+          console.error('Error upserting post:', postError);
+          continue;
+        }
 
-          if (postError) {
-            console.error('Error inserting post:', postError);
-            continue;
-          }
-
-          // Insert lock information
+        // If there's a lock amount, upsert the lock information
+        if (tx.amount > 0) {
           const { error: lockError } = await this.supabase
             .from('LockLike')
-            .insert({
+            .upsert({
               txid: tx.txid,
               amount: tx.amount,
               handle_id: tx.author_address,
               locked_until: tx.locked_until,
               post_id: tx.txid,
-              created_at: new Date().toISOString()
+              created_at: new Date().toISOString(),
+              confirmed: !isMempool // Set confirmed status based on source
+            }, {
+              onConflict: 'txid'
             });
 
           if (lockError) {
-            console.error('Error inserting lock:', lockError);
+            console.error('Error upserting lock:', lockError);
           }
         }
+
+        console.log(`Successfully processed ${isMempool ? 'mempool' : 'confirmed'} transaction ${tx.txid}`);
       } catch (error) {
         console.error(`Error processing transaction ${tx.txid}:`, error);
       }
