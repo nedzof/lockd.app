@@ -23,31 +23,23 @@ export interface Database {
       };
       Post: {
         Row: {
-          txid: string;
-          amount: number;
-          handle_id: string;
+          id: string;
           content: string;
           created_at: string;
-          locked_until: number;
-          media_url: string | null;
+          author_address: string;
+          is_locked: boolean;
         };
         Insert: {
-          txid: string;
-          amount: number;
-          handle_id: string;
-          content?: string;
+          content: string;
+          author_address: string;
+          is_locked?: boolean;
           created_at?: string;
-          locked_until?: number;
-          media_url?: string | null;
         };
         Update: {
-          txid?: string;
-          amount?: number;
-          handle_id?: string;
           content?: string;
+          author_address?: string;
+          is_locked?: boolean;
           created_at?: string;
-          locked_until?: number;
-          media_url?: string | null;
         };
       };
       LockLike: {
