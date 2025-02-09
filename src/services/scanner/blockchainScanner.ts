@@ -27,7 +27,7 @@ export class BlockchainScanner {
   private lastScannedHeight: number;
   private isScanning: boolean;
   private scanInterval: number; // in milliseconds
-  private readonly LOCKUP_CONTRACT_PREFIX = '00'; // Update this with your actual contract prefix
+  private readonly LOCKUP_CONTRACT_PREFIX = '0063036f7264'; // ord protocol prefix
 
   constructor(startHeight: number = 0, scanInterval: number = 10000) {
     this.lastScannedHeight = startHeight;
@@ -84,7 +84,10 @@ export class BlockchainScanner {
   }
 
   private async getCurrentBlockHeight(): Promise<number> {
-    const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+    const response = await fetch('https://api.whatsonchain.com/v1/bsv/test/chain/info');
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
     const data = await response.json();
     return data.blocks;
   }
@@ -94,11 +97,17 @@ export class BlockchainScanner {
     
     try {
       // Get block hash
-      const hashResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/main/block/height/${height}`);
+      const hashResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/test/block/height/${height}`);
+      if (!hashResponse.ok) {
+        throw new Error(`HTTP error! status: ${hashResponse.status}`);
+      }
       const blockHash = await hashResponse.text();
       
       // Get block details
-      const blockResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/main/block/hash/${blockHash}`);
+      const blockResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/test/block/hash/${blockHash}`);
+      if (!blockResponse.ok) {
+        throw new Error(`HTTP error! status: ${blockResponse.status}`);
+      }
       const block = await blockResponse.json();
       
       // Process each transaction in the block
@@ -117,7 +126,10 @@ export class BlockchainScanner {
 
   private async getTransaction(txid: string): Promise<BlockchainTransaction | null> {
     try {
-      const response = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/hash/${txid}`);
+      const response = await fetch(`https://api.whatsonchain.com/v1/bsv/test/tx/hash/${txid}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const tx = await response.json();
       
       if (this.isRelevantTransaction(tx)) {
@@ -143,10 +155,12 @@ export class BlockchainScanner {
     try {
       return tx.vout.some((output: any) => {
         const script = output.scriptPubKey.hex;
-        // Check if it's a Lockup contract transaction
-        return script.startsWith(this.LOCKUP_CONTRACT_PREFIX);
+        // Check for ordinal inscription
+        return script.includes('6f7264') && // 'ord' in hex
+               script.includes('0063036f7264'); // OP_0 OP_IF ord
       });
     } catch (error) {
+      console.error('Error checking transaction relevance:', error);
       return false;
     }
   }
@@ -209,17 +223,15 @@ export class BlockchainScanner {
 
   private extractMediaUrl(tx: any): string | undefined {
     try {
-      // Look for media URL in OP_RETURN data
-      const opReturnOutput = tx.vout.find((output: any) => 
-        output.scriptPubKey.type === 'nulldata' &&
-        output.scriptPubKey.hex.includes('media_url=')
-      );
+      // Check for ordinal inscription
+      const inscriptionOutput = tx.vout.find((output: any) => {
+        const script = output.scriptPubKey.hex;
+        return script.includes('6f7264') && // 'ord' in hex
+               script.includes('0063036f7264'); // OP_0 OP_IF ord
+      });
 
-      if (opReturnOutput) {
-        const hex = opReturnOutput.scriptPubKey.hex;
-        const data = Buffer.from(hex, 'hex').toString('utf8');
-        const match = data.match(/media_url=(.*?)(?:\||$)/);
-        return match ? match[1] : undefined;
+      if (inscriptionOutput) {
+        return `https://testnet.ordinals.sv/content/${tx.txid}`;
       }
     } catch (error) {
       console.error('Error extracting media URL:', error);
@@ -229,17 +241,23 @@ export class BlockchainScanner {
 
   private extractMediaType(tx: any): string | undefined {
     try {
-      // Look for media type in OP_RETURN data
-      const opReturnOutput = tx.vout.find((output: any) => 
-        output.scriptPubKey.type === 'nulldata' &&
-        output.scriptPubKey.hex.includes('media_type=')
-      );
+      // Check for ordinal inscription
+      const inscriptionOutput = tx.vout.find((output: any) => {
+        const script = output.scriptPubKey.hex;
+        return script.includes('6f7264') && // 'ord' in hex
+               script.includes('0063036f7264'); // OP_0 OP_IF ord
+      });
 
-      if (opReturnOutput) {
-        const hex = opReturnOutput.scriptPubKey.hex;
-        const data = Buffer.from(hex, 'hex').toString('utf8');
-        const match = data.match(/media_type=(.*?)(?:\||$)/);
-        return match ? match[1] : undefined;
+      if (inscriptionOutput) {
+        const script = inscriptionOutput.scriptPubKey.hex;
+        // Extract MIME type from inscription
+        const mimeTypeMatch = script.match(/(?<=00)(?:[0-9a-f]{2})+(?=00)/);
+        if (mimeTypeMatch) {
+          const mimeType = Buffer.from(mimeTypeMatch[0], 'hex').toString('utf8');
+          if (mimeType.startsWith('image/')) {
+            return mimeType;
+          }
+        }
       }
     } catch (error) {
       console.error('Error extracting media type:', error);
