@@ -351,41 +351,124 @@ class BlockchainScanner {
   }
 
   /**
-   * Extract content from transaction
-   * @param {Object} tx - The transaction object
-   * @returns {string}
+   * Extract content from a transaction
+   * @param {BlockchainTransaction} tx
+   * @returns {string|null}
    */
   extractContent(tx) {
     try {
-      const opReturnOutput = tx.vout.find(output => 
-        output.scriptPubKey.type === 'nulldata' || 
-        output.scriptPubKey.hex.startsWith('6a')
-      );
+      console.log('Extracting content from transaction:', tx.txid);
 
-      if (opReturnOutput) {
-        const hex = opReturnOutput.scriptPubKey.hex.slice(4); // Remove OP_RETURN prefix
-        return Buffer.from(hex, 'hex').toString('utf8');
+      // First check OP_RETURN outputs
+      for (const output of tx.vout) {
+        if (output.scriptPubKey && output.scriptPubKey.type === 'nulldata') {
+          const asm = output.scriptPubKey.asm;
+          if (asm && asm.startsWith('OP_RETURN')) {
+            // Extract the hex data after OP_RETURN
+            const hexData = asm.split(' ')[1];
+            if (hexData) {
+              const content = Buffer.from(hexData, 'hex').toString('utf8');
+              console.log('Found content in OP_RETURN:', content);
+              return content;
+            }
+          }
+        }
       }
+
+      // Then check P2PKH outputs
+      for (const output of tx.vout) {
+        if (output.scriptPubKey && output.scriptPubKey.type === 'pubkeyhash') {
+          const asm = output.scriptPubKey.asm;
+          if (asm) {
+            const parts = asm.split(' ');
+            // Look for data after OP_CHECKSIG
+            const dataIndex = parts.indexOf('OP_CHECKSIG') + 1;
+            if (dataIndex < parts.length) {
+              const hexData = parts[dataIndex];
+              const content = Buffer.from(hexData, 'hex').toString('utf8');
+              console.log('Found content in P2PKH:', content);
+              return content;
+            }
+          }
+        }
+      }
+
+      console.log('No content found in transaction:', tx.txid);
+      return null;
     } catch (error) {
       console.error('Error extracting content:', error);
+      return null;
     }
-    return '';
   }
 
   /**
-   * Extract author address from transaction
-   * @param {Object} tx - The transaction object
-   * @returns {string}
+   * Extract author address from a transaction
+   * @param {BlockchainTransaction} tx
+   * @returns {string|null}
    */
   extractAuthorAddress(tx) {
     try {
-      if (tx.vin && tx.vin[0] && tx.vin[0].addr) {
-        return tx.vin[0].addr;
+      console.log('Extracting author address from transaction:', tx.txid);
+
+      // First try to get from vin[0]
+      if (tx.vin && tx.vin[0]) {
+        const firstInput = tx.vin[0];
+        
+        // Check if we have a direct address
+        if (firstInput.address) {
+          console.log('Found address in vin[0]:', firstInput.address);
+          return firstInput.address;
+        }
+
+        // Check if we have scriptSig
+        if (firstInput.scriptSig && firstInput.scriptSig.asm) {
+          const parts = firstInput.scriptSig.asm.split(' ');
+          // The public key is usually the second element
+          if (parts.length >= 2) {
+            const pubKeyHex = parts[1];
+            // Convert public key to address
+            // This is a simplified version - you might need a more robust conversion
+            const address = this.pubKeyToAddress(pubKeyHex);
+            if (address) {
+              console.log('Derived address from public key:', address);
+              return address;
+            }
+          }
+        }
       }
+
+      // Then check vout for change address
+      for (const output of tx.vout) {
+        if (output.scriptPubKey && output.scriptPubKey.addresses && output.scriptPubKey.addresses.length > 0) {
+          const address = output.scriptPubKey.addresses[0];
+          console.log('Found address in vout:', address);
+          return address;
+        }
+      }
+
+      console.log('No author address found in transaction:', tx.txid);
+      return null;
     } catch (error) {
       console.error('Error extracting author address:', error);
+      return null;
     }
-    return '';
+  }
+
+  /**
+   * Convert a public key to a Bitcoin address
+   * @param {string} pubKeyHex
+   * @returns {string|null}
+   */
+  pubKeyToAddress(pubKeyHex) {
+    try {
+      // This is a placeholder - you'll need to implement proper Bitcoin address derivation
+      // You might want to use a library like bitcoinjs-lib for this
+      console.log('Converting public key to address:', pubKeyHex);
+      return null;
+    } catch (error) {
+      console.error('Error converting public key to address:', error);
+      return null;
+    }
   }
 
   /**
@@ -504,35 +587,74 @@ class BlockchainScanner {
   async processTransactions(transactions, isMempool = false) {
     for (const tx of transactions) {
       try {
-        // First, ensure the Bitcoiner record exists
-        const { error: bitcoinerError } = await this.supabase
-          .from('Bitcoiner')
-          .upsert({
-            address: tx.author_address,
-            handle: tx.author_address.slice(0, 10) // Using first 10 chars of address as handle for now
-          }, {
-            onConflict: 'address'
-          });
+        console.log('Processing transaction:', {
+          txid: tx.txid,
+          content: tx.content,
+          author_address: tx.author_address,
+          amount: tx.amount,
+          isMempool
+        });
 
-        if (bitcoinerError) {
-          console.error('Error upserting bitcoiner:', bitcoinerError);
+        if (!tx.author_address) {
+          console.error('No author address found for transaction:', tx.txid);
           continue;
         }
 
+        // Generate a handle from the address
+        const handle = tx.author_address.slice(0, 10);
+        console.log('Generated handle:', handle);
+
+        // First, ensure the Bitcoiner record exists
+        const { data: existingBitcoiner, error: bitcoinerCheckError } = await this.supabase
+          .from('Bitcoiner')
+          .select('*')
+          .eq('address', tx.author_address)
+          .single();
+
+        if (bitcoinerCheckError && bitcoinerCheckError.code !== 'PGRST116') {
+          console.error('Error checking bitcoiner:', bitcoinerCheckError);
+          continue;
+        }
+
+        if (!existingBitcoiner) {
+          console.log('Creating new Bitcoiner record:', {
+            address: tx.author_address,
+            handle
+          });
+
+          const { error: bitcoinerError } = await this.supabase
+            .from('Bitcoiner')
+            .insert({
+              address: tx.author_address,
+              handle: handle
+            });
+
+          if (bitcoinerError) {
+            console.error('Error creating bitcoiner:', bitcoinerError);
+            continue;
+          }
+        } else {
+          console.log('Found existing Bitcoiner:', existingBitcoiner);
+        }
+
         // Upsert the post with confirmed status
+        const postData = {
+          id: tx.txid,
+          content: tx.content,
+          author_address: tx.author_address,
+          is_locked: true,
+          created_at: new Date().toISOString(),
+          media_url: tx.media_url,
+          media_type: tx.media_type,
+          description: tx.description,
+          confirmed: !isMempool
+        };
+
+        console.log('Upserting post:', postData);
+
         const { error: postError } = await this.supabase
           .from('Post')
-          .upsert({
-            id: tx.txid,
-            content: tx.content,
-            author_address: tx.author_address,
-            is_locked: true,
-            created_at: new Date().toISOString(),
-            media_url: tx.media_url,
-            media_type: tx.media_type,
-            description: tx.description,
-            confirmed: !isMempool // Set confirmed status based on source
-          }, {
+          .upsert(postData, {
             onConflict: 'id'
           });
 
@@ -543,17 +665,21 @@ class BlockchainScanner {
 
         // If there's a lock amount, upsert the lock information
         if (tx.amount > 0) {
+          const lockData = {
+            txid: tx.txid,
+            amount: tx.amount,
+            handle_id: tx.author_address,
+            locked_until: tx.locked_until,
+            post_id: tx.txid,
+            created_at: new Date().toISOString(),
+            confirmed: !isMempool
+          };
+
+          console.log('Upserting lock:', lockData);
+
           const { error: lockError } = await this.supabase
             .from('LockLike')
-            .upsert({
-              txid: tx.txid,
-              amount: tx.amount,
-              handle_id: tx.author_address,
-              locked_until: tx.locked_until,
-              post_id: tx.txid,
-              created_at: new Date().toISOString(),
-              confirmed: !isMempool // Set confirmed status based on source
-            }, {
+            .upsert(lockData, {
               onConflict: 'txid'
             });
 

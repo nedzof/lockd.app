@@ -104,9 +104,27 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       let query = supabase
         .from('Post')
         .select(`
-          *,
-          Bitcoiner!Post_author_address_fkey (*),
-          LockLike!LockLike_post_id_fkey (*)
+          id,
+          content,
+          author_address,
+          created_at,
+          is_locked,
+          media_url,
+          media_type,
+          description,
+          confirmed,
+          Bitcoiner (
+            handle,
+            address
+          ),
+          LockLike (
+            txid,
+            amount,
+            handle_id,
+            locked_until,
+            created_at,
+            confirmed
+          )
         `);
 
       // Apply time filter
@@ -121,18 +139,54 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         if (days) {
           const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
           query = query.gte('created_at', startDate.toISOString());
+          console.log('Applied time filter:', { days, startDate });
         }
       }
 
-      // Apply personal filters
+      // Apply personal filters with proper foreign key relationships
       if (personalFilter === 'mylocks') {
-        query = query.eq('LockLike.handle_id', userId);
+        // First get all LockLikes for the user
+        const { data: userLocks } = await supabase
+          .from('LockLike')
+          .select('post_id')
+          .eq('handle_id', userId);
+        
+        console.log('Found user locks:', userLocks);
+        
+        if (userLocks && userLocks.length > 0) {
+          const postIds = userLocks.map(lock => lock.post_id);
+          query = query.in('id', postIds);
+          console.log('Filtering by user lock post IDs:', postIds);
+        } else {
+          console.log('No user locks found');
+          setSubmissions([]);
+          setIsLoading(false);
+          return;
+        }
       } else if (personalFilter === 'locked') {
         const currentTime = Math.floor(Date.now() / 1000);
-        query = query.gte('LockLike.locked_until', currentTime);
+        // First get all locked posts
+        const { data: lockedPosts } = await supabase
+          .from('LockLike')
+          .select('post_id')
+          .gte('locked_until', currentTime);
+        
+        console.log('Found locked posts:', lockedPosts);
+        
+        if (lockedPosts && lockedPosts.length > 0) {
+          const postIds = lockedPosts.map(lock => lock.post_id);
+          query = query.in('id', postIds);
+          console.log('Filtering by locked post IDs:', postIds);
+        } else {
+          console.log('No locked posts found');
+          setSubmissions([]);
+          setIsLoading(false);
+          return;
+        }
       }
 
       // Get the posts
+      console.log('Executing Supabase query...');
       let { data: posts, error } = await query
         .order('created_at', { ascending: false });
 
@@ -140,6 +194,8 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         console.error('Supabase query error:', error);
         throw error;
       }
+
+      console.log('Raw posts data from Supabase:', posts);
 
       if (!posts || posts.length === 0) {
         console.log('No posts found in database');
@@ -149,13 +205,30 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
       // Process and enrich the posts
       let submissionsWithStats = posts.map((post: any) => {
-        const totalLockLiked = post.LockLike?.reduce((sum: number, locklike: any) => {
+        console.log('Processing post:', {
+          id: post.id,
+          content: post.content,
+          bitcoiner: post.Bitcoiner,
+          lockLikes: post.LockLike
+        });
+
+        // Calculate total amount from all lock likes
+        const totalLocked = post.LockLike?.reduce((sum: number, locklike: any) => {
+          console.log('Lock like amount:', {
+            txid: locklike.txid,
+            amount: locklike.amount,
+            handle_id: locklike.handle_id
+          });
           return sum + (locklike?.amount || 0);
         }, 0) || 0;
-        
-        const totalAmountandLockLiked = (post.amount || 0) + totalLockLiked;
 
-        return {
+        console.log('Calculated total locked amount:', {
+          postId: post.id,
+          totalLocked,
+          lockLikesCount: post.LockLike?.length || 0
+        });
+
+        const submission = {
           id: post.id,
           creator: post.Bitcoiner?.handle || 'Anonymous',
           title: `Post by ${post.Bitcoiner?.handle || 'Anonymous'}`,
@@ -167,17 +240,20 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           fileUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
           thumbnailUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
           txId: post.id,
-          locks: totalAmountandLockLiked,
+          locks: totalLocked,
           status: 'minted' as const,
           tags: ['meme', 'viral'],
           createdAt: new Date(post.created_at),
           updatedAt: new Date(post.created_at),
-          totalLocked: totalAmountandLockLiked,
+          totalLocked: totalLocked,
           threshold: 1000000000, // 10 BSV threshold
-          isTop10Percent: totalAmountandLockLiked > 1000000000,
-          isTop3: totalAmountandLockLiked > 2000000000,
+          isTop10Percent: totalLocked > 1000000000,
+          isTop3: totalLocked > 2000000000,
           locklikes: post.LockLike || []
         };
+
+        console.log('Created submission object:', submission);
+        return submission;
       });
 
       // Apply ranking filters only if a ranking filter is selected
@@ -190,6 +266,12 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         return b.createdAt.getTime() - a.createdAt.getTime();
       });
 
+      console.log('Sorted submissions:', submissionsWithStats.map(s => ({
+        id: s.id,
+        totalLocked: s.totalLocked,
+        createdAt: s.createdAt
+      })));
+
       // Apply limit based on filter
       if (rankingFilter) {
         if (rankingFilter === 'top1') {
@@ -199,9 +281,10 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         } else if (rankingFilter === 'top10') {
           submissionsWithStats = submissionsWithStats.slice(0, 10);
         }
+        console.log(`Applied ${rankingFilter} filter, remaining submissions:`, submissionsWithStats.length);
       }
 
-      console.log('Processed submissions:', submissionsWithStats);
+      console.log('Final processed submissions:', submissionsWithStats);
       setSubmissions(submissionsWithStats);
 
       // Update stats
