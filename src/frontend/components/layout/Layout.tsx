@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { FiLock, FiLogOut, FiExternalLink } from 'react-icons/fi';
-import { formatBSV } from '../../utils/formatBSV';
+import { formatBSV, formatAddress } from '../../utils/formatBSV';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -20,6 +20,13 @@ export default function Layout({
   onConnect,
   onDisconnect,
 }: LayoutProps) {
+  console.log('Layout render state:', { connected, bsvAddress, balance });
+  
+  const displayAddress = React.useMemo(() => {
+    if (!connected || !bsvAddress) return null;
+    return formatAddress(bsvAddress);
+  }, [connected, bsvAddress]);
+
   return (
     <div className="min-h-screen bg-[#1A1B23] text-white">
       {/* Header */}
@@ -74,14 +81,15 @@ export default function Layout({
             <div className="flex-shrink-0">
               {connected ? (
                 <div className="flex items-center space-x-4">
-                  {/* Balance Display */}
+                  {/* Address Display */}
                   <div className="group relative">
                     <div className="flex items-center space-x-3 px-4 py-2 rounded-xl border border-[#00ffa3]/20 bg-gradient-to-r from-[#2A2A40]/50 to-[#1A1B23]/50 backdrop-blur-xl transition-all duration-300 hover:border-[#00ffa3]/30 hover:shadow-[0_0_20px_rgba(0,255,163,0.1)]">
                       <div className="p-1.5 bg-[#00ffa3] bg-opacity-10 rounded-lg group-hover:bg-opacity-20 transition-all duration-300">
                         <FiLock className="text-[#00ffa3] w-4 h-4 group-hover:scale-110 transition-transform duration-300" />
                       </div>
-                      <span className="text-[#00ffa3] font-medium">{formatBSV(balance)}</span>
-                      <span className="text-gray-400 group-hover:text-gray-300 transition-colors duration-300">BSV</span>
+                      {displayAddress && (
+                        <span className="text-[#00ffa3] font-medium">{displayAddress}</span>
+                      )}
                     </div>
                     <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-5 blur-xl transition-all duration-300 rounded-xl"></div>
                   </div>

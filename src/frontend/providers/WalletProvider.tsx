@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useYoursWallet } from 'yours-wallet-provider';
 
 interface WalletContextType {
@@ -28,15 +28,23 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isConnected, setIsConnected] = useState(false);
   const [balance, setBalance] = useState<number>(0);
 
-  const connect = async () => {
+  // Cleanup function to reset state
+  const resetState = useCallback(() => {
+    setIsConnected(false);
+    setPublicKey(undefined);
+    setBsvAddress(null);
+    setBalance(0);
+  }, []);
+
+  // Handle wallet connection
+  const connect = useCallback(async () => {
     console.log('Connect called, wallet state:', {
-      isReady: wallet.isReady,
-      hasConnect: !!wallet.connect,
+      isReady: wallet?.isReady,
+      hasConnect: !!wallet?.connect,
       wallet
     });
 
-    const isReady = wallet.isReady;
-    if (!isReady) {
+    if (!wallet?.isReady) {
       console.log('Wallet not ready, redirecting to yours.org');
       window.open('https://yours.org', '_blank');
       return;
@@ -50,45 +58,67 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsConnected(true);
         const addresses = await wallet.getAddresses();
         console.log('Got addresses:', addresses);
-        if (addresses?.[0]) {
-          setBsvAddress(addresses[0]);
+        if (addresses?.bsvAddress) {
+          console.log('Setting BSV address:', addresses.bsvAddress);
+          setBsvAddress(addresses.bsvAddress);
           const bal = await wallet.getBalance();
+          console.log('Setting balance:', bal);
           setBalance(Number(bal));
+        } else {
+          console.error('No BSV address found in wallet response');
+          resetState();
         }
       }
     } catch (error) {
       console.error('Failed to connect:', error);
-      setIsConnected(false);
-      setPublicKey(undefined);
-      setBsvAddress(null);
-      setBalance(0);
+      resetState();
     }
-  };
+  }, [wallet, resetState]);
 
-  const disconnect = async () => {
-    if (!wallet.disconnect) return;
+  // Handle wallet disconnection
+  const disconnect = useCallback(async () => {
+    if (!wallet?.disconnect) return;
     try {
       await wallet.disconnect();
-      setIsConnected(false);
-      setPublicKey(undefined);
-      setBsvAddress(null);
-      setBalance(0);
+      resetState();
     } catch (error) {
       console.error('Failed to disconnect:', error);
+      resetState();
     }
-  };
+  }, [wallet, resetState]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      resetState();
+    };
+  }, [resetState]);
+
+  // Check initial connection state
+  useEffect(() => {
+    const checkConnection = async () => {
+      if (wallet?.isConnected) {
+        const isConnected = await wallet.isConnected();
+        if (!isConnected) {
+          resetState();
+        }
+      }
+    };
+    
+    checkConnection();
+  }, [wallet, resetState]);
+
+  const value = React.useMemo(() => ({
+    connect,
+    disconnect,
+    isConnected,
+    publicKey,
+    bsvAddress,
+    balance,
+  }), [connect, disconnect, isConnected, publicKey, bsvAddress, balance]);
 
   return (
-    <WalletContext.Provider
-      value={{
-        connect,
-        disconnect,
-        isConnected,
-        publicKey,
-        bsvAddress,
-        balance,
-      }}
-    >
+    <WalletContext.Provider value={value}>
       {children}
     </WalletContext.Provider>
   );
