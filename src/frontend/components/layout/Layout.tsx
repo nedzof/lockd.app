@@ -10,6 +10,7 @@ interface LayoutProps {
   balance: number;
   onConnect: () => void;
   onDisconnect: () => void;
+  isWalletDetected: boolean;
 }
 
 export default function Layout({
@@ -19,13 +20,22 @@ export default function Layout({
   balance,
   onConnect,
   onDisconnect,
+  isWalletDetected,
 }: LayoutProps) {
-  console.log('Layout render state:', { connected, bsvAddress, balance });
+  console.log('Layout render state:', { connected, bsvAddress, balance, isWalletDetected });
   
   const displayAddress = React.useMemo(() => {
     if (!connected || !bsvAddress) return null;
     return formatAddress(bsvAddress);
   }, [connected, bsvAddress]);
+
+  const handleWalletAction = () => {
+    if (!isWalletDetected) {
+      window.open('https://yours.org', '_blank');
+    } else {
+      onConnect();
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#1A1B23] text-white">
@@ -106,13 +116,13 @@ export default function Layout({
                 </div>
               ) : (
                 <button
-                  onClick={onConnect}
+                  onClick={handleWalletAction}
                   className="group relative px-6 py-2 rounded-xl font-medium transition-all duration-300 transform hover:scale-105"
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl transition-all duration-300"></div>
                   <div className="absolute inset-0 bg-gradient-to-r from-[#00ff9d] to-[#00ffa3] rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
                   <div className="relative flex items-center space-x-2 text-black">
-                    <span>Connect Wallet</span>
+                    <span>{isWalletDetected ? 'Connect Wallet' : 'Download Wallet'}</span>
                     <FiExternalLink className="w-4 h-4 group-hover:rotate-45 transition-transform duration-300" />
                   </div>
                   <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-xl"></div>

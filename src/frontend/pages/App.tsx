@@ -6,7 +6,7 @@ import WTF from './WTF';
 import { useWallet } from '../providers/WalletProvider';
 
 export default function App() {
-  const { connect, disconnect, isConnected, bsvAddress, balance } = useWallet();
+  const { connect, disconnect, isConnected, bsvAddress, balance, isWalletDetected } = useWallet();
 
   return (
     <Router>
@@ -16,6 +16,7 @@ export default function App() {
         balance={balance || 0}
         onConnect={connect}
         onDisconnect={disconnect}
+        isWalletDetected={isWalletDetected}
       >
         <Routes>
           {/* Redirect root to /posts */}

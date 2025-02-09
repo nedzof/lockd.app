@@ -9,6 +9,7 @@ interface WalletContextType {
   publicKey: string | undefined;
   bsvAddress: string | null;
   balance: number;
+  isWalletDetected: boolean;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -27,6 +28,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [bsvAddress, setBsvAddress] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [balance, setBalance] = useState<number>(0);
+  const [isWalletDetected, setIsWalletDetected] = useState(false);
+
+  // Check if wallet is detected
+  useEffect(() => {
+    setIsWalletDetected(!!wallet?.isReady);
+  }, [wallet?.isReady]);
 
   // Cleanup function to reset state
   const resetState = useCallback(() => {
@@ -115,7 +122,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     publicKey,
     bsvAddress,
     balance,
-  }), [connect, disconnect, isConnected, publicKey, bsvAddress, balance]);
+    isWalletDetected,
+  }), [connect, disconnect, isConnected, publicKey, bsvAddress, balance, isWalletDetected]);
 
   return (
     <WalletContext.Provider value={value}>
