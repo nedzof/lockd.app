@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import Layout from '../components/layout/Layout';
 import Home from './Home';
 import WTF from './WTF';
@@ -32,6 +33,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/posts" replace />} />
         </Routes>
       </Layout>
+      <Toaster position="bottom-right" />
     </Router>
   );
 } 
