@@ -4,6 +4,7 @@ import type { useYoursWallet } from 'yours-wallet-provider';
 import { OrdiNFTP2PKH } from 'scrypt-ord';
 import { bsv, Addr, PandaSigner } from 'scrypt-ts';
 import { OrdiProvider } from 'scrypt-ord';
+import { YoursWalletAdapter } from '../utils/YoursWalletAdapter';
 
 export interface Post {
   txid: string;
@@ -138,118 +139,63 @@ export const createPost = async (
       
       console.log("Creating image inscription transaction...");
       try {
-        // Convert base64 to hex for the image data
-        const imageHex = base64ToHex(b64);
-        console.log("Data conversion metrics:", {
-          originalFileSize: imageFile.size,
-          base64Length: b64.length,
-          hexLength: imageHex.length,
-          hexByteSize: Math.floor(imageHex.length/2)
-        });
-
-        // Create ordinal inscription data
-        const ordinalData = {
-          p: "ord",
-          op: "deploy",
-          type: imageFile.type,
-          data: imageHex
-        };
-
-        // Format the ordinal protocol data
-        const protocolData = ["ord", JSON.stringify(ordinalData)];
-        console.log("Protocol data analysis:", {
-          totalLength: protocolData.join('').length,
-          marker: protocolData[0],
-          jsonLength: protocolData[1].length,
-          jsonPreview: protocolData[1].substring(0, 100) + '...',
-          estimatedTxSize: (protocolData.join('').length * 2) + 1000,
-          dataStructure: {
-            p: ordinalData.p,
-            op: ordinalData.op,
-            type: ordinalData.type,
-            dataLength: ordinalData.data.length
-          }
-        });
-
-        // Use the wallet's sendBsv method with increased satoshis for larger data
-        console.log("Preparing transaction request:", {
-          satoshis: 1000000,
-          address: authorAddress,
-          dataLength: protocolData.join('').length,
-          estimatedFinalSize: (protocolData.join('').length * 2) + 1000,
-          protocolDataSample: {
-            marker: protocolData[0],
-            jsonStart: protocolData[1].substring(0, 100),
-            jsonEnd: protocolData[1].substring(protocolData[1].length - 100)
-          }
-        });
-
-        // Split data into chunks for logging
-        const dataChunks = protocolData[1].match(/.{1,1000}/g) || [];
-        console.log("Data chunks analysis:", {
-          totalChunks: dataChunks.length,
-          chunkSizes: dataChunks.map(chunk => chunk.length),
-          firstChunkPreview: dataChunks[0],
-          lastChunkPreview: dataChunks[dataChunks.length - 1]
-        });
-
-        // Create transaction request
-        const txRequest = {
-          satoshis: 1000000,
-          address: authorAddress,
-          data: protocolData
-        };
-
-        console.log("Broadcasting transaction request:", {
-          requestSize: JSON.stringify(txRequest).length,
-          dataArrayLength: txRequest.data.length,
-          markerSize: txRequest.data[0].length,
-          jsonSize: txRequest.data[1].length,
-          requestPreview: JSON.stringify(txRequest).substring(0, 200) + '...'
-        });
-
-        inscriptionTx = await wallet.sendBsv([txRequest]);
+        // Initialize ordinal inscription
+        console.log("Initializing ordinal inscription...");
+        const provider = new OrdiProvider();
+        const signer = new YoursWalletAdapter(wallet, provider);
         
-        console.log("Raw transaction analysis:", {
-          success: !!inscriptionTx?.txid,
-          txid: inscriptionTx?.txid,
-          rawTxLength: inscriptionTx?.rawtx?.length,
-          rawTxPreview: inscriptionTx?.rawtx?.substring(0, 100) + '...',
-          hasOrdMarker: inscriptionTx?.rawtx?.includes('ord'),
-          hasImageType: inscriptionTx?.rawtx?.includes(imageFile.type),
-          scriptSizeEstimate: inscriptionTx?.rawtx?.length / 2,
-          outputs: inscriptionTx?.rawtx?.match(/76a914[a-f0-9]{40}88ac/g)?.length || 0,
-          opReturnCount: inscriptionTx?.rawtx?.match(/6a/g)?.length || 0,
-          hexDump: inscriptionTx?.rawtx?.match(/.{1,50}/g)?.slice(0, 5)
+        // Request authentication
+        console.log("Requesting authentication...");
+        const { isAuthenticated, error } = await signer.requestAuth();
+        if (!isAuthenticated) {
+            throw new Error(`Authentication failed: ${error}`);
+        }
+        
+        // Convert address to proper format and create instance
+        const addressObj = new bsv.Address(authorAddress);
+        const instance = new OrdiNFTP2PKH(Addr(addressObj.toByteString()))
+        await instance.connect(signer)
+
+        console.log("Creating inscription with parameters:", {
+          contentLength: b64.length,
+          contentType: imageFile.type,
+          receiverAddress: authorAddress,
+          satoshis: 1000000
         });
 
-        // Validate transaction contents
-        if (inscriptionTx?.rawtx) {
-          const txHex = inscriptionTx.rawtx;
-          console.log("Transaction content validation:", {
-            totalLength: txHex.length,
-            containsOrdMarker: txHex.includes('ord'),
-            containsImageType: txHex.includes(imageFile.type),
-            containsHexData: txHex.includes(imageHex.substring(0, 50)),
-            scriptLocations: {
-              ordLocation: txHex.indexOf('ord'),
-              typeLocation: txHex.indexOf(imageFile.type),
-              dataLocation: txHex.indexOf(imageHex.substring(0, 50))
+        // Create inscription transaction using scrypt-ord - directly use base64 data
+        inscriptionTx = await instance.inscribeImage(b64, imageFile.type);
+        
+        // Analyze raw transaction
+        if (inscriptionTx?.tx) {
+          const txHex = inscriptionTx.tx.toString('hex');
+          
+          console.log("Raw transaction analysis:", {
+            success: !!inscriptionTx?.id,
+            txid: inscriptionTx?.id,
+            size: {
+              total: txHex.length,
+              hex: txHex.length / 2,
+              estimated: b64.length
             },
-            scriptSegments: txHex.match(/76a914[a-f0-9]{40}88ac|6a[0-9a-f]*/g)
+            data: {
+              hasOrdMarker: txHex.includes('ord'),
+              hasImageType: txHex.includes(imageFile.type),
+              hasHexData: txHex.includes(base64ToHex(b64).substring(0, 50))
+            }
           });
         }
 
-        if (!inscriptionTx?.txid) {
+        if (!inscriptionTx?.id) {
           console.error('Transaction response invalid:', inscriptionTx);
           throw new Error('Failed to create image inscription - no transaction ID returned');
         }
 
         // Use testnet URLs
-        media_url = `https://testnet.ordinals.sv/content/${inscriptionTx.txid}`;
+        media_url = `https://testnet.ordinals.sv/content/${inscriptionTx.id}`;
         media_type = imageFile.type;
         console.log("Image inscription complete:", JSON.stringify({
-          txid: inscriptionTx.txid,
+          txid: inscriptionTx.id,
           media_url,
           media_type
         }, null, 2));
@@ -267,32 +213,43 @@ export const createPost = async (
       try {
         console.log("Sending text inscription transaction...");
         
-        // Create ordinal inscription data
-        const ordinalData = {
-          p: 'ord',
-          op: 'deploy',
-          type: 'text/plain;charset=utf-8',
-          data: content
-        };
-
-        const textTxRequest = {
-          satoshis: 10000,
-          address: authorAddress,
-          data: ['ord', JSON.stringify(ordinalData)]
-        };
+        // Initialize ordinal inscription
+        console.log("Initializing ordinal inscription...");
+        const provider = new OrdiProvider();
+        const signer = new YoursWalletAdapter(wallet, provider);
         
-        console.log("Text inscription request:", JSON.stringify(textTxRequest, null, 2));
-        inscriptionTx = await wallet.sendBsv([textTxRequest]);
+        // Request authentication
+        console.log("Requesting authentication...");
+        const { isAuthenticated, error } = await signer.requestAuth();
+        if (!isAuthenticated) {
+            throw new Error(`Authentication failed: ${error}`);
+        }
+        
+        // Convert address to proper format and create instance
+        const addressObj = new bsv.Address(authorAddress);
+        const instance = new OrdiNFTP2PKH(Addr(addressObj.toByteString()))
+        await instance.connect(signer)
+
+        console.log("Creating text inscription with parameters:", {
+          contentLength: content.length,
+          contentType: 'text/plain;charset=utf-8',
+          receiverAddress: authorAddress
+        });
+
+        // Create inscription transaction using scrypt-ord
+        inscriptionTx = await instance.inscribeText(content);
         
         // Log and validate text inscription
-        const rawTx = inscriptionTx.rawtx;
-        console.log("Text inscription response:", JSON.stringify({
-          txid: inscriptionTx?.txid,
-          rawTxLength: rawTx?.length,
-          scriptPreview: rawTx?.includes('6a') ? rawTx.substring(rawTx.indexOf('6a'), rawTx.indexOf('6a') + 100) + '...' : 'No OP_RETURN found',
-          containsOrdData: rawTx?.includes('ord'),
-          containsContent: rawTx?.includes(content)
-        }, null, 2));
+        if (inscriptionTx?.tx) {
+          const txHex = inscriptionTx.tx.toString('hex');
+          console.log("Text inscription response:", JSON.stringify({
+            txid: inscriptionTx?.id,
+            rawTxLength: txHex.length,
+            scriptPreview: txHex.includes('6a') ? txHex.substring(txHex.indexOf('6a'), txHex.indexOf('6a') + 100) + '...' : 'No OP_RETURN found',
+            containsOrdData: txHex.includes('ord'),
+            containsContent: txHex.includes(content)
+          }, null, 2));
+        }
       } catch (txError) {
         console.error("Text inscription error:", JSON.stringify({
           error: txError,
@@ -304,23 +261,23 @@ export const createPost = async (
     }
     
     console.log('Final inscription transaction state:', JSON.stringify({
-      txid: inscriptionTx?.txid,
-      hasRawTx: !!inscriptionTx?.rawtx,
-      rawTxLength: inscriptionTx?.rawtx?.length,
+      txid: inscriptionTx?.id,
+      hasRawTx: !!inscriptionTx?.tx,
+      rawTxLength: inscriptionTx?.tx?.toString('hex').length,
       responseType: typeof inscriptionTx,
       fullResponse: inscriptionTx
     }, null, 2));
 
-    if (!inscriptionTx?.txid) {
+    if (!inscriptionTx?.id) {
       console.error('No txid in response:', inscriptionTx);
       throw new Error('Failed to broadcast inscription - no transaction ID returned');
     }
 
-    console.log('Inscription successful with txid:', inscriptionTx.txid);
+    console.log('Inscription successful with txid:', inscriptionTx.id);
 
     // Create the post object based on the type of content
     const post: Post = {
-      txid: inscriptionTx.txid,
+      txid: inscriptionTx.id,
       content: imageFile ? (description || '') : content,
       author_address: authorAddress,
       created_at: new Date().toISOString(),
@@ -342,7 +299,7 @@ export const createPost = async (
     toast.success(successMessage);
     
     // Open WhatsOnChain in a new tab with testnet URL
-    const whatsOnChainUrl = `https://test.whatsonchain.com/tx/${inscriptionTx.txid}`;
+    const whatsOnChainUrl = `https://test.whatsonchain.com/tx/${inscriptionTx.id}`;
     console.log('Opening WhatsOnChain URL:', whatsOnChainUrl);
     window.open(whatsOnChainUrl, '_blank');
     
