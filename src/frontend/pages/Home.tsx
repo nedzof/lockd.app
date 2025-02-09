@@ -101,7 +101,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
               {/* Personal Filters */}
               <div className="flex items-center space-x-1">
                 {[
-                  { id: 'mylocks', label: 'My Lockings' },
+                  { id: 'mylocks', label: 'My Posts' },
                   { id: 'locked', label: 'Locked Posts' }
                 ].map(({ id, label }) => (
                   <button
