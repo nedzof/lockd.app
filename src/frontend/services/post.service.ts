@@ -1,30 +1,40 @@
-import { supabase } from '../utils/supabaseClient';
-import type { Database } from '../../types/supabase';
+import { toast } from 'react-hot-toast';
+import type { useYoursWallet } from 'yours-wallet-provider';
 
-type Post = Database['public']['Tables']['Post']['Row'];
-type PostInsert = Database['public']['Tables']['Post']['Insert'];
+export interface Post {
+  txid: string;
+  content: string;
+  author_address: string;
+  created_at: string;
+}
 
-export const createPost = async (content: string, authorAddress: string): Promise<Post> => {
-  const newPost: PostInsert = {
-    content,
-    author_address: authorAddress,
-    is_locked: false,
-  };
+type YoursWallet = NonNullable<ReturnType<typeof useYoursWallet>>;
 
-  const { data, error } = await supabase
-    .from('Post')
-    .insert([newPost])
-    .select()
-    .single();
+export const createPost = async (content: string, authorAddress: string, wallet: YoursWallet): Promise<Post> => {
+  try {
+    // Create a simple OP_RETURN with just the content
+    const send = await wallet.sendBsv([{
+      satoshis: 1,
+      address: authorAddress,
+      data: [content]
+    }]);
 
-  if (error) {
-    console.error('Failed to create post:', error);
-    throw new Error(`Failed to create post: ${error.message}`);
+    if (!send?.txid) {
+      throw new Error('Failed to broadcast transaction');
+    }
+
+    const post: Post = {
+      txid: send.txid,
+      content,
+      author_address: authorAddress,
+      created_at: new Date().toISOString()
+    };
+
+    toast.success("Post created successfully!");
+    return post;
+  } catch (error) {
+    console.error("Error creating post:", error);
+    toast.error("Failed to create post: " + (error as Error).message);
+    throw error;
   }
-
-  if (!data) {
-    throw new Error('No data returned from post creation');
-  }
-
-  return data;
 }; 

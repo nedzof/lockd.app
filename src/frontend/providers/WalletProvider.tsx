@@ -10,6 +10,7 @@ interface WalletContextType {
   bsvAddress: string | null;
   balance: number;
   isWalletDetected: boolean;
+  wallet: ReturnType<typeof useYoursWallet>;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -58,23 +59,19 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     try {
-      const key = await wallet.connect();
-      console.log('Got key:', key);
-      if (key) {
-        setPublicKey(key);
-        setIsConnected(true);
-        const addresses = await wallet.getAddresses();
-        console.log('Got addresses:', addresses);
-        if (addresses?.bsvAddress) {
-          console.log('Setting BSV address:', addresses.bsvAddress);
-          setBsvAddress(addresses.bsvAddress);
-          const bal = await wallet.getBalance();
-          console.log('Setting balance:', bal);
-          setBalance(Number(bal));
-        } else {
-          console.error('No BSV address found in wallet response');
-          resetState();
-        }
+      await wallet.connect();
+      setIsConnected(true);
+      const addresses = await wallet.getAddresses();
+      console.log('Got addresses:', addresses);
+      if (addresses?.bsvAddress) {
+        console.log('Setting BSV address:', addresses.bsvAddress);
+        setBsvAddress(addresses.bsvAddress);
+        const bal = await wallet.getBalance();
+        console.log('Setting balance:', bal);
+        setBalance(Number(bal.satoshis));
+      } else {
+        console.error('No BSV address found in wallet response');
+        resetState();
       }
     } catch (error) {
       console.error('Failed to connect:', error);
@@ -123,7 +120,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     bsvAddress,
     balance,
     isWalletDetected,
-  }), [connect, disconnect, isConnected, publicKey, bsvAddress, balance, isWalletDetected]);
+    wallet
+  }), [connect, disconnect, isConnected, publicKey, bsvAddress, balance, isWalletDetected, wallet]);
 
   return (
     <WalletContext.Provider value={value}>

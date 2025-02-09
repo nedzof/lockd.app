@@ -20,7 +20,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const [timeFilter, setTimeFilter] = useState('');
   const [rankingFilter, setRankingFilter] = useState('top1');
   const [personalFilter, setPersonalFilter] = useState('');
-  const [showCreatePost, setShowCreatePost] = useState(false);
+  const [isCreatePostOpen, setIsCreatePostOpen] = useState(false);
 
   const handleTimeFilter = (filter: string) => {
     setTimeFilter(timeFilter === filter ? '' : filter);
@@ -32,6 +32,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
   const handleStatsUpdate = (stats: { totalLocked: number; participantCount: number; roundNumber: number }) => {
     console.log('Stats updated:', stats);
+  };
+
+  const handleRefreshPosts = () => {
+    // Implement post refresh logic here
+    console.log('Refreshing posts...');
   };
 
   const renderContent = () => {
@@ -116,10 +121,12 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           </div>
         </div>
 
-        {/* Create Post Form */}
-        {showCreatePost && (
-          <CreatePost connected={connected} bsvAddress={bsvAddress || null} />
-        )}
+        {/* Create Post Modal */}
+        <CreatePost
+          isOpen={isCreatePostOpen}
+          onClose={() => setIsCreatePostOpen(false)}
+          onPostCreated={handleRefreshPosts}
+        />
         
         <PostGrid 
           onStatsUpdate={handleStatsUpdate}
@@ -130,19 +137,21 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
         />
 
         {/* Create Post Button - Fixed at bottom center */}
-        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-10">
-          <button 
-            onClick={() => setShowCreatePost(!showCreatePost)}
-            className="group relative px-6 py-3 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 transform hover:scale-105"
-          >
-            <div className="relative flex items-center space-x-2 text-black">
-              <FiPlus className={`w-5 h-5 transition-transform duration-300 ${showCreatePost ? 'rotate-45' : ''}`} />
-              <span>{showCreatePost ? 'Close' : 'Create Post'}</span>
-            </div>
-            <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 rounded-xl transition-all duration-300"></div>
-            <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-xl"></div>
-          </button>
-        </div>
+        {connected && (
+          <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-10">
+            <button 
+              onClick={() => setIsCreatePostOpen(true)}
+              className="group relative px-6 py-3 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 transform hover:scale-105"
+            >
+              <div className="relative flex items-center space-x-2 text-black">
+                <FiPlus className="w-5 h-5" />
+                <span>Create Post</span>
+              </div>
+              <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 rounded-xl transition-all duration-300"></div>
+              <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-xl"></div>
+            </button>
+          </div>
+        )}
       </div>
     );
   };
