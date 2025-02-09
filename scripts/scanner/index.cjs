@@ -15,11 +15,10 @@ function startBlockchainScanner() {
   }
 }
 
-function stopBlockchainScanner() {
+function stopBlockchainScanner(scanner) {
   if (scanner) {
-    scanner.stopScanning();
-    scanner = null;
-    console.log('Blockchain scanner service stopped');
+    scanner.stop();
+    console.log('Scanner stopped gracefully.');
   } else {
     console.log('No blockchain scanner is running');
   }
