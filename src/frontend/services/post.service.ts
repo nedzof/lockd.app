@@ -255,7 +255,23 @@ export const createPost = async (
         });
 
         // Create inscription transaction using scrypt-ord - directly use base64 data
-        inscriptionTx = await instance.inscribeImage(b64, imageFile.type);
+        const response = await wallet.inscribe([{
+          address: authorAddress,
+          base64Data: b64,
+          mimeType: imageFile.type,
+          map: {
+            app: 'lockd.app',
+            tags: JSON.stringify(['lockdapp', ...(tags || [])]),
+            description: description || content || 'Image inscription'
+          },
+          satoshis: lockData?.isLocked ? (lockData.amount || 1000) : 1000
+        }]);
+
+        // Convert response to expected format
+        inscriptionTx = {
+          id: response.txid,
+          tx: response.rawtx
+        };
         
         // Analyze raw transaction
         if (inscriptionTx?.tx) {
@@ -310,7 +326,7 @@ export const createPost = async (
           timestamp: new Date().toISOString(),
           contentType: 'text/plain',
           version: '1.0.0',
-          tags: tags || [],
+          tags: ['lockdapp', ...(tags || [])],  // Add lockdapp tag to all posts
           prediction_market_data: predictionMarketData,
           lock_data: lockData?.isLocked && currentBlockHeight && lockData.duration ? {
             isLocked: true,

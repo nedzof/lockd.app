@@ -66,7 +66,13 @@ export class JungleBusService {
     try {
       // Parse the raw transaction
       const rawTx = tx.tx.transaction;
+      const authorAddress = this.extractAuthorAddress(rawTx);
       
+      if (!authorAddress) {
+        console.warn(`No author address found for transaction ${tx.tx.id}`);
+        return null;
+      }
+
       // Check for MAP protocol transaction
       if (rawTx.includes(TRANSACTION_TYPES.MAP.PREFIX)) {
         const mapData = this.extractMapData(rawTx);
@@ -74,7 +80,7 @@ export class JungleBusService {
           return {
             txid: tx.tx.id,
             content: mapData.content,
-            author_address: this.extractAuthorAddress(rawTx),
+            author_address: authorAddress,
             media_type: mapData.contentType || 'text/plain',
             blockHeight: tx.blockHeight,
             description: mapData.content
@@ -86,12 +92,6 @@ export class JungleBusService {
       if (rawTx.includes(TRANSACTION_TYPES.ORD_PREFIX)) {
         const mimeType = this.extractMimeType(rawTx);
         if (!mimeType || !TRANSACTION_TYPES.IMAGE_TYPES.some(type => mimeType.startsWith(type))) {
-          return null;
-        }
-
-        const authorAddress = this.extractAuthorAddress(rawTx);
-        if (!authorAddress) {
-          console.warn(`No author address found for transaction ${tx.tx.id}`);
           return null;
         }
 
@@ -109,10 +109,55 @@ export class JungleBusService {
         return blockchainTx;
       }
 
+      // Check for regular BSV transfer from our application
+      // We'll check if the transaction has our application's signature in the OP_RETURN
+      if (this.isLockdAppTransaction(rawTx)) {
+        const amount = this.extractTransactionAmount(rawTx);
+        const blockchainTx: BlockchainTransaction = {
+          txid: tx.tx.id,
+          content: rawTx,
+          author_address: authorAddress,
+          media_type: 'application/json',
+          blockHeight: tx.blockHeight,
+          amount: amount,
+          description: `BSV transfer of ${amount} satoshis`
+        };
+
+        console.log('Created blockchain transaction:', blockchainTx);
+        return blockchainTx;
+      }
+
       return null;
     } catch (error) {
       console.error('Error extracting transaction data:', error);
       return null;
+    }
+  }
+
+  private isLockdAppTransaction(rawTx: string): boolean {
+    try {
+      // Check for our application's signature in OP_RETURN
+      // This could be a specific prefix or pattern that identifies our app's transactions
+      return rawTx.includes('6c6f636b642e617070'); // 'lockd.app' in hex
+    } catch (error) {
+      console.error('Error checking for lockd.app transaction:', error);
+      return false;
+    }
+  }
+
+  private extractTransactionAmount(rawTx: string): number {
+    try {
+      // Extract the transaction amount from the raw transaction
+      // This is a simplified implementation - in production you'd want to use a proper BSV library
+      // to parse the transaction outputs and calculate the actual amount
+      const amountMatch = rawTx.match(/76a914[0-9a-f]{40}88ac([0-9a-f]{16})/);
+      if (amountMatch && amountMatch[1]) {
+        return parseInt(amountMatch[1], 16);
+      }
+      return 0;
+    } catch (error) {
+      console.error('Error extracting transaction amount:', error);
+      return 0;
     }
   }
 
