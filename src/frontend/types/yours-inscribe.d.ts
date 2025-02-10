@@ -12,6 +12,13 @@ declare module 'yours-wallet-provider' {
     rawtx: string;
   }
 
+  export interface TransactionResponse {
+    id: string;
+    tx: {
+      toString: () => string;
+    };
+  }
+
   export interface YoursWallet {
     inscribe: (params: InscriptionParams[]) => Promise<SendResponse>;
   }

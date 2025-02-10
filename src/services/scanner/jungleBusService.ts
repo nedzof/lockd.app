@@ -1,13 +1,13 @@
 import { JungleBusClient } from '@gorillapool/js-junglebus';
-import type { JungleBusTransaction, JungleBusSubscription } from './junglebus.types';
-import { TRANSACTION_TYPES } from './junglebus.types';
-import { DatabaseService } from './databaseService';
-import type { BlockchainTransaction } from './types';
+import type { JungleBusTransaction, Transaction, ControlMessage, JungleBusSubscription, SubscriptionErrorContext } from './junglebus.types.js';
+import { TRANSACTION_TYPES } from './junglebus.types.js';
+import { DatabaseService } from './databaseService.js';
+import type { BlockchainTransaction } from './types.js';
 
 export class JungleBusService {
   private client: JungleBusClient;
   private databaseService: DatabaseService;
-  private subscriptionId?: number;
+  private subscription?: JungleBusSubscription;
 
   constructor() {
     this.client = new JungleBusClient('https://junglebus.gorillapool.io');
@@ -15,39 +15,24 @@ export class JungleBusService {
   }
 
   public async subscribe(fromBlock: number) {
-    const subscription: JungleBusSubscription = {
-      fromBlock,
-      outputs: [
-        // Listen for ordinal inscriptions
-        { 
-          type: TRANSACTION_TYPES.OUTPUT_TYPES.ORD,
-          filter: TRANSACTION_TYPES.ORD_PREFIX // 'ord' prefix
-        },
-        // Listen for standard BSV transactions
-        { 
-          type: TRANSACTION_TYPES.OUTPUT_TYPES.PUBKEYHASH 
-        }
-      ]
-    };
-
     try {
-      this.subscriptionId = await this.client.Subscribe(
-        subscription.fromBlock,
-        async (tx: JungleBusTransaction) => {
-          await this.processTransaction(tx);
-        },
-        async (status: any) => {
+      this.subscription = await this.client.Subscribe(
+        'lockd.app',
+        fromBlock,
+        (tx: Transaction) => this.processTransaction({ 
+          tx, 
+          blockHeight: tx.block_height 
+        }),
+        (status: ControlMessage) => {
           console.log('Status update:', status);
         },
-        async (mempool: any) => {
-          console.log('Mempool update:', mempool);
-        },
-        (error: Error) => {
-          console.error('JungleBus subscription error:', error);
+        (error: SubscriptionErrorContext) => {
+          console.error('JungleBus subscription error:', error.error.message);
         }
       );
 
-      console.log(`JungleBus subscription created with ID: ${this.subscriptionId}`);
+      console.log(`JungleBus subscription created with ID: ${this.subscription.subscriptionID}`);
+      this.subscription.Subscribe();
     } catch (error) {
       console.error('Error creating JungleBus subscription:', error);
       throw error;
@@ -55,11 +40,11 @@ export class JungleBusService {
   }
 
   public async unsubscribe() {
-    if (this.subscriptionId) {
+    if (this.subscription) {
       try {
-        await this.client.Unsubscribe(this.subscriptionId);
-        console.log(`Unsubscribed from JungleBus subscription: ${this.subscriptionId}`);
-        this.subscriptionId = undefined;
+        this.subscription.UnSubscribe();
+        console.log(`Unsubscribed from JungleBus subscription: ${this.subscription.subscriptionID}`);
+        this.subscription = undefined;
       } catch (error) {
         console.error('Error unsubscribing:', error);
       }
@@ -79,52 +64,130 @@ export class JungleBusService {
 
   private extractTransactionData(tx: JungleBusTransaction): BlockchainTransaction | null {
     try {
-      // Find ordinal inscription output
-      const ordOutput = tx.tx.outputs.find(output => 
-        output.s.includes(TRANSACTION_TYPES.ORD_PREFIX)
-      );
-
-      if (!ordOutput) return null;
-
-      // Extract MIME type
-      const mimeType = this.extractMimeType(ordOutput.s);
-      if (!mimeType || !TRANSACTION_TYPES.IMAGE_TYPES.some(type => mimeType.startsWith(type))) {
-        return null;
+      // Parse the raw transaction
+      const rawTx = tx.tx.transaction;
+      
+      // Check for MAP protocol transaction
+      if (rawTx.includes(TRANSACTION_TYPES.MAP.PREFIX)) {
+        const mapData = this.extractMapData(rawTx);
+        if (mapData && mapData.app === TRANSACTION_TYPES.MAP.APP && mapData.type === TRANSACTION_TYPES.MAP.TYPE) {
+          return {
+            txid: tx.tx.id,
+            content: mapData.content,
+            author_address: this.extractAuthorAddress(rawTx),
+            media_type: mapData.contentType || 'text/plain',
+            blockHeight: tx.blockHeight,
+            description: mapData.content
+          };
+        }
       }
 
-      // Get author address from first input
-      const authorAddress = tx.tx.inputs[0]?.a || '';
-      if (!authorAddress) {
-        console.warn(`No author address found for transaction ${tx.tx.h}`);
-        return null;
+      // Check for ordinal inscription
+      if (rawTx.includes(TRANSACTION_TYPES.ORD_PREFIX)) {
+        const mimeType = this.extractMimeType(rawTx);
+        if (!mimeType || !TRANSACTION_TYPES.IMAGE_TYPES.some(type => mimeType.startsWith(type))) {
+          return null;
+        }
+
+        const authorAddress = this.extractAuthorAddress(rawTx);
+        if (!authorAddress) {
+          console.warn(`No author address found for transaction ${tx.tx.id}`);
+          return null;
+        }
+
+        const blockchainTx: BlockchainTransaction = {
+          txid: tx.tx.id,
+          content: rawTx,
+          author_address: authorAddress,
+          media_type: mimeType,
+          blockHeight: tx.blockHeight,
+          amount: 0,
+          description: `${mimeType.split('/')[1].toUpperCase()} image inscription`
+        };
+
+        console.log('Created blockchain transaction:', blockchainTx);
+        return blockchainTx;
       }
 
-      const blockchainTx: BlockchainTransaction = {
-        txid: tx.tx.h,
-        content: ordOutput.s, // Store the full ordinal inscription
-        author_address: authorAddress,
-        media_type: mimeType,
-        blockHeight: tx.block?.i || 0,
-        amount: 0, // Set if needed
-        locked_until: tx.tx.lock || 0,
-        description: `${mimeType.split('/')[1].toUpperCase()} image inscription`
-      };
-
-      console.log('Created blockchain transaction:', blockchainTx);
-      return blockchainTx;
+      return null;
     } catch (error) {
       console.error('Error extracting transaction data:', error);
       return null;
     }
   }
 
-  private extractMimeType(script: string): string | undefined {
+  private extractAuthorAddress(rawTx: string): string {
     try {
-      const ordIndex = script.indexOf(TRANSACTION_TYPES.ORD_PREFIX);
+      // Extract the first input's address from the raw transaction
+      // This is a simplified implementation - in production you'd want to use a proper BSV library
+      const addressMatch = rawTx.match(/76a914([0-9a-f]{40})88ac/);
+      if (addressMatch && addressMatch[1]) {
+        return addressMatch[1];
+      }
+      return '';
+    } catch (error) {
+      console.error('Error extracting author address:', error);
+      return '';
+    }
+  }
+
+  private extractMapData(rawTx: string): { 
+    app: string;
+    type: string;
+    content: string;
+    contentType?: string;
+  } | null {
+    try {
+      // Find MAP prefix
+      const mapIndex = rawTx.indexOf(TRANSACTION_TYPES.MAP.PREFIX);
+      if (mapIndex === -1) return null;
+
+      // Parse MAP data from raw transaction
+      const mapData = rawTx.substring(mapIndex);
+      const parts = mapData.split('00'); // Split on null bytes
+      
+      // Extract MAP fields
+      const data: Record<string, string> = {};
+      for (let i = 0; i < parts.length - 1; i += 2) {
+        const key = this.hexToString(parts[i]);
+        const value = this.hexToString(parts[i + 1]);
+        if (!key || !value) break;
+        data[key] = value;
+      }
+
+      if (data.app !== TRANSACTION_TYPES.MAP.APP || data.type !== TRANSACTION_TYPES.MAP.TYPE) {
+        return null;
+      }
+
+      return {
+        app: data.app,
+        type: data.type,
+        content: data.content || '',
+        contentType: data.contentType
+      };
+    } catch (error) {
+      console.error('Error extracting MAP data:', error);
+      return null;
+    }
+  }
+
+  private hexToString(hex: string): string {
+    try {
+      const bytes = hex.match(/.{2}/g) || [];
+      return bytes.map(byte => String.fromCharCode(parseInt(byte, 16))).join('');
+    } catch (error) {
+      console.error('Error converting hex to string:', error);
+      return '';
+    }
+  }
+
+  private extractMimeType(rawTx: string): string | undefined {
+    try {
+      const ordIndex = rawTx.indexOf(TRANSACTION_TYPES.ORD_PREFIX);
       if (ordIndex === -1) return undefined;
 
       // Skip past 'ord' and look for the MIME type
-      const afterOrd = script.slice(ordIndex + 6);
+      const afterOrd = rawTx.slice(ordIndex + 6);
       const chunks = afterOrd.match(/.{1,2}/g) || [];
       let mimeType = '';
       

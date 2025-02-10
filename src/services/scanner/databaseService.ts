@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
-import type { Database } from '../../types/supabase';
-import type { BlockchainTransaction } from './types';
+import type { Database } from '../../types/supabase.js';
+import type { BlockchainTransaction } from './types.js';
 
 export class DatabaseService {
   private supabase;

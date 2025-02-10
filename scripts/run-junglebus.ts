@@ -1,5 +1,7 @@
-const { JungleBusService } = require('../src/services/scanner/jungleBusService');
-require('dotenv').config();
+import { JungleBusService } from '../src/services/scanner/jungleBusService.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 async function main() {
   const jungleBusService = new JungleBusService();

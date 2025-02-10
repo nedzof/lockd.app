@@ -1,47 +1,65 @@
+export interface Transaction {
+  id: string;
+  block_hash: string;
+  block_height: number;
+  block_index: number;
+  block_time: number;
+  transaction: string;
+  merkle_proof: string;
+}
+
 export interface JungleBusTransaction {
-  tx: {
-    h: string; // transaction hash
-    inputs: Array<{
-      o?: string; // output point
-      h?: string; // previous transaction hash
-      i?: number; // previous output index
-      s?: string; // unlocking script
-      a?: string; // bitcoin address
-    }>;
-    outputs: Array<{
-      i: number; // output index
-      s: string; // locking script
-      a?: string; // bitcoin address
-      t?: string; // type (e.g. 'pubkeyhash', 'nulldata')
-    }>;
-    lock?: number;
-  };
-  block?: {
-    h: string; // block hash
-    i: number; // block height
-    t: number; // block time
+  tx: Transaction;
+  blockHeight: number;
+}
+
+export interface ControlMessage {
+  statusCode: number;
+  status: string;
+  message: string;
+  block: number;
+  transactions: number;
+}
+
+export interface SubscriptionErrorContext {
+  type: string;
+  error: {
+    code: number;
+    message: string;
+    temporary: boolean;
   };
 }
 
 export interface JungleBusSubscription {
-  fromBlock: number;
-  toBlock?: number;
-  outputs?: Array<{
-    type: string;
-    filter?: string;
-  }>;
-  inputs?: Array<{
-    type: string;
-    filter?: string;
-  }>;
+  subscriptionID: string;
+  currentBlock: number;
+  Subscribe: () => void;
+  UnSubscribe: () => void;
+  GetCurrentBlock: () => number;
 }
 
-// Keywords for detecting relevant transactions
 export const TRANSACTION_TYPES = {
-  ORD_PREFIX: '6f7264', // 'ord' in hex
+  IMAGE_TYPES: ['image/'],
+  ORDINAL_TYPES: ['ord'],
+  MAP: {
+    PREFIX: '1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5',
+    APP: 'lockd.app',
+    TYPE: 'post'
+  },
+  OUTPUT_TYPES: {
+    ORD: 'ord',
+    PUBKEYHASH: 'bitcoin.pubkeyhash',
+    MAP: 'map'
+  },
+  ORD_PREFIX: '6f7264' // 'ord' in hex
+} as const;
+
+// Keywords for detecting relevant transactions
+export const TRANSACTION_TYPES_OLD = {
   IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'],
   OUTPUT_TYPES: {
     ORD: 'ord',
-    PUBKEYHASH: 'bitcoin.pubkeyhash'
+    PUBKEYHASH: 'bitcoin.pubkeyhash',
+    MAP: 'map'
   }
 } as const; 

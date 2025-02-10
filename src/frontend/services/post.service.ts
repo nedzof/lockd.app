@@ -208,13 +208,21 @@ export const createPost = async (
         });
         throw txError;
       }
-    } else if (content.trim()) {
+    } else {
       console.log("Creating text post:", content);
       try {
-        console.log("Sending text inscription transaction...");
-        
-        // Initialize ordinal inscription
-        console.log("Initializing ordinal inscription...");
+        // Create MAP data
+        const mapData = {
+          app: 'lockd.app',
+          type: 'post',
+          content: content,
+          timestamp: new Date().toISOString(),
+          contentType: 'text/plain',
+          version: '1.0.0'
+        };
+
+        // Initialize transaction
+        console.log("Creating MAP transaction...");
         const provider = new OrdiProvider();
         const signer = new YoursWalletAdapter(wallet, provider);
         
@@ -224,30 +232,21 @@ export const createPost = async (
         if (!isAuthenticated) {
             throw new Error(`Authentication failed: ${error}`);
         }
-        
-        // Convert address to proper format and create instance
-        const addressObj = new bsv.Address(authorAddress);
-        const instance = new OrdiNFTP2PKH(Addr(addressObj.toByteString()))
-        await instance.connect(signer)
 
-        console.log("Creating text inscription with parameters:", {
-          contentLength: content.length,
-          contentType: 'text/plain;charset=utf-8',
-          receiverAddress: authorAddress
-        });
-
-        // Create inscription transaction using scrypt-ord
-        inscriptionTx = await instance.inscribeText(content);
+        // Create inscription transaction using MAP protocol
+        inscriptionTx = await wallet.inscribe([{
+          address: authorAddress,
+          base64Data: btoa(content),
+          mimeType: 'text/plain',
+          map: mapData,
+          satoshis: 1000
+        }]);
         
         // Log and validate text inscription
         if (inscriptionTx?.tx) {
-          const txHex = inscriptionTx.tx.toString('hex');
-          console.log("Text inscription response:", JSON.stringify({
+          console.log("MAP transaction response:", JSON.stringify({
             txid: inscriptionTx?.id,
-            rawTxLength: txHex.length,
-            scriptPreview: txHex.includes('6a') ? txHex.substring(txHex.indexOf('6a'), txHex.indexOf('6a') + 100) + '...' : 'No OP_RETURN found',
-            containsOrdData: txHex.includes('ord'),
-            containsContent: txHex.includes(content)
+            map: mapData
           }, null, 2));
         }
       } catch (txError) {
@@ -275,28 +274,17 @@ export const createPost = async (
 
     console.log('Inscription successful with txid:', inscriptionTx.id);
 
-    // Create the post object based on the type of content
+    // Create the post object
     const post: Post = {
       txid: inscriptionTx.id,
-      content: imageFile ? (description || '') : content,
+      content: content,
       author_address: authorAddress,
       created_at: new Date().toISOString(),
-      ...(imageFile && {
-        media_url,
-        media_type,
-        description: content.trim() ? content : undefined
-      })
+      media_type: 'text/plain'
     };
     console.log('Created post object:', post);
 
-    // Show success message based on post type
-    let successMessage = 'Post created successfully!';
-    if (imageFile && content.trim()) {
-      successMessage = 'Image post with description created successfully!';
-    } else if (imageFile) {
-      successMessage = 'Image post created successfully!';
-    }
-    toast.success(successMessage);
+    toast.success('Post created successfully!');
     
     // Open WhatsOnChain in a new tab with testnet URL
     const whatsOnChainUrl = `https://test.whatsonchain.com/tx/${inscriptionTx.id}`;
@@ -305,17 +293,8 @@ export const createPost = async (
     
     return post;
   } catch (error) {
-    console.error("Error creating post:", error);
-    // Log the full error details
-    if (error instanceof Error) {
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
-        cause: error.cause
-      });
-    }
-    toast.error("Failed to create post: " + (error as Error).message);
+    console.error('Error creating post:', error);
+    toast.error('Failed to create post: ' + (error instanceof Error ? error.message : 'Unknown error'));
     throw error;
   }
 }; 

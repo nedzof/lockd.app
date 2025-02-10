@@ -2,12 +2,22 @@
   "compilerOptions": {
     "composite": true,
     "skipLibCheck": true,
-    "module": "CommonJS",
-    "moduleResolution": "node",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "target": "ES2020",
-    "outDir": "dist"
+    "outDir": "dist",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "esModuleInterop": true
+  },
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifiers": true
   },
   "include": ["scripts/**/*", "src/services/scanner/**/*"]
 } 
