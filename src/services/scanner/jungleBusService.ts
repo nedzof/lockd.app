@@ -26,8 +26,8 @@ export class JungleBusService {
         (status: ControlMessage) => {
           console.log('Status update:', status);
         },
-        (error: SubscriptionErrorContext) => {
-          console.error('JungleBus subscription error:', error.error.message);
+        (error: any) => {
+          console.error('JungleBus subscription error:', error?.message || error);
         }
       );
 

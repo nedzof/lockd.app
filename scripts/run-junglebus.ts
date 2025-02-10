@@ -1,13 +1,13 @@
 import { JungleBusService } from '../src/services/scanner/jungleBusService.js';
-import dotenv from 'dotenv';
+import * as dotenv from 'dotenv';
 
 dotenv.config();
 
 async function main() {
   const jungleBusService = new JungleBusService();
   
-  // Start from a specific block height (e.g., last 24 hours of blocks)
-  const startBlock = 1660537; // Adjust this as needed
+  // Start from 10 blocks before the target transaction in block 1660547
+  const startBlock = 1660537;
   
   console.log(`Starting JungleBus subscription from block ${startBlock}...`);
   

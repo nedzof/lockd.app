@@ -12,7 +12,7 @@
     "test": "jest",
     "setup-db": "NODE_ENV=development node scripts/setup-db.cjs",
     "start:junglebus": "node dist/scripts/run-junglebus.js",
-    "dev:junglebus": "ts-node --project scripts/tsconfig.json scripts/run-junglebus.ts"
+    "dev:junglebus": "ts-node --esm scripts/run-junglebus.ts"
   },
   "dependencies": {
     "@gorillapool/js-junglebus": "^0.3.0",
