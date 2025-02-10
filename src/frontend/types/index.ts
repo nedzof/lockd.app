@@ -92,6 +92,16 @@ export enum TxStatus {
   FAILED = 'FAILED'
 }
 
+export interface PolymarketData {
+  marketId: string;
+  question: string;
+  description: string;
+  closeTime: string;
+  probability: number;
+  status: 'open' | 'closed' | 'resolved';
+  resolvedOutcome?: string;
+}
+
 export interface Lock {
   id: string;
   txId: string;
@@ -100,6 +110,7 @@ export interface Lock {
   lockUntilHeight: number;
   createdAt: string;
   metadata?: Record<string, any>;
+  polymarketData?: PolymarketData;
 }
 
 export interface Transaction {

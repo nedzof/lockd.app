@@ -12,7 +12,8 @@
     "test": "jest",
     "setup-db": "NODE_ENV=development node scripts/setup-db.cjs",
     "start:junglebus": "node dist/scripts/run-junglebus.js",
-    "dev:junglebus": "ts-node --esm scripts/run-junglebus.ts"
+    "dev:junglebus": "ts-node --esm scripts/run-junglebus.ts",
+    "test:polymarket": "tsx src/frontend/scripts/test-polymarket.ts"
   },
   "dependencies": {
     "@gorillapool/js-junglebus": "^0.3.0",
@@ -35,6 +36,7 @@
     "react-router-dom": "^6.22.0",
     "scrypt-ord": "^1.0.17",
     "scrypt-ts": "^1.4.4",
+    "tsx": "^4.19.2",
     "yours-wallet-provider": "^3.5.0",
     "zustand": "^4.4.7"
   },

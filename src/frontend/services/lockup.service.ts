@@ -1,9 +1,11 @@
-import { Lock, CreateLockParams } from '../types';
+import { Lock, CreateLockParams, PolymarketData } from '../types';
 import { WalletError } from '../../shared/utils/errors';
 import { useYoursWallet } from 'yours-wallet-provider';
+import { PolymarketService } from './polymarket.service';
 
 export const useLockupService = () => {
   const wallet = useYoursWallet();
+  const polymarketService = new PolymarketService();
 
   const createLockScript = (lockUntilHeight: number): string => {
     // Implement the lock script creation logic
@@ -17,9 +19,9 @@ export const useLockupService = () => {
     throw new Error('Not implemented');
   };
 
-  const createLock = async (params: CreateLockParams): Promise<string> => {
+  const createLock = async (params: CreateLockParams & { polymarketUrl?: string }): Promise<string> => {
     try {
-      const { recipientAddress, amount, lockUntilHeight } = params;
+      const { recipientAddress, amount, lockUntilHeight, polymarketUrl } = params;
 
       // Validate parameters
       if (!recipientAddress) throw new WalletError('Recipient address is required');
@@ -30,11 +32,32 @@ export const useLockupService = () => {
         throw new WalletError('Wallet not connected');
       }
 
+      let polymarketData: PolymarketData | undefined;
+      
+      // If a Polymarket URL is provided, validate and fetch market data
+      if (polymarketUrl) {
+        const marketData = await polymarketService.validatePolymarketUrl(polymarketUrl);
+        if (!marketData) {
+          throw new WalletError('Invalid Polymarket URL or unable to fetch market data');
+        }
+        
+        polymarketData = {
+          marketId: marketData.url,
+          question: marketData.outcomes[0].name,
+          description: marketData.outcomes.map(o => `${o.name}: ${o.probability.toFixed(1)}%`).join(', '),
+          closeTime: '',  // We don't have this in the new API response
+          probability: marketData.probability,
+          status: 'open', // We'll assume open since we're only fetching active markets
+          resolvedOutcome: undefined,
+        };
+      }
+
       // Create lock transaction using sendBsv
       const result = await wallet.sendBsv([{
         satoshis: amount,
         address: recipientAddress,
-        script: createLockScript(lockUntilHeight)
+        script: createLockScript(lockUntilHeight),
+        data: polymarketData ? [JSON.stringify(polymarketData)] : undefined
       }]);
 
       if (!result?.txid) {
