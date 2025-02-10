@@ -8,12 +8,12 @@ export const AVAILABLE_TAGS = [
   'Crypto',
   'Sports',
   'Pop Culture',
-  'Economics/Business',
-  'Science/Technology',
+  'Business',
+  'Tech',
   'Current Events',
   'Finance',
   'Health',
-  'Miscellaneous/Oddities'
+  'Memes'
 ] as const;
 
 interface TagFilterProps {

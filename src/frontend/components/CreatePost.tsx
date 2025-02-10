@@ -1,16 +1,62 @@
 import * as React from 'react';
 import { useState } from 'react';
-import { FiSend, FiX, FiImage, FiTrash2, FiTwitter, FiMessageCircle, FiLoader, FiBarChart2 } from 'react-icons/fi';
+import { FiSend, FiX, FiImage, FiTrash2, FiTwitter, FiMessageCircle, FiLoader, FiBarChart2, FiTag, FiLock } from 'react-icons/fi';
 import { createPost } from '../services/post.service';
 import { toast } from 'react-hot-toast';
 import { useWallet } from '../providers/WalletProvider';
 import ImageUploading, { ImageListType } from 'react-images-uploading';
+
+// Available tags based on schema comment
+const AVAILABLE_TAGS = [
+  'Politics',
+  'Crypto',
+  'Sports',
+  'Pop Culture',
+  'Business',
+  'Tech',
+  'Current Events',
+  'Finance',
+  'Health',
+  'Memes'
+];
+
+interface PollOption {
+  text: string;
+  lockAmount: number;
+  lockDuration: number;
+}
 
 interface CreatePostProps {
   isOpen: boolean;
   onClose: () => void;
   onPostCreated?: () => void;
 }
+
+interface PredictionMarketData {
+  source: string;
+  prediction: string;
+  endDate: Date;
+  probability: number;
+  options?: string[];
+  lockDurationBlocks?: number;
+}
+
+interface StandardLockOptions {
+  isLocked: boolean;
+  duration?: number;
+  amount?: number;
+}
+
+interface PollLockOptions {
+  isPoll: true;
+  options: Array<{
+    text: string;
+    lockDuration: number;
+    lockAmount: number;
+  }>;
+}
+
+type LockOptions = StandardLockOptions | PollLockOptions;
 
 export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostCreated }) => {
   const { bsvAddress, wallet } = useWallet();
@@ -21,11 +67,27 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
   const [images, setImages] = useState<ImageListType>([]);
   const [showImportOptions, setShowImportOptions] = useState(false);
   const [importUrl, setImportUrl] = useState('');
-  const [importType, setImportType] = useState<'x' | 'telegram' | 'polymarket' | null>(null);
-  const [mode, setMode] = useState<'create' | 'import'>('create');
+  const [importType, setImportType] = useState<'x' | 'telegram' | null>(null);
+  const [mode, setMode] = useState<'create' | 'import' | 'poll'>('create');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [showTagSelector, setShowTagSelector] = useState(false);
+  const [predictionMarketData, setPredictionMarketData] = useState<PredictionMarketData | null>(null);
+  const [isLocked, setIsLocked] = useState(false);
+  const [showLockOptions, setShowLockOptions] = useState(false);
+  const [lockDuration, setLockDuration] = useState<number>(1); // Default 1 block
+  const [lockAmount, setLockAmount] = useState<number>(1000); // Default 1000 sats
+  const [pollOptions, setPollOptions] = useState<PollOption[]>([]);
 
   const onImagesChange = (imageList: ImageListType) => {
     setImages(imageList);
+  };
+
+  const handleTagToggle = (tag: string) => {
+    setSelectedTags(prev => 
+      prev.includes(tag) 
+        ? prev.filter(t => t !== tag)
+        : [...prev, tag]
+    );
   };
 
   const handleImport = async () => {
@@ -33,9 +95,9 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
 
     setIsSubmitting(true);
     try {
-      // Here you would implement the actual import logic
-      // For now, we'll just extract the content from the URL
       let importedContent = '';
+      let predictionData: PredictionMarketData | null = null;
+
       if (importType === 'x') {
         // Extract X post ID and fetch content
         const tweetId = importUrl.split('/').pop();
@@ -44,49 +106,132 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
       } else if (importType === 'telegram') {
         // Extract Telegram post info and fetch content
         importedContent = `Imported from Telegram: ${importUrl}`;
-      } else if (importType === 'polymarket') {
-        // Extract Polymarket prediction market URL and fetch content
-        importedContent = `Imported from Polymarket: ${importUrl}`;
       }
 
-      setContent(importedContent);
+      if (mode !== 'poll') {
+        setContent(importedContent);
+      }
       setImportUrl('');
       setImportType(null);
       setShowImportOptions(false);
-      toast.success(`Successfully imported from ${importType === 'x' ? 'X' : importType === 'telegram' ? 'Telegram' : 'Polymarket'}`);
+      toast.success(`Successfully imported from ${importType === 'x' ? 'X' : 'Telegram'}`);
     } catch (error) {
       console.error('Failed to import post:', error);
       toast.error('Failed to import post. Please try again.');
+      setPredictionMarketData(null);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleSubmit = async () => {
-    if (!wallet || !bsvAddress || (!content.trim() && !images.length)) {
+    if (!wallet || !bsvAddress) {
+      toast.error('Please connect your wallet');
+      return;
+    }
+
+    if (mode === 'poll') {
+      if (!content.trim()) {
+        toast.error('Please provide a poll question');
+        return;
+      }
+      if (pollOptions.length < 2) {
+        toast.error('Please add at least 2 poll options');
+        return;
+      }
+      if (pollOptions.some(opt => !opt.text.trim())) {
+        toast.error('Please fill in all poll options');
+        return;
+      }
+      if (pollOptions.some(opt => !opt.lockAmount || !opt.lockDuration)) {
+        toast.error('Please provide both lock duration and amount for all options');
+        return;
+      }
+    } else if (!content.trim() && !images.length) {
       toast.error('Please provide either text content or an image');
       return;
     }
-    
+
     setIsSubmitting(true);
     try {
-      await createPost(
-        content, 
-        bsvAddress, 
-        wallet,
-        images[0]?.file,
-        comment
-      );
+      if (mode === 'poll') {
+        const pollLockOptions: PollLockOptions = {
+          isPoll: true,
+          options: pollOptions.map(opt => ({
+            text: opt.text,
+            lockDuration: opt.lockDuration,
+            lockAmount: opt.lockAmount
+          }))
+        };
+
+        await createPost(
+          content,
+          bsvAddress,
+          wallet,
+          undefined, // no image for polls
+          undefined, // no comment for polls
+          selectedTags,
+          undefined, // no prediction market data needed
+          pollLockOptions as any // temporary type assertion until post.service is updated
+        );
+      } else {
+        const standardLockOptions: StandardLockOptions | undefined = isLocked ? {
+          isLocked: true,
+          duration: lockDuration,
+          amount: lockAmount
+        } : undefined;
+
+        await createPost(
+          content,
+          bsvAddress,
+          wallet,
+          images[0]?.file,
+          comment,
+          selectedTags,
+          predictionMarketData || undefined,
+          standardLockOptions
+        );
+      }
+
       setContent('');
       setComment('');
       setImages([]);
+      setSelectedTags([]);
+      setPredictionMarketData(null);
+      setIsLocked(false);
+      setLockDuration(1);
+      setLockAmount(1000);
+      setPollOptions([]);
       onPostCreated?.();
       onClose();
     } catch (error) {
       console.error('Failed to create post:', error);
+      toast.error('Failed to create post. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handlePollOptionChange = (index: number, field: keyof PollOption, value: string | number) => {
+    setPollOptions(prev => {
+      const newOptions = [...prev];
+      if (field === 'text') {
+        newOptions[index] = { ...newOptions[index], text: value as string };
+      } else if (field === 'lockAmount') {
+        newOptions[index] = { ...newOptions[index], lockAmount: Math.max(1000, Number(value)) };
+      } else if (field === 'lockDuration') {
+        newOptions[index] = { ...newOptions[index], lockDuration: Math.min(52560, Math.max(1, Number(value))) };
+      }
+      return newOptions;
+    });
+  };
+
+  const addPollOption = () => {
+    setPollOptions(prev => [...prev, { text: '', lockAmount: 1000, lockDuration: 1 }]);
+  };
+
+  const removePollOption = (index: number) => {
+    setPollOptions(prev => prev.filter((_, i) => i !== index));
   };
 
   if (!isOpen) return null;
@@ -98,7 +243,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
         <div className="flex flex-col border-b border-gray-800/30">
           <div className="flex items-center justify-between p-6">
             <h2 className="text-xl font-semibold text-white">
-              {mode === 'create' ? 'Create Post' : 'Import Post'}
+              {mode === 'create' ? 'Create Post' : mode === 'poll' ? 'Create Poll' : 'Import Post'}
             </h2>
             <button
               onClick={onClose}
@@ -125,6 +270,19 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
                 }`}
               >
                 Create Post
+              </button>
+              <button
+                onClick={() => {
+                  setMode('poll');
+                  setShowImportOptions(true);
+                }}
+                className={`px-4 py-2 rounded-md transition-all duration-200 ${
+                  mode === 'poll'
+                    ? 'bg-[#00ffa3] text-black font-medium'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Create Poll
               </button>
               <button
                 onClick={() => {
@@ -170,17 +328,6 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
                   <FiMessageCircle className="w-4 h-4" />
                   <span>Telegram</span>
                 </button>
-                <button
-                  onClick={() => setImportType('polymarket')}
-                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg transition-colors ${
-                    importType === 'polymarket'
-                      ? 'bg-[#00ffa3]/10 text-[#00ffa3]'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  <FiBarChart2 className="w-4 h-4" />
-                  <span>Polymarket</span>
-                </button>
               </div>
 
               {importType && (
@@ -192,10 +339,8 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
                     placeholder={`Enter ${
                       importType === 'x' 
                         ? 'X' 
-                        : importType === 'telegram' 
-                          ? 'Telegram' 
-                          : 'Polymarket'
-                    } ${importType === 'polymarket' ? 'prediction market URL' : 'post URL'}`}
+                        : 'Telegram'
+                    } post URL`}
                     className="w-full px-4 py-2 bg-[#1A1B23] border border-gray-800/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#00ffa3]/30"
                   />
                   <button
@@ -204,18 +349,146 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
                     className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-[#00ffa3]/10 text-[#00ffa3] rounded-lg hover:bg-[#00ffa3]/20 transition-colors disabled:opacity-50"
                   >
                     <span>
-                      {importType === 'polymarket' ? 'Import prediction market from' : 'Import from'} {
-                        importType === 'x' 
-                          ? 'X' 
-                          : importType === 'telegram' 
-                            ? 'Telegram' 
-                            : 'Polymarket'
-                      }
+                      Import from {importType === 'x' ? 'X' : 'Telegram'}
                     </span>
                     {isSubmitting && <FiLoader className="w-4 h-4 animate-spin" />}
                   </button>
                 </div>
               )}
+            </div>
+          ) : mode === 'poll' ? (
+            <div className="space-y-6">
+              {/* Poll Title/Question */}
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="Enter your poll question..."
+                className="w-full px-4 py-3 text-white bg-[#1A1B23] border border-gray-800 rounded-lg focus:outline-none focus:border-[#00ffa3] resize-none"
+                disabled={isSubmitting}
+              />
+
+              {/* Polymarket Import */}
+              <div className="p-4 bg-[#1A1B23]/50 rounded-lg border border-gray-800/30">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    placeholder="Enter Polymarket URL to import prediction"
+                    className="flex-1 px-4 py-2 bg-[#1A1B23] border border-gray-800/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#00ffa3]/30"
+                  />
+                  <button
+                    onClick={async () => {
+                      try {
+                        setIsSubmitting(true);
+                        const url = new URL(importUrl);
+                        
+                        // Mock implementation - you would need to implement actual Polymarket API integration
+                        const endDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
+                        const durationInDays = Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                        const durationInBlocks = durationInDays * 144; // ~144 blocks per day
+
+                        // Mock data - replace with actual API call
+                        const newPredictionData: PredictionMarketData = {
+                          source: 'Polymarket',
+                          prediction: 'Will BTC reach $100k by end of 2024?', // Example prediction
+                          endDate,
+                          probability: 0.5,
+                          options: ['Yes', 'No'],
+                          lockDurationBlocks: durationInBlocks
+                        };
+
+                        // Set the poll question
+                        setContent(newPredictionData.prediction);
+
+                        // Create poll options with the imported data
+                        const newOptions = newPredictionData.options?.map(opt => ({
+                          text: opt,
+                          lockAmount: 1000, // Default amount
+                          lockDuration: newPredictionData.lockDurationBlocks || 144
+                        })) || [];
+
+                        // Set the options
+                        setPollOptions(newOptions);
+
+                        // Clear the import URL
+                        setImportUrl('');
+
+                        // Show success message
+                        toast.success('Successfully imported from Polymarket');
+
+                        // Set prediction market data for reference
+                        setPredictionMarketData(newPredictionData);
+                      } catch (error) {
+                        console.error('Failed to import from Polymarket:', error);
+                        toast.error('Failed to import from Polymarket. Please check the URL and try again.');
+                      } finally {
+                        setIsSubmitting(false);
+                      }
+                    }}
+                    disabled={!importUrl || isSubmitting}
+                    className="flex items-center space-x-2 px-4 py-2 bg-[#00ffa3]/10 text-[#00ffa3] rounded-lg hover:bg-[#00ffa3]/20 transition-colors disabled:opacity-50"
+                  >
+                    <span>Import</span>
+                    {isSubmitting && <FiLoader className="w-4 h-4 animate-spin" />}
+                  </button>
+                </div>
+                {predictionMarketData && (
+                  <div className="mt-4 text-sm text-gray-400">
+                    <p>Imported from Polymarket</p>
+                    <p>Ends in: {(predictionMarketData.lockDurationBlocks || 0) / 144} days</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Poll Options */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-white font-medium">Poll Options</h3>
+                  <button
+                    onClick={addPollOption}
+                    className="px-3 py-1.5 text-sm bg-[#00ffa3]/10 text-[#00ffa3] rounded-lg hover:bg-[#00ffa3]/20 transition-colors"
+                  >
+                    Add Option
+                  </button>
+                </div>
+
+                {pollOptions.map((option, index) => (
+                  <div key={index} className="p-3 bg-[#1A1B23] border border-gray-800 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        value={option.text}
+                        onChange={(e) => handlePollOptionChange(index, 'text', e.target.value)}
+                        placeholder={`Option ${index + 1}`}
+                        className="flex-1 px-3 py-2 bg-[#1A1B23] border border-gray-800 rounded-lg text-white focus:outline-none focus:border-[#00ffa3]"
+                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="1000"
+                          step="1000"
+                          value={option.lockAmount}
+                          onChange={(e) => handlePollOptionChange(index, 'lockAmount', e.target.value)}
+                          className="w-28 px-3 py-2 bg-[#1A1B23] border border-gray-800 rounded-lg text-white focus:outline-none focus:border-[#00ffa3]"
+                          placeholder="Lock amount"
+                        />
+                        <span className="text-gray-500 text-sm">sats</span>
+                      </div>
+                      <button
+                        onClick={() => removePollOption(index)}
+                        className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                        title="Remove option"
+                      >
+                        <FiTrash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      Locks for {(option.lockDuration / 144).toFixed(1)} days
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : (
             <>
@@ -271,6 +544,105 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
                 disabled={isSubmitting}
               />
               
+              {/* Tag Selector */}
+              <div className="space-y-2">
+                <button
+                  onClick={() => setShowTagSelector(!showTagSelector)}
+                  className="flex items-center space-x-2 text-gray-400 hover:text-[#00ffa3] transition-colors"
+                >
+                  <FiTag className="w-4 h-4" />
+                  <span>
+                    {selectedTags.length ? `${selectedTags.length} tags selected` : 'Add tags'}
+                  </span>
+                </button>
+                
+                {showTagSelector && (
+                  <div className="p-4 bg-[#1A1B23] border border-gray-800 rounded-lg">
+                    <div className="flex flex-wrap gap-2">
+                      {AVAILABLE_TAGS.map(tag => (
+                        <button
+                          key={tag}
+                          onClick={() => handleTagToggle(tag)}
+                          className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                            selectedTags.includes(tag)
+                              ? 'bg-[#00ffa3] text-black'
+                              : 'bg-gray-800/50 text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Lock Options */}
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    setShowLockOptions(!showLockOptions);
+                    if (!showLockOptions) setIsLocked(true);
+                  }}
+                  className="flex items-center space-x-2 text-gray-400 hover:text-[#00ffa3] transition-colors"
+                >
+                  <FiLock className="w-4 h-4" />
+                  <span>
+                    {isLocked ? `Lock: ${lockDuration} ${lockDuration === 1 ? 'block' : 'blocks'} / ${lockAmount} sats` : 'Add Lock'}
+                  </span>
+                </button>
+                
+                {showLockOptions && (
+                  <div className="p-4 bg-[#1A1B23] border border-gray-800 rounded-lg space-y-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <label className="text-gray-400">Lock Post</label>
+                      <button
+                        onClick={() => setIsLocked(!isLocked)}
+                        className={`relative w-11 h-6 rounded-full transition-colors ${
+                          isLocked ? 'bg-[#00ffa3]' : 'bg-gray-700'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform transform ${
+                            isLocked ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {isLocked && (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-gray-400 text-sm block mb-2">Duration (blocks)</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="52560"
+                            value={lockDuration}
+                            onChange={(e) => setLockDuration(Math.min(52560, Math.max(1, parseInt(e.target.value) || 0)))}
+                            className="w-full px-3 py-2 bg-[#1A1B23] border border-gray-800 rounded-lg text-white focus:outline-none focus:border-[#00ffa3]"
+                          />
+                          <span className="text-xs text-gray-500 mt-1 block">≈ {(lockDuration / 144).toFixed(1)} days</span>
+                        </div>
+
+                        <div>
+                          <label className="text-gray-400 text-sm block mb-2">Amount (sats)</label>
+                          <input
+                            type="number"
+                            min="1000"
+                            step="1000"
+                            value={lockAmount}
+                            onChange={(e) => setLockAmount(Math.max(1000, parseInt(e.target.value) || 0))}
+                            className="w-full px-3 py-2 bg-[#1A1B23] border border-gray-800 rounded-lg text-white focus:outline-none focus:border-[#00ffa3]"
+                          />
+                          <span className="text-xs text-gray-500 mt-1 block">Min: 1000 sats</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Character count */}
               <div className="flex justify-end">
                 <span className="text-sm text-gray-400">
@@ -343,7 +715,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
             <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl transition-all duration-300"></div>
             <div className="absolute inset-0 bg-gradient-to-r from-[#00ff9d] to-[#00ffa3] rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
             <div className="relative flex items-center space-x-2 text-black">
-              <span>{isSubmitting ? 'Creating...' : mode === 'create' ? 'Create Post' : 'Import Post'}</span>
+              <span>{isSubmitting ? 'Creating...' : mode === 'create' ? 'Create Post' : mode === 'poll' ? 'Create Poll' : 'Import Post'}</span>
               <FiSend className={`w-4 h-4 transition-all duration-300 ${isSubmitting ? 'animate-pulse' : 'group-hover:rotate-45'}`} />
             </div>
             <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-xl"></div>

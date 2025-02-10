@@ -145,16 +145,16 @@ export class DatabaseService {
   async extractTransactionData(txid: string, height: number): Promise<BlockchainTransaction | null> {
     try {
       // Get raw transaction data
-      const rawTxResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/test/tx/${txid}/raw`);
+      const rawTxResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/raw`);
       const rawTxData = await rawTxResponse.text();
 
       // Get decoded transaction data for input/output details
-      const txResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/test/tx/${txid}/out/0`);
+      const txResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/out/0`);
       const txData = await txResponse.json();
 
       // Extract author address from the first output that's a pubkeyhash type
       let authorAddress = '';
-      const outputsResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/test/tx/${txid}/out`);
+      const outputsResponse = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/out`);
       const outputs = await outputsResponse.json();
       for (const output of outputs) {
         if (output.type === 'pubkeyhash') {

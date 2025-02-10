@@ -6,14 +6,30 @@ import { bsv, Addr, PandaSigner } from 'scrypt-ts';
 import { OrdiProvider } from 'scrypt-ord';
 import { YoursWalletAdapter } from '../utils/YoursWalletAdapter';
 
-export interface Post {
-  txid: string;
+export interface PredictionMarketData {
+  source: string;
+  prediction: string;
+  endDate: Date;
+  probability?: number;
+}
+
+export interface PostCreationData {
   content: string;
   author_address: string;
-  created_at: string;
-  media_url?: string;
+  media_url?: string | null;
   media_type?: string;
   description?: string;
+  tags?: string[];
+  prediction_market_data?: PredictionMarketData;
+  isLocked: boolean;
+  lockDuration?: number;
+  lockAmount?: number;
+  unlockHeight?: number;
+}
+
+export interface Post extends PostCreationData {
+  txid: string;
+  created_at: string;
 }
 
 type YoursWallet = NonNullable<ReturnType<typeof useYoursWallet>>;
@@ -86,12 +102,63 @@ const base64ToHex = (base64: string): string => {
   return hex;
 };
 
+// Helper function to get current block height
+const getCurrentBlockHeight = async (): Promise<number> => {
+  try {
+    const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+    const data = await response.json();
+    return data.blocks;
+  } catch (error) {
+    console.error('Failed to fetch current block height:', error);
+    throw new Error('Failed to fetch current block height');
+  }
+};
+
+interface LockData {
+  isLocked: boolean;
+  duration?: number; // in blocks
+  amount?: number; // in satoshis
+  unlockHeight?: number;
+}
+
+interface MapData {
+  app: string;
+  type: string;
+  content: string;
+  timestamp: string;
+  contentType: string;
+  version: string;
+  tags: string[];
+  prediction_market_data?: PredictionMarketData;
+  lock_data?: LockData;
+}
+
+interface StringifiedMapData {
+  app: string;
+  type: string;
+  content: string;
+  timestamp: string;
+  contentType: string;
+  version: string;
+  tags: string;
+  prediction_market_data?: string;
+  lock_data?: string;
+}
+
+interface TransactionResponse {
+  id: string;
+  tx?: any; // Make tx optional since not all responses include it
+}
+
 export const createPost = async (
   content: string, 
   authorAddress: string, 
   wallet: YoursWallet,
   imageFile?: File,
-  description?: string
+  description?: string,
+  tags?: string[],
+  predictionMarketData?: PredictionMarketData,
+  lockData?: { isLocked: boolean; duration?: number; amount?: number }
 ): Promise<Post> => {
   try {
     console.log('Creating post with:', { 
@@ -100,7 +167,10 @@ export const createPost = async (
       hasImage: !!imageFile, 
       imageType: imageFile?.type,
       imageSize: imageFile?.size,
-      description 
+      description,
+      tags,
+      predictionMarketData,
+      lockData
     });
     
     // Validate input based on post type
@@ -108,16 +178,37 @@ export const createPost = async (
       throw new Error('Please provide either text content or an image');
     }
 
+    // Validate lock data if present
+    if (lockData?.isLocked) {
+      if (!lockData.duration || lockData.duration < 1) {
+        throw new Error('Lock duration must be at least 1 block');
+      }
+      if (lockData.duration > 52560) { // ~1 year worth of blocks
+        throw new Error('Lock duration cannot exceed 52560 blocks (approximately 1 year)');
+      }
+      if (!lockData.amount || lockData.amount < 1000) {
+        throw new Error('Lock amount must be at least 1000 satoshis');
+      }
+    }
+
+    // Get current block height if locking
+    let currentBlockHeight: number | undefined;
+    if (lockData?.isLocked) {
+      currentBlockHeight = await getCurrentBlockHeight();
+    }
+
     // Get current balance to ensure we have enough funds
     const balance = await wallet.getBalance();
     console.log('Current wallet balance:', balance);
 
-    if (!balance?.satoshis || balance.satoshis < 10) {
-      throw new Error('Insufficient balance to create post');
+    const requiredBalance = (lockData?.isLocked ? (lockData.amount || 0) : 0) + 10; // 10 sats for transaction fee
+    if (!balance?.satoshis || balance.satoshis < requiredBalance) {
+      throw new Error(`Insufficient balance. Required: ${requiredBalance} satoshis`);
     }
 
-    let inscriptionTx;
-    let media_url, media_type;
+    let inscriptionTx: TransactionResponse;
+    let media_url: string | undefined;
+    let media_type: string | undefined;
 
     // Handle different post types
     if (imageFile) {
@@ -211,15 +302,42 @@ export const createPost = async (
     } else {
       console.log("Creating text post:", content);
       try {
-        // Create MAP data
-        const mapData = {
+        // Create MAP data with tags, prediction market data, and lock data
+        const mapData: MapData = {
           app: 'lockd.app',
-          type: 'post',
+          type: predictionMarketData ? 'prediction' : 'post',
           content: content,
           timestamp: new Date().toISOString(),
           contentType: 'text/plain',
-          version: '1.0.0'
+          version: '1.0.0',
+          tags: tags || [],
+          prediction_market_data: predictionMarketData,
+          lock_data: lockData?.isLocked && currentBlockHeight && lockData.duration ? {
+            isLocked: true,
+            duration: lockData.duration,
+            amount: lockData.amount || 1000,
+            unlockHeight: currentBlockHeight + lockData.duration
+          } : undefined
         };
+
+        // Convert MapData to a proper Record<string, string>
+        const stringifiedMapData: Record<string, string> = {
+          app: mapData.app,
+          type: mapData.type,
+          content: mapData.content,
+          timestamp: mapData.timestamp,
+          contentType: mapData.contentType,
+          version: mapData.version,
+          tags: JSON.stringify(mapData.tags)
+        };
+
+        // Add optional fields only if they exist
+        if (mapData.prediction_market_data) {
+          stringifiedMapData.prediction_market_data = JSON.stringify(mapData.prediction_market_data);
+        }
+        if (mapData.lock_data) {
+          stringifiedMapData.lock_data = JSON.stringify(mapData.lock_data);
+        }
 
         // Initialize transaction
         console.log("Creating MAP transaction...");
@@ -234,13 +352,19 @@ export const createPost = async (
         }
 
         // Create inscription transaction using MAP protocol
-        inscriptionTx = await wallet.inscribe([{
+        const response = await wallet.inscribe([{
           address: authorAddress,
           base64Data: btoa(content),
           mimeType: 'text/plain',
-          map: mapData,
-          satoshis: 1000
+          map: stringifiedMapData,
+          satoshis: lockData?.isLocked ? (lockData.amount || 1000) : 1000
         }]);
+
+        // Convert response to expected format
+        inscriptionTx = {
+          id: (response as any).txid || (response as any).id,
+          tx: (response as any).tx
+        };
         
         // Log and validate text inscription
         if (inscriptionTx?.tx) {
@@ -280,14 +404,23 @@ export const createPost = async (
       content: content,
       author_address: authorAddress,
       created_at: new Date().toISOString(),
-      media_type: 'text/plain'
+      media_type,
+      media_url,
+      tags: tags || [],
+      prediction_market_data: predictionMarketData,
+      isLocked: lockData?.isLocked || false,
+      lockDuration: lockData?.duration,
+      lockAmount: lockData?.amount,
+      unlockHeight: lockData?.isLocked && currentBlockHeight && lockData.duration 
+        ? currentBlockHeight + lockData.duration 
+        : undefined
     };
     console.log('Created post object:', post);
 
     toast.success('Post created successfully!');
     
-    // Open WhatsOnChain in a new tab with testnet URL
-    const whatsOnChainUrl = `https://test.whatsonchain.com/tx/${inscriptionTx.id}`;
+    // Open WhatsOnChain in a new tab with mainnet URL
+    const whatsOnChainUrl = `https://whatsonchain.com/tx/${inscriptionTx.id}`;
     console.log('Opening WhatsOnChain URL:', whatsOnChainUrl);
     window.open(whatsOnChainUrl, '_blank');
     

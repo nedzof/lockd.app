@@ -56,7 +56,7 @@ function validateMimeType(type: string): MimeTypes {
 
 // Helper function to broadcast transaction
 async function broadcastTransaction(txHex: string): Promise<string> {
-    const url = 'https://api.whatsonchain.com/v1/bsv/test/tx/raw';
+    const url = 'https://api.whatsonchain.com/v1/bsv/main/tx/raw';
     
     try {
         // Parse the transaction to get the txid
@@ -214,7 +214,7 @@ export class YoursWalletAdapter implements Signer {
     }
 
     async getNetwork(): Promise<bsv.Networks.Network> {
-        return bsv.Networks.testnet; // TODO: Get from wallet when available
+        return bsv.Networks.mainnet;
     }
 
     async getDefaultPubKey(): Promise<bsv.PublicKey> {
@@ -579,7 +579,7 @@ export class YoursWalletAdapter implements Signer {
     }
 
     async alignProviderNetwork(): Promise<void> {
-        // No-op since we're already on testnet
+        // No-op since we're already on mainnet
     }
 
     getProvider(): Provider {
