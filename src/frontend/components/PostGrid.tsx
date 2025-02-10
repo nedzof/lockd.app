@@ -11,15 +11,19 @@ interface MemeSubmissionGridProps {
   timeFilter: string;
   rankingFilter: string;
   personalFilter: string;
+  blockFilter: string;
+  selectedTags: string[];
   userId?: string;
 }
 
 const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ 
-  onStatsUpdate, 
-  timeFilter = 'all',
-  rankingFilter = 'top',
-  personalFilter = '',
-  userId = 'anon'
+  onStatsUpdate,
+  timeFilter,
+  rankingFilter,
+  personalFilter,
+  blockFilter,
+  selectedTags,
+  userId
 }) => {
   const [submissions, setSubmissions] = useState<MemeSubmission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,7 +102,27 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     setError(null);
     
     try {
-      console.log('Starting to fetch submissions with filters:', { timeFilter, rankingFilter, personalFilter });
+      console.log('Starting to fetch submissions with filters:', { 
+        timeFilter, 
+        rankingFilter, 
+        personalFilter, 
+        blockFilter,
+        selectedTags 
+      });
+      
+      // Fetch current block height first if block filter is active
+      let currentBlock = 0;
+      if (blockFilter) {
+        try {
+          const blockResponse = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+          const blockData = await blockResponse.json();
+          currentBlock = blockData.blocks;
+          console.log('Current block height:', currentBlock);
+        } catch (error) {
+          console.error('Failed to fetch current block height:', error);
+          throw new Error('Failed to fetch current block height');
+        }
+      }
       
       // Build the base query with proper joins
       let query = supabase
@@ -113,6 +137,8 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           media_type,
           description,
           confirmed,
+          blockHeight,
+          tags,
           Bitcoiner (
             handle,
             address
@@ -141,6 +167,27 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           query = query.gte('created_at', startDate.toISOString());
           console.log('Applied time filter:', { days, startDate });
         }
+      }
+
+      // Apply block filter
+      if (blockFilter && currentBlock > 0) {
+        const blockFilters = {
+          'last_block': 1,
+          'last_5_blocks': 5,
+          'last_10_blocks': 10
+        };
+        const blocks = blockFilters[blockFilter as keyof typeof blockFilters];
+        if (blocks) {
+          const startBlock = currentBlock - blocks;
+          query = query.gte('blockHeight', startBlock);
+          console.log('Applied block filter:', { currentBlock, startBlock, blocks });
+        }
+      }
+
+      // Apply tag filter
+      if (selectedTags.length > 0) {
+        query = query.contains('tags', selectedTags);
+        console.log('Applied tag filter:', selectedTags);
       }
 
       // Apply personal filters with proper foreign key relationships
@@ -209,7 +256,8 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           id: post.id,
           content: post.content,
           bitcoiner: post.Bitcoiner,
-          lockLikes: post.LockLike
+          lockLikes: post.LockLike,
+          tags: post.tags
         });
 
         // Calculate total amount from all lock likes
@@ -242,7 +290,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           txId: post.id,
           locks: totalLocked,
           status: 'minted' as const,
-          tags: ['meme', 'viral'],
+          tags: post.tags || [],
           createdAt: new Date(post.created_at),
           updatedAt: new Date(post.created_at),
           totalLocked: totalLocked,
@@ -300,7 +348,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [timeFilter, rankingFilter, personalFilter, userId, onStatsUpdate]);
+  }, [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, userId, onStatsUpdate]);
 
   // Single useEffect for initialization and data fetching
   useEffect(() => {
@@ -439,7 +487,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     <div className="min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-center">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 justify-items-center" style={{ maxWidth: 'fit-content' }}>
+          <div className="grid grid-cols-1 gap-6 justify-items-center" style={{ maxWidth: '800px' }}>
             {submissions.map((submission) => (
               <div
                 key={submission.id}

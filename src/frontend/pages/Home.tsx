@@ -6,6 +6,7 @@ import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
 import { NotificationSettings } from '../components/NotificationSettings';
 import { CreatePost } from '../components/CreatePost';
+import { TagFilter } from '../components/TagFilter';
 
 interface HomeProps {
   connected: boolean;
@@ -20,6 +21,8 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const [timeFilter, setTimeFilter] = useState('');
   const [rankingFilter, setRankingFilter] = useState('top1');
   const [personalFilter, setPersonalFilter] = useState('');
+  const [blockFilter, setBlockFilter] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [isCreatePostOpen, setIsCreatePostOpen] = useState(false);
 
   const handleTimeFilter = (filter: string) => {
@@ -28,6 +31,10 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
   const handleRankingFilter = (filter: string) => {
     setRankingFilter(rankingFilter === filter ? '' : filter);
+  };
+
+  const handleBlockFilter = (filter: string) => {
+    setBlockFilter(blockFilter === filter ? '' : filter);
   };
 
   const handleStatsUpdate = (stats: { totalLocked: number; participantCount: number; roundNumber: number }) => {
@@ -51,7 +58,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     return (
       <div className="relative min-h-screen pb-20">
         {/* Filter bar */}
-        <div className="mb-8">
+        <div className="mb-8 space-y-4">
           <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg">
             <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800/10">
               {/* Time Filters */}
@@ -67,6 +74,30 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                     }`}
                   >
                     {filter.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+
+              {/* Divider */}
+              <div className="h-4 w-px bg-gray-800/30 mx-4" />
+
+              {/* Block Filters */}
+              <div className="flex items-center space-x-1">
+                {[
+                  { id: 'last_block', label: 'Last Block' },
+                  { id: 'last_5_blocks', label: 'Last 5 Blocks' },
+                  { id: 'last_10_blocks', label: 'Last 10 Blocks' }
+                ].map(({ id, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => handleBlockFilter(id)}
+                    className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
+                      blockFilter === id
+                        ? 'bg-white/10 text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    {label}
                   </button>
                 ))}
               </div>
@@ -119,6 +150,13 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
               </div>
             </div>
           </div>
+
+          {/* Tag Filter */}
+          <TagFilter
+            selectedTags={selectedTags}
+            onTagsChange={setSelectedTags}
+            userId={bsvAddress || undefined}
+          />
         </div>
 
         {/* Create Post Modal */}
@@ -133,6 +171,8 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           timeFilter={timeFilter}
           rankingFilter={rankingFilter}
           personalFilter={personalFilter}
+          blockFilter={blockFilter}
+          selectedTags={selectedTags}
           userId={connected && bsvAddress ? bsvAddress : 'anon'}
         />
 

@@ -28,18 +28,24 @@ export interface Database {
           created_at: string;
           author_address: string;
           is_locked: boolean;
+          blockHeight: number | null;
+          tags: string[];
         };
         Insert: {
           content: string;
           author_address: string;
           is_locked?: boolean;
           created_at?: string;
+          blockHeight?: number | null;
+          tags?: string[];
         };
         Update: {
           content?: string;
           author_address?: string;
           is_locked?: boolean;
           created_at?: string;
+          blockHeight?: number | null;
+          tags?: string[];
         };
       };
       LockLike: {
@@ -66,6 +72,26 @@ export interface Database {
           locked_until?: number;
           created_at?: string;
           post_id?: string;
+        };
+      };
+      UserPreferences: {
+        Row: {
+          handle_id: string;
+          preferred_tags: string[];
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          handle_id: string;
+          preferred_tags?: string[];
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          handle_id?: string;
+          preferred_tags?: string[];
+          created_at?: string;
+          updated_at?: string;
         };
       };
     };

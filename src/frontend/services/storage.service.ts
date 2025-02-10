@@ -75,6 +75,11 @@ export class StorageService {
 
   async createPost(txid: string, handle: string, content: string, amount: number, mediaUrl?: string) {
     try {
+      // Fetch current block height
+      const blockResponse = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+      const blockData = await blockResponse.json();
+      const currentBlock = blockData.blocks;
+
       const { data, error } = await this.supabase
         .from('Post')
         .insert([
@@ -84,7 +89,8 @@ export class StorageService {
             content,
             amount,
             media_url: mediaUrl || null,
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            blockHeight: currentBlock
           }
         ]);
 
