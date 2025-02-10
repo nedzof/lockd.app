@@ -35,14 +35,14 @@ export const TagFilter: React.FC<TagFilterProps> = ({ selectedTags, onTagsChange
     try {
       const { data, error } = await supabase
         .from('UserPreferences')
-        .select('preferred_tags')
-        .eq('handle_id', userId)
+        .select('content_preferences')
+        .eq('address', userId)
         .single();
 
       if (error) throw error;
       
-      if (data) {
-        setUserPreferredTags(data.preferred_tags || []);
+      if (data?.content_preferences?.preferred_tags) {
+        setUserPreferredTags(data.content_preferences.preferred_tags);
       }
     } catch (error) {
       console.error('Error fetching user preferences:', error);

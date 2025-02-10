@@ -140,13 +140,12 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           blockHeight,
           tags,
           Bitcoiner (
-            handle,
             address
           ),
           LockLike (
             txid,
             amount,
-            handle_id,
+            address,
             locked_until,
             created_at,
             confirmed
@@ -196,7 +195,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         const { data: userLocks } = await supabase
           .from('LockLike')
           .select('post_id')
-          .eq('handle_id', userId);
+          .eq('address', userId);
         
         console.log('Found user locks:', userLocks);
         
@@ -265,7 +264,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           console.log('Lock like amount:', {
             txid: locklike.txid,
             amount: locklike.amount,
-            handle_id: locklike.handle_id
+            address: locklike.address
           });
           return sum + (locklike?.amount || 0);
         }, 0) || 0;
@@ -278,8 +277,8 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
         const submission = {
           id: post.id,
-          creator: post.Bitcoiner?.handle || 'Anonymous',
-          title: `Post by ${post.Bitcoiner?.handle || 'Anonymous'}`,
+          creator: post.author_address || 'Anonymous',
+          title: `Post by ${post.author_address || 'Anonymous'}`,
           description: post.description || post.content || '',
           prompt: '',
           style: 'viral',

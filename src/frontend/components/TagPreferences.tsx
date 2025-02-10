@@ -25,6 +25,7 @@ export const TagPreferences: React.FC<TagPreferencesProps> = ({ userId }) => {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [existingPreferences, setExistingPreferences] = useState<any>(null);
 
   useEffect(() => {
     fetchUserPreferences();
@@ -34,14 +35,15 @@ export const TagPreferences: React.FC<TagPreferencesProps> = ({ userId }) => {
     try {
       const { data, error } = await supabase
         .from('UserPreferences')
-        .select('preferred_tags')
-        .eq('handle_id', userId)
+        .select('content_preferences')
+        .eq('address', userId)
         .single();
 
       if (error) throw error;
       
-      if (data) {
-        setSelectedTags(data.preferred_tags || []);
+      if (data?.content_preferences?.preferred_tags) {
+        setSelectedTags(data.content_preferences.preferred_tags);
+        setExistingPreferences(data.content_preferences);
       }
     } catch (error) {
       console.error('Error fetching user preferences:', error);
@@ -65,8 +67,11 @@ export const TagPreferences: React.FC<TagPreferencesProps> = ({ userId }) => {
       const { error } = await supabase
         .from('UserPreferences')
         .upsert({
-          handle_id: userId,
-          preferred_tags: selectedTags,
+          address: userId,
+          content_preferences: {
+            ...existingPreferences,
+            preferred_tags: selectedTags
+          },
           updated_at: new Date().toISOString()
         });
 
