@@ -129,8 +129,10 @@ interface MapData {
   contentType: string;
   version: string;
   tags: string[];
-  prediction_market_data?: PredictionMarketData;
-  lock_data?: LockData;
+  prediction?: string;
+  lockDuration?: string;
+  lockAmount?: string;
+  unlockHeight?: string;
 }
 
 interface StringifiedMapData {
@@ -148,6 +150,22 @@ interface StringifiedMapData {
 interface TransactionResponse {
   id: string;
   tx?: any; // Make tx optional since not all responses include it
+}
+
+interface MetadataObject {
+  app: string;
+  type: string;
+  description: string;
+  tags: string[];
+  timestamp: string;
+  version: string;
+  lock_data?: {
+    isLocked: boolean;
+    duration: number;
+    amount: number;
+    unlockHeight: number;
+  };
+  protocol?: string;
 }
 
 export const createPost = async (
@@ -243,48 +261,54 @@ export const createPost = async (
         }
 
         // Create metadata object
-        const metadata = {
+        const metadata: MetadataObject = {
           app: 'lockd.app',
           type: 'image',
           description: description || content || 'Image inscription',
           tags: ['lockdapp', ...(tags || [])],
           timestamp: new Date().toISOString(),
-          version: '1.0.0',
-          lock_data: lockData?.isLocked && currentBlockHeight && lockData.duration ? {
+          version: '1.0.0'
+        };
+
+        // Add lock data only if present
+        if (lockData?.isLocked && currentBlockHeight && lockData.duration) {
+          metadata.lock_data = {
             isLocked: true,
             duration: lockData.duration,
             amount: lockData.amount || 1000,
             unlockHeight: currentBlockHeight + lockData.duration
-          } : undefined
-        };
+          };
+        }
 
-        // Create a multipart inscription with image and metadata
-        const boundary = '---lockdapp-boundary---';
-        const multipartData = [
-          `--${boundary}`,
-          'Content-Type: application/json',
-          '',
-          JSON.stringify(metadata, null, 2),
-          `--${boundary}`,
-          `Content-Type: ${imageFile.type}`,
-          'Content-Transfer-Encoding: base64',
-          '',
-          b64,
-          `--${boundary}--`
-        ].join('\n');
+        // Create the inscription content following 1Sat Ordinals format
+        const inscriptionContent = `data:${imageFile.type};base64,${b64}`;
 
-        // Create inscription transaction using pure ordinal format
+        // Create inscription transaction using MAP protocol format
         const response = await wallet.inscribe([{
           address: authorAddress,
-          base64Data: btoa(multipartData),
+          base64Data: btoa(inscriptionContent),
           mimeType: imageFile.type,
-          satoshis: lockData?.isLocked ? (lockData.amount || 1000) : 1000
+          satoshis: lockData?.isLocked ? (lockData.amount || 1000) : 1000,
+          map: {
+            app: 'lockd.app',
+            type: 'image',
+            content: description || content || '',
+            contentType: imageFile.type,
+            tags: JSON.stringify(['lockdapp', ...(tags || [])]),
+            timestamp: new Date().toISOString().toLowerCase(),
+            version: '1.0.0',
+            ...(lockData?.isLocked && currentBlockHeight && lockData.duration) && {
+              lockDuration: lockData.duration.toString(),
+              lockAmount: (lockData.amount || 1000).toString(),
+              unlockHeight: (currentBlockHeight + lockData.duration).toString()
+            }
+          }
         }]);
 
         // Convert response to expected format
         inscriptionTx = {
-          id: response.txid,
-          tx: response.rawtx
+          id: (response as any).txid || (response as any).id,
+          tx: (response as any).tx
         };
         
         // Analyze raw transaction
@@ -297,7 +321,7 @@ export const createPost = async (
             size: {
               total: txHex.length,
               hex: txHex.length / 2,
-              estimated: multipartData.length
+              estimated: inscriptionContent.length
             }
           });
         }
@@ -331,51 +355,27 @@ export const createPost = async (
         // Create MAP data with tags, prediction market data, and lock data
         const mapData: MapData = {
           app: 'lockd.app',
-          type: predictionMarketData ? 'prediction' : 'post',
+          type: predictionMarketData ? 'prediction' : 'text',
           content: content,
-          timestamp: new Date().toISOString(),
+          timestamp: new Date().toISOString().toLowerCase(),
           contentType: 'text/plain',
           version: '1.0.0',
-          tags: ['lockdapp', ...(tags || [])],  // Add lockdapp tag to all posts
-          prediction_market_data: predictionMarketData,
-          lock_data: lockData?.isLocked && currentBlockHeight && lockData.duration ? {
-            isLocked: true,
-            duration: lockData.duration,
-            amount: lockData.amount || 1000,
-            unlockHeight: currentBlockHeight + lockData.duration
-          } : undefined
+          tags: ['lockdapp', ...(tags || [])],
+          ...(predictionMarketData && {
+            prediction: JSON.stringify(predictionMarketData)
+          }),
+          ...(lockData?.isLocked && currentBlockHeight && lockData.duration && {
+            lockDuration: lockData.duration.toString(),
+            lockAmount: (lockData.amount || 1000).toString(),
+            unlockHeight: (currentBlockHeight + lockData.duration).toString()
+          })
         };
 
-        // Convert MapData to a proper Record<string, string>
+        // Convert to Record<string, string> for wallet API
         const stringifiedMapData: Record<string, string> = {
-          app: mapData.app,
-          type: mapData.type,
-          content: mapData.content,
-          timestamp: mapData.timestamp,
-          contentType: mapData.contentType,
-          version: mapData.version,
+          ...mapData,
           tags: JSON.stringify(mapData.tags)
         };
-
-        // Add optional fields only if they exist
-        if (mapData.prediction_market_data) {
-          stringifiedMapData.prediction_market_data = JSON.stringify(mapData.prediction_market_data);
-        }
-        if (mapData.lock_data) {
-          stringifiedMapData.lock_data = JSON.stringify(mapData.lock_data);
-        }
-
-        // Initialize transaction
-        console.log("Creating MAP transaction...");
-        const provider = new OrdiProvider();
-        const signer = new YoursWalletAdapter(wallet, provider);
-        
-        // Request authentication
-        console.log("Requesting authentication...");
-        const { isAuthenticated, error } = await signer.requestAuth();
-        if (!isAuthenticated) {
-            throw new Error(`Authentication failed: ${error}`);
-        }
 
         // Create inscription transaction using MAP protocol
         const response = await wallet.inscribe([{

@@ -1,332 +1,45 @@
-import { JungleBusClient } from '@gorillapool/js-junglebus';
-import type { JungleBusTransaction, Transaction, ControlMessage, JungleBusSubscription, SubscriptionErrorContext } from './junglebus.types.js';
-import { TRANSACTION_TYPES } from './junglebus.types.js';
-import { DatabaseService } from './databaseService.js';
-import type { BlockchainTransaction } from './types.js';
+import { JungleBusClient, ControlMessageStatusCode } from "@gorillapool/js-junglebus";
+import type { Transaction, ControlMessage } from './junglebus.types.js';
 
-export class JungleBusService {
-  private client: JungleBusClient;
-  private databaseService: DatabaseService;
-  private subscription?: JungleBusSubscription;
+const client = new JungleBusClient("junglebus.gorillapool.io", {
+    useSSL: true,
+    protocol: "json",
+    onConnected(ctx) {
+        console.log("CONNECTED", ctx);
+    },
+    onConnecting(ctx) {
+        console.log("CONNECTING", ctx);
+    },
+    onDisconnected(ctx) {
+        console.log("DISCONNECTED", ctx);
+    },
+    onError(ctx) {
+        console.error(ctx);
+    },
+});
 
-  constructor() {
-    this.client = new JungleBusClient('https://junglebus.gorillapool.io');
-    this.databaseService = new DatabaseService();
-  }
-
-  public async subscribe(fromBlock: number) {
-    try {
-      this.subscription = await this.client.Subscribe(
-        'lockd.app',
-        fromBlock,
-        (tx: Transaction) => this.processTransaction({ 
-          tx, 
-          blockHeight: tx.block_height 
-        }),
-        (status: ControlMessage) => {
-          console.log('Status update:', status);
-        },
-        (error: any) => {
-          console.error('JungleBus subscription error:', error?.message || error);
-        }
-      );
-
-      console.log(`JungleBus subscription created with ID: ${this.subscription.subscriptionID}`);
-      this.subscription.Subscribe();
-    } catch (error) {
-      console.error('Error creating JungleBus subscription:', error);
-      throw error;
+const onPublish = function(tx: Transaction) {
+    console.log("TRANSACTION", tx);
+};
+const onStatus = function(message: ControlMessage) {
+    if (message.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
+      console.log("BLOCK DONE", message.block);
+    } else if (message.statusCode === ControlMessageStatusCode.WAITING) {
+      console.log("WAITING FOR NEW BLOCK...", message);
+    } else if (message.statusCode === ControlMessageStatusCode.REORG) {
+      console.log("REORG TRIGGERED", message);
+    } else if (message.statusCode === ControlMessageStatusCode.ERROR) {
+      console.error(message);
     }
-  }
+};
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const onError = function(error: any) {
+    console.error(error);
+};
+const onMempool = function(tx: Transaction) {
+    console.log("TRANSACTION", tx);
+};
 
-  public async unsubscribe() {
-    if (this.subscription) {
-      try {
-        this.subscription.UnSubscribe();
-        console.log(`Unsubscribed from JungleBus subscription: ${this.subscription.subscriptionID}`);
-        this.subscription = undefined;
-      } catch (error) {
-        console.error('Error unsubscribing:', error);
-      }
-    }
-  }
-
-  private async processTransaction(tx: JungleBusTransaction): Promise<void> {
-    try {
-      const blockchainTx = this.extractTransactionData(tx);
-      if (blockchainTx) {
-        await this.databaseService.processTransactions([blockchainTx]);
-      }
-    } catch (error) {
-      console.error('Error processing transaction:', error);
-    }
-  }
-
-  private extractTransactionData(tx: JungleBusTransaction): BlockchainTransaction | null {
-    try {
-      // Parse the raw transaction
-      const rawTx = tx.tx.transaction;
-      const authorAddress = this.extractAuthorAddress(rawTx);
-      
-      if (!authorAddress) {
-        console.warn(`No author address found for transaction ${tx.tx.id}`);
-        return null;
-      }
-
-      // Check for MAP protocol transaction
-      if (rawTx.includes(TRANSACTION_TYPES.MAP.PREFIX)) {
-        const mapData = this.extractMapData(rawTx);
-        if (mapData && mapData.app === TRANSACTION_TYPES.MAP.APP && mapData.type === TRANSACTION_TYPES.MAP.TYPE) {
-          return {
-            txid: tx.tx.id,
-            content: mapData.content,
-            author_address: authorAddress,
-            media_type: mapData.contentType || 'text/plain',
-            blockHeight: tx.blockHeight,
-            description: mapData.content
-          };
-        }
-      }
-
-      // Check for ordinal inscription
-      if (rawTx.includes(TRANSACTION_TYPES.ORD_PREFIX)) {
-        const mimeType = this.extractMimeType(rawTx);
-        if (!mimeType || !TRANSACTION_TYPES.IMAGE_TYPES.some(type => mimeType.startsWith(type))) {
-          return null;
-        }
-
-        try {
-          // Extract the content
-          const content = this.extractContent(rawTx);
-          if (!content) {
-            return null;
-          }
-
-          // Try to parse multipart content
-          const boundary = '---lockdapp-boundary---';
-          const parts = content.split(`--${boundary}`);
-          
-          let metadata: Record<string, any> = {};
-          let description = `${mimeType.split('/')[1].toUpperCase()} image inscription`;
-          
-          // Look for JSON metadata in the parts
-          for (const part of parts) {
-            if (part.includes('Content-Type: application/json')) {
-              try {
-                const jsonStr = part.split('\n\n')[1]?.trim();
-                if (jsonStr) {
-                  metadata = JSON.parse(jsonStr);
-                  if (metadata && typeof metadata === 'object' && 'description' in metadata) {
-                    description = metadata.description;
-                  }
-                }
-                break;
-              } catch (e) {
-                console.warn('Failed to parse metadata JSON:', e);
-              }
-            }
-          }
-
-          const blockchainTx: BlockchainTransaction = {
-            txid: tx.tx.id,
-            content: content,
-            author_address: authorAddress,
-            media_type: mimeType,
-            blockHeight: tx.blockHeight,
-            amount: 0,
-            description: description,
-            metadata: metadata
-          };
-
-          console.log('Created blockchain transaction:', blockchainTx);
-          return blockchainTx;
-        } catch (error) {
-          console.error('Error processing ordinal inscription:', error);
-          return null;
-        }
-      }
-
-      // Check for regular BSV transfer from our application
-      // We'll check if the transaction has our application's signature in the OP_RETURN
-      if (this.isLockdAppTransaction(rawTx)) {
-        const amount = this.extractTransactionAmount(rawTx);
-        const blockchainTx: BlockchainTransaction = {
-          txid: tx.tx.id,
-          content: rawTx,
-          author_address: authorAddress,
-          media_type: 'application/json',
-          blockHeight: tx.blockHeight,
-          amount: amount,
-          description: `BSV transfer of ${amount} satoshis`
-        };
-
-        console.log('Created blockchain transaction:', blockchainTx);
-        return blockchainTx;
-      }
-
-      return null;
-    } catch (error) {
-      console.error('Error extracting transaction data:', error);
-      return null;
-    }
-  }
-
-  private isLockdAppTransaction(rawTx: string): boolean {
-    try {
-      // Check for our application's signature in OP_RETURN
-      // This could be a specific prefix or pattern that identifies our app's transactions
-      return rawTx.includes('6c6f636b642e617070'); // 'lockd.app' in hex
-    } catch (error) {
-      console.error('Error checking for lockd.app transaction:', error);
-      return false;
-    }
-  }
-
-  private extractTransactionAmount(rawTx: string): number {
-    try {
-      // Extract the transaction amount from the raw transaction
-      // This is a simplified implementation - in production you'd want to use a proper BSV library
-      // to parse the transaction outputs and calculate the actual amount
-      const amountMatch = rawTx.match(/76a914[0-9a-f]{40}88ac([0-9a-f]{16})/);
-      if (amountMatch && amountMatch[1]) {
-        return parseInt(amountMatch[1], 16);
-      }
-      return 0;
-    } catch (error) {
-      console.error('Error extracting transaction amount:', error);
-      return 0;
-    }
-  }
-
-  private extractAuthorAddress(rawTx: string): string {
-    try {
-      // Extract the first input's address from the raw transaction
-      // This is a simplified implementation - in production you'd want to use a proper BSV library
-      const addressMatch = rawTx.match(/76a914([0-9a-f]{40})88ac/);
-      if (addressMatch && addressMatch[1]) {
-        return addressMatch[1];
-      }
-      return '';
-    } catch (error) {
-      console.error('Error extracting author address:', error);
-      return '';
-    }
-  }
-
-  private extractMapData(rawTx: string): { 
-    app: string;
-    type: string;
-    content: string;
-    contentType?: string;
-  } | null {
-    try {
-      // Find MAP prefix
-      const mapIndex = rawTx.indexOf(TRANSACTION_TYPES.MAP.PREFIX);
-      if (mapIndex === -1) return null;
-
-      // Parse MAP data from raw transaction
-      const mapData = rawTx.substring(mapIndex);
-      const parts = mapData.split('00'); // Split on null bytes
-      
-      // Extract MAP fields
-      const data: Record<string, string> = {};
-      for (let i = 0; i < parts.length - 1; i += 2) {
-        const key = this.hexToString(parts[i]);
-        const value = this.hexToString(parts[i + 1]);
-        if (!key || !value) break;
-        data[key] = value;
-      }
-
-      if (data.app !== TRANSACTION_TYPES.MAP.APP || data.type !== TRANSACTION_TYPES.MAP.TYPE) {
-        return null;
-      }
-
-      return {
-        app: data.app,
-        type: data.type,
-        content: data.content || '',
-        contentType: data.contentType
-      };
-    } catch (error) {
-      console.error('Error extracting MAP data:', error);
-      return null;
-    }
-  }
-
-  private hexToString(hex: string): string {
-    try {
-      const bytes = hex.match(/.{2}/g) || [];
-      return bytes.map(byte => String.fromCharCode(parseInt(byte, 16))).join('');
-    } catch (error) {
-      console.error('Error converting hex to string:', error);
-      return '';
-    }
-  }
-
-  private extractMimeType(rawTx: string): string | undefined {
-    try {
-      const ordIndex = rawTx.indexOf(TRANSACTION_TYPES.ORD_PREFIX);
-      if (ordIndex === -1) return undefined;
-
-      // Skip past 'ord' and look for the MIME type
-      const afterOrd = rawTx.slice(ordIndex + 6);
-      const chunks = afterOrd.match(/.{1,2}/g) || [];
-      let mimeType = '';
-      
-      for (const chunk of chunks) {
-        if (chunk === '00') break;
-        mimeType += String.fromCharCode(parseInt(chunk, 16));
-      }
-
-      mimeType = mimeType
-        .replace(/^Q\t?/, '')
-        .replace(/^Q(?=[a-z])/, '')
-        .replace(/\r?\n/g, '')
-        .trim();
-
-      if (TRANSACTION_TYPES.IMAGE_TYPES.some(type => mimeType.startsWith(type))) {
-        console.log(`Found image MIME type: ${mimeType}`);
-        return mimeType;
-      }
-
-      return undefined;
-    } catch (error) {
-      console.error('Error extracting MIME type:', error);
-      return undefined;
-    }
-  }
-
-  private extractContent(rawTx: string): string | null {
-    try {
-      const ordIndex = rawTx.indexOf(TRANSACTION_TYPES.ORD_PREFIX);
-      if (ordIndex === -1) return null;
-
-      // Skip past 'ord' and the MIME type to find content
-      const afterOrd = rawTx.slice(ordIndex + 6);
-      let content = '';
-      let foundContentStart = false;
-      
-      // Read until we find two consecutive '00' bytes which indicate end of content
-      const bytes = afterOrd.match(/.{2}/g) || [];
-      for (let i = 0; i < bytes.length; i++) {
-        if (!foundContentStart) {
-          if (bytes[i] === '00') {
-            foundContentStart = true;
-          }
-          continue;
-        }
-        
-        if (bytes[i] === '00' && bytes[i + 1] === '00') {
-          break;
-        }
-        
-        content += String.fromCharCode(parseInt(bytes[i], 16));
-      }
-
-      return content.trim();
-    } catch (error) {
-      console.error('Error extracting content:', error);
-      return null;
-    }
-  }
-} 
+(async () => {
+    await client.Subscribe("2dfb47cb42e93df9c8bbccec89425417f4e5a094c9c7d6fcda9dab12e845fd09", 883519, onPublish, onStatus, onError, onMempool);
+})(); 
