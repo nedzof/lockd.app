@@ -119,10 +119,10 @@ process.on('SIGINT', async () => {
 // Start the subscription
 export async function startVoteSubscription() {
     try {
-        console.log('Starting subscription from block 720000...');
+        console.log('Starting subscription from block 883520...');
         await client.Subscribe(
             "436d4681e23186b369291cf3e494285724964e92f319de5f56b6509d32627693",
-            720000,
+            883520,
             onPublish,
             onStatus,
             onError,
