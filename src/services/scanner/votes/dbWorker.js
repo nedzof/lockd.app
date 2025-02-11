@@ -38,21 +38,6 @@ async function processTransaction(message) {
             }
         });
 
-        // Log raw transaction data for debugging
-        console.log('Raw transaction data:', {
-            id: message.transaction.id,
-            inputs: message.transaction.vin,
-            outputs: message.transaction.vout,
-            parsedTransaction: message.parsedTransaction
-        });
-
-        // Log parsed transaction data
-        console.log('Database worker message:', {
-            type: 'debug',
-            message: 'Parsed transaction data',
-            data: message.parsedTransaction
-        });
-
         // Get the parsed transaction data
         const parsedTx = message.parsedTransaction;
         if (!parsedTx) {
@@ -64,33 +49,12 @@ async function processTransaction(message) {
             return;
         }
 
-        // Get author address from transaction outputs
-        const authorAddress = message.transaction.vout?.[0]?.scriptPubKey?.addresses?.[0];
+        // Get author address
+        const authorAddress = parsedTx.metadata.authorAddress;
         if (!authorAddress) {
             parentPort.postMessage({
                 type: 'warning',
                 message: 'No author address found',
-                data: { txid: message.transaction.id }
-            });
-            return;
-        }
-
-        // Log attempt to check for existing transaction
-        parentPort.postMessage({
-            type: 'debug',
-            message: 'Checking for existing transaction',
-            data: { txid: message.transaction.id }
-        });
-
-        // Check if transaction already exists
-        const existingTx = await prisma.voteQuestion.findUnique({
-            where: { txid: message.transaction.id }
-        });
-
-        if (existingTx) {
-            parentPort.postMessage({
-                type: 'info',
-                message: 'Transaction already exists',
                 data: { txid: message.transaction.id }
             });
             return;
@@ -104,15 +68,16 @@ async function processTransaction(message) {
                     type: 'debug',
                     message: 'Creating vote question',
                     data: {
-                        txid: message.transaction.id,
+                        txid: parsedTx.transaction_id,
                         content: parsedTx.vote_question,
                         options: parsedTx.vote_options
                     }
                 });
 
+                // First create the vote question
                 const voteQuestion = await prisma.voteQuestion.create({
                     data: {
-                        txid: message.transaction.id,
+                        txid: parsedTx.transaction_id,
                         content: parsedTx.vote_question,
                         author_address: authorAddress,
                         created_at: new Date(parsedTx.timestamp * 1000),
@@ -121,51 +86,81 @@ async function processTransaction(message) {
                     }
                 });
 
-                parentPort.postMessage({
-                    type: 'info',
-                    message: 'Created vote question',
-                    data: {
-                        id: voteQuestion.id,
-                        txid: voteQuestion.txid,
-                        content: voteQuestion.content,
-                        options: voteQuestion.options
-                    }
-                });
+                // Then create all associated vote options
+                if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
+                    const voteOptionsPromises = parsedTx.vote_options.map(option =>
+                        prisma.voteOption.create({
+                            data: {
+                                txid: parsedTx.transaction_id + '_' + option.option, // Create unique txid for each option
+                                question_txid: parsedTx.transaction_id,
+                                content: option.option,
+                                author_address: authorAddress,
+                                created_at: new Date(parsedTx.timestamp * 1000),
+                                lock_amount: option.lockAmount,
+                                lock_duration: option.lockDuration,
+                                tags: parsedTx.metadata.tags
+                            }
+                        })
+                    );
 
-                return voteQuestion;
+                    const createdOptions = await Promise.all(voteOptionsPromises);
+
+                    parentPort.postMessage({
+                        type: 'info',
+                        message: 'Created vote question with options',
+                        data: {
+                            question: {
+                                id: voteQuestion.id,
+                                content: voteQuestion.content
+                            },
+                            options: createdOptions.map(opt => ({
+                                id: opt.id,
+                                content: opt.content,
+                                lockAmount: opt.lock_amount,
+                                lockDuration: opt.lock_duration
+                            }))
+                        }
+                    });
+
+                    return { voteQuestion, options: createdOptions };
+                }
+
+                return { voteQuestion };
             }
 
-            // Create vote options if present
-            if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
+            // If this is just a vote option (not part of a question creation)
+            else if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
                 parentPort.postMessage({
                     type: 'debug',
-                    message: 'Creating vote options',
+                    message: 'Creating standalone vote options',
                     data: {
-                        txid: message.transaction.id,
+                        txid: parsedTx.transaction_id,
                         options: parsedTx.vote_options
                     }
                 });
 
-                const voteOptions = await Promise.all(parsedTx.vote_options.map(option =>
+                const voteOptionsPromises = parsedTx.vote_options.map(option =>
                     prisma.voteOption.create({
                         data: {
-                            txid: message.transaction.id,
+                            txid: parsedTx.transaction_id + '_' + option.option,
+                            question_txid: parsedTx.transaction_id, // This should be the actual question's txid
                             content: option.option,
                             author_address: authorAddress,
                             created_at: new Date(parsedTx.timestamp * 1000),
                             lock_amount: option.lockAmount,
                             lock_duration: option.lockDuration,
-                            tags: parsedTx.metadata.tags,
-                            question_txid: message.transaction.id // This should be the question's txid
+                            tags: parsedTx.metadata.tags
                         }
                     })
-                ));
+                );
+
+                const createdOptions = await Promise.all(voteOptionsPromises);
 
                 parentPort.postMessage({
                     type: 'info',
-                    message: 'Created vote options',
+                    message: 'Created standalone vote options',
                     data: {
-                        options: voteOptions.map(opt => ({
+                        options: createdOptions.map(opt => ({
                             id: opt.id,
                             content: opt.content,
                             lockAmount: opt.lock_amount,
@@ -174,13 +169,13 @@ async function processTransaction(message) {
                     }
                 });
 
-                return voteOptions;
+                return { options: createdOptions };
             }
 
             parentPort.postMessage({
                 type: 'warning',
                 message: 'No vote question or options found to process',
-                data: { txid: message.transaction.id }
+                data: { txid: parsedTx.transaction_id }
             });
             return null;
         });
@@ -190,7 +185,7 @@ async function processTransaction(message) {
                 type: 'success',
                 message: 'Transaction processed successfully',
                 data: {
-                    txid: message.transaction.id,
+                    txid: parsedTx.transaction_id,
                     timestamp: new Date().toISOString(),
                     result
                 }
