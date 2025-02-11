@@ -15,11 +15,16 @@ const client = new JungleBusClient("junglebus.gorillapool.io", {
     },
     onError(ctx) {
         console.error(ctx);
-    },
+    }
 });
 
 const onPublish = function(tx: Transaction) {
-    console.log("TRANSACTION", tx);
+    console.log("TRANSACTION DETECTED:", JSON.stringify({
+        id: tx.id,
+        transaction: tx.transaction,
+        block_height: tx.block_height,
+        block_time: tx.block_time
+    }, null, 2));
 };
 const onStatus = function(message: ControlMessage) {
     if (message.statusCode === ControlMessageStatusCode.BLOCK_DONE) {

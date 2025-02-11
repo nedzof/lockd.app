@@ -1,11 +1,15 @@
 export interface Transaction {
   id: string;
-  block_hash: string;
-  block_height: number;
-  block_index: number;
-  block_time: number;
   transaction: string;
-  merkle_proof: string;
+  block_hash?: string;
+  block_height?: number;
+  block_time?: number;
+  block_index?: number;
+  merkle_proof?: any;
+  output_types?: string[];
+  contexts?: string[];
+  sub_contexts?: string[];
+  data?: string[];
 }
 
 export interface JungleBusTransaction {
@@ -15,10 +19,9 @@ export interface JungleBusTransaction {
 
 export interface ControlMessage {
   statusCode: number;
-  status: string;
-  message: string;
-  block: number;
-  transactions: number;
+  status?: string;
+  message?: string;
+  block?: number;
 }
 
 export interface SubscriptionErrorContext {
