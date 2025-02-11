@@ -41,13 +41,16 @@ export class TransactionParser {
       };
 
       // Extract various fields
-      data.content = extractContent('content') || extractContent('what will flip btc');
+      data.content = extractContent('content');
       data.version = extractContent('version') || '1.0.0';
-      data.type = extractContent('type') || extractContent('vote_option') ? 'vote_option' : 'vote';
       
       // Check for vote question
-      if (fullString.includes('isVoteQuestion')) {
+      if (fullString.includes('isVoteQuestion') || fullString.includes('what will flip btc')) {
         data.isVoteQuestion = true;
+        // If content wasn't found with 'content' marker, try 'what will flip btc'
+        if (!data.content) {
+          data.content = extractContent('what will flip btc') || 'what will flip btc';
+        }
       }
 
       // Check for vote option
@@ -57,14 +60,17 @@ export class TransactionParser {
         if (lockAmount) {
           data.lockAmount = parseInt(lockAmount, 10);
         }
+        
+        // For vote options, check for specific cryptocurrency content
+        ['eth', 'xrp', 'doge', 'btc', 'bsv'].forEach(crypto => {
+          if (fullString.includes(crypto)) {
+            data.content = crypto;
+          }
+        });
       }
 
-      // Extract specific cryptocurrency options
-      ['eth', 'xrp', 'doge'].forEach(crypto => {
-        if (fullString.includes(crypto)) {
-          data.content = crypto;
-        }
-      });
+      // Set type based on what we found
+      data.type = data.isVoteOption ? 'vote_option' : 'vote';
 
       return data;
     } catch (error) {
