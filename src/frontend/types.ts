@@ -30,5 +30,7 @@ export interface MemeSubmission {
   isTop10Percent: boolean;
   isTop3: boolean;
   locklikes: LockLike[];
-  content?: string;
+  content: string;
+  unlock_height: number | null;
+  block_height: number;
 } 

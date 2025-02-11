@@ -307,7 +307,9 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           isTop10Percent: (post.amount || 0) > 1000000000,
           isTop3: (post.amount || 0) > 2000000000,
           locklikes: [],
-          content: post.content || ''
+          content: post.content || '',
+          unlock_height: post.unlock_height,
+          block_height: post.block_height
         };
 
         return submission;
@@ -357,53 +359,53 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   }, [fetchSubmissions]);
 
   const renderContent = (submission: MemeSubmission) => {
+    // If it's an image post
     if (submission.format?.startsWith('image/')) {
       return (
-        <div className="relative w-full aspect-square">
-          <img
-            ref={(el) => el && handleImageLoad(submission.id, el)}
-            src={submission.fileUrl}
-            alt={submission.description || 'Post image'}
-            className="w-full h-full object-contain bg-[#1A1B23] cursor-pointer rounded-t-xl"
-            onClick={() => handleImageClick(submission.fileUrl)}
-            onError={(e) => {
-              console.error('Image load error for submission:', {
-                id: submission.id,
-                format: submission.format,
-                urlLength: submission.fileUrl.length,
-                urlStart: submission.fileUrl.substring(0, 50)
-              });
-              const img = e.target as HTMLImageElement;
-              img.src = `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('Failed to load image')}`;
-            }}
-            loading="lazy"
-          />
-          <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity duration-300 bg-black/50">
-            <FiMaximize2 className="w-8 h-8 text-white" />
+        <>
+          <div className="relative w-full">
+            <img
+              ref={(el) => el && handleImageLoad(submission.id, el)}
+              src={submission.fileUrl}
+              alt={submission.description || 'Post image'}
+              className="w-full object-contain bg-[#1A1B23] cursor-pointer rounded-t-xl"
+              onClick={() => handleImageClick(submission.fileUrl)}
+              onError={(e) => {
+                console.error('Image load error for submission:', {
+                  id: submission.id,
+                  format: submission.format,
+                  urlLength: submission.fileUrl.length,
+                  urlStart: submission.fileUrl.substring(0, 50)
+                });
+                const img = e.target as HTMLImageElement;
+                img.src = `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('Failed to load image')}`;
+              }}
+              loading="lazy"
+            />
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity duration-300 bg-black/50">
+              <FiMaximize2 className="w-8 h-8 text-white" />
+            </div>
           </div>
-        </div>
+          {submission.content && (
+            <div className="px-4 py-3 text-gray-200/90 border-y border-gray-800/30 bg-[#1A1B23]/50">
+              <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{submission.content}</p>
+            </div>
+          )}
+        </>
       );
-    } else if (submission.format?.startsWith('video/')) {
+    }
+    
+    // If it's text only (no image)
+    if (submission.content) {
       return (
-        <video
-          ref={(el) => el && (videoRefs.current[submission.id] = el)}
-          src={submission.fileUrl}
-          className="w-full h-full object-cover cursor-pointer rounded-t-xl"
-          onClick={() => handleVideoClick(submission.id)}
-          onMouseEnter={(e) => handleVideoMouseEnter(e.target as HTMLVideoElement, submission.id)}
-          onMouseLeave={(e) => handleVideoMouseLeave(e.target as HTMLVideoElement, submission.id)}
-          loop
-          muted
-          playsInline
-        />
-      );
-    } else {
-      return (
-        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#2A2A40]/20 to-[#1A1B23]/20 p-6 text-center">
-          <p className="text-gray-300/90 text-lg font-medium">{submission.description}</p>
+        <div className="w-full px-4 py-6 bg-gradient-to-br from-[#2A2A40]/20 to-[#1A1B23]/20">
+          <p className="text-gray-200/90 text-base leading-relaxed whitespace-pre-wrap break-words">{submission.content}</p>
         </div>
       );
     }
+
+    // If no content at all
+    return null;
   };
 
   if (isLoading) {
@@ -457,18 +459,16 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
             {submissions.map((submission) => (
               <div
                 key={submission.id}
-                className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/10 hover:border-[#00ffa3]/20 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.05)] bg-[#1A1B23]/30 w-full max-w-md"
+                className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/10 hover:border-[#00ffa3]/20 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.05)] bg-[#1A1B23]/30 w-full max-w-md flex flex-col"
               >
-                <div className="relative aspect-square">
-                  {renderContent(submission)}
-                  {showConfetti === submission.id && (
-                    <div className="absolute inset-0 pointer-events-none">
-                      {/* Add your confetti animation here */}
-                    </div>
-                  )}
-                </div>
+                {renderContent(submission)}
+                {showConfetti === submission.id && (
+                  <div className="absolute inset-0 pointer-events-none">
+                    {/* Add your confetti animation here */}
+                  </div>
+                )}
 
-                <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-[#1A1B23]/95 via-[#1A1B23]/70 to-transparent backdrop-blur-[1px]">
+                <div className="p-4 mt-auto bg-gradient-to-t from-[#1A1B23] via-[#1A1B23]/95 to-[#1A1B23]/50">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center space-x-2">
                       <div className="p-1.5 bg-[#00ffa3] bg-opacity-5 rounded-lg group-hover:bg-opacity-10 transition-all duration-300">
@@ -477,7 +477,17 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                       <span className="text-[#00ffa3] text-opacity-80 font-medium group-hover:text-opacity-95 transition-opacity duration-300">{formatBSV(submission.totalLocked / 100000000)}</span>
                     </div>
                     <div className="text-sm text-gray-300/80 group-hover:text-gray-200/90 transition-colors duration-300">
-                      by {submission.creator}
+                      {submission.unlock_height ? (
+                        <div className="flex items-center space-x-1">
+                          <span>Unlocks at {submission.unlock_height}</span>
+                          <span className="text-gray-400/60">·</span>
+                          <span className="text-[#00ffa3]/80">
+                            {Math.max(0, submission.unlock_height - submission.block_height)} blocks remaining
+                          </span>
+                        </div>
+                      ) : (
+                        <span>No lock period</span>
+                      )}
                     </div>
                   </div>
 
