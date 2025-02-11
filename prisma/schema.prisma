@@ -1,35 +1,32 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["multiSchema"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
 model Post {
-  id            String   @id @default(cuid())
-  txid          String   @unique
-  content       String
+  id             String   @id @default(cuid())
+  txid           String   @unique
+  content        String
   author_address String
-  media_type    String?
-  block_height  Int
-  amount        Int?
-  unlock_height Int?
-  description   String?
-  created_at    DateTime @default(now())
-  tags          String[]
-  metadata      Json?
-  is_locked     Boolean  @default(false)
-  lock_duration Int?
-  raw_image_data String? @db.Text  // Store raw base64 image data
-  image_format  String? // Store the detected image format (jpeg, png, etc)
-  image_source  String? // Store where the image was found in the transaction
+  media_type     String?
+  block_height   Int
+  amount         Int?
+  unlock_height  Int?
+  description    String?
+  created_at     DateTime @default(now())
+  tags           String[]
+  metadata       Json?
+  is_locked      Boolean  @default(false)
+  lock_duration  Int?
+  raw_image_data String?
+  image_format   String?
+  image_source   String?
 
   @@index([author_address])
   @@index([created_at])
@@ -37,15 +34,15 @@ model Post {
 }
 
 model VoteQuestion {
-  id            String       @id @default(cuid())
-  txid          String       @unique
-  content       String
+  id             String       @id @default(cuid())
+  txid           String       @unique
+  content        String
   author_address String
-  created_at    DateTime
-  options       Json
-  tags          String[]
-  vote_options  VoteOption[]
-  
+  created_at     DateTime
+  options        Json
+  tags           String[]
+  vote_options   VoteOption[]
+
   @@map("vote_questions")
 }
 
@@ -58,8 +55,8 @@ model VoteOption {
   created_at     DateTime
   lock_amount    Int
   lock_duration  Int
-  tags          String[]
-  question      VoteQuestion @relation(fields: [question_txid], references: [txid])
-  
+  tags           String[]
+  question       VoteQuestion @relation(fields: [question_txid], references: [txid])
+
   @@map("vote_options")
-} 
+}

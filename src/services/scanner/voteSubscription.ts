@@ -11,11 +11,26 @@ const prisma = new PrismaClient({
             url: process.env.DIRECT_URL
         }
     }
-});
+}) as unknown as PrismaClient & {
+    VoteQuestion: {
+        create: (data: any) => Promise<any>;
+        count: () => Promise<number>;
+    };
+};
 
-interface JungleBusTransaction extends Transaction {
-    hex: string;
-    addresses: string[];
+// Test database connection
+prisma.$connect()
+    .then(() => {
+        console.log('Successfully connected to the database');
+    })
+    .catch((error) => {
+        console.error('Failed to connect to the database:', error);
+    });
+
+interface JungleBusTransaction {
+    id: string;
+    transaction: string;
+    addresses?: string[];
 }
 
 interface VoteData {
@@ -43,21 +58,44 @@ interface MapOutput {
 
 const onPublish = async function(tx: JungleBusTransaction) {
     try {
-        // Extract MAP data from all outputs
-        const outputs = parseMapData([tx.hex]) as unknown as MapOutput[];
-        if (!outputs || !Array.isArray(outputs)) return;
+        console.log('Processing transaction:', tx.id);
+        
+        // Extract MAP data from transaction
+        const outputs = parseMapData([tx.transaction]);
+        if (!outputs || !Array.isArray(outputs)) {
+            console.log('No MAP outputs found in transaction:', tx.id);
+            return;
+        }
 
         // Find the vote question output
         const questionOutput = outputs.find(output => 
             output.type === 'vote' && output.isVoteQuestion === 'true'
         );
 
-        if (!questionOutput) return;
+        if (!questionOutput) {
+            console.log('No vote question found in transaction:', tx.id);
+            return;
+        }
 
-        // Find all vote option outputs
+        console.log('Found vote question:', {
+            txid: tx.id,
+            content: questionOutput.content,
+            type: questionOutput.type
+        });
+
+        // Find all vote option outputs in the same transaction
         const optionOutputs = outputs.filter(output => 
             output.type === 'vote_option'
         );
+
+        console.log('Found vote options:', {
+            count: optionOutputs.length,
+            options: optionOutputs.map(opt => ({
+                content: opt.content,
+                lockDuration: opt.lockDuration,
+                lockAmount: opt.lockAmount
+            }))
+        });
 
         // Parse vote question data
         const voteData: VoteData = {
@@ -74,46 +112,51 @@ const onPublish = async function(tx: JungleBusTransaction) {
         };
 
         try {
-            // Store vote question in database
-            const voteQuestion = await prisma.voteQuestion.create({
+            // Store vote question in database with its options
+            const voteQuestion = await prisma.VoteQuestion.create({
                 data: {
                     txid: voteData.txid,
                     content: voteData.content,
                     author_address: voteData.author_address,
                     created_at: new Date(voteData.created_at),
                     options: voteData.options as Prisma.JsonValue,
-                    tags: voteData.tags
-                }
-            });
-
-            // Store each vote option in database
-            if (voteData.options && voteData.options.length > 0) {
-                await Promise.all(voteData.options.map((option, index) => 
-                    prisma.voteOption.create({
-                        data: {
-                            txid: `${voteData.txid}_${index}`, // Generate unique txid for each option
-                            question_txid: voteData.txid,
+                    tags: voteData.tags,
+                    vote_options: {
+                        create: voteData.options?.map((option, index) => ({
+                            txid: `${voteData.txid}_${index}`,
                             content: option.text,
                             author_address: voteData.author_address,
                             created_at: new Date(voteData.created_at),
                             lock_amount: option.lockAmount,
                             lock_duration: option.lockDuration,
                             tags: voteData.tags
-                        }
-                    })
-                ));
-            }
+                        }))
+                    }
+                }
+            });
 
-            console.log('Vote stored:', {
+            console.log('Successfully stored vote in database:', {
                 questionTxid: voteData.txid,
+                content: voteData.content,
                 optionsCount: voteData.options?.length || 0,
-                options: voteData.options
+                options: voteData.options?.map(opt => ({
+                    text: opt.text,
+                    lockAmount: opt.lockAmount,
+                    lockDuration: opt.lockDuration
+                }))
             });
         } catch (error) {
-            console.error('Error storing vote:', error);
+            console.error('Error storing vote in database:', {
+                error: error instanceof Error ? error.message : error,
+                txid: voteData.txid,
+                content: voteData.content
+            });
         }
     } catch (error) {
-        console.error('Error processing vote transaction:', error);
+        console.error('Error processing vote transaction:', {
+            error: error instanceof Error ? error.message : error,
+            txid: tx.id
+        });
     }
 };
 
@@ -155,15 +198,24 @@ const subscriptionId = "436d4681e23186b369291cf3e494285724964e92f319de5f56b6509d
 
 export async function startVoteSubscription() {
     try {
+        // Verify database connection
+        try {
+            const voteCount = await prisma.VoteQuestion.count();
+            console.log('Database connection verified. Current vote count:', voteCount);
+        } catch (dbError) {
+            console.error('Database connection error:', dbError);
+            throw dbError;
+        }
+
         await client.Subscribe(
             subscriptionId,
-            0, // fromBlock
+            883556, // Start from block 883556
             onPublish as unknown as (tx: Transaction) => void,
             onStatus,
             onError,
             onMempool as unknown as (tx: Transaction) => void
         );
-        console.log('Vote subscription started successfully');
+        console.log('Vote subscription started successfully from block 883556');
     } catch (error) {
         console.error('Failed to start vote subscription:', error);
         throw error;
