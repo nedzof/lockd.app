@@ -27,66 +27,89 @@ async function fetchTransaction(txId) {
     return response.data;
 }
 
-async function processTransaction(tx) {
+async function processTransaction(message) {
     try {
         parentPort.postMessage({
             type: 'info',
             message: 'Processing transaction',
             data: {
-                id: tx.transaction.id,
+                id: message.transaction.id,
                 timestamp: new Date().toISOString()
             }
         });
 
+        // Log the parsed transaction data
+        parentPort.postMessage({
+            type: 'debug',
+            message: 'Parsed transaction data',
+            data: message.parsedTransaction
+        });
+
         // Get the parsed transaction data
-        const parsedTx = tx.parsedTransaction;
+        const parsedTx = message.parsedTransaction;
         if (!parsedTx) {
             parentPort.postMessage({
                 type: 'warning',
                 message: 'No parsed transaction data available',
-                data: { txid: tx.transaction.id }
+                data: { txid: message.transaction.id }
             });
             return;
         }
 
         // Get author address from transaction outputs
-        const fullTx = await fetchTransaction(tx.transaction.id);
-        const authorAddress = fullTx.vout[0]?.scriptPubKey?.addresses?.[0];
+        const authorAddress = message.transaction.vout?.[0]?.scriptPubKey?.addresses?.[0];
         if (!authorAddress) {
             parentPort.postMessage({
                 type: 'warning',
                 message: 'No author address found',
-                data: { txid: tx.transaction.id }
+                data: { txid: message.transaction.id }
+            });
+            return;
+        }
+
+        // Log attempt to check for existing transaction
+        parentPort.postMessage({
+            type: 'debug',
+            message: 'Checking for existing transaction',
+            data: { txid: message.transaction.id }
+        });
+
+        // Check if transaction already exists
+        const existingTx = await prisma.voteQuestion.findUnique({
+            where: { txid: message.transaction.id }
+        });
+
+        if (existingTx) {
+            parentPort.postMessage({
+                type: 'info',
+                message: 'Transaction already exists',
+                data: { txid: message.transaction.id }
             });
             return;
         }
 
         // Process the transaction in a database transaction
         const result = await prisma.$transaction(async (prisma) => {
-            // Create vote question if present
+            // Create vote question record if this is a vote question
             if (parsedTx.vote_question) {
-                // Check if question already exists
-                const existingQuestion = await prisma.voteQuestion.findUnique({
-                    where: { txid: tx.transaction.id }
+                parentPort.postMessage({
+                    type: 'debug',
+                    message: 'Creating vote question',
+                    data: {
+                        txid: message.transaction.id,
+                        content: parsedTx.vote_question,
+                        options: parsedTx.vote_options
+                    }
                 });
-
-                if (existingQuestion) {
-                    parentPort.postMessage({
-                        type: 'info',
-                        message: 'Vote question already exists',
-                        data: { txid: tx.transaction.id }
-                    });
-                    return existingQuestion;
-                }
 
                 const voteQuestion = await prisma.voteQuestion.create({
                     data: {
-                        txid: tx.transaction.id,
+                        txid: message.transaction.id,
                         content: parsedTx.vote_question,
                         author_address: authorAddress,
                         created_at: new Date(parsedTx.timestamp * 1000),
-                        options: parsedTx.vote_options || [],
-                        tags: parsedTx.metadata.tags || ['vote']
+                        options: parsedTx.vote_options,
+                        tags: parsedTx.metadata.tags
                     }
                 });
 
@@ -106,31 +129,26 @@ async function processTransaction(tx) {
 
             // Create vote options if present
             if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
-                // Check if any options already exist
-                const existingOption = await prisma.voteOption.findUnique({
-                    where: { txid: tx.transaction.id }
+                parentPort.postMessage({
+                    type: 'debug',
+                    message: 'Creating vote options',
+                    data: {
+                        txid: message.transaction.id,
+                        options: parsedTx.vote_options
+                    }
                 });
-
-                if (existingOption) {
-                    parentPort.postMessage({
-                        type: 'info',
-                        message: 'Vote option already exists',
-                        data: { txid: tx.transaction.id }
-                    });
-                    return existingOption;
-                }
 
                 const voteOptions = await Promise.all(parsedTx.vote_options.map(option =>
                     prisma.voteOption.create({
                         data: {
-                            txid: tx.transaction.id,
+                            txid: message.transaction.id,
                             content: option.option,
                             author_address: authorAddress,
                             created_at: new Date(parsedTx.timestamp * 1000),
                             lock_amount: option.lockAmount,
                             lock_duration: option.lockDuration,
-                            tags: parsedTx.metadata.tags || ['vote_option'],
-                            question_txid: tx.transaction.id // This should be the question's txid
+                            tags: parsedTx.metadata.tags,
+                            question_txid: message.transaction.id // This should be the question's txid
                         }
                     })
                 ));
@@ -151,6 +169,11 @@ async function processTransaction(tx) {
                 return voteOptions;
             }
 
+            parentPort.postMessage({
+                type: 'warning',
+                message: 'No vote question or options found to process',
+                data: { txid: message.transaction.id }
+            });
             return null;
         });
 
@@ -159,16 +182,10 @@ async function processTransaction(tx) {
                 type: 'success',
                 message: 'Transaction processed successfully',
                 data: {
-                    txid: tx.transaction.id,
+                    txid: message.transaction.id,
                     timestamp: new Date().toISOString(),
                     result
                 }
-            });
-        } else {
-            parentPort.postMessage({
-                type: 'warning',
-                message: 'Transaction was not a vote question or option',
-                data: { txid: tx.transaction.id }
             });
         }
 
@@ -178,7 +195,7 @@ async function processTransaction(tx) {
                 type: 'warning',
                 message: 'Duplicate transaction',
                 data: {
-                    txid: tx.transaction.id,
+                    txid: message.transaction.id,
                     error: 'P2002'
                 }
             });
@@ -187,8 +204,9 @@ async function processTransaction(tx) {
                 type: 'error',
                 message: 'Error processing transaction',
                 data: {
-                    txid: tx.transaction.id,
-                    error: error instanceof Error ? error.message : String(error)
+                    txid: message.transaction.id,
+                    error: error instanceof Error ? error.message : String(error),
+                    stack: error instanceof Error ? error.stack : undefined
                 }
             });
         }
@@ -198,6 +216,6 @@ async function processTransaction(tx) {
 // Listen for messages from the main thread
 parentPort.on('message', async (message) => {
     if (message.type === 'process_transaction') {
-        await processTransaction(message.transaction);
+        await processTransaction(message);
     }
 }); 
