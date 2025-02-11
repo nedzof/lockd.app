@@ -65,4 +65,16 @@ export const TRANSACTION_TYPES_OLD = {
     PUBKEYHASH: 'bitcoin.pubkeyhash',
     MAP: 'map'
   }
-} as const; 
+} as const;
+
+export interface JungleBusClient {
+  Subscribe(
+    from: string,
+    fromBlock: number,
+    onTransaction: (tx: Transaction) => void,
+    onStatus: (message: ControlMessage) => void,
+    onError: (error: any) => void,
+    onMempool: (tx: Transaction) => void
+  ): Promise<any>;
+  GetTransaction(txid: string): Promise<Transaction>;
+} 

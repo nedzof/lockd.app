@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@gorillapool/js-junglebus": "^0.3.0",
+    "@prisma/client": "^6.3.1",
     "@supabase/supabase-js": "^2.48.1",
     "@tanstack/react-query": "^4.36.1",
     "@types/node-fetch": "^2.6.12",
@@ -56,6 +57,7 @@
     "eslint-plugin-react-refresh": "^0.4.5",
     "jest": "^29.7.0",
     "postcss": "^8.4.35",
+    "prisma": "^6.3.1",
     "rollup-plugin-node-polyfills": "^0.2.1",
     "tailwindcss": "^3.4.1",
     "ts-jest": "^29.1.1",

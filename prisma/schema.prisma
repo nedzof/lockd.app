@@ -1,0 +1,34 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Post {
+  id            String   @id @default(cuid())
+  txid          String   @unique
+  content       String
+  author_address String
+  media_type    String?
+  block_height  Int
+  amount        Int?
+  unlock_height Int?
+  description   String?
+  created_at    DateTime @default(now())
+  tags          String[]
+  metadata      Json?
+  is_locked     Boolean  @default(false)
+  lock_duration Int?
+
+  @@index([author_address])
+  @@index([created_at])
+  @@index([block_height])
+} 
