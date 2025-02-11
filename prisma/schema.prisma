@@ -27,6 +27,9 @@ model Post {
   metadata      Json?
   is_locked     Boolean  @default(false)
   lock_duration Int?
+  raw_image_data String? @db.Text  // Store raw base64 image data
+  image_format  String? // Store the detected image format (jpeg, png, etc)
+  image_source  String? // Store where the image was found in the transaction
 
   @@index([author_address])
   @@index([created_at])

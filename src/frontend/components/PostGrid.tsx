@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { FiLock, FiZap, FiLoader, FiPlus, FiHeart } from 'react-icons/fi';
+import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
 import { MemeSubmission, Post, LockLike } from '../types';
@@ -51,7 +51,9 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   const [lockAmount, setLockAmount] = useState<string>('');
   const [showConfetti, setShowConfetti] = useState<string | null>(null);
   const [lockingSubmissionId, setLockingSubmissionId] = useState<string | null>(null);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement }>({});
+  const imageRefs = useRef<{ [key: string]: HTMLImageElement }>({});
 
   const handleVideoClick = (id: string) => {
     const video = videoRefs.current[id];
@@ -77,6 +79,14 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       video.pause();
       video.currentTime = 0;
     }
+  };
+
+  const handleImageClick = (url: string) => {
+    setExpandedImage(url);
+  };
+
+  const handleImageLoad = (id: string, img: HTMLImageElement) => {
+    imageRefs.current[id] = img;
   };
 
   const handleLockCoins = async (postId: string, amount: number) => {
@@ -159,8 +169,8 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           style: 'viral',
           duration: 30,
           format: post.media_type || 'text/plain',
-          fileUrl: post.media_type ? `https://testnet.ordinals.sv/content/${post.txid}` : `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
-          thumbnailUrl: post.media_type ? `https://testnet.ordinals.sv/content/${post.txid}` : `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
+          fileUrl: post.metadata?.imageData || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
+          thumbnailUrl: post.metadata?.imageData || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
           txId: post.txid,
           locks: post.amount || 0,
           status: 'minted' as const,
@@ -219,6 +229,49 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     fetchSubmissions();
   }, [fetchSubmissions]);
 
+  const renderContent = (submission: MemeSubmission) => {
+    if (submission.format?.startsWith('image/')) {
+      return (
+        <div className="relative w-full h-full">
+          <img
+            ref={(el) => el && handleImageLoad(submission.id, el)}
+            src={submission.fileUrl}
+            alt={submission.description}
+            className="w-full h-full object-cover cursor-pointer rounded-t-xl"
+            onClick={() => handleImageClick(submission.fileUrl)}
+            onError={(e) => {
+              const img = e.target as HTMLImageElement;
+              img.src = `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('Failed to load image')}`;
+            }}
+          />
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity duration-300 bg-black/50">
+            <FiMaximize2 className="w-8 h-8 text-white" />
+          </div>
+        </div>
+      );
+    } else if (submission.format?.startsWith('video/')) {
+      return (
+        <video
+          ref={(el) => el && (videoRefs.current[submission.id] = el)}
+          src={submission.fileUrl}
+          className="w-full h-full object-cover cursor-pointer rounded-t-xl"
+          onClick={() => handleVideoClick(submission.id)}
+          onMouseEnter={(e) => handleVideoMouseEnter(e.target as HTMLVideoElement, submission.id)}
+          onMouseLeave={(e) => handleVideoMouseLeave(e.target as HTMLVideoElement, submission.id)}
+          loop
+          muted
+          playsInline
+        />
+      );
+    } else {
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#2A2A40]/20 to-[#1A1B23]/20 p-6 text-center">
+          <p className="text-gray-300/90 text-lg font-medium">{submission.description}</p>
+        </div>
+      );
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-[400px] flex items-center justify-center">
@@ -273,23 +326,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                 className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/10 hover:border-[#00ffa3]/20 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.05)] bg-[#1A1B23]/30 w-full max-w-md"
               >
                 <div className="relative aspect-square">
-                  {submission.fileUrl.includes('placehold.co') ? (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#2A2A40]/20 to-[#1A1B23]/20 p-6 text-center">
-                      <p className="text-gray-300/90 text-lg font-medium">{submission.description}</p>
-                    </div>
-                  ) : (
-                    <video
-                      ref={(el) => el && (videoRefs.current[submission.id] = el)}
-                      src={submission.fileUrl}
-                      className="w-full h-full object-cover cursor-pointer rounded-t-xl"
-                      onClick={() => handleVideoClick(submission.id)}
-                      onMouseEnter={(e) => handleVideoMouseEnter(e.target as HTMLVideoElement, submission.id)}
-                      onMouseLeave={(e) => handleVideoMouseLeave(e.target as HTMLVideoElement, submission.id)}
-                      loop
-                      muted
-                      playsInline
-                    />
-                  )}
+                  {renderContent(submission)}
                   {showConfetti === submission.id && (
                     <div className="absolute inset-0 pointer-events-none">
                       {/* Add your confetti animation here */}
@@ -361,6 +398,27 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Image Modal */}
+      {expandedImage && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90"
+          onClick={() => setExpandedImage(null)}
+        >
+          <button 
+            className="absolute top-4 right-4 text-white hover:text-[#00ffa3] transition-colors"
+            onClick={() => setExpandedImage(null)}
+          >
+            <FiX className="w-8 h-8" />
+          </button>
+          <img
+            src={expandedImage}
+            alt="Expanded view"
+            className="max-w-[90vw] max-h-[90vh] object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 };
