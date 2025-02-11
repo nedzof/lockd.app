@@ -1,5 +1,5 @@
 import { JungleBusClient, ControlMessageStatusCode } from "@gorillapool/js-junglebus";
-import type { Transaction, ControlMessage } from './junglebus.types';
+import type { Transaction, ControlMessage } from '../junglebus.types';
 import { PrismaClient } from '@prisma/client';
 import { TransactionParser } from './parser';
 import axios from 'axios';
