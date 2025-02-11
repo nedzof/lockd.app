@@ -1,10 +1,17 @@
 import express from 'express';
 import cors from 'cors';
-import postsRouter from './api/posts';
-import lockLikesRouter from './api/lockLikes';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import postsRouter from './api/posts.js';
+import lockLikesRouter from './api/lockLikes.js';
+import tagsRouter from './api/tags.js';
+import statsRouter from './api/stats.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
-const port = process.env.PORT || 3002;
+const port = 3001; // Fixed port for API server
 
 // Middleware
 app.use(cors());
@@ -13,6 +20,8 @@ app.use(express.json());
 // Routes
 app.use('/api/posts', postsRouter);
 app.use('/api/lockLikes', lockLikesRouter);
+app.use('/api/tags', tagsRouter);
+app.use('/api/stats', statsRouter);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -22,5 +31,5 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // Start server
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`API server is running on port ${port}`);
 }); 

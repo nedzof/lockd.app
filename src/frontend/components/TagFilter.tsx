@@ -1,83 +1,72 @@
-import * as React from 'react';
-import { useState, useEffect } from 'react';
-import clsx from 'clsx';
-import { supabase } from '../utils/supabaseClient';
+import React, { useState, useEffect } from 'react';
+import { FiX } from 'react-icons/fi';
 
-export const AVAILABLE_TAGS = [
-  'Politics',
-  'Crypto',
-  'Sports',
-  'Pop Culture',
-  'Business',
-  'Tech',
-  'Current Events',
-  'Finance',
-  'Health',
-  'Memes'
-] as const;
+const API_URL = 'http://localhost:3001';
 
 interface TagFilterProps {
   selectedTags: string[];
   onTagsChange: (tags: string[]) => void;
-  userId?: string;
 }
 
-export const TagFilter: React.FC<TagFilterProps> = ({ selectedTags, onTagsChange, userId }) => {
-  const [userPreferredTags, setUserPreferredTags] = useState<string[]>([]);
+export const TagFilter: React.FC<TagFilterProps> = ({ selectedTags, onTagsChange }) => {
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (userId) {
-      fetchUserPreferences();
-    }
-  }, [userId]);
-
-  const fetchUserPreferences = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('UserPreferences')
-        .select('content_preferences')
-        .eq('address', userId)
-        .single();
-
-      if (error) throw error;
-      
-      if (data?.content_preferences?.preferred_tags) {
-        setUserPreferredTags(data.content_preferences.preferred_tags);
+    const fetchTags = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/tags`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch tags');
+        }
+        const tags = await response.json();
+        setAvailableTags(tags);
+      } catch (error) {
+        console.error('Error fetching tags:', error);
+        setError(error instanceof Error ? error.message : 'Failed to load tags');
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Error fetching user preferences:', error);
+    };
+
+    fetchTags();
+  }, []);
+
+  const handleTagClick = (tag: string) => {
+    if (selectedTags.includes(tag)) {
+      onTagsChange(selectedTags.filter(t => t !== tag));
+    } else {
+      onTagsChange([...selectedTags, tag]);
     }
   };
 
-  const handleTagToggle = (tag: string) => {
-    onTagsChange(
-      selectedTags.includes(tag)
-        ? selectedTags.filter(t => t !== tag)
-        : [...selectedTags, tag]
-    );
-  };
+  if (isLoading) {
+    return <div className="text-gray-400">Loading tags...</div>;
+  }
+
+  if (error) {
+    return <div className="text-red-500">{error}</div>;
+  }
 
   return (
-    <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg p-4">
-      <div className="flex flex-wrap gap-2">
-        {AVAILABLE_TAGS.map(tag => (
-          <button
-            key={tag}
-            onClick={() => handleTagToggle(tag)}
-            className={clsx(
-              'px-3 py-1 rounded-md text-sm transition-all duration-200',
-              selectedTags.includes(tag)
-                ? 'bg-[#00ffa3] text-black'
-                : 'bg-[#2A2A40] text-gray-400 hover:text-white hover:bg-[#3A3A50]',
-              userPreferredTags.includes(tag) && !selectedTags.includes(tag)
-                ? 'border border-[#00ffa3]/30'
-                : 'border border-transparent'
-            )}
-          >
-            {tag}
-          </button>
-        ))}
-      </div>
+    <div className="flex flex-wrap gap-2">
+      {availableTags.map(tag => (
+        <button
+          key={tag}
+          onClick={() => handleTagClick(tag)}
+          className={`px-3 py-1 rounded-full text-sm font-medium flex items-center space-x-1 transition-all duration-300 ${
+            selectedTags.includes(tag)
+              ? 'bg-[#00ffa3] text-black'
+              : 'bg-[#2A2A40]/30 text-gray-300 hover:bg-[#2A2A40]/50'
+          }`}
+        >
+          <span>{tag}</span>
+          {selectedTags.includes(tag) && (
+            <FiX className="w-4 h-4 ml-1" />
+          )}
+        </button>
+      ))}
     </div>
   );
 }; 

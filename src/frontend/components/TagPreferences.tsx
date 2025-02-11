@@ -1,137 +1,118 @@
-import * as React from 'react';
-import { useState, useEffect } from 'react';
-import { FiCheck, FiLoader } from 'react-icons/fi';
-import { supabase } from '../utils/supabaseClient';
-import { toast } from 'react-hot-toast';
+import React, { useState, useEffect } from 'react';
+import { FiX, FiPlus } from 'react-icons/fi';
 
-const AVAILABLE_TAGS = [
-  'Politics',
-  'Crypto',
-  'Sports',
-  'Pop Culture',
-  'Business',
-  'Tech',
-  'Current Events',
-  'Finance',
-  'Health',
-  'Memes'
-];
+const API_URL = 'http://localhost:3001';
 
 interface TagPreferencesProps {
-  userId: string;
+  selectedTags: string[];
+  onTagsChange: (tags: string[]) => void;
 }
 
-export const TagPreferences: React.FC<TagPreferencesProps> = ({ userId }) => {
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+export const TagPreferences: React.FC<TagPreferencesProps> = ({ selectedTags, onTagsChange }) => {
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [newTag, setNewTag] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [existingPreferences, setExistingPreferences] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchUserPreferences();
-  }, [userId]);
-
-  const fetchUserPreferences = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('UserPreferences')
-        .select('content_preferences')
-        .eq('address', userId)
-        .single();
-
-      if (error) throw error;
-      
-      if (data?.content_preferences?.preferred_tags) {
-        setSelectedTags(data.content_preferences.preferred_tags);
-        setExistingPreferences(data.content_preferences);
+    const fetchTags = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/tags`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch tags');
+        }
+        const tags = await response.json();
+        setAvailableTags(tags);
+      } catch (error) {
+        console.error('Error fetching tags:', error);
+        setError(error instanceof Error ? error.message : 'Failed to load tags');
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Error fetching user preferences:', error);
-      toast.error('Failed to load preferences');
-    } finally {
-      setIsLoading(false);
+    };
+
+    fetchTags();
+  }, []);
+
+  const handleTagClick = (tag: string) => {
+    if (selectedTags.includes(tag)) {
+      onTagsChange(selectedTags.filter(t => t !== tag));
+    } else {
+      onTagsChange([...selectedTags, tag]);
     }
   };
 
-  const handleTagToggle = (tag: string) => {
-    setSelectedTags(prev => 
-      prev.includes(tag)
-        ? prev.filter(t => t !== tag)
-        : [...prev, tag]
-    );
-  };
+  const handleAddTag = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTag.trim()) return;
 
-  const handleSave = async () => {
-    setIsSaving(true);
     try {
-      const { error } = await supabase
-        .from('UserPreferences')
-        .upsert({
-          address: userId,
-          content_preferences: {
-            ...existingPreferences,
-            preferred_tags: selectedTags
-          },
-          updated_at: new Date().toISOString()
-        });
+      const response = await fetch(`${API_URL}/api/tags`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ tag: newTag.trim() }),
+      });
 
-      if (error) throw error;
-      
-      toast.success('Preferences saved successfully');
+      if (!response.ok) {
+        throw new Error('Failed to add tag');
+      }
+
+      setAvailableTags([...availableTags, newTag.trim()]);
+      setNewTag('');
     } catch (error) {
-      console.error('Error saving preferences:', error);
-      toast.error('Failed to save preferences');
-    } finally {
-      setIsSaving(false);
+      console.error('Error adding tag:', error);
+      setError(error instanceof Error ? error.message : 'Failed to add tag');
     }
   };
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <FiLoader className="w-6 h-6 text-[#00ffa3] animate-spin" />
-      </div>
-    );
+    return <div className="text-gray-400">Loading tags...</div>;
+  }
+
+  if (error) {
+    return <div className="text-red-500">{error}</div>;
   }
 
   return (
-    <div className="bg-[#2A2A40] border border-gray-800 rounded-lg p-6">
-      <h2 className="text-xl font-semibold text-white mb-4">Content Preferences</h2>
-      <p className="text-gray-400 mb-6">Select the types of content you'd like to see in your feed</p>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-        {AVAILABLE_TAGS.map(tag => (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {availableTags.map(tag => (
           <button
             key={tag}
-            onClick={() => handleTagToggle(tag)}
-            className={`flex items-center justify-between px-4 py-3 rounded-lg border transition-all duration-300 ${
+            onClick={() => handleTagClick(tag)}
+            className={`px-3 py-1 rounded-full text-sm font-medium flex items-center space-x-1 transition-all duration-300 ${
               selectedTags.includes(tag)
-                ? 'bg-[#00ffa3]/10 border-[#00ffa3] text-[#00ffa3]'
-                : 'border-gray-700 text-gray-400 hover:border-gray-600'
+                ? 'bg-[#00ffa3] text-black'
+                : 'bg-[#2A2A40]/30 text-gray-300 hover:bg-[#2A2A40]/50'
             }`}
           >
             <span>{tag}</span>
             {selectedTags.includes(tag) && (
-              <FiCheck className="w-5 h-5" />
+              <FiX className="w-4 h-4 ml-1" />
             )}
           </button>
         ))}
       </div>
 
-      <button
-        onClick={handleSave}
-        disabled={isSaving}
-        className="w-full flex items-center justify-center px-6 py-3 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] text-black rounded-lg font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 disabled:opacity-50"
-      >
-        {isSaving ? (
-          <>
-            <FiLoader className="w-5 h-5 mr-2 animate-spin" />
-            Saving...
-          </>
-        ) : (
-          'Save Preferences'
-        )}
-      </button>
+      <form onSubmit={handleAddTag} className="flex space-x-2">
+        <input
+          type="text"
+          value={newTag}
+          onChange={(e) => setNewTag(e.target.value)}
+          placeholder="Add new tag..."
+          className="flex-1 bg-[#2A2A40]/30 border border-gray-700/20 rounded-lg px-3 py-1.5 text-white placeholder-gray-400/70 focus:border-[#00ffa3]/30 focus:outline-none transition-colors"
+        />
+        <button
+          type="submit"
+          disabled={!newTag.trim()}
+          className="flex items-center space-x-1 px-4 py-1.5 bg-gradient-to-r from-[#00ffa3]/80 to-[#00ff9d]/80 text-black rounded-lg font-medium hover:shadow-lg hover:from-[#00ff9d]/90 hover:to-[#00ffa3]/90 transition-all duration-300 disabled:opacity-50"
+        >
+          <FiPlus className="w-4 h-4" />
+          <span>Add</span>
+        </button>
+      </form>
     </div>
   );
 }; 

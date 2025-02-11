@@ -32,7 +32,7 @@ interface ApiPost {
   lock_duration: number | null;
 }
 
-const API_URL = 'http://localhost:3002';
+const API_URL = 'http://localhost:3001';
 
 const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ 
   onStatsUpdate,
@@ -46,7 +46,6 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   const [submissions, setSubmissions] = useState<MemeSubmission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
   const [activeVideo, setActiveVideo] = useState<string | null>(null);
   const [showLockInput, setShowLockInput] = useState<string | null>(null);
   const [lockAmount, setLockAmount] = useState<string>('');
@@ -145,6 +144,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       if (!posts || posts.length === 0) {
         console.log('No posts found');
         setSubmissions([]);
+        setIsLoading(false);
         return;
       }
 
@@ -218,17 +218,6 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   useEffect(() => {
     fetchSubmissions();
   }, [fetchSubmissions]);
-
-  if (!isConnected) {
-    return (
-      <div className="min-h-[400px] flex items-center justify-center">
-        <div className="flex flex-col items-center space-y-4">
-          <FiLoader className="w-8 h-8 text-[#00ffa3] animate-spin" />
-          <p className="text-gray-400">Connecting to database...</p>
-        </div>
-      </div>
-    );
-  }
 
   if (isLoading) {
     return (
