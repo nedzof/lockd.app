@@ -67,6 +67,8 @@ const onPublish = async function(tx: JungleBusTransaction) {
             return;
         }
 
+        console.log('Found MAP outputs:', outputs);
+
         // Find the vote question output
         const questionOutput = outputs.find(output => 
             output.type === 'vote' && output.isVoteQuestion === 'true'
@@ -80,7 +82,9 @@ const onPublish = async function(tx: JungleBusTransaction) {
         console.log('Found vote question:', {
             txid: tx.id,
             content: questionOutput.content,
-            type: questionOutput.type
+            type: questionOutput.type,
+            timestamp: questionOutput.timestamp,
+            tags: questionOutput.tags
         });
 
         // Find all vote option outputs in the same transaction
@@ -93,9 +97,22 @@ const onPublish = async function(tx: JungleBusTransaction) {
             options: optionOutputs.map(opt => ({
                 content: opt.content,
                 lockDuration: opt.lockDuration,
-                lockAmount: opt.lockAmount
+                lockAmount: opt.lockAmount,
+                timestamp: opt.timestamp,
+                tags: opt.tags
             }))
         });
+
+        // Parse tags from string if needed
+        const parseTags = (tagsStr: string | string[] | undefined): string[] => {
+            if (!tagsStr) return [];
+            if (Array.isArray(tagsStr)) return tagsStr;
+            try {
+                return JSON.parse(tagsStr);
+            } catch {
+                return [];
+            }
+        };
 
         // Parse vote question data
         const voteData: VoteData = {
@@ -103,7 +120,7 @@ const onPublish = async function(tx: JungleBusTransaction) {
             content: questionOutput.content || '',
             author_address: tx.addresses?.[0] || '',
             created_at: questionOutput.timestamp || new Date().toISOString(),
-            tags: Array.isArray(questionOutput.tags) ? questionOutput.tags : [],
+            tags: parseTags(questionOutput.tags),
             options: optionOutputs.map(opt => ({
                 text: opt.content || '',
                 lockDuration: parseInt(opt.lockDuration || '0'),
@@ -138,6 +155,7 @@ const onPublish = async function(tx: JungleBusTransaction) {
             console.log('Successfully stored vote in database:', {
                 questionTxid: voteData.txid,
                 content: voteData.content,
+                author: voteData.author_address,
                 optionsCount: voteData.options?.length || 0,
                 options: voteData.options?.map(opt => ({
                     text: opt.text,
@@ -149,7 +167,8 @@ const onPublish = async function(tx: JungleBusTransaction) {
             console.error('Error storing vote in database:', {
                 error: error instanceof Error ? error.message : error,
                 txid: voteData.txid,
-                content: voteData.content
+                content: voteData.content,
+                data: voteData
             });
         }
     } catch (error) {
