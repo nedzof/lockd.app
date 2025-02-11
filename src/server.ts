@@ -6,6 +6,7 @@ import postsRouter from './api/posts.js';
 import lockLikesRouter from './api/lockLikes.js';
 import tagsRouter from './api/tags.js';
 import statsRouter from './api/stats.js';
+import votesRouter from './api/votes.js';
 import { startVoteSubscription } from './services/scanner/votes/voteSubscription.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -23,6 +24,7 @@ app.use('/api/posts', postsRouter);
 app.use('/api/lockLikes', lockLikesRouter);
 app.use('/api/tags', tagsRouter);
 app.use('/api/stats', statsRouter);
+app.use('/api/votes', votesRouter);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
