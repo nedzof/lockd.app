@@ -16,6 +16,9 @@ const prisma = new PrismaClient({
         create: (data: any) => Promise<any>;
         count: () => Promise<number>;
     };
+    VoteOption: {
+        create: (data: any) => Promise<any>;
+    };
 };
 
 // Test database connection
@@ -31,6 +34,11 @@ interface JungleBusTransaction {
     id: string;
     transaction: string;
     addresses?: string[];
+    outputs?: string[];
+    data?: string[];
+    outputTypes?: string[];
+    contexts?: string[];
+    subContexts?: string[];
 }
 
 interface VoteData {
@@ -56,133 +64,226 @@ interface MapOutput {
     lockAmount?: string;
 }
 
+let currentBlock: number = 0;
+
+interface ExtendedTransaction extends Transaction {
+    outputs?: string[];
+    output_types?: string[];
+    contexts?: string[];
+    sub_contexts?: string[];
+    data?: string[];
+    addresses?: string[];
+}
+
+interface VoteMapData {
+    type: string;
+    content: string;
+    isVoteQuestion?: boolean;
+    questionTxid?: string;
+    lockAmount?: number;
+    lockDuration?: number;
+    timestamp?: string;
+    tags?: string[];
+    txid?: string;
+}
+
+function parseVoteMapData(outputs: string[]): VoteMapData[] {
+    const voteData: VoteMapData[] = [];
+    let currentData: Partial<VoteMapData> = {};
+    let currentOptions: Array<{text: string; lockAmount: number; lockDuration: number}> = [];
+
+    for (const output of outputs) {
+        try {
+            // Split by MAP protocol separator
+            const [key, value] = output.split('=').map(s => s.trim());
+            
+            if (!key || !value) continue;
+
+            switch (key.toLowerCase()) {
+                case 'app':
+                    if (currentData.type) {
+                        if (currentOptions.length > 0) {
+                            // Add options as separate vote data entries
+                            currentOptions.forEach(opt => {
+                                voteData.push({
+                                    type: 'vote_option',
+                                    content: opt.text,
+                                    lockAmount: opt.lockAmount,
+                                    lockDuration: opt.lockDuration,
+                                    timestamp: currentData.timestamp,
+                                    tags: currentData.tags,
+                                    questionTxid: currentData.txid
+                                } as VoteMapData);
+                            });
+                            currentOptions = [];
+                        }
+                        voteData.push(currentData as VoteMapData);
+                        currentData = {};
+                    }
+                    if (value === 'lockd.app') {
+                        currentData = {};
+                    }
+                    break;
+                case 'type':
+                    currentData.type = value;
+                    break;
+                case 'content':
+                    currentData.content = value;
+                    break;
+                case 'isvotequestion':
+                    currentData.isVoteQuestion = value.toLowerCase() === 'true';
+                    break;
+                case 'questiontxid':
+                    currentData.questionTxid = value;
+                    break;
+                case 'lockamount':
+                    currentData.lockAmount = parseInt(value);
+                    break;
+                case 'lockduration':
+                    currentData.lockDuration = parseInt(value);
+                    break;
+                case 'timestamp':
+                    currentData.timestamp = value;
+                    break;
+                case 'tags':
+                    try {
+                        currentData.tags = JSON.parse(value);
+                    } catch {
+                        currentData.tags = value.split(',').map(t => t.trim());
+                    }
+                    break;
+                case 'voteoptions':
+                    try {
+                        const options = JSON.parse(value);
+                        currentOptions = options.map((opt: any) => ({
+                            text: opt.text,
+                            lockAmount: parseInt(opt.lockAmount) || 0,
+                            lockDuration: parseInt(opt.lockDuration) || 0
+                        }));
+                    } catch (error) {
+                        console.error('Error parsing vote options:', error);
+                    }
+                    break;
+            }
+        } catch (error) {
+            console.error('Error parsing vote output:', error);
+        }
+    }
+
+    // Add the last data object and its options if they exist
+    if (currentData.type) {
+        if (currentOptions.length > 0) {
+            currentOptions.forEach(opt => {
+                voteData.push({
+                    type: 'vote_option',
+                    content: opt.text,
+                    lockAmount: opt.lockAmount,
+                    lockDuration: opt.lockDuration,
+                    timestamp: currentData.timestamp,
+                    tags: currentData.tags,
+                    questionTxid: currentData.txid
+                } as VoteMapData);
+            });
+        }
+        voteData.push(currentData as VoteMapData);
+    }
+
+    return voteData;
+}
+
 const onPublish = async function(tx: JungleBusTransaction) {
     try {
-        console.log('Processing transaction:', tx.id);
-        
-        // Extract MAP data from transaction
-        const outputs = parseMapData([tx.transaction]);
-        if (!outputs || !Array.isArray(outputs)) {
-            console.log('No MAP outputs found in transaction:', tx.id);
+        console.log('Processing transaction:', {
+            id: tx.id,
+            outputsCount: tx.outputs?.length || 0,
+            dataCount: tx.data?.length || 0,
+            addresses: tx.addresses,
+            transaction: tx.transaction ? tx.transaction.substring(0, 100) + '...' : undefined
+        });
+
+        // Get the full transaction data from JungleBus
+        const fullTx = await client.GetTransaction(tx.id) as ExtendedTransaction;
+        if (!fullTx) {
+            console.log('Could not fetch transaction details:', tx.id);
             return;
         }
 
-        console.log('Found MAP outputs:', outputs);
+        console.log('Full transaction data:', {
+            id: fullTx.id,
+            outputCount: fullTx.outputs?.length,
+            outputTypes: fullTx.output_types,
+            data: fullTx.data?.map((d: string) => d.substring(0, 100) + '...'),
+        });
 
-        // Find the vote question output
-        const questionOutput = outputs.find(output => 
-            output.type === 'vote' && output.isVoteQuestion === 'true'
-        );
+        // Parse MAP data from outputs
+        const outputs = fullTx.data || [];
+        const voteData = parseVoteMapData(outputs).map(data => ({
+            ...data,
+            txid: tx.id
+        }));
 
-        if (!questionOutput) {
+        if (voteData.length === 0) {
+            console.log('No vote data found in transaction:', tx.id);
+            return;
+        }
+
+        // Find vote question and options
+        const question = voteData.find(d => d.isVoteQuestion && d.type === 'vote');
+        const options = voteData.filter(d => d.type === 'vote_option');
+
+        if (!question) {
             console.log('No vote question found in transaction:', tx.id);
             return;
         }
 
-        console.log('Found vote question:', {
-            txid: tx.id,
-            content: questionOutput.content,
-            type: questionOutput.type,
-            timestamp: questionOutput.timestamp,
-            tags: questionOutput.tags
-        });
+        // Get author address from transaction outputs
+        const authorAddress = fullTx.addresses?.[0] || tx.addresses?.[0] || '';
+        if (!authorAddress) {
+            console.log('No author address found in transaction:', tx.id);
+            return;
+        }
 
-        // Find all vote option outputs in the same transaction
-        const optionOutputs = outputs.filter(output => 
-            output.type === 'vote_option'
-        );
-
-        console.log('Found vote options:', {
-            count: optionOutputs.length,
-            options: optionOutputs.map(opt => ({
-                content: opt.content,
-                lockDuration: opt.lockDuration,
-                lockAmount: opt.lockAmount,
-                timestamp: opt.timestamp,
-                tags: opt.tags
-            }))
-        });
-
-        // Parse tags from string if needed
-        const parseTags = (tagsStr: string | string[] | undefined): string[] => {
-            if (!tagsStr) return [];
-            if (Array.isArray(tagsStr)) return tagsStr;
-            try {
-                return JSON.parse(tagsStr);
-            } catch {
-                return [];
+        // First create the vote question
+        const voteQuestion = await prisma.VoteQuestion.create({
+            data: {
+                txid: tx.id,
+                content: question.content,
+                author_address: authorAddress,
+                created_at: new Date(question.timestamp || Date.now()),
+                options: [], // Empty array since we'll create separate VoteOption records
+                tags: question.tags || []
             }
-        };
+        });
 
-        // Parse vote question data
-        const voteData: VoteData = {
-            txid: tx.id,
-            content: questionOutput.content || '',
-            author_address: tx.addresses?.[0] || '',
-            created_at: questionOutput.timestamp || new Date().toISOString(),
-            tags: parseTags(questionOutput.tags),
-            options: optionOutputs.map(opt => ({
-                text: opt.content || '',
-                lockDuration: parseInt(opt.lockDuration || '0'),
-                lockAmount: parseInt(opt.lockAmount || '0')
-            }))
-        };
-
-        try {
-            // Store vote question in database with its options
-            const voteQuestion = await prisma.VoteQuestion.create({
+        // Then create the vote options
+        for (const option of options) {
+            await prisma.VoteOption.create({
                 data: {
-                    txid: voteData.txid,
-                    content: voteData.content,
-                    author_address: voteData.author_address,
-                    created_at: new Date(voteData.created_at),
-                    options: voteData.options as Prisma.JsonValue,
-                    tags: voteData.tags,
-                    vote_options: {
-                        create: voteData.options?.map((option, index) => ({
-                            txid: `${voteData.txid}_${index}`,
-                            content: option.text,
-                            author_address: voteData.author_address,
-                            created_at: new Date(voteData.created_at),
-                            lock_amount: option.lockAmount,
-                            lock_duration: option.lockDuration,
-                            tags: voteData.tags
-                        }))
-                    }
+                    txid: `${tx.id}_${option.content}`, // Create unique txid for each option
+                    question_txid: tx.id,
+                    content: option.content,
+                    author_address: authorAddress,
+                    created_at: new Date(option.timestamp || Date.now()),
+                    lock_amount: option.lockAmount || 0,
+                    lock_duration: option.lockDuration || 0,
+                    tags: option.tags || []
                 }
             });
-
-            console.log('Successfully stored vote in database:', {
-                questionTxid: voteData.txid,
-                content: voteData.content,
-                author: voteData.author_address,
-                optionsCount: voteData.options?.length || 0,
-                options: voteData.options?.map(opt => ({
-                    text: opt.text,
-                    lockAmount: opt.lockAmount,
-                    lockDuration: opt.lockDuration
-                }))
-            });
-        } catch (error) {
-            console.error('Error storing vote in database:', {
-                error: error instanceof Error ? error.message : error,
-                txid: voteData.txid,
-                content: voteData.content,
-                data: voteData
-            });
         }
+
+        console.log('Successfully stored vote question and options');
     } catch (error) {
-        console.error('Error processing vote transaction:', {
-            error: error instanceof Error ? error.message : error,
-            txid: tx.id
-        });
+        console.error('Error processing transaction:', error);
     }
 };
 
-const onStatus = function(message: ControlMessage) {
-    console.log("Status:", message);
-    if (message.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
-        console.log("Block done:", message);
+const onStatus = function(status: any) {
+    if (status.block) {
+        currentBlock = status.block;
+    }
+    console.log('Status:', status);
+    if (status.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
+        console.log("Block done:", status);
     }
 };
 
