@@ -6,6 +6,7 @@ import postsRouter from './api/posts.js';
 import lockLikesRouter from './api/lockLikes.js';
 import tagsRouter from './api/tags.js';
 import statsRouter from './api/stats.js';
+import { startVoteSubscription } from './services/scanner/voteSubscription';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,7 +30,22 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   res.status(500).json({ message: 'Something broke!' });
 });
 
+async function startServer() {
+    try {
+        // Start vote subscription
+        console.log('Starting vote subscription...');
+        await startVoteSubscription();
+        console.log('Vote subscription started successfully');
+        
+        // Start the Express server
+        app.listen(port, () => {
+            console.log(`API server is running on port ${port}`);
+        });
+    } catch (error) {
+        console.error('Failed to start server:', error);
+        process.exit(1);
+    }
+}
+
 // Start server
-app.listen(port, () => {
-  console.log(`API server is running on port ${port}`);
-}); 
+startServer(); 

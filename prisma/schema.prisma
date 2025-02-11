@@ -34,4 +34,32 @@ model Post {
   @@index([author_address])
   @@index([created_at])
   @@index([block_height])
+}
+
+model VoteQuestion {
+  id            String       @id @default(cuid())
+  txid          String       @unique
+  content       String
+  author_address String
+  created_at    DateTime
+  options       Json
+  tags          String[]
+  vote_options  VoteOption[]
+  
+  @@map("vote_questions")
+}
+
+model VoteOption {
+  id             String       @id @default(cuid())
+  txid           String       @unique
+  question_txid  String
+  content        String
+  author_address String
+  created_at     DateTime
+  lock_amount    Int
+  lock_duration  Int
+  tags          String[]
+  question      VoteQuestion @relation(fields: [question_txid], references: [txid])
+  
+  @@map("vote_options")
 } 

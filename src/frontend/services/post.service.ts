@@ -328,22 +328,22 @@ export const createPost = async (
       throw new Error('Please provide either text content or an image');
     }
 
-    // Validate lock data if present
-    if (lockData?.isLocked) {
-      if (!lockData.duration || lockData.duration < 1) {
-        throw new Error('Lock duration must be at least 1 block');
+    // For vote posts, validate options
+    if (lockData?.isPoll) {
+      if (!lockData.options || lockData.options.length < 2) {
+        throw new Error('Please provide at least 2 vote options');
       }
-      if (lockData.duration > 52560) { // ~1 year worth of blocks
-        throw new Error('Lock duration cannot exceed 52560 blocks (approximately 1 year)');
+      if (lockData.options.some(opt => !opt.text.trim())) {
+        throw new Error('Please fill in all vote options');
       }
-      if (!lockData.amount || lockData.amount < 1000) {
-        throw new Error('Lock amount must be at least 1000 satoshis');
+      if (lockData.options.some(opt => !opt.lockAmount || !opt.lockDuration)) {
+        throw new Error('Please provide both lock duration and amount for all options');
       }
     }
 
     // Get current block height if locking
     let currentBlockHeight: number | undefined;
-    if (lockData?.isLocked) {
+    if (lockData?.isLocked || (lockData?.isPoll && lockData.options?.some(opt => opt.lockAmount > 0))) {
       currentBlockHeight = await getCurrentBlockHeight();
     }
 
@@ -351,7 +351,11 @@ export const createPost = async (
     const balance = await wallet.getBalance();
     console.log('Current wallet balance:', balance);
 
-    const requiredBalance = (lockData?.isLocked ? (lockData.amount || 0) : 0) + 10; // 10 sats for transaction fee
+    // Calculate required balance for vote options
+    const requiredBalance = lockData?.isPoll 
+      ? (lockData.options?.reduce((sum, opt) => sum + opt.lockAmount, 0) || 0) + 10 
+      : (lockData?.isLocked ? (lockData.amount || 0) : 0) + 10;
+
     if (!balance?.satoshis || balance.satoshis < requiredBalance) {
       throw new Error(`Insufficient balance. Required: ${requiredBalance} satoshis`);
     }
@@ -484,59 +488,111 @@ export const createPost = async (
     } else {
       console.log("Creating text post:", content);
       try {
-        // Create MAP data with tags, prediction market data, and lock data
-        const mapData: MapData = {
-          app: 'lockd.app',
-          type: predictionMarketData ? 'prediction' : (lockData?.isPoll ? 'vote' : 'text'),
-          content: content,
-          timestamp: new Date().toISOString().toLowerCase(),
-          contentType: 'text/plain',
-          version: '1.0.0',
-          tags: ['lockdapp', ...(tags || [])],
-          ...(predictionMarketData && {
-            prediction: JSON.stringify(predictionMarketData)
-          }),
-          ...(lockData?.isLocked && currentBlockHeight && lockData.duration && {
-            lockDuration: lockData.duration.toString(),
-            lockAmount: (lockData.amount || 1000).toString(),
-            unlockHeight: (currentBlockHeight + lockData.duration).toString()
-          }),
-          ...(lockData?.isPoll && {
-            isVoteQuestion: 'true',
-            voteOptions: JSON.stringify(lockData.options?.map(opt => ({
-              text: opt.text,
-              lockDuration: opt.lockDuration,
-              lockAmount: opt.lockAmount
-            })))
-          })
-        };
+        if (lockData?.isPoll && lockData.options) {
+          // Create an array of inscriptions - one for the question and one for each option
+          const inscriptions = [
+            // Question inscription
+            {
+              address: authorAddress,
+              base64Data: btoa(content),
+              mimeType: 'text/plain',
+              map: {
+                app: 'lockd.app',
+                type: 'vote',
+                content: content,
+                timestamp: new Date().toISOString().toLowerCase(),
+                contentType: 'text/plain',
+                version: '1.0.0',
+                tags: JSON.stringify(['lockdapp', 'vote_question', ...(tags || [])]),
+                isVoteQuestion: 'true'
+              },
+              satoshis: 1000
+            },
+            // Option inscriptions
+            ...lockData.options.map(opt => ({
+              address: authorAddress,
+              base64Data: btoa(opt.text),
+              mimeType: 'text/plain',
+              map: {
+                app: 'lockd.app',
+                type: 'vote_option',
+                content: opt.text,
+                timestamp: new Date().toISOString().toLowerCase(),
+                contentType: 'text/plain',
+                version: '1.0.0',
+                tags: JSON.stringify(['lockdapp', 'vote_option', ...(tags || [])]),
+                lockDuration: opt.lockDuration.toString(),
+                lockAmount: opt.lockAmount.toString()
+              },
+              satoshis: opt.lockAmount
+            }))
+          ];
 
-        // Convert to Record<string, string> for wallet API
-        const stringifiedMapData: Record<string, string> = {
-          ...mapData,
-          tags: JSON.stringify(mapData.tags)
-        };
+          // Create inscription transaction with multiple outputs
+          const response = await wallet.inscribe(inscriptions);
 
-        // Create inscription transaction using MAP protocol
-        const response = await wallet.inscribe([{
-          address: authorAddress,
-          base64Data: btoa(content),
-          mimeType: 'text/plain',
-          map: stringifiedMapData,
-          satoshis: lockData?.isLocked ? (lockData.amount || 1000) : 1000
-        }]);
+          // Convert response to expected format
+          inscriptionTx = {
+            id: (response as any).txid || (response as any).id,
+            tx: (response as any).tx
+          };
+        } else {
+          // Create MAP data with tags, prediction market data, and vote data
+          const mapData: MapData = {
+            app: 'lockd.app',
+            type: predictionMarketData ? 'prediction' : (lockData?.isPoll ? 'vote' : 'text'),
+            content: content,
+            timestamp: new Date().toISOString().toLowerCase(),
+            contentType: 'text/plain',
+            version: '1.0.0',
+            tags: ['lockdapp', ...(tags || [])],
+            ...(predictionMarketData && {
+              prediction: JSON.stringify(predictionMarketData)
+            }),
+            ...(lockData?.isLocked && currentBlockHeight && lockData.duration && {
+              lockDuration: lockData.duration.toString(),
+              lockAmount: (lockData.amount || 1000).toString(),
+              unlockHeight: (currentBlockHeight + lockData.duration).toString()
+            }),
+            ...(lockData?.isPoll && {
+              isVoteQuestion: 'true',
+              voteOptions: JSON.stringify(lockData.options?.map(opt => ({
+                text: opt.text,
+                lockDuration: opt.lockDuration,
+                lockAmount: opt.lockAmount
+              })))
+            })
+          };
 
-        // Convert response to expected format
-        inscriptionTx = {
-          id: (response as any).txid || (response as any).id,
-          tx: (response as any).tx
-        };
+          // Convert to Record<string, string> for wallet API
+          const stringifiedMapData: Record<string, string> = {
+            ...mapData,
+            tags: JSON.stringify(mapData.tags)
+          };
+
+          // Create inscription transaction using MAP protocol
+          const response = await wallet.inscribe([{
+            address: authorAddress,
+            base64Data: btoa(content),
+            mimeType: 'text/plain',
+            map: stringifiedMapData,
+            satoshis: lockData?.isPoll 
+              ? (lockData.options?.reduce((sum, opt) => sum + opt.lockAmount, 0) || 1000)
+              : (lockData?.isLocked ? (lockData.amount || 1000) : 1000)
+          }]);
+
+          // Convert response to expected format
+          inscriptionTx = {
+            id: (response as any).txid || (response as any).id,
+            tx: (response as any).tx
+          };
+        }
         
         // Log and validate text inscription
         if (inscriptionTx?.tx) {
           console.log("MAP transaction response:", JSON.stringify({
             txid: inscriptionTx?.id,
-            map: mapData
+            inscriptions: lockData?.isPoll ? 'Multiple outputs for vote' : 'Single output'
           }, null, 2));
         }
       } catch (txError) {
