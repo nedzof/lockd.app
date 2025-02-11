@@ -1,7 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { FiLock, FiZap, FiLoader, FiPlus, FiHeart } from 'react-icons/fi';
-import { supabase } from '../utils/supabaseClient';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
 import { MemeSubmission, Post, LockLike } from '../types';
@@ -15,6 +14,25 @@ interface MemeSubmissionGridProps {
   selectedTags: string[];
   userId?: string;
 }
+
+interface ApiPost {
+  id: string;
+  txid: string;
+  content: string;
+  author_address: string;
+  media_type: string | null;
+  block_height: number;
+  amount: number | null;
+  unlock_height: number | null;
+  description: string | null;
+  created_at: string;
+  tags: string[];
+  metadata: any;
+  is_locked: boolean;
+  lock_duration: number | null;
+}
+
+const API_URL = 'http://localhost:3002';
 
 const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ 
   onStatsUpdate,
@@ -67,18 +85,22 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
     setLockingSubmissionId(postId);
     try {
-      const { data, error } = await supabase
-        .from('LockLike')
-        .insert([
-          {
-            post_id: postId,
-            handle: 'anon', // Using anonymous user for now
-            amount: Math.floor(amount * 100000000), // Convert BSV to satoshis
-            lock_period: 30, // 30 days default lock period
-          }
-        ]);
+      const response = await fetch(`${API_URL}/api/lockLikes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          postId,
+          amount,
+          handle: 'anon', // Using anonymous user for now
+          lockPeriod: 30, // 30 days default lock period
+        }),
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        throw new Error('Failed to lock coins');
+      }
 
       // Show confetti animation
       setShowConfetti(postId);
@@ -102,180 +124,33 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     setError(null);
     
     try {
-      console.log('Starting to fetch submissions with filters:', { 
-        timeFilter, 
-        rankingFilter, 
-        personalFilter, 
+      // Build query parameters
+      const params = new URLSearchParams({
+        timeFilter,
+        rankingFilter,
+        personalFilter,
         blockFilter,
-        selectedTags 
+        selectedTags: JSON.stringify(selectedTags),
+        ...(userId && { userId })
       });
-      
-      // Fetch current block height first if block filter is active
-      let currentBlock = 0;
-      if (blockFilter) {
-        try {
-          const blockResponse = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
-          const blockData = await blockResponse.json();
-          currentBlock = blockData.blocks;
-          console.log('Current block height:', currentBlock);
-        } catch (error) {
-          console.error('Failed to fetch current block height:', error);
-          throw new Error('Failed to fetch current block height');
-        }
-      }
-      
-      // Build the base query with proper joins
-      let query = supabase
-        .from('Post')
-        .select(`
-          id,
-          content,
-          author_address,
-          created_at,
-          is_locked,
-          media_url,
-          media_type,
-          description,
-          confirmed,
-          blockHeight,
-          tags,
-          Bitcoiner (
-            address
-          ),
-          LockLike (
-            txid,
-            amount,
-            address,
-            locked_until,
-            created_at,
-            confirmed
-          )
-        `);
 
-      // Apply time filter
-      if (timeFilter) {
-        const now = new Date();
-        const timeFilters = {
-          '1d': 1,
-          '7d': 7,
-          '30d': 30
-        };
-        const days = timeFilters[timeFilter as keyof typeof timeFilters];
-        if (days) {
-          const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-          query = query.gte('created_at', startDate.toISOString());
-          console.log('Applied time filter:', { days, startDate });
-        }
+      // Fetch posts from API
+      const response = await fetch(`${API_URL}/api/posts?${params}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch posts');
       }
 
-      // Apply block filter
-      if (blockFilter && currentBlock > 0) {
-        const blockFilters = {
-          'last_block': 1,
-          'last_5_blocks': 5,
-          'last_10_blocks': 10
-        };
-        const blocks = blockFilters[blockFilter as keyof typeof blockFilters];
-        if (blocks) {
-          const startBlock = currentBlock - blocks;
-          query = query.gte('blockHeight', startBlock);
-          console.log('Applied block filter:', { currentBlock, startBlock, blocks });
-        }
-      }
-
-      // Apply tag filter
-      if (selectedTags.length > 0) {
-        query = query.contains('tags', selectedTags);
-        console.log('Applied tag filter:', selectedTags);
-      }
-
-      // Apply personal filters with proper foreign key relationships
-      if (personalFilter === 'mylocks') {
-        // First get all LockLikes for the user
-        const { data: userLocks } = await supabase
-          .from('LockLike')
-          .select('post_id')
-          .eq('address', userId);
-        
-        console.log('Found user locks:', userLocks);
-        
-        if (userLocks && userLocks.length > 0) {
-          const postIds = userLocks.map(lock => lock.post_id);
-          query = query.in('id', postIds);
-          console.log('Filtering by user lock post IDs:', postIds);
-        } else {
-          console.log('No user locks found');
-          setSubmissions([]);
-          setIsLoading(false);
-          return;
-        }
-      } else if (personalFilter === 'locked') {
-        const currentTime = Math.floor(Date.now() / 1000);
-        // First get all locked posts
-        const { data: lockedPosts } = await supabase
-          .from('LockLike')
-          .select('post_id')
-          .gte('locked_until', currentTime);
-        
-        console.log('Found locked posts:', lockedPosts);
-        
-        if (lockedPosts && lockedPosts.length > 0) {
-          const postIds = lockedPosts.map(lock => lock.post_id);
-          query = query.in('id', postIds);
-          console.log('Filtering by locked post IDs:', postIds);
-        } else {
-          console.log('No locked posts found');
-          setSubmissions([]);
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      // Get the posts
-      console.log('Executing Supabase query...');
-      let { data: posts, error } = await query
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Supabase query error:', error);
-        throw error;
-      }
-
-      console.log('Raw posts data from Supabase:', posts);
+      const posts: ApiPost[] = await response.json();
 
       if (!posts || posts.length === 0) {
-        console.log('No posts found in database');
+        console.log('No posts found');
         setSubmissions([]);
         return;
       }
 
       // Process and enrich the posts
-      let submissionsWithStats = posts.map((post: any) => {
-        console.log('Processing post:', {
-          id: post.id,
-          content: post.content,
-          bitcoiner: post.Bitcoiner,
-          lockLikes: post.LockLike,
-          tags: post.tags
-        });
-
-        // Calculate total amount from all lock likes
-        const totalLocked = post.LockLike?.reduce((sum: number, locklike: any) => {
-          console.log('Lock like amount:', {
-            txid: locklike.txid,
-            amount: locklike.amount,
-            address: locklike.address
-          });
-          return sum + (locklike?.amount || 0);
-        }, 0) || 0;
-
-        console.log('Calculated total locked amount:', {
-          postId: post.id,
-          totalLocked,
-          lockLikesCount: post.LockLike?.length || 0
-        });
-
-        const submission = {
+      let submissionsWithStats = posts.map((post: ApiPost) => {
+        const submission: MemeSubmission = {
           id: post.id,
           creator: post.author_address || 'Anonymous',
           title: `Post by ${post.author_address || 'Anonymous'}`,
@@ -284,27 +159,26 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           style: 'viral',
           duration: 30,
           format: post.media_type || 'text/plain',
-          fileUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
-          thumbnailUrl: post.media_url || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
-          txId: post.id,
-          locks: totalLocked,
+          fileUrl: post.media_type ? `https://testnet.ordinals.sv/content/${post.txid}` : `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
+          thumbnailUrl: post.media_type ? `https://testnet.ordinals.sv/content/${post.txid}` : `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
+          txId: post.txid,
+          locks: post.amount || 0,
           status: 'minted' as const,
           tags: post.tags || [],
           createdAt: new Date(post.created_at),
           updatedAt: new Date(post.created_at),
-          totalLocked: totalLocked,
+          totalLocked: post.amount || 0,
           threshold: 1000000000, // 10 BSV threshold
-          isTop10Percent: totalLocked > 1000000000,
-          isTop3: totalLocked > 2000000000,
-          locklikes: post.LockLike || []
+          isTop10Percent: (post.amount || 0) > 1000000000,
+          isTop3: (post.amount || 0) > 2000000000,
+          locklikes: []
         };
 
-        console.log('Created submission object:', submission);
         return submission;
       });
 
-      // Apply ranking filters only if a ranking filter is selected
-      submissionsWithStats.sort((a, b) => {
+      // Apply ranking filters
+      submissionsWithStats.sort((a: MemeSubmission, b: MemeSubmission) => {
         // First sort by total locked amount
         const amountDiff = b.totalLocked - a.totalLocked;
         if (amountDiff !== 0) return amountDiff;
@@ -312,12 +186,6 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         // If amounts are equal, sort by most recent
         return b.createdAt.getTime() - a.createdAt.getTime();
       });
-
-      console.log('Sorted submissions:', submissionsWithStats.map(s => ({
-        id: s.id,
-        totalLocked: s.totalLocked,
-        createdAt: s.createdAt
-      })));
 
       // Apply limit based on filter
       if (rankingFilter) {
@@ -328,14 +196,12 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         } else if (rankingFilter === 'top10') {
           submissionsWithStats = submissionsWithStats.slice(0, 10);
         }
-        console.log(`Applied ${rankingFilter} filter, remaining submissions:`, submissionsWithStats.length);
       }
 
-      console.log('Final processed submissions:', submissionsWithStats);
       setSubmissions(submissionsWithStats);
 
       // Update stats
-      const total = submissionsWithStats.reduce((sum, sub) => sum + (sub.totalLocked || 0), 0);
+      const total = submissionsWithStats.reduce((sum: number, sub: MemeSubmission) => sum + (sub.totalLocked || 0), 0);
       onStatsUpdate({
         totalLocked: total,
         participantCount: submissionsWithStats.length,
@@ -349,83 +215,8 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     }
   }, [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, userId, onStatsUpdate]);
 
-  // Single useEffect for initialization and data fetching
   useEffect(() => {
-    const initializeAndFetch = async () => {
-      try {
-        console.log('Checking Supabase connection...');
-        
-        // First verify we have a valid client
-        if (!supabase) {
-          console.error('Supabase client is not initialized');
-          setError('Database client not initialized');
-          return;
-        }
-
-        // Test the connection with a simple query
-        const { data, error } = await supabase
-          .from('Post')
-          .select('count')
-          .limit(1);
-
-        if (error) {
-          console.error('Failed to connect to Supabase:', error);
-          setError('Database connection failed: ' + error.message);
-          return;
-        }
-
-        console.log('Successfully connected to Supabase. Count query result:', data);
-        setIsConnected(true);
-        
-        // Now that we're connected, fetch the submissions
-        await fetchSubmissions();
-
-        // Subscribe to real-time updates
-        const postSubscription = supabase
-          .channel('posts-channel')
-          .on('postgres_changes', 
-            { 
-              event: '*', 
-              schema: 'public', 
-              table: 'Post' 
-            }, 
-            async (payload) => {
-              console.log('Received real-time update:', payload);
-              // Refresh submissions when a post is added or updated
-              await fetchSubmissions();
-            }
-          )
-          .subscribe();
-
-        // Subscribe to lock likes updates
-        const lockLikeSubscription = supabase
-          .channel('locklikes-channel')
-          .on('postgres_changes', 
-            { 
-              event: '*', 
-              schema: 'public', 
-              table: 'LockLike' 
-            }, 
-            async (payload) => {
-              console.log('Received lock like update:', payload);
-              // Refresh submissions when a lock like is added or updated
-              await fetchSubmissions();
-            }
-          )
-          .subscribe();
-
-        // Cleanup subscriptions on unmount
-        return () => {
-          postSubscription.unsubscribe();
-          lockLikeSubscription.unsubscribe();
-        };
-      } catch (error) {
-        console.error('Error during initialization:', error);
-        setError('Failed to initialize: ' + (error instanceof Error ? error.message : String(error)));
-      }
-    };
-
-    initializeAndFetch();
+    fetchSubmissions();
   }, [fetchSubmissions]);
 
   if (!isConnected) {
