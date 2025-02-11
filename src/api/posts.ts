@@ -2,7 +2,9 @@ import express from 'express';
 import { PrismaClient } from '@prisma/client';
 
 const router = express.Router();
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  log: ['query', 'error']
+});
 
 router.get('/', async (req, res) => {
   try {
@@ -50,13 +52,30 @@ router.get('/', async (req, res) => {
 
     console.log('Querying posts with where clause:', where);
 
-    // Get the posts
+    // Get the posts with explicit select
     const posts = await prisma.post.findMany({
       where,
+      select: {
+        id: true,
+        txid: true,
+        content: true,
+        author_address: true,
+        media_type: true,
+        block_height: true,
+        amount: true,
+        unlock_height: true,
+        description: true,
+        created_at: true,
+        tags: true,
+        metadata: true,
+        is_locked: true,
+        lock_duration: true
+      },
       orderBy: { created_at: 'desc' }
     });
 
-    console.log(`Found ${posts.length} posts`);
+    console.log(`Found ${posts.length} posts with the following fields:`, 
+      posts.length > 0 ? Object.keys(posts[0]) : 'no posts found');
 
     // Process and return posts
     res.json(posts);
@@ -73,6 +92,14 @@ router.get('/test', async (req, res) => {
     await prisma.$connect();
     console.log('Database connection successful');
     
+    // Get table information
+    const tableInfo = await prisma.$queryRaw`
+      SELECT table_name, column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'Post'
+    `;
+    console.log('Post table structure:', tableInfo);
+    
     // Count total posts
     const count = await prisma.post.count();
     console.log('Total posts in database:', count);
@@ -80,7 +107,8 @@ router.get('/test', async (req, res) => {
     res.json({ 
       status: 'ok', 
       message: 'Database connection successful',
-      postCount: count
+      postCount: count,
+      tableInfo
     });
   } catch (error) {
     console.error('Database connection error:', error);
