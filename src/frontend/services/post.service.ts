@@ -42,32 +42,84 @@ const fileToBase64 = (file: File): Promise<string> => {
     fileSize: file.size,
     lastModified: new Date(file.lastModified).toISOString()
   });
+  
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => {
-      console.log('FileReader loaded successfully');
-      if (typeof reader.result === 'string') {
-        const base64 = reader.result.split(',')[1];
+    // Create URL from file
+    const url = URL.createObjectURL(file);
+
+    // Create image element
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    // Create canvas
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      reject(new Error('Could not get canvas context'));
+      return;
+    }
+
+    // Wait for image to load
+    img.onload = () => {
+      try {
+        // Calculate dimensions
+        let width = img.width;
+        let height = img.height;
+
+        // Resize if needed (max 800px)
+        const maxSize = 800;
+        if (width > height) {
+          if (width > maxSize) {
+            height = Math.round((height * maxSize) / width);
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
+          }
+        }
+
+        // Set canvas size
+        canvas.width = width;
+        canvas.height = height;
+
+        // Draw with black background
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to base64
+        const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+
+        // Log conversion details
         console.log('Base64 conversion details:', {
-          originalLength: reader.result.length,
-          dataUrlPrefix: reader.result.substring(0, reader.result.indexOf(',')),
+          originalWidth: img.width,
+          originalHeight: img.height,
+          finalWidth: width,
+          finalHeight: height,
           base64Length: base64.length,
           base64Preview: base64.substring(0, 50) + '...'
         });
+
+        // Cleanup
+        URL.revokeObjectURL(url);
+
         resolve(base64);
-      } else {
-        console.error('FileReader result error:', {
-          resultType: typeof reader.result,
-          result: reader.result
-        });
-        reject(new Error('Failed to convert file to base64'));
+      } catch (error) {
+        console.error('Error processing image:', error);
+        reject(error);
       }
     };
-    reader.onerror = error => {
-      console.error('FileReader error:', error);
+
+    img.onerror = error => {
+      console.error('Error loading image:', error);
+      URL.revokeObjectURL(url);
       reject(error);
     };
+
+    img.src = url;
   });
 };
 

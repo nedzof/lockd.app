@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
-import { MemeSubmission, Post, LockLike } from '../types';
+import type { MemeSubmission, LockLike } from '../types';
 
 interface MemeSubmissionGridProps {
   onStatsUpdate: (stats: { totalLocked: number; participantCount: number; roundNumber: number }) => void;
@@ -54,6 +54,115 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement }>({});
   const imageRefs = useRef<{ [key: string]: HTMLImageElement }>({});
+
+  const formatImageUrl = async (imageData: string | undefined) => {
+    if (!imageData) return null;
+    
+    // Debug logging
+    console.log('Processing image data:', {
+      length: imageData.length,
+      startsWith: imageData.substring(0, 50),
+      type: imageData.startsWith('data:image/') ? 'data-url' : 
+            imageData.startsWith('http') ? 'url' :
+            imageData.startsWith('/') && !imageData.startsWith('/9j/') ? 'path' : 
+            imageData.startsWith('/9j/') ? 'raw-jpeg' : 'unknown',
+      containsInvalidChars: /[^A-Za-z0-9+/=]/.test(imageData.split(',')[1] || imageData)
+    });
+
+    // If it's a URL or path (but not a raw JPEG), return as is
+    if ((imageData.startsWith('http') || imageData.startsWith('/')) && !imageData.startsWith('/9j/')) {
+      return imageData;
+    }
+
+    try {
+      // Create image element
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+
+      // Create canvas
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      if (!ctx) {
+        throw new Error('Could not get canvas context');
+      }
+
+      // Clean base64 data
+      let base64Data = imageData;
+      if (imageData.startsWith('data:image/')) {
+        const [header, base64] = imageData.split(',');
+        if (!base64) {
+          console.error('No base64 data found in data URL');
+          return null;
+        }
+        base64Data = base64;
+      }
+
+      // Clean the base64 data
+      base64Data = base64Data
+        .replace(/[\r\n\t\f\v ]+/g, '') // Remove all whitespace
+        .replace(/[^A-Za-z0-9+/=]/g, '') // Remove invalid characters
+        .replace(/=+$/, ''); // Remove trailing equals
+
+      // Re-add proper padding
+      const padding = base64Data.length % 4;
+      if (padding > 0) {
+        base64Data += '='.repeat(4 - padding);
+      }
+
+      // Verify the cleaned base64 data
+      try {
+        const decoded = atob(base64Data);
+        if (decoded.length === 0) {
+          console.error('Decoded base64 data is empty');
+          return null;
+        }
+      } catch (e) {
+        console.error('Invalid base64 data:', e);
+        return null;
+      }
+
+      // Wait for image to load
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = imageData.startsWith('data:image/') ? imageData : `data:image/jpeg;base64,${base64Data}`;
+      });
+
+      // Calculate dimensions
+      let width = img.width;
+      let height = img.height;
+
+      // Resize if needed (max 800px)
+      const maxSize = 800;
+      if (width > height) {
+        if (width > maxSize) {
+          height = Math.round((height * maxSize) / width);
+          width = maxSize;
+        }
+      } else {
+        if (height > maxSize) {
+          width = Math.round((width * maxSize) / height);
+          height = maxSize;
+        }
+      }
+
+      // Set canvas size
+      canvas.width = width;
+      canvas.height = height;
+
+      // Draw with black background
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Convert to base64
+      return canvas.toDataURL('image/jpeg', 0.85);
+    } catch (error) {
+      console.error('Error formatting image URL:', error);
+      return null;
+    }
+  };
 
   const handleVideoClick = (id: string) => {
     const video = videoRefs.current[id];
@@ -159,7 +268,23 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       }
 
       // Process and enrich the posts
-      let submissionsWithStats = posts.map((post: ApiPost) => {
+      const submissionsWithStats = await Promise.all(posts.map(async (post: ApiPost) => {
+        // Format image URL properly if it's base64 data
+        const imageUrl = await formatImageUrl(post.metadata?.imageData) || 
+                        await formatImageUrl(post.content) || 
+                        `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('No image available')}`;
+
+        // Debug the final URL
+        console.log('Final image URL:', {
+          id: post.id,
+          urlLength: imageUrl.length,
+          urlStart: imageUrl.substring(0, 50),
+          isDataUrl: imageUrl.startsWith('data:image/'),
+          isPlaceholder: imageUrl.includes('placehold.co'),
+          source: imageUrl === await formatImageUrl(post.metadata?.imageData) ? 'metadata' : 
+                 imageUrl === await formatImageUrl(post.content) ? 'content' : 'placeholder'
+        });
+
         const submission: MemeSubmission = {
           id: post.id,
           creator: post.author_address || 'Anonymous',
@@ -169,8 +294,8 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           style: 'viral',
           duration: 30,
           format: post.media_type || 'text/plain',
-          fileUrl: post.metadata?.imageData || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
-          thumbnailUrl: post.metadata?.imageData || `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent(post.content || '')}`,
+          fileUrl: imageUrl,
+          thumbnailUrl: imageUrl,
           txId: post.txid,
           locks: post.amount || 0,
           status: 'minted' as const,
@@ -181,11 +306,12 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           threshold: 1000000000, // 10 BSV threshold
           isTop10Percent: (post.amount || 0) > 1000000000,
           isTop3: (post.amount || 0) > 2000000000,
-          locklikes: []
+          locklikes: [],
+          content: post.content || ''
         };
 
         return submission;
-      });
+      }));
 
       // Apply ranking filters
       submissionsWithStats.sort((a: MemeSubmission, b: MemeSubmission) => {
@@ -198,23 +324,24 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       });
 
       // Apply limit based on filter
+      let filteredSubmissions = submissionsWithStats;
       if (rankingFilter) {
         if (rankingFilter === 'top1') {
-          submissionsWithStats = submissionsWithStats.slice(0, 1);
+          filteredSubmissions = submissionsWithStats.slice(0, 1);
         } else if (rankingFilter === 'top3') {
-          submissionsWithStats = submissionsWithStats.slice(0, 3);
+          filteredSubmissions = submissionsWithStats.slice(0, 3);
         } else if (rankingFilter === 'top10') {
-          submissionsWithStats = submissionsWithStats.slice(0, 10);
+          filteredSubmissions = submissionsWithStats.slice(0, 10);
         }
       }
 
-      setSubmissions(submissionsWithStats);
+      setSubmissions(filteredSubmissions);
 
       // Update stats
-      const total = submissionsWithStats.reduce((sum: number, sub: MemeSubmission) => sum + (sub.totalLocked || 0), 0);
+      const total = filteredSubmissions.reduce((sum: number, sub: MemeSubmission) => sum + (sub.totalLocked || 0), 0);
       onStatsUpdate({
         totalLocked: total,
-        participantCount: submissionsWithStats.length,
+        participantCount: filteredSubmissions.length,
         roundNumber: 1
       });
     } catch (error) {
@@ -232,17 +359,24 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   const renderContent = (submission: MemeSubmission) => {
     if (submission.format?.startsWith('image/')) {
       return (
-        <div className="relative w-full h-full">
+        <div className="relative w-full aspect-square">
           <img
             ref={(el) => el && handleImageLoad(submission.id, el)}
             src={submission.fileUrl}
-            alt={submission.description}
-            className="w-full h-full object-cover cursor-pointer rounded-t-xl"
+            alt={submission.description || 'Post image'}
+            className="w-full h-full object-contain bg-[#1A1B23] cursor-pointer rounded-t-xl"
             onClick={() => handleImageClick(submission.fileUrl)}
             onError={(e) => {
+              console.error('Image load error for submission:', {
+                id: submission.id,
+                format: submission.format,
+                urlLength: submission.fileUrl.length,
+                urlStart: submission.fileUrl.substring(0, 50)
+              });
               const img = e.target as HTMLImageElement;
               img.src = `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('Failed to load image')}`;
             }}
+            loading="lazy"
           />
           <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity duration-300 bg-black/50">
             <FiMaximize2 className="w-8 h-8 text-white" />
@@ -423,4 +557,4 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   );
 };
 
-export default MemeSubmissionGrid;
+export { MemeSubmissionGrid as default };

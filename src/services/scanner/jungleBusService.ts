@@ -465,11 +465,21 @@ const onPublish = async function(tx: Transaction) {
                     image_source: imageData?.source || null
                 },
                 update: {
+                    content,
+                    author_address,
+                    media_type: imageData ? imageData.type : contentType,
                     block_height: fullTx.block_height || 0,
+                    amount: mapData.lockAmount ? parseInt(mapData.lockAmount) : undefined,
+                    unlock_height: mapData.unlockHeight ? parseInt(mapData.unlockHeight) : undefined,
+                    description: content,
+                    created_at: new Date(timestamp),
+                    tags: Array.isArray(tags) ? tags : JSON.parse(typeof tags === 'string' ? tags : '["lockdapp"]'),
                     metadata: {
                         ...mapData,
                         extractedImage: !!imageData
                     },
+                    is_locked: !!mapData.unlockHeight,
+                    lock_duration: mapData.lockDuration ? parseInt(mapData.lockDuration) : undefined,
                     raw_image_data: imageData?.data || null,
                     image_format: imageData ? imageData.type.split('/')[1] : null,
                     image_source: imageData?.source || null
@@ -484,13 +494,10 @@ const onPublish = async function(tx: Transaction) {
                 imageSource: post.image_source,
                 mediaType: post.media_type
             });
-        } catch (dbError: any) {
-            console.error('Database error:', {
-                code: dbError.code,
-                message: dbError.message,
-                txid: fullTx.id
-            });
-            throw dbError;
+            return post;
+        } catch (error) {
+            console.error('Error creating/updating post:', error);
+            throw error;
         }
     } catch (error) {
         console.error('Error processing transaction:', error);
