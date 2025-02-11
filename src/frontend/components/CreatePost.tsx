@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState } from 'react';
 import { FiSend, FiX, FiImage, FiTrash2, FiTwitter, FiMessageCircle, FiLoader, FiBarChart2, FiTag, FiLock } from 'react-icons/fi';
-import { createPost } from '../services/post.service';
+import { createPost, createVoteOptionPost } from '../services/post.service';
 import { getLinkPreview, LinkPreviewData } from '../services/link-preview.service';
 import { toast } from 'react-hot-toast';
 import { useWallet } from '../providers/WalletProvider';
@@ -125,25 +125,42 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
     setIsSubmitting(true);
     try {
       if (mode === 'poll') {
-        const pollLockOptions: PollLockOptions = {
-          isPoll: true,
-          options: pollOptions.map(opt => ({
-            text: opt.text,
-            lockDuration: opt.lockDuration,
-            lockAmount: opt.lockAmount
-          }))
-        };
-
-        await createPost(
+        // First create the main vote question post
+        const questionPost = await createPost(
           content,
           bsvAddress,
           wallet,
-          undefined, // no image for polls
-          undefined, // no comment for polls
-          selectedTags,
-          undefined, // no prediction market data needed
-          pollLockOptions as any // temporary type assertion until post.service is updated
+          undefined,
+          undefined,
+          [...selectedTags, 'vote_question'],
+          undefined,
+          {
+            isLocked: false,
+            isPoll: true,
+            options: pollOptions.map(opt => ({
+              text: opt.text,
+              lockDuration: opt.lockDuration,
+              lockAmount: opt.lockAmount
+            }))
+          }
         );
+
+        // Then create individual posts for each option
+        const optionPromises = pollOptions.map(async (option) => {
+          return createVoteOptionPost(
+            {
+              questionTxid: questionPost.txid,
+              optionText: option.text,
+              lockDuration: option.lockDuration,
+              lockAmount: option.lockAmount
+            },
+            bsvAddress,
+            wallet
+          );
+        });
+
+        // Wait for all option posts to be created
+        await Promise.all(optionPromises);
       } else {
         const standardLockOptions: StandardLockOptions | undefined = isLocked ? {
           isLocked: true,
@@ -156,7 +173,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
           bsvAddress,
           wallet,
           images[0]?.file,
-          undefined, // removed comment parameter
+          undefined,
           selectedTags,
           predictionMarketData || undefined,
           standardLockOptions

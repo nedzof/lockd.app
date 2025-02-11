@@ -185,6 +185,8 @@ interface MapData {
   lockDuration?: string;
   lockAmount?: string;
   unlockHeight?: string;
+  voteOptions?: string;
+  isVoteQuestion?: string;
 }
 
 interface StringifiedMapData {
@@ -197,6 +199,8 @@ interface StringifiedMapData {
   tags: string;
   prediction_market_data?: string;
   lock_data?: string;
+  voteOptions?: string;
+  isVoteQuestion?: string;
 }
 
 interface TransactionResponse {
@@ -220,6 +224,82 @@ interface MetadataObject {
   protocol?: string;
 }
 
+interface VoteOptionData {
+  questionTxid: string;
+  optionText: string;
+  lockDuration: number;
+  lockAmount: number;
+}
+
+interface VotePostData extends PostCreationData {
+  isVoteQuestion: boolean;
+  voteTxid?: string;
+  voteOptionIndex?: number;
+  totalOptions?: number;
+}
+
+export const createVoteOptionPost = async (
+  optionData: VoteOptionData,
+  authorAddress: string,
+  wallet: YoursWallet,
+): Promise<Post> => {
+  const mapData: MapData = {
+    app: 'lockd.app',
+    type: 'vote_option',
+    content: optionData.optionText,
+    timestamp: new Date().toISOString().toLowerCase(),
+    contentType: 'text/plain',
+    version: '1.0.0',
+    tags: ['lockdapp', 'vote_option'],
+    lockDuration: optionData.lockDuration.toString(),
+    lockAmount: optionData.lockAmount.toString(),
+    voteOptions: JSON.stringify({
+      questionTxid: optionData.questionTxid,
+      optionText: optionData.optionText,
+      isVoteOption: 'true'
+    })
+  };
+
+  // Convert to Record<string, string> for wallet API
+  const stringifiedMapData: Record<string, string> = {
+    ...mapData,
+    tags: JSON.stringify(mapData.tags)
+  };
+
+  // Create inscription transaction using MAP protocol
+  const response = await wallet.inscribe([{
+    address: authorAddress,
+    base64Data: btoa(optionData.optionText),
+    mimeType: 'text/plain',
+    map: stringifiedMapData,
+    satoshis: optionData.lockAmount
+  }]);
+
+  // Convert response to expected format
+  const inscriptionTx = {
+    id: (response as any).txid || (response as any).id,
+    tx: (response as any).tx
+  };
+
+  if (!inscriptionTx?.id) {
+    throw new Error('Failed to create vote option - no transaction ID returned');
+  }
+
+  // Create the post object
+  const post: Post = {
+    txid: inscriptionTx.id,
+    content: optionData.optionText,
+    author_address: authorAddress,
+    created_at: new Date().toISOString(),
+    tags: ['vote_option'],
+    isLocked: true,
+    lockDuration: optionData.lockDuration,
+    lockAmount: optionData.lockAmount
+  };
+
+  return post;
+};
+
 export const createPost = async (
   content: string, 
   authorAddress: string, 
@@ -228,7 +308,7 @@ export const createPost = async (
   description?: string,
   tags?: string[],
   predictionMarketData?: PredictionMarketData,
-  lockData?: { isLocked: boolean; duration?: number; amount?: number }
+  lockData?: { isLocked: boolean; duration?: number; amount?: number; isPoll?: boolean; options?: Array<{ text: string; lockDuration: number; lockAmount: number }> }
 ): Promise<Post> => {
   try {
     console.log('Creating post with:', { 
@@ -407,7 +487,7 @@ export const createPost = async (
         // Create MAP data with tags, prediction market data, and lock data
         const mapData: MapData = {
           app: 'lockd.app',
-          type: predictionMarketData ? 'prediction' : 'text',
+          type: predictionMarketData ? 'prediction' : (lockData?.isPoll ? 'vote' : 'text'),
           content: content,
           timestamp: new Date().toISOString().toLowerCase(),
           contentType: 'text/plain',
@@ -420,6 +500,14 @@ export const createPost = async (
             lockDuration: lockData.duration.toString(),
             lockAmount: (lockData.amount || 1000).toString(),
             unlockHeight: (currentBlockHeight + lockData.duration).toString()
+          }),
+          ...(lockData?.isPoll && {
+            isVoteQuestion: 'true',
+            voteOptions: JSON.stringify(lockData.options?.map(opt => ({
+              text: opt.text,
+              lockDuration: opt.lockDuration,
+              lockAmount: opt.lockAmount
+            })))
           })
         };
 
