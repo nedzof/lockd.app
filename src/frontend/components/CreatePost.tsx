@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useState } from 'react';
 import { FiSend, FiX, FiImage, FiTrash2, FiTwitter, FiMessageCircle, FiLoader, FiBarChart2, FiTag, FiLock } from 'react-icons/fi';
 import { createPost } from '../services/post.service';
+import { getLinkPreview, LinkPreviewData } from '../services/link-preview.service';
 import { toast } from 'react-hot-toast';
 import { useWallet } from '../providers/WalletProvider';
 import ImageUploading, { ImageListType } from 'react-images-uploading';
@@ -58,17 +59,19 @@ interface PollLockOptions {
 
 type LockOptions = StandardLockOptions | PollLockOptions;
 
+interface LinkPreview {
+  url: string;
+  title?: string;
+  description?: string;
+  image?: string;
+}
+
 export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostCreated }) => {
   const { bsvAddress, wallet } = useWallet();
   const [content, setContent] = useState('');
-  const [comment, setComment] = useState('');
-  const [showComment, setShowComment] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [images, setImages] = useState<ImageListType>([]);
-  const [showImportOptions, setShowImportOptions] = useState(false);
-  const [importUrl, setImportUrl] = useState('');
-  const [importType, setImportType] = useState<'x' | 'telegram' | null>(null);
-  const [mode, setMode] = useState<'create' | 'import' | 'poll'>('create');
+  const [mode, setMode] = useState<'create' | 'poll'>('create');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [predictionMarketData, setPredictionMarketData] = useState<PredictionMarketData | null>(null);
@@ -77,6 +80,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
   const [lockDuration, setLockDuration] = useState<number>(1); // Default 1 block
   const [lockAmount, setLockAmount] = useState<number>(1000); // Default 1000 sats
   const [pollOptions, setPollOptions] = useState<PollOption[]>([]);
+  const [linkPreview, setLinkPreview] = useState<LinkPreviewData | null>(null);
 
   const onImagesChange = (imageList: ImageListType) => {
     setImages(imageList);
@@ -88,40 +92,6 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
         ? prev.filter(t => t !== tag)
         : [...prev, tag]
     );
-  };
-
-  const handleImport = async () => {
-    if (!importUrl || !importType) return;
-
-    setIsSubmitting(true);
-    try {
-      let importedContent = '';
-      let predictionData: PredictionMarketData | null = null;
-
-      if (importType === 'x') {
-        // Extract X post ID and fetch content
-        const tweetId = importUrl.split('/').pop();
-        // You would implement the actual Twitter API call here
-        importedContent = `Imported from X: ${importUrl}`;
-      } else if (importType === 'telegram') {
-        // Extract Telegram post info and fetch content
-        importedContent = `Imported from Telegram: ${importUrl}`;
-      }
-
-      if (mode !== 'poll') {
-        setContent(importedContent);
-      }
-      setImportUrl('');
-      setImportType(null);
-      setShowImportOptions(false);
-      toast.success(`Successfully imported from ${importType === 'x' ? 'X' : 'Telegram'}`);
-    } catch (error) {
-      console.error('Failed to import post:', error);
-      toast.error('Failed to import post. Please try again.');
-      setPredictionMarketData(null);
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
   const handleSubmit = async () => {
@@ -186,7 +156,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
           bsvAddress,
           wallet,
           images[0]?.file,
-          comment,
+          undefined, // removed comment parameter
           selectedTags,
           predictionMarketData || undefined,
           standardLockOptions
@@ -194,7 +164,6 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
       }
 
       setContent('');
-      setComment('');
       setImages([]);
       setSelectedTags([]);
       setPredictionMarketData(null);
@@ -234,6 +203,29 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
     setPollOptions(prev => prev.filter((_, i) => i !== index));
   };
 
+  // Function to extract URLs from text
+  const extractUrls = (text: string): string[] => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    return text.match(urlRegex) || [];
+  };
+
+  // Handle content change with link detection
+  const handleContentChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newContent = e.target.value;
+    setContent(newContent);
+    
+    // Extract URLs and fetch preview for the first one
+    const urls = extractUrls(newContent);
+    if (urls.length > 0 && (!linkPreview || linkPreview.url !== urls[0])) {
+      const preview = await getLinkPreview(urls[0]);
+      if (preview) {
+        setLinkPreview(preview);
+      }
+    } else if (urls.length === 0 && linkPreview) {
+      setLinkPreview(null);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -243,7 +235,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
         <div className="flex flex-col border-b border-gray-800/30">
           <div className="flex items-center justify-between p-6">
             <h2 className="text-xl font-semibold text-white">
-              {mode === 'create' ? 'Create Post' : mode === 'poll' ? 'Create Poll' : 'Import Post'}
+              {mode === 'create' ? 'Create Post' : 'Create Vote'}
             </h2>
             <button
               onClick={onClose}
@@ -254,16 +246,13 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
           </div>
           
           {/* Mode Toggle */}
-          <div className="flex px-6 pb-4">
+          <div className="flex justify-center px-6 pb-4">
             <div className="flex p-1 bg-[#1A1B23] rounded-lg">
               <button
                 onClick={() => {
                   setMode('create');
-                  setShowImportOptions(false);
-                  setImportType(null);
-                  setImportUrl('');
                 }}
-                className={`px-4 py-2 rounded-md transition-all duration-200 ${
+                className={`px-6 py-2 rounded-md transition-all duration-200 ${
                   mode === 'create'
                     ? 'bg-[#00ffa3] text-black font-medium'
                     : 'text-gray-400 hover:text-white'
@@ -274,28 +263,14 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
               <button
                 onClick={() => {
                   setMode('poll');
-                  setShowImportOptions(true);
                 }}
-                className={`px-4 py-2 rounded-md transition-all duration-200 ${
+                className={`px-6 py-2 rounded-md transition-all duration-200 ${
                   mode === 'poll'
                     ? 'bg-[#00ffa3] text-black font-medium'
                     : 'text-gray-400 hover:text-white'
                 }`}
               >
-                Create Poll
-              </button>
-              <button
-                onClick={() => {
-                  setMode('import');
-                  setShowImportOptions(true);
-                }}
-                className={`px-4 py-2 rounded-md transition-all duration-200 ${
-                  mode === 'import'
-                    ? 'bg-[#00ffa3] text-black font-medium'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                Import
+                Create Vote
               </button>
             </div>
           </div>
@@ -303,60 +278,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
 
         {/* Content */}
         <div className="p-6 space-y-4">
-          {mode === 'import' ? (
-            <div className="space-y-4 p-4 bg-[#1A1B23]/50 rounded-lg border border-gray-800/30">
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => setImportType('x')}
-                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg transition-colors ${
-                    importType === 'x'
-                      ? 'bg-[#00ffa3]/10 text-[#00ffa3]'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  <FiTwitter className="w-4 h-4" />
-                  <span>X (Twitter)</span>
-                </button>
-                <button
-                  onClick={() => setImportType('telegram')}
-                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg transition-colors ${
-                    importType === 'telegram'
-                      ? 'bg-[#00ffa3]/10 text-[#00ffa3]'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  <FiMessageCircle className="w-4 h-4" />
-                  <span>Telegram</span>
-                </button>
-              </div>
-
-              {importType && (
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    value={importUrl}
-                    onChange={(e) => setImportUrl(e.target.value)}
-                    placeholder={`Enter ${
-                      importType === 'x' 
-                        ? 'X' 
-                        : 'Telegram'
-                    } post URL`}
-                    className="w-full px-4 py-2 bg-[#1A1B23] border border-gray-800/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#00ffa3]/30"
-                  />
-                  <button
-                    onClick={handleImport}
-                    disabled={!importUrl || isSubmitting}
-                    className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-[#00ffa3]/10 text-[#00ffa3] rounded-lg hover:bg-[#00ffa3]/20 transition-colors disabled:opacity-50"
-                  >
-                    <span>
-                      Import from {importType === 'x' ? 'X' : 'Telegram'}
-                    </span>
-                    {isSubmitting && <FiLoader className="w-4 h-4 animate-spin" />}
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : mode === 'poll' ? (
+          {mode === 'poll' ? (
             <div className="space-y-6">
               {/* Poll Title/Question */}
               <textarea
@@ -366,80 +288,6 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
                 className="w-full px-4 py-3 text-white bg-[#1A1B23] border border-gray-800 rounded-lg focus:outline-none focus:border-[#00ffa3] resize-none"
                 disabled={isSubmitting}
               />
-
-              {/* Polymarket Import */}
-              <div className="p-4 bg-[#1A1B23]/50 rounded-lg border border-gray-800/30">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="text"
-                    value={importUrl}
-                    onChange={(e) => setImportUrl(e.target.value)}
-                    placeholder="Enter Polymarket URL to import prediction"
-                    className="flex-1 px-4 py-2 bg-[#1A1B23] border border-gray-800/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#00ffa3]/30"
-                  />
-                  <button
-                    onClick={async () => {
-                      try {
-                        setIsSubmitting(true);
-                        const url = new URL(importUrl);
-                        
-                        // Mock implementation - you would need to implement actual Polymarket API integration
-                        const endDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
-                        const durationInDays = Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                        const durationInBlocks = durationInDays * 144; // ~144 blocks per day
-
-                        // Mock data - replace with actual API call
-                        const newPredictionData: PredictionMarketData = {
-                          source: 'Polymarket',
-                          prediction: 'Will BTC reach $100k by end of 2024?', // Example prediction
-                          endDate,
-                          probability: 0.5,
-                          options: ['Yes', 'No'],
-                          lockDurationBlocks: durationInBlocks
-                        };
-
-                        // Set the poll question
-                        setContent(newPredictionData.prediction);
-
-                        // Create poll options with the imported data
-                        const newOptions = newPredictionData.options?.map(opt => ({
-                          text: opt,
-                          lockAmount: 1000, // Default amount
-                          lockDuration: newPredictionData.lockDurationBlocks || 144
-                        })) || [];
-
-                        // Set the options
-                        setPollOptions(newOptions);
-
-                        // Clear the import URL
-                        setImportUrl('');
-
-                        // Show success message
-                        toast.success('Successfully imported from Polymarket');
-
-                        // Set prediction market data for reference
-                        setPredictionMarketData(newPredictionData);
-                      } catch (error) {
-                        console.error('Failed to import from Polymarket:', error);
-                        toast.error('Failed to import from Polymarket. Please check the URL and try again.');
-                      } finally {
-                        setIsSubmitting(false);
-                      }
-                    }}
-                    disabled={!importUrl || isSubmitting}
-                    className="flex items-center space-x-2 px-4 py-2 bg-[#00ffa3]/10 text-[#00ffa3] rounded-lg hover:bg-[#00ffa3]/20 transition-colors disabled:opacity-50"
-                  >
-                    <span>Import</span>
-                    {isSubmitting && <FiLoader className="w-4 h-4 animate-spin" />}
-                  </button>
-                </div>
-                {predictionMarketData && (
-                  <div className="mt-4 text-sm text-gray-400">
-                    <p>Imported from Polymarket</p>
-                    <p>Ends in: {(predictionMarketData.lockDurationBlocks || 0) / 144} days</p>
-                  </div>
-                )}
-              </div>
 
               {/* Poll Options */}
               <div className="space-y-4">
@@ -538,12 +386,54 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
               {/* Text content field */}
               <textarea
                 value={content}
-                onChange={(e) => setContent(e.target.value)}
+                onChange={handleContentChange}
                 placeholder={images.length > 0 ? "Add a description (optional)..." : "What's on your mind?"}
                 className="w-full h-40 px-4 py-3 text-white bg-[#1A1B23] border border-gray-800 rounded-lg focus:outline-none focus:border-[#00ffa3] resize-none"
                 disabled={isSubmitting}
               />
               
+              {/* Link Preview */}
+              {linkPreview && (
+                <div className="mt-2 p-4 bg-[#1A1B23] border border-gray-800 rounded-lg">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2">
+                        {linkPreview.siteName && (
+                          <span className="text-sm text-gray-400">{linkPreview.siteName}</span>
+                        )}
+                        <h3 className="text-white font-medium">{linkPreview.title}</h3>
+                      </div>
+                      {linkPreview.description && (
+                        <p className="mt-1 text-sm text-gray-400 line-clamp-2">{linkPreview.description}</p>
+                      )}
+                      <a 
+                        href={linkPreview.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="mt-2 text-xs text-[#00ffa3] hover:underline truncate block"
+                      >
+                        {linkPreview.url}
+                      </a>
+                    </div>
+                    {linkPreview.image && (
+                      <div className="ml-4 flex-shrink-0">
+                        <img 
+                          src={linkPreview.image} 
+                          alt="Link preview" 
+                          className="w-20 h-20 object-cover rounded-lg"
+                        />
+                      </div>
+                    )}
+                    <button
+                      onClick={() => setLinkPreview(null)}
+                      className="ml-2 p-1 text-gray-400 hover:text-white"
+                    >
+                      <FiX className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Tag Selector */}
               <div className="space-y-2">
                 <button
@@ -649,51 +539,6 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
                   {content.length} characters
                 </span>
               </div>
-
-              {/* Comment Section Toggle */}
-              <div className="flex items-center justify-between pt-4 border-t border-gray-800/30">
-                <button
-                  onClick={() => setShowComment(!showComment)}
-                  className="flex items-center space-x-2 text-gray-400 hover:text-[#00ffa3] transition-colors"
-                >
-                  <span className="text-sm">
-                    {showComment ? 'Hide Comment' : 'Add Comment'}
-                  </span>
-                  <svg
-                    className={`w-4 h-4 transform transition-transform ${
-                      showComment ? 'rotate-180' : ''
-                    }`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 9l-7 7-7-7"
-                    />
-                  </svg>
-                </button>
-                {comment && (
-                  <span className="text-xs text-gray-500">
-                    {comment.length} characters
-                  </span>
-                )}
-              </div>
-
-              {/* Comment Input */}
-              {showComment && (
-                <div className="space-y-2">
-                  <textarea
-                    value={comment}
-                    onChange={(e) => setComment(e.target.value)}
-                    placeholder="Add your comment here..."
-                    className="w-full h-24 px-4 py-3 text-white bg-[#1A1B23] border border-gray-800 rounded-lg focus:outline-none focus:border-[#00ffa3] resize-none text-sm"
-                    disabled={isSubmitting}
-                  />
-                </div>
-              )}
             </>
           )}
         </div>
@@ -715,7 +560,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
             <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl transition-all duration-300"></div>
             <div className="absolute inset-0 bg-gradient-to-r from-[#00ff9d] to-[#00ffa3] rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
             <div className="relative flex items-center space-x-2 text-black">
-              <span>{isSubmitting ? 'Creating...' : mode === 'create' ? 'Create Post' : mode === 'poll' ? 'Create Poll' : 'Import Post'}</span>
+              <span>{isSubmitting ? 'Creating...' : mode === 'create' ? 'Create Post' : 'Create Vote'}</span>
               <FiSend className={`w-4 h-4 transition-all duration-300 ${isSubmitting ? 'animate-pulse' : 'group-hover:rotate-45'}`} />
             </div>
             <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-xl"></div>
