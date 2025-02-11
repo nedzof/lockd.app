@@ -33,7 +33,7 @@ async function processTransaction(tx) {
             type: 'info',
             message: 'Processing transaction',
             data: {
-                id: tx.id,
+                id: tx.transaction.id,
                 timestamp: new Date().toISOString()
             }
         });
@@ -44,48 +44,44 @@ async function processTransaction(tx) {
             parentPort.postMessage({
                 type: 'warning',
                 message: 'No parsed transaction data available',
-                data: { txid: tx.id }
+                data: { txid: tx.transaction.id }
             });
             return;
         }
 
-        // Get author address from transaction outputs
-        const authorAddress = parsedTx.metadata?.authorAddress;
-        if (!authorAddress) {
-            parentPort.postMessage({
-                type: 'warning',
-                message: 'No author address found',
-                data: { txid: tx.id }
-            });
-            return;
-        }
+        // Log the parsed transaction for debugging
+        parentPort.postMessage({
+            type: 'info',
+            message: 'Parsed transaction data',
+            data: parsedTx
+        });
 
         // Check if transaction already exists
         const existingTx = await prisma.voteQuestion.findUnique({
-            where: { txid: tx.id }
+            where: { txid: parsedTx.transaction_id }
         });
 
         if (existingTx) {
             parentPort.postMessage({
                 type: 'info',
                 message: 'Transaction already exists',
-                data: { txid: tx.id }
+                data: { txid: parsedTx.transaction_id }
             });
             return;
         }
 
         // Process the transaction in a database transaction
         const result = await prisma.$transaction(async (prisma) => {
-            // Create vote question record if this is a vote question
+            // Create vote question if present
             if (parsedTx.vote_question) {
                 const voteQuestion = await prisma.voteQuestion.create({
                     data: {
-                        txid: tx.id,
+                        txid: parsedTx.transaction_id,
                         content: parsedTx.vote_question,
-                        author_address: authorAddress,
+                        author_address: tx.transaction.author_address || 'unknown',
                         created_at: new Date(parsedTx.timestamp * 1000),
-                        options: parsedTx.vote_options,
-                        tags: parsedTx.metadata.tags
+                        options: parsedTx.vote_options || [],
+                        tags: parsedTx.metadata.tags || []
                     }
                 });
 
@@ -100,52 +96,99 @@ async function processTransaction(tx) {
                     }
                 });
 
-                return voteQuestion;
-            }
+                // Create vote options if present
+                if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
+                    const voteOptions = await Promise.all(parsedTx.vote_options.map(option =>
+                        prisma.voteOption.create({
+                            data: {
+                                txid: parsedTx.transaction_id + '_' + option.option, // Create unique txid for option
+                                content: option.option,
+                                author_address: tx.transaction.author_address || 'unknown',
+                                created_at: new Date(parsedTx.timestamp * 1000),
+                                lock_amount: option.lockAmount,
+                                lock_duration: option.lockDuration,
+                                tags: parsedTx.metadata.tags || [],
+                                question_txid: voteQuestion.txid
+                            }
+                        })
+                    ));
 
-            // Create vote options if present
-            if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
-                const voteOptions = await Promise.all(parsedTx.vote_options.map(option =>
-                    prisma.voteOption.create({
+                    parentPort.postMessage({
+                        type: 'info',
+                        message: 'Created vote options',
                         data: {
-                            txid: tx.id,
-                            content: option.option,
-                            author_address: authorAddress,
-                            created_at: new Date(parsedTx.timestamp * 1000),
-                            lock_amount: option.lockAmount,
-                            lock_duration: option.lockDuration,
-                            tags: parsedTx.metadata.tags,
-                            question_txid: tx.id // This should be the question's txid
+                            questionId: voteQuestion.id,
+                            options: voteOptions.map(opt => ({
+                                id: opt.id,
+                                content: opt.content,
+                                lockAmount: opt.lock_amount,
+                                lockDuration: opt.lock_duration
+                            }))
                         }
-                    })
-                ));
+                    });
+                }
 
-                parentPort.postMessage({
-                    type: 'info',
-                    message: 'Created vote options',
+                return {
+                    question: voteQuestion,
+                    type: 'vote_question'
+                };
+            }
+            // If no vote question but has options, it might be a vote cast
+            else if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
+                const voteOption = parsedTx.vote_options[0]; // Take the first option as the vote
+                const voteCast = await prisma.voteOption.create({
                     data: {
-                        options: voteOptions.map(opt => ({
-                            id: opt.id,
-                            content: opt.content,
-                            lockAmount: opt.lock_amount,
-                            lockDuration: opt.lock_duration
-                        }))
+                        txid: parsedTx.transaction_id,
+                        content: voteOption.option,
+                        author_address: tx.transaction.author_address || 'unknown',
+                        created_at: new Date(parsedTx.timestamp * 1000),
+                        lock_amount: voteOption.lockAmount,
+                        lock_duration: voteOption.lockDuration,
+                        tags: parsedTx.metadata.tags || [],
+                        question_txid: tx.transaction.id // This should be the original question's txid
                     }
                 });
 
-                return voteOptions;
+                parentPort.postMessage({
+                    type: 'info',
+                    message: 'Created vote cast',
+                    data: {
+                        id: voteCast.id,
+                        content: voteCast.content,
+                        lockAmount: voteCast.lock_amount,
+                        lockDuration: voteCast.lock_duration
+                    }
+                });
+
+                return {
+                    voteCast,
+                    type: 'vote_cast'
+                };
             }
+
+            return null;
         });
 
-        parentPort.postMessage({
-            type: 'success',
-            message: 'Transaction processed successfully',
-            data: {
-                txid: tx.id,
-                timestamp: new Date().toISOString(),
-                result
-            }
-        });
+        if (result) {
+            parentPort.postMessage({
+                type: 'success',
+                message: 'Transaction processed successfully',
+                data: {
+                    txid: parsedTx.transaction_id,
+                    type: result.type,
+                    timestamp: new Date().toISOString(),
+                    result
+                }
+            });
+        } else {
+            parentPort.postMessage({
+                type: 'warning',
+                message: 'Transaction did not contain vote data',
+                data: {
+                    txid: parsedTx.transaction_id
+                }
+            });
+        }
 
     } catch (error) {
         if (error?.code === 'P2002') {
@@ -153,7 +196,7 @@ async function processTransaction(tx) {
                 type: 'warning',
                 message: 'Duplicate transaction',
                 data: {
-                    txid: tx.id,
+                    txid: tx.transaction.id,
                     error: 'P2002'
                 }
             });
@@ -162,7 +205,7 @@ async function processTransaction(tx) {
                 type: 'error',
                 message: 'Error processing transaction',
                 data: {
-                    txid: tx.id,
+                    txid: tx.transaction.id,
                     error: error instanceof Error ? error.message : String(error)
                 }
             });
