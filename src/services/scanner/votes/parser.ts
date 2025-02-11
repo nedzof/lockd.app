@@ -79,6 +79,18 @@ export class TransactionParser {
     }
   }
 
+  private static extractAuthorAddress(tx: Transaction): string | null {
+    // Try to get the author address from the last output's scriptPubKey address
+    if (tx.vout && tx.vout.length > 0) {
+      const lastOutput = tx.vout[tx.vout.length - 1];
+      if (lastOutput.scriptPubKey?.addresses && lastOutput.scriptPubKey.addresses.length > 0) {
+        return lastOutput.scriptPubKey.addresses[0];
+      }
+    }
+    
+    return null;
+  }
+
   public static parseTransaction(tx: Transaction): StructuredTransaction {
     const structured: StructuredTransaction = {
       transaction_id: tx.txid,
@@ -92,7 +104,8 @@ export class TransactionParser {
         app: 'lockd.app',
         type: 'vote',
         severity: 'info',
-        tags: ['lockdapp', 'vote_question']
+        tags: ['lockdapp', 'vote_question'],
+        authorAddress: this.extractAuthorAddress(tx)
       }
     };
 

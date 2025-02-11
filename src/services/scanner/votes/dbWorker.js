@@ -38,8 +38,16 @@ async function processTransaction(message) {
             }
         });
 
-        // Log the parsed transaction data
-        parentPort.postMessage({
+        // Log raw transaction data for debugging
+        console.log('Raw transaction data:', {
+            id: message.transaction.id,
+            inputs: message.transaction.vin,
+            outputs: message.transaction.vout,
+            parsedTransaction: message.parsedTransaction
+        });
+
+        // Log parsed transaction data
+        console.log('Database worker message:', {
             type: 'debug',
             message: 'Parsed transaction data',
             data: message.parsedTransaction
@@ -215,7 +223,121 @@ async function processTransaction(message) {
 
 // Listen for messages from the main thread
 parentPort.on('message', async (message) => {
+    console.log('Database worker message:', {
+        type: 'info',
+        message: 'Processing transaction',
+        data: {
+            id: message.transaction.id,
+            timestamp: new Date().toISOString()
+        }
+    });
+
+    // Log raw transaction data for debugging
+    console.log('Raw transaction data:', {
+        id: message.transaction.id,
+        inputs: message.transaction.vin,
+        outputs: message.transaction.vout,
+        parsedTransaction: message.parsedTransaction
+    });
+
     if (message.type === 'process_transaction') {
-        await processTransaction(message);
+        try {
+            const parsedTx = message.parsedTransaction;
+            
+            // Log the parsed transaction data
+            console.log('Database worker message:', {
+                type: 'debug',
+                message: 'Parsed transaction data',
+                data: parsedTx
+            });
+
+            // Check if we have an author address
+            if (!parsedTx.metadata.authorAddress) {
+                console.log('Database worker message:', {
+                    type: 'warning',
+                    message: 'No author address found',
+                    data: {
+                        txid: parsedTx.transaction_id
+                    }
+                });
+                return;
+            }
+
+            // Create author address record if it doesn't exist
+            const authorAddress = await prisma.authorAddress.upsert({
+                where: { address: parsedTx.metadata.authorAddress },
+                update: {},
+                create: { address: parsedTx.metadata.authorAddress }
+            });
+
+            // Create vote question record
+            if (parsedTx.vote_question) {
+                const voteQuestion = await prisma.voteQuestion.create({
+                    data: {
+                        transaction_id: parsedTx.transaction_id,
+                        block_height: parsedTx.block_height,
+                        block_hash: parsedTx.block_hash,
+                        created_at: new Date(parsedTx.timestamp * 1000),
+                        question: parsedTx.vote_question,
+                        author_address_id: authorAddress.id,
+                        options: parsedTx.vote_options,
+                        tags: parsedTx.metadata.tags
+                    }
+                });
+
+                console.log('Database worker message:', {
+                    type: 'info',
+                    message: 'Created vote question',
+                    data: {
+                        id: voteQuestion.id,
+                        question: voteQuestion.question
+                    }
+                });
+            }
+
+            // Create vote options if present
+            if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
+                for (const option of parsedTx.vote_options) {
+                    const voteOption = await prisma.voteOption.create({
+                        data: {
+                            transaction_id: parsedTx.transaction_id,
+                            block_height: parsedTx.block_height,
+                            block_hash: parsedTx.block_hash,
+                            created_at: new Date(parsedTx.timestamp * 1000),
+                            option: option.option,
+                            lock_amount: option.lockAmount,
+                            lock_duration: option.lockDuration,
+                            author_address_id: authorAddress.id
+                        }
+                    });
+
+                    console.log('Database worker message:', {
+                        type: 'info',
+                        message: 'Created vote option',
+                        data: {
+                            id: voteOption.id,
+                            option: voteOption.option
+                        }
+                    });
+                }
+            }
+
+            console.log('Database worker message:', {
+                type: 'info',
+                message: 'Successfully processed transaction',
+                data: {
+                    txid: parsedTx.transaction_id
+                }
+            });
+        } catch (error) {
+            console.error('Database worker message:', {
+                type: 'error',
+                message: 'Error processing transaction',
+                data: {
+                    error: error.message,
+                    stack: error.stack
+                }
+            });
+        }
     }
 }); 

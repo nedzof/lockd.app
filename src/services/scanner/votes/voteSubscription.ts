@@ -88,7 +88,7 @@ const onPublish = async function(tx: JungleBusTransaction) {
         // Send parsed transaction to worker for processing
         dbWorker.postMessage({ 
             type: 'process_transaction', 
-            transaction: tx,
+            transaction: fullTx,
             parsedTransaction: parsedTx 
         });
     } catch (error) {
@@ -126,7 +126,7 @@ const onMempool = async function(tx: JungleBusTransaction) {
         // Send parsed transaction to worker for processing
         dbWorker.postMessage({ 
             type: 'process_transaction', 
-            transaction: tx,
+            transaction: fullTx,
             parsedTransaction: parsedTx 
         });
     } catch (error) {

@@ -67,8 +67,11 @@ export interface TransactionInput {
   scriptSig: {
     hex: string;
     asm: string;
+    addresses?: string[];
   };
   sequence: number;
+  addresses?: string[];
+  addr?: string;
 }
 
 export interface Transaction {
@@ -107,6 +110,7 @@ export interface StructuredTransaction {
     type: string;
     severity: string;
     tags: string[];
+    authorAddress?: string | null;
   };
 }
 
