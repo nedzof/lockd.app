@@ -241,29 +241,43 @@ export const createPost = async (
         if (!isAuthenticated) {
             throw new Error(`Authentication failed: ${error}`);
         }
-        
-        // Convert address to proper format and create instance
-        const addressObj = new bsv.Address(authorAddress);
-        const instance = new OrdiNFTP2PKH(Addr(addressObj.toByteString()))
-        await instance.connect(signer)
 
-        console.log("Creating inscription with parameters:", {
-          contentLength: b64.length,
-          contentType: imageFile.type,
-          receiverAddress: authorAddress,
-          satoshis: 1000000
-        });
+        // Create metadata object
+        const metadata = {
+          app: 'lockd.app',
+          type: 'image',
+          description: description || content || 'Image inscription',
+          tags: ['lockdapp', ...(tags || [])],
+          timestamp: new Date().toISOString(),
+          version: '1.0.0',
+          lock_data: lockData?.isLocked && currentBlockHeight && lockData.duration ? {
+            isLocked: true,
+            duration: lockData.duration,
+            amount: lockData.amount || 1000,
+            unlockHeight: currentBlockHeight + lockData.duration
+          } : undefined
+        };
 
-        // Create inscription transaction using scrypt-ord - directly use base64 data
+        // Create a multipart inscription with image and metadata
+        const boundary = '---lockdapp-boundary---';
+        const multipartData = [
+          `--${boundary}`,
+          'Content-Type: application/json',
+          '',
+          JSON.stringify(metadata, null, 2),
+          `--${boundary}`,
+          `Content-Type: ${imageFile.type}`,
+          'Content-Transfer-Encoding: base64',
+          '',
+          b64,
+          `--${boundary}--`
+        ].join('\n');
+
+        // Create inscription transaction using pure ordinal format
         const response = await wallet.inscribe([{
           address: authorAddress,
-          base64Data: b64,
+          base64Data: btoa(multipartData),
           mimeType: imageFile.type,
-          map: {
-            app: 'lockd.app',
-            tags: JSON.stringify(['lockdapp', ...(tags || [])]),
-            description: description || content || 'Image inscription'
-          },
           satoshis: lockData?.isLocked ? (lockData.amount || 1000) : 1000
         }]);
 
@@ -283,12 +297,7 @@ export const createPost = async (
             size: {
               total: txHex.length,
               hex: txHex.length / 2,
-              estimated: b64.length
-            },
-            data: {
-              hasOrdMarker: txHex.includes('ord'),
-              hasImageType: txHex.includes(imageFile.type),
-              hasHexData: txHex.includes(base64ToHex(b64).substring(0, 50))
+              estimated: multipartData.length
             }
           });
         }
@@ -304,7 +313,8 @@ export const createPost = async (
         console.log("Image inscription complete:", JSON.stringify({
           txid: inscriptionTx.id,
           media_url,
-          media_type
+          media_type,
+          metadata
         }, null, 2));
 
       } catch (txError) {

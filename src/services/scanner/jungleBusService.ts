@@ -95,18 +95,55 @@ export class JungleBusService {
           return null;
         }
 
-        const blockchainTx: BlockchainTransaction = {
-          txid: tx.tx.id,
-          content: rawTx,
-          author_address: authorAddress,
-          media_type: mimeType,
-          blockHeight: tx.blockHeight,
-          amount: 0,
-          description: `${mimeType.split('/')[1].toUpperCase()} image inscription`
-        };
+        try {
+          // Extract the content
+          const content = this.extractContent(rawTx);
+          if (!content) {
+            return null;
+          }
 
-        console.log('Created blockchain transaction:', blockchainTx);
-        return blockchainTx;
+          // Try to parse multipart content
+          const boundary = '---lockdapp-boundary---';
+          const parts = content.split(`--${boundary}`);
+          
+          let metadata: Record<string, any> = {};
+          let description = `${mimeType.split('/')[1].toUpperCase()} image inscription`;
+          
+          // Look for JSON metadata in the parts
+          for (const part of parts) {
+            if (part.includes('Content-Type: application/json')) {
+              try {
+                const jsonStr = part.split('\n\n')[1]?.trim();
+                if (jsonStr) {
+                  metadata = JSON.parse(jsonStr);
+                  if (metadata && typeof metadata === 'object' && 'description' in metadata) {
+                    description = metadata.description;
+                  }
+                }
+                break;
+              } catch (e) {
+                console.warn('Failed to parse metadata JSON:', e);
+              }
+            }
+          }
+
+          const blockchainTx: BlockchainTransaction = {
+            txid: tx.tx.id,
+            content: content,
+            author_address: authorAddress,
+            media_type: mimeType,
+            blockHeight: tx.blockHeight,
+            amount: 0,
+            description: description,
+            metadata: metadata
+          };
+
+          console.log('Created blockchain transaction:', blockchainTx);
+          return blockchainTx;
+        } catch (error) {
+          console.error('Error processing ordinal inscription:', error);
+          return null;
+        }
       }
 
       // Check for regular BSV transfer from our application
@@ -256,6 +293,40 @@ export class JungleBusService {
     } catch (error) {
       console.error('Error extracting MIME type:', error);
       return undefined;
+    }
+  }
+
+  private extractContent(rawTx: string): string | null {
+    try {
+      const ordIndex = rawTx.indexOf(TRANSACTION_TYPES.ORD_PREFIX);
+      if (ordIndex === -1) return null;
+
+      // Skip past 'ord' and the MIME type to find content
+      const afterOrd = rawTx.slice(ordIndex + 6);
+      let content = '';
+      let foundContentStart = false;
+      
+      // Read until we find two consecutive '00' bytes which indicate end of content
+      const bytes = afterOrd.match(/.{2}/g) || [];
+      for (let i = 0; i < bytes.length; i++) {
+        if (!foundContentStart) {
+          if (bytes[i] === '00') {
+            foundContentStart = true;
+          }
+          continue;
+        }
+        
+        if (bytes[i] === '00' && bytes[i + 1] === '00') {
+          break;
+        }
+        
+        content += String.fromCharCode(parseInt(bytes[i], 16));
+      }
+
+      return content.trim();
+    } catch (error) {
+      console.error('Error extracting content:', error);
+      return null;
     }
   }
 } 

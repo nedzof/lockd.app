@@ -8,6 +8,7 @@ export interface BlockchainTransaction {
   locked_until?: number;
   description?: string;
   media_url?: string | undefined;
+  metadata?: Record<string, any>;
 }
 
 export interface ChainInfo {
