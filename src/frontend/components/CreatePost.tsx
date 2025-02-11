@@ -125,8 +125,8 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
     setIsSubmitting(true);
     try {
       if (mode === 'poll') {
-        // First create the main vote question post
-        const questionPost = await createPost(
+        // Create a single transaction with the question and all options
+        await createPost(
           content,
           bsvAddress,
           wallet,
@@ -144,23 +144,6 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
             }))
           }
         );
-
-        // Then create individual posts for each option
-        const optionPromises = pollOptions.map(async (option) => {
-          return createVoteOptionPost(
-            {
-              questionTxid: questionPost.txid,
-              optionText: option.text,
-              lockDuration: option.lockDuration,
-              lockAmount: option.lockAmount
-            },
-            bsvAddress,
-            wallet
-          );
-        });
-
-        // Wait for all option posts to be created
-        await Promise.all(optionPromises);
       } else {
         const standardLockOptions: StandardLockOptions | undefined = isLocked ? {
           isLocked: true,

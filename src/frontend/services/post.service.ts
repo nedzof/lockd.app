@@ -5,6 +5,7 @@ import { OrdiNFTP2PKH } from 'scrypt-ord';
 import { bsv, Addr, PandaSigner } from 'scrypt-ts';
 import { OrdiProvider } from 'scrypt-ord';
 import { YoursWalletAdapter } from '../utils/YoursWalletAdapter';
+import { MimeTypes, MAP } from 'yours-wallet-provider';
 
 export interface PredictionMarketData {
   source: string;
@@ -173,9 +174,7 @@ interface LockData {
   unlockHeight?: number;
 }
 
-interface MapData {
-  app: string;
-  type: string;
+interface MapData extends MAP {
   content: string;
   timestamp: string;
   contentType: string;
@@ -187,6 +186,14 @@ interface MapData {
   unlockHeight?: string;
   voteOptions?: string;
   isVoteQuestion?: string;
+}
+
+interface InscribeRequest {
+  address: string;
+  base64Data: string;
+  mimeType: MimeTypes;
+  map: MAP;
+  satoshis: number;
 }
 
 interface StringifiedMapData {
@@ -495,27 +502,29 @@ export const createPost = async (
             {
               address: authorAddress,
               base64Data: btoa(content),
-              mimeType: 'text/plain',
+              mimeType: 'text/plain' as MimeTypes,
               map: {
                 app: 'lockd.app',
                 type: 'vote',
-                content: content,
+                severity: 'info',
+                content,
                 timestamp: new Date().toISOString().toLowerCase(),
                 contentType: 'text/plain',
                 version: '1.0.0',
                 tags: JSON.stringify(['lockdapp', 'vote_question', ...(tags || [])]),
                 isVoteQuestion: 'true'
-              },
+              } satisfies MAP,
               satoshis: 1000
             },
             // Option inscriptions
             ...lockData.options.map(opt => ({
               address: authorAddress,
               base64Data: btoa(opt.text),
-              mimeType: 'text/plain',
+              mimeType: 'text/plain' as MimeTypes,
               map: {
                 app: 'lockd.app',
                 type: 'vote_option',
+                severity: 'info',
                 content: opt.text,
                 timestamp: new Date().toISOString().toLowerCase(),
                 contentType: 'text/plain',
@@ -523,7 +532,7 @@ export const createPost = async (
                 tags: JSON.stringify(['lockdapp', 'vote_option', ...(tags || [])]),
                 lockDuration: opt.lockDuration.toString(),
                 lockAmount: opt.lockAmount.toString()
-              },
+              } satisfies MAP,
               satoshis: opt.lockAmount
             }))
           ];
@@ -538,14 +547,14 @@ export const createPost = async (
           };
         } else {
           // Create MAP data with tags, prediction market data, and vote data
-          const mapData: MapData = {
+          const mapData: Record<string, string> = {
             app: 'lockd.app',
-            type: predictionMarketData ? 'prediction' : (lockData?.isPoll ? 'vote' : 'text'),
-            content: content,
+            type: predictionMarketData ? 'prediction' : 'text',
+            content,
             timestamp: new Date().toISOString().toLowerCase(),
             contentType: 'text/plain',
             version: '1.0.0',
-            tags: ['lockdapp', ...(tags || [])],
+            tags: JSON.stringify(['lockdapp', ...(tags || [])]),
             ...(predictionMarketData && {
               prediction: JSON.stringify(predictionMarketData)
             }),
@@ -553,32 +562,16 @@ export const createPost = async (
               lockDuration: lockData.duration.toString(),
               lockAmount: (lockData.amount || 1000).toString(),
               unlockHeight: (currentBlockHeight + lockData.duration).toString()
-            }),
-            ...(lockData?.isPoll && {
-              isVoteQuestion: 'true',
-              voteOptions: JSON.stringify(lockData.options?.map(opt => ({
-                text: opt.text,
-                lockDuration: opt.lockDuration,
-                lockAmount: opt.lockAmount
-              })))
             })
-          };
-
-          // Convert to Record<string, string> for wallet API
-          const stringifiedMapData: Record<string, string> = {
-            ...mapData,
-            tags: JSON.stringify(mapData.tags)
           };
 
           // Create inscription transaction using MAP protocol
           const response = await wallet.inscribe([{
             address: authorAddress,
             base64Data: btoa(content),
-            mimeType: 'text/plain',
-            map: stringifiedMapData,
-            satoshis: lockData?.isPoll 
-              ? (lockData.options?.reduce((sum, opt) => sum + opt.lockAmount, 0) || 1000)
-              : (lockData?.isLocked ? (lockData.amount || 1000) : 1000)
+            mimeType: 'text/plain' as MimeTypes,
+            map: mapData,
+            satoshis: lockData?.isLocked ? (lockData.amount || 1000) : 1000
           }]);
 
           // Convert response to expected format
