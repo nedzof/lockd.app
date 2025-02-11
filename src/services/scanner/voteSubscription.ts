@@ -1,6 +1,6 @@
 import { JungleBusClient, ControlMessageStatusCode } from "@gorillapool/js-junglebus";
 import type { Transaction, ControlMessage } from './junglebus.types';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { parseMapData } from '../../shared/utils/mapProtocol';
 
 // Initialize Prisma client with direct connection
@@ -13,8 +13,7 @@ const prisma = new PrismaClient({
     }
 });
 
-interface JungleBusTransaction {
-    id: string;
+interface JungleBusTransaction extends Transaction {
     hex: string;
     addresses: string[];
 }
@@ -32,10 +31,20 @@ interface VoteData {
     }>;
 }
 
+interface MapOutput {
+    type: string;
+    content?: string;
+    isVoteQuestion?: string;
+    timestamp?: string;
+    tags?: string[];
+    lockDuration?: string;
+    lockAmount?: string;
+}
+
 const onPublish = async function(tx: JungleBusTransaction) {
     try {
         // Extract MAP data from all outputs
-        const outputs = parseMapData(tx.hex);
+        const outputs = parseMapData([tx.hex]) as unknown as MapOutput[];
         if (!outputs || !Array.isArray(outputs)) return;
 
         // Find the vote question output
@@ -72,7 +81,7 @@ const onPublish = async function(tx: JungleBusTransaction) {
                     content: voteData.content,
                     author_address: voteData.author_address,
                     created_at: new Date(voteData.created_at),
-                    options: voteData.options,
+                    options: voteData.options as Prisma.JsonValue,
                     tags: voteData.tags
                 }
             });
@@ -82,7 +91,7 @@ const onPublish = async function(tx: JungleBusTransaction) {
                 await Promise.all(voteData.options.map((option, index) => 
                     prisma.voteOption.create({
                         data: {
-                            txid: `${voteData.txid}_${index}`, // Use index for unique txid
+                            txid: `${voteData.txid}_${index}`, // Generate unique txid for each option
                             question_txid: voteData.txid,
                             content: option.text,
                             author_address: voteData.author_address,
@@ -149,10 +158,10 @@ export async function startVoteSubscription() {
         await client.Subscribe(
             subscriptionId,
             0, // fromBlock
-            onPublish,
+            onPublish as unknown as (tx: Transaction) => void,
             onStatus,
             onError,
-            onMempool
+            onMempool as unknown as (tx: Transaction) => void
         );
         console.log('Vote subscription started successfully');
     } catch (error) {
