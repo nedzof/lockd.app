@@ -112,7 +112,7 @@ process.on('SIGINT', async () => {
 });
 
 // Start the subscription
-(async () => {
+export async function startVoteSubscription() {
     try {
         console.log('Starting subscription from block 720000...');
         await client.Subscribe(
@@ -127,4 +127,4 @@ process.on('SIGINT', async () => {
         console.error("Error starting subscription:", error);
         process.exit(1);
     }
-})(); 
+} 

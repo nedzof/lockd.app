@@ -6,7 +6,7 @@ import postsRouter from './api/posts.js';
 import lockLikesRouter from './api/lockLikes.js';
 import tagsRouter from './api/tags.js';
 import statsRouter from './api/stats.js';
-import { startVoteSubscription } from './services/scanner/voteSubscription';
+import { startVoteSubscription } from './services/scanner/votes/voteSubscription.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
