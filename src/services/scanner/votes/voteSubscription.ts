@@ -5,6 +5,11 @@ import { TransactionParser } from './parser';
 import axios from 'axios';
 import { Worker } from 'worker_threads';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Initialize Prisma client with direct connection
 const prisma = new PrismaClient({
