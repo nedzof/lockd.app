@@ -1,6 +1,6 @@
-const { parentPort } = require('worker_threads');
-const { PrismaClient } = require('@prisma/client');
-const axios = require('axios');
+import { parentPort } from 'worker_threads';
+import { PrismaClient } from '@prisma/client';
+import axios from 'axios';
 
 // Initialize Prisma client
 const prisma = new PrismaClient({
@@ -38,30 +38,19 @@ async function processTransaction(tx) {
             }
         });
 
-        // Fetch full transaction data
-        const fullTx = await fetchTransaction(tx.id);
-        if (!fullTx) {
+        // Get the parsed transaction data
+        const parsedTx = tx.parsedTransaction;
+        if (!parsedTx) {
             parentPort.postMessage({
                 type: 'warning',
-                message: 'Could not fetch transaction details',
+                message: 'No parsed transaction data available',
                 data: { txid: tx.id }
             });
             return;
         }
 
-        parentPort.postMessage({
-            type: 'info',
-            message: 'Raw transaction data',
-            data: {
-                txid: fullTx.txid,
-                version: fullTx.version,
-                size: fullTx.size,
-                blockheight: fullTx.blockheight
-            }
-        });
-
         // Get author address from transaction outputs
-        const authorAddress = fullTx.vout[0]?.scriptPubKey?.addresses?.[0];
+        const authorAddress = parsedTx.metadata?.authorAddress;
         if (!authorAddress) {
             parentPort.postMessage({
                 type: 'warning',
@@ -87,37 +76,74 @@ async function processTransaction(tx) {
 
         // Process the transaction in a database transaction
         const result = await prisma.$transaction(async (prisma) => {
-            // Create vote question record
-            const voteQuestion = await prisma.voteQuestion.create({
-                data: {
-                    txid: tx.id,
-                    content: 'Vote Question', // You'll need to extract this from the transaction
-                    author_address: authorAddress,
-                    created_at: new Date(),
-                    options: [],
-                    tags: ['vote']
-                }
-            });
+            // Create vote question record if this is a vote question
+            if (parsedTx.vote_question) {
+                const voteQuestion = await prisma.voteQuestion.create({
+                    data: {
+                        txid: tx.id,
+                        content: parsedTx.vote_question,
+                        author_address: authorAddress,
+                        created_at: new Date(parsedTx.timestamp * 1000),
+                        options: parsedTx.vote_options,
+                        tags: parsedTx.metadata.tags
+                    }
+                });
 
-            parentPort.postMessage({
-                type: 'info',
-                message: 'Created vote question',
-                data: {
-                    id: voteQuestion.id,
-                    txid: voteQuestion.txid
-                }
-            });
+                parentPort.postMessage({
+                    type: 'info',
+                    message: 'Created vote question',
+                    data: {
+                        id: voteQuestion.id,
+                        txid: voteQuestion.txid,
+                        content: voteQuestion.content,
+                        options: voteQuestion.options
+                    }
+                });
 
-            return voteQuestion;
+                return voteQuestion;
+            }
+
+            // Create vote options if present
+            if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
+                const voteOptions = await Promise.all(parsedTx.vote_options.map(option =>
+                    prisma.voteOption.create({
+                        data: {
+                            txid: tx.id,
+                            content: option.option,
+                            author_address: authorAddress,
+                            created_at: new Date(parsedTx.timestamp * 1000),
+                            lock_amount: option.lockAmount,
+                            lock_duration: option.lockDuration,
+                            tags: parsedTx.metadata.tags,
+                            question_txid: tx.id // This should be the question's txid
+                        }
+                    })
+                ));
+
+                parentPort.postMessage({
+                    type: 'info',
+                    message: 'Created vote options',
+                    data: {
+                        options: voteOptions.map(opt => ({
+                            id: opt.id,
+                            content: opt.content,
+                            lockAmount: opt.lock_amount,
+                            lockDuration: opt.lock_duration
+                        }))
+                    }
+                });
+
+                return voteOptions;
+            }
         });
 
         parentPort.postMessage({
             type: 'success',
             message: 'Transaction processed successfully',
             data: {
-                questionId: result.id,
-                txid: result.txid,
-                timestamp: new Date().toISOString()
+                txid: tx.id,
+                timestamp: new Date().toISOString(),
+                result
             }
         });
 

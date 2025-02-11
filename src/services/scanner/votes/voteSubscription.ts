@@ -74,10 +74,26 @@ dbWorker.on('exit', (code) => {
     }
 });
 
-const onPublish = function(tx: any) {
+const onPublish = async function(tx: JungleBusTransaction) {
     console.log("TRANSACTION", JSON.stringify(tx, null, 2));
-    // Send transaction to worker for processing
-    dbWorker.postMessage({ type: 'process_transaction', transaction: tx });
+    
+    try {
+        // Fetch full transaction data
+        const fullTx = await fetchTransaction(tx.id);
+        
+        // Parse the transaction
+        const parsedTx = TransactionParser.parseTransaction(fullTx);
+        console.log("PARSED TRANSACTION:", JSON.stringify(parsedTx, null, 2));
+        
+        // Send parsed transaction to worker for processing
+        dbWorker.postMessage({ 
+            type: 'process_transaction', 
+            transaction: tx,
+            parsedTransaction: parsedTx 
+        });
+    } catch (error) {
+        console.error("Error processing transaction:", error);
+    }
 };
 
 const onStatus = function(message: any) {
@@ -96,10 +112,26 @@ const onError = function(err: any) {
     console.error(err);
 };
 
-const onMempool = function(tx: any) {
+const onMempool = async function(tx: JungleBusTransaction) {
     console.log("MEMPOOL TRANSACTION", JSON.stringify(tx, null, 2));
-    // Send mempool transaction to worker for processing
-    dbWorker.postMessage({ type: 'process_transaction', transaction: tx });
+    
+    try {
+        // Fetch full transaction data
+        const fullTx = await fetchTransaction(tx.id);
+        
+        // Parse the transaction
+        const parsedTx = TransactionParser.parseTransaction(fullTx);
+        console.log("PARSED MEMPOOL TRANSACTION:", JSON.stringify(parsedTx, null, 2));
+        
+        // Send parsed transaction to worker for processing
+        dbWorker.postMessage({ 
+            type: 'process_transaction', 
+            transaction: tx,
+            parsedTransaction: parsedTx 
+        });
+    } catch (error) {
+        console.error("Error processing mempool transaction:", error);
+    }
 };
 
 // Handle graceful shutdown
