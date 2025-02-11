@@ -6,6 +6,8 @@ const prisma = new PrismaClient();
 
 router.get('/', async (req, res) => {
   try {
+    console.log('Received request for posts with query:', req.query);
+
     const {
       timeFilter,
       rankingFilter,
@@ -46,17 +48,47 @@ router.get('/', async (req, res) => {
       where.author_address = userId;
     }
 
+    console.log('Querying posts with where clause:', where);
+
     // Get the posts
     const posts = await prisma.post.findMany({
       where,
       orderBy: { created_at: 'desc' }
     });
 
+    console.log(`Found ${posts.length} posts`);
+
     // Process and return posts
     res.json(posts);
   } catch (error) {
     console.error('Error fetching posts:', error);
     res.status(500).json({ message: 'Error fetching posts' });
+  }
+});
+
+// Add a test endpoint to check database connection
+router.get('/test', async (req, res) => {
+  try {
+    // Test database connection
+    await prisma.$connect();
+    console.log('Database connection successful');
+    
+    // Count total posts
+    const count = await prisma.post.count();
+    console.log('Total posts in database:', count);
+    
+    res.json({ 
+      status: 'ok', 
+      message: 'Database connection successful',
+      postCount: count
+    });
+  } catch (error) {
+    console.error('Database connection error:', error);
+    res.status(500).json({ 
+      status: 'error',
+      message: 'Database connection failed',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 
