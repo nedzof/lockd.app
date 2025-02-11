@@ -1,24 +1,55 @@
-export interface BlockchainTransaction {
-  txid: string;
-  content: string;
-  author_address: string;
-  media_type: string;
-  blockHeight: number;
-  amount?: number;
-  locked_until?: number;
-  description?: string;
-  media_url?: string | undefined;
-  metadata?: Record<string, any>;
+// JungleBus Types
+export interface JungleBusTransaction {
+  id: string;
+  transaction: string;
+  block_hash?: string;
+  block_height?: number;
+  block_time?: number;
+  block_index?: number;
+  merkle_proof?: any;
+  output_types?: string[];
+  contexts?: string[];
+  sub_contexts?: string[];
+  data?: string[];
 }
 
-export interface ChainInfo {
-  blocks: number;
+export interface ControlMessage {
+  statusCode: number;
+  status?: string;
+  message?: string;
+  block?: number;
 }
 
-export interface Block {
-  tx: string[];
+export interface SubscriptionErrorContext {
+  type: string;
+  error: {
+    code: number;
+    message: string;
+    temporary: boolean;
+  };
 }
 
+export interface JungleBusSubscription {
+  subscriptionID: string;
+  currentBlock: number;
+  Subscribe: () => void;
+  UnSubscribe: () => void;
+  GetCurrentBlock: () => number;
+}
+
+export interface JungleBusClient {
+  Subscribe(
+    from: string,
+    fromBlock: number,
+    onTransaction: (tx: JungleBusTransaction) => void,
+    onStatus: (message: ControlMessage) => void,
+    onError: (error: any) => void,
+    onMempool: (tx: JungleBusTransaction) => void
+  ): Promise<any>;
+  GetTransaction(txid: string): Promise<JungleBusTransaction>;
+}
+
+// Transaction Types
 export interface TransactionOutput {
   value: number;
   n: number;
@@ -55,11 +86,7 @@ export interface Transaction {
   blockheight: number;
 }
 
-export interface MediaContent {
-  content: Buffer;
-  type: string;
-}
-
+// Vote Types
 export interface VoteOption {
   option: string;
   lockAmount: number;
@@ -81,4 +108,27 @@ export interface StructuredTransaction {
     severity: string;
     tags: string[];
   };
-} 
+}
+
+// Media Types
+export interface MediaContent {
+  content: Buffer;
+  type: string;
+}
+
+// Constants
+export const TRANSACTION_TYPES = {
+  IMAGE_TYPES: ['image/'],
+  ORDINAL_TYPES: ['ord'],
+  MAP: {
+    PREFIX: '1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5',
+    APP: 'lockd.app',
+    TYPE: 'post'
+  },
+  OUTPUT_TYPES: {
+    ORD: 'ord',
+    PUBKEYHASH: 'bitcoin.pubkeyhash',
+    MAP: 'map'
+  },
+  ORD_PREFIX: '6f7264' // 'ord' in hex
+} as const; 
