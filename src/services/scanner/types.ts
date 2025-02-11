@@ -97,20 +97,40 @@ export interface VoteOption {
   timestamp: string;
 }
 
+export interface VoteQuestionData {
+  txid: string;
+  content: string;
+  author_address: string;
+  created_at: Date;
+  options: VoteOption[];
+  tags: string[];
+}
+
+export interface VoteOptionData {
+  txid: string;
+  question_txid: string;
+  content: string;
+  author_address: string;
+  created_at: Date;
+  lock_amount: number;
+  lock_duration: number;
+  tags: string[];
+}
+
 export interface StructuredTransaction {
   transaction_id: string;
   block_height: number;
   block_hash: string;
   timestamp: number;
-  vote_question: string | null;
-  vote_options: VoteOption[];
+  voteQuestion: VoteQuestionData | null;
+  voteOptions: VoteOptionData[];
   metadata: {
     version: string | null;
     app: string;
     type: string;
     severity: string;
     tags: string[];
-    authorAddress?: string | null;
+    authorAddress: string | null;
   };
 }
 

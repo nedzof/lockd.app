@@ -55,7 +55,7 @@ async function processTransaction(message) {
             parentPort.postMessage({
                 type: 'warning',
                 message: 'No author address found',
-                data: { txid: message.transaction.id }
+                data: { txid: parsedTx.transaction_id }
             });
             return;
         }
@@ -63,42 +63,38 @@ async function processTransaction(message) {
         // Process the transaction in a database transaction
         const result = await prisma.$transaction(async (prisma) => {
             // Create vote question record if this is a vote question
-            if (parsedTx.vote_question) {
+            if (parsedTx.voteQuestion) {
                 parentPort.postMessage({
                     type: 'debug',
                     message: 'Creating vote question',
-                    data: {
-                        txid: parsedTx.transaction_id,
-                        content: parsedTx.vote_question,
-                        options: parsedTx.vote_options
-                    }
+                    data: parsedTx.voteQuestion
                 });
 
-                // First create the vote question
+                // Create the vote question
                 const voteQuestion = await prisma.voteQuestion.create({
                     data: {
-                        txid: parsedTx.transaction_id,
-                        content: parsedTx.vote_question,
-                        author_address: authorAddress,
-                        created_at: new Date(parsedTx.timestamp * 1000),
-                        options: parsedTx.vote_options,
-                        tags: parsedTx.metadata.tags
+                        txid: parsedTx.voteQuestion.txid,
+                        content: parsedTx.voteQuestion.content,
+                        author_address: parsedTx.voteQuestion.author_address,
+                        created_at: parsedTx.voteQuestion.created_at,
+                        options: parsedTx.voteQuestion.options,
+                        tags: parsedTx.voteQuestion.tags
                     }
                 });
 
-                // Then create all associated vote options
-                if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
-                    const voteOptionsPromises = parsedTx.vote_options.map(option =>
+                // Create all associated vote options
+                if (parsedTx.voteOptions.length > 0) {
+                    const voteOptionsPromises = parsedTx.voteOptions.map(option =>
                         prisma.voteOption.create({
                             data: {
-                                txid: parsedTx.transaction_id + '_' + option.option, // Create unique txid for each option
-                                question_txid: parsedTx.transaction_id,
-                                content: option.option,
-                                author_address: authorAddress,
-                                created_at: new Date(parsedTx.timestamp * 1000),
-                                lock_amount: option.lockAmount,
-                                lock_duration: option.lockDuration,
-                                tags: parsedTx.metadata.tags
+                                txid: option.txid,
+                                question_txid: option.question_txid,
+                                content: option.content,
+                                author_address: option.author_address,
+                                created_at: option.created_at,
+                                lock_amount: option.lock_amount,
+                                lock_duration: option.lock_duration,
+                                tags: option.tags
                             }
                         })
                     );
@@ -129,27 +125,24 @@ async function processTransaction(message) {
             }
 
             // If this is just a vote option (not part of a question creation)
-            else if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
+            else if (parsedTx.voteOptions.length > 0) {
                 parentPort.postMessage({
                     type: 'debug',
                     message: 'Creating standalone vote options',
-                    data: {
-                        txid: parsedTx.transaction_id,
-                        options: parsedTx.vote_options
-                    }
+                    data: parsedTx.voteOptions
                 });
 
-                const voteOptionsPromises = parsedTx.vote_options.map(option =>
+                const voteOptionsPromises = parsedTx.voteOptions.map(option =>
                     prisma.voteOption.create({
                         data: {
-                            txid: parsedTx.transaction_id + '_' + option.option,
-                            question_txid: parsedTx.transaction_id, // This should be the actual question's txid
-                            content: option.option,
-                            author_address: authorAddress,
-                            created_at: new Date(parsedTx.timestamp * 1000),
-                            lock_amount: option.lockAmount,
-                            lock_duration: option.lockDuration,
-                            tags: parsedTx.metadata.tags
+                            txid: option.txid,
+                            question_txid: option.question_txid,
+                            content: option.content,
+                            author_address: option.author_address,
+                            created_at: option.created_at,
+                            lock_amount: option.lock_amount,
+                            lock_duration: option.lock_duration,
+                            tags: option.tags
                         }
                     })
                 );
@@ -198,7 +191,7 @@ async function processTransaction(message) {
                 type: 'warning',
                 message: 'Duplicate transaction',
                 data: {
-                    txid: message.transaction.id,
+                    txid: parsedTx.transaction_id,
                     error: 'P2002'
                 }
             });
@@ -207,7 +200,7 @@ async function processTransaction(message) {
                 type: 'error',
                 message: 'Error processing transaction',
                 data: {
-                    txid: message.transaction.id,
+                    txid: parsedTx.transaction_id,
                     error: error instanceof Error ? error.message : String(error),
                     stack: error instanceof Error ? error.stack : undefined
                 }
@@ -218,121 +211,7 @@ async function processTransaction(message) {
 
 // Listen for messages from the main thread
 parentPort.on('message', async (message) => {
-    console.log('Database worker message:', {
-        type: 'info',
-        message: 'Processing transaction',
-        data: {
-            id: message.transaction.id,
-            timestamp: new Date().toISOString()
-        }
-    });
-
-    // Log raw transaction data for debugging
-    console.log('Raw transaction data:', {
-        id: message.transaction.id,
-        inputs: message.transaction.vin,
-        outputs: message.transaction.vout,
-        parsedTransaction: message.parsedTransaction
-    });
-
     if (message.type === 'process_transaction') {
-        try {
-            const parsedTx = message.parsedTransaction;
-            
-            // Log the parsed transaction data
-            console.log('Database worker message:', {
-                type: 'debug',
-                message: 'Parsed transaction data',
-                data: parsedTx
-            });
-
-            // Check if we have an author address
-            if (!parsedTx.metadata.authorAddress) {
-                console.log('Database worker message:', {
-                    type: 'warning',
-                    message: 'No author address found',
-                    data: {
-                        txid: parsedTx.transaction_id
-                    }
-                });
-                return;
-            }
-
-            // Create author address record if it doesn't exist
-            const authorAddress = await prisma.authorAddress.upsert({
-                where: { address: parsedTx.metadata.authorAddress },
-                update: {},
-                create: { address: parsedTx.metadata.authorAddress }
-            });
-
-            // Create vote question record
-            if (parsedTx.vote_question) {
-                const voteQuestion = await prisma.voteQuestion.create({
-                    data: {
-                        transaction_id: parsedTx.transaction_id,
-                        block_height: parsedTx.block_height,
-                        block_hash: parsedTx.block_hash,
-                        created_at: new Date(parsedTx.timestamp * 1000),
-                        question: parsedTx.vote_question,
-                        author_address_id: authorAddress.id,
-                        options: parsedTx.vote_options,
-                        tags: parsedTx.metadata.tags
-                    }
-                });
-
-                console.log('Database worker message:', {
-                    type: 'info',
-                    message: 'Created vote question',
-                    data: {
-                        id: voteQuestion.id,
-                        question: voteQuestion.question
-                    }
-                });
-            }
-
-            // Create vote options if present
-            if (parsedTx.vote_options && parsedTx.vote_options.length > 0) {
-                for (const option of parsedTx.vote_options) {
-                    const voteOption = await prisma.voteOption.create({
-                        data: {
-                            transaction_id: parsedTx.transaction_id,
-                            block_height: parsedTx.block_height,
-                            block_hash: parsedTx.block_hash,
-                            created_at: new Date(parsedTx.timestamp * 1000),
-                            option: option.option,
-                            lock_amount: option.lockAmount,
-                            lock_duration: option.lockDuration,
-                            author_address_id: authorAddress.id
-                        }
-                    });
-
-                    console.log('Database worker message:', {
-                        type: 'info',
-                        message: 'Created vote option',
-                        data: {
-                            id: voteOption.id,
-                            option: voteOption.option
-                        }
-                    });
-                }
-            }
-
-            console.log('Database worker message:', {
-                type: 'info',
-                message: 'Successfully processed transaction',
-                data: {
-                    txid: parsedTx.transaction_id
-                }
-            });
-        } catch (error) {
-            console.error('Database worker message:', {
-                type: 'error',
-                message: 'Error processing transaction',
-                data: {
-                    error: error.message,
-                    stack: error.stack
-                }
-            });
-        }
+        await processTransaction(message);
     }
 }); 

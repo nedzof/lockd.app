@@ -92,13 +92,21 @@ export class TransactionParser {
   }
 
   public static parseTransaction(tx: Transaction): StructuredTransaction {
-    const structured: StructuredTransaction = {
+    const timestamp = new Date(tx.time * 1000);
+    
+    // Format for Prisma VoteQuestion and VoteOption models
+    const structured = {
       transaction_id: tx.txid,
       block_height: tx.blockheight,
       block_hash: tx.blockhash,
       timestamp: tx.time,
-      vote_question: null,
-      vote_options: [],
+      
+      // VoteQuestion format
+      voteQuestion: null as any,
+      
+      // VoteOption format
+      voteOptions: [] as any[],
+      
       metadata: {
         version: null,
         app: 'lockd.app',
@@ -119,20 +127,42 @@ export class TransactionParser {
           structured.metadata.version = parsed.version;
         }
 
-        // Check if this is the vote question
+        // Format vote question for Prisma
         if (parsed.isVoteQuestion && parsed.content) {
-          structured.vote_question = parsed.content;
+          structured.voteQuestion = {
+            txid: tx.txid,
+            content: parsed.content,
+            author_address: structured.metadata.authorAddress,
+            created_at: timestamp,
+            options: [], // Will be filled with formatted options
+            tags: structured.metadata.tags
+          };
         }
 
-        // Check if this is a vote option
+        // Format vote options for Prisma
         else if (parsed.isVoteOption && parsed.content) {
-          const option: VoteOption = {
-            option: parsed.content,
-            lockAmount: parsed.lockAmount || 1000,
-            lockDuration: 1,
-            timestamp: "2025-02-11t17:06:45.537z"
+          const option = {
+            txid: tx.txid + '_' + parsed.content, // Unique txid for each option
+            question_txid: tx.txid,
+            content: parsed.content,
+            author_address: structured.metadata.authorAddress,
+            created_at: timestamp,
+            lock_amount: parsed.lockAmount || 1000,
+            lock_duration: 1,
+            tags: structured.metadata.tags
           };
-          structured.vote_options.push(option);
+          
+          structured.voteOptions.push(option);
+          
+          // Also add to vote question options if it exists
+          if (structured.voteQuestion) {
+            structured.voteQuestion.options.push({
+              option: parsed.content,
+              lockAmount: parsed.lockAmount || 1000,
+              lockDuration: 1,
+              timestamp: timestamp.toISOString()
+            });
+          }
         }
       }
     });
