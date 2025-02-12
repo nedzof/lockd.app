@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2 } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
-import type { MemeSubmission, LockLike } from '../types';
+import type { LockLike } from '../types';
 
 interface VoteQuestion {
   id: string;
@@ -45,7 +45,7 @@ interface ApiPost {
   author_address: string;
   media_type: string | null;
   block_height: number;
-  amount: number | null;
+  amount: number;
   unlock_height: number | null;
   description: string | null;
   created_at: string;
@@ -56,6 +56,47 @@ interface ApiPost {
 }
 
 const API_URL = 'http://localhost:3001';
+
+const AVAILABLE_TAGS = [
+  'Crypto',
+  'Sports',
+  'Tech',
+  'Business',
+  'Memes',
+  'Current Events',
+  'Health',
+  'Politics',
+  'Finance',
+  'Pop Culture'
+] as const;
+
+interface MemeSubmission {
+  id: string;
+  content: string;
+  format?: string;
+  fileUrl: string;
+  description?: string;
+  created_at: string;
+  createdAt: Date;
+  updatedAt: Date;
+  totalLocked: number;
+  threshold?: number;
+  block_height?: number;
+  unlock_height?: number;
+  creator: string;
+  title: string;
+  prompt: string;
+  style: string;
+  duration: number;
+  thumbnailUrl: string;
+  txId: string;
+  locks: number;
+  status: 'minted';
+  tags: string[];
+  isTop10Percent: boolean;
+  isTop3: boolean;
+  locklikes: LockLike[];
+}
 
 const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ 
   onStatsUpdate,
@@ -78,6 +119,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement }>({});
   const imageRefs = useRef<{ [key: string]: HTMLImageElement }>({});
+  const [visibleTags, setVisibleTags] = useState<Set<string>>(new Set(AVAILABLE_TAGS));
 
   const formatImageUrl = async (imageData: string | undefined) => {
     if (!imageData) return null;
@@ -321,15 +363,16 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           fileUrl: imageUrl,
           thumbnailUrl: imageUrl,
           txId: post.txid,
-          locks: post.amount || 0,
+          locks: post.amount,
           status: 'minted' as const,
           tags: post.tags || [],
           createdAt: new Date(post.created_at),
           updatedAt: new Date(post.created_at),
-          totalLocked: post.amount || 0,
+          created_at: post.created_at,
+          totalLocked: post.amount,
           threshold: 1000000000, // 10 BSV threshold
-          isTop10Percent: (post.amount || 0) > 1000000000,
-          isTop3: (post.amount || 0) > 2000000000,
+          isTop10Percent: post.amount > 1000000000,
+          isTop3: post.amount > 2000000000,
           locklikes: [],
           content: post.content || '',
           unlock_height: post.unlock_height,
@@ -341,12 +384,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
       // Apply ranking filters
       submissionsWithStats.sort((a: MemeSubmission, b: MemeSubmission) => {
-        // First sort by total locked amount
-        const amountDiff = b.totalLocked - a.totalLocked;
-        if (amountDiff !== 0) return amountDiff;
-        
-        // If amounts are equal, sort by most recent
-        return b.createdAt.getTime() - a.createdAt.getTime();
+        return b.totalLocked - a.totalLocked || b.createdAt.getTime() - a.createdAt.getTime();
       });
 
       // Apply limit based on filter
@@ -525,6 +563,31 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         </div>
       </div>
     );
+  };
+
+  // Helper function to toggle tag visibility
+  const toggleTagVisibility = (tag: string) => {
+    setVisibleTags(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(tag)) {
+        newSet.delete(tag);
+      } else {
+        newSet.add(tag);
+      }
+      return newSet;
+    });
+  };
+
+  // Helper function to get content for a specific tag
+  const getContentForTag = (tag: string) => {
+    const allContent = [
+      ...submissions.map(submission => ({ type: 'post' as const, data: submission })),
+      ...votes.map(vote => ({ type: 'vote' as const, data: vote }))
+    ].sort((a, b) => {
+      return new Date(b.data.created_at).getTime() - new Date(a.data.created_at).getTime();
+    });
+
+    return allContent.filter(item => item.data.tags.includes(tag));
   };
 
   if (isLoading) {
