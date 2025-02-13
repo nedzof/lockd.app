@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2 } from 'react-icons/fi';
+import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2, FiExternalLink } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
 import type { MemeSubmission, LockLike } from '../types';
@@ -420,11 +420,24 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     fetchData();
   }, [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, userId]);
 
+  const renderWhatsOnChainLink = (txid: string) => (
+    <a
+      href={`https://whatsonchain.com/tx/${txid}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="absolute top-3 right-3 p-2 rounded-full bg-[#1A1B23]/40 text-white/40 hover:text-[#00ffa3] hover:bg-[#1A1B23]/60 transition-all duration-500 backdrop-blur-sm z-10"
+      title="View on WhatsOnChain"
+    >
+      <FiExternalLink className="w-4 h-4" />
+    </a>
+  );
+
   const renderContent = (submission: MemeSubmission) => {
     // If it's text only (no image) - more ethereal styling
     if (submission.content) {
       return (
         <div className="w-full p-8 bg-gradient-to-br from-[#2A2A40]/5 to-[#1A1B23]/5 relative group">
+          {renderWhatsOnChainLink(submission.txId)}
           {/* Decorative elements */}
           <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all duration-1000 pointer-events-none">
             <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-[#00ffa3]/3 to-transparent rounded-full blur-xl" />
@@ -499,6 +512,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           {/* Content section - more focused */}
           {submission.content && (
             <div className="p-8 bg-gradient-to-b from-[#1A1B23] to-[#1A1B23]/95 relative group">
+              {renderWhatsOnChainLink(submission.txId)}
               {/* Decorative elements */}
               <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all duration-1000 pointer-events-none">
                 <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-[#00ffa3]/3 to-transparent rounded-full blur-xl" />
@@ -561,6 +575,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
     return (
       <div className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-500 hover:shadow-[0_0_40px_rgba(0,255,163,0.03)] bg-[#1A1B23]/20 w-full max-w-md">
+        {renderWhatsOnChainLink(vote.txid)}
         <div className="p-8 space-y-6">
           {/* Header */}
           <div className="space-y-2">
