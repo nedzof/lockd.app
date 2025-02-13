@@ -9,45 +9,51 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-model Post {
-  id             String       @id @default(cuid())
-  txid           String       @unique
-  content        String
-  author_address String
-  media_type     String?
-  block_height   Int
-  amount         Int?
-  unlock_height  Int?
-  description    String?
-  created_at     DateTime     @default(now())
-  tags           String[]
-  metadata       Json?
-  is_locked      Boolean      @default(false)
-  lock_duration  Int?
-  raw_image_data String?
-  image_format   String?
-  image_source   String?
+model Transaction {
+  id               String       @id @default(cuid())
+  txid             String       @unique
+  content          String
+  author_address   String
+  media_type       String?
+  block_height     Int
+  amount           Int?
+  unlock_height    Int?
+  description      String?
+  created_at       DateTime     @default(now())
+  tags             String[]
+  metadata         Json?
+  is_locked        Boolean      @default(false)
+  lock_duration    Int?
+  raw_image_data   String?
+  image_format     String?
+  image_source     String?
   // Vote-related fields
-  is_vote        Boolean      @default(false)
-  vote_options   VoteOption[]
+  is_vote          Boolean      @default(false)
+  is_vote_question Boolean      @default(false)
+  question_content String?
+  vote_options     VoteOption[]
 
   @@index([author_address])
   @@index([created_at])
   @@index([block_height])
+  @@map("transaction")
 }
 
 model VoteOption {
-  id             String   @id @default(cuid())
-  txid           String   @unique
-  post_txid      String   // Changed from question_txid
-  content        String
-  author_address String
-  created_at     DateTime
-  lock_amount    Int
-  lock_duration  Int
-  tags           String[]
-  post           Post     @relation(fields: [post_txid], references: [txid]) // Changed from question to post
+  id              String      @id @default(cuid())
+  txid            String      @unique
+  post_txid       String // Changed from question_txid
+  content         String
+  author_address  String
+  created_at      DateTime
+  lock_amount     Int
+  lock_duration   Int
+  unlock_height   Int
+  current_height  Int
+  lock_percentage Float
+  tags            String[]
+  transaction     Transaction @relation(fields: [post_txid], references: [txid]) // Changed from post to transaction
 
-  @@map("vote_options")
   @@index([post_txid])
+  @@map("vote_options")
 }
