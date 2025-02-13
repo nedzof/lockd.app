@@ -214,12 +214,58 @@ async function processTransaction(transaction: TransactionData) {
             isVoteQuestion: finalData.is_vote_question
         });
 
-        // Save to database
-        await prisma.transaction.upsert({
-            where: { txid: finalData.txid },
-            update: finalData,
-            create: finalData
+        // Update transaction in database
+        const existingTx = await prisma.transaction.findUnique({
+            where: { txid: finalData.txid }
         });
+
+        if (existingTx) {
+            await prisma.transaction.update({
+                where: { txid: finalData.txid },
+                data: finalData
+            });
+        } else {
+            await prisma.transaction.create({
+                data: finalData
+            });
+        }
+
+        // Process vote options if present
+        const voteOptions = parsedTx.vote?.options;
+        if (voteOptions && voteOptions.length > 0) {
+            console.log('Processing vote options:', voteOptions);
+            
+            for (const option of voteOptions) {
+                const optionId = `${transaction.txid}-${option.index}`;
+                await prisma.voteOption.upsert({
+                    where: { txid: optionId },
+                    create: {
+                        id: optionId,
+                        txid: optionId,
+                        post_txid: transaction.txid,
+                        content: option.text,
+                        author_address: parsedTx.author || transaction.author_address,
+                        created_at: new Date(parsedTx.timestamp),
+                        lock_amount: option.lockAmount,
+                        lock_duration: option.lockDuration,
+                        unlock_height: option.unlockHeight,
+                        current_height: option.currentHeight,
+                        lock_percentage: option.lockPercentage,
+                        tags: []
+                    },
+                    update: {
+                        content: option.text,
+                        author_address: parsedTx.author || transaction.author_address,
+                        created_at: new Date(parsedTx.timestamp),
+                        lock_amount: option.lockAmount,
+                        lock_duration: option.lockDuration,
+                        unlock_height: option.unlockHeight,
+                        current_height: option.currentHeight,
+                        lock_percentage: option.lockPercentage
+                    }
+                });
+            }
+        }
 
         // Send success message back to main thread
         parentPort?.postMessage({
@@ -239,4 +285,4 @@ async function processTransaction(transaction: TransactionData) {
 }
 
 // Test database connection on startup
-testConnection(); 
+testConnection();

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:server": "tsc -p tsconfig.server.json",
+    "build:scanner": "tsc -p tsconfig.scanner.json",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "test": "jest",
@@ -16,7 +17,7 @@
     "test:polymarket": "tsx src/frontend/scripts/test-polymarket.ts",
     "api": "tsx watch src/server.ts",
     "api:dev": "tsx watch src/server.ts",
-    "start:scanner": "tsx src/services/scanner/unifiedScanner.ts",
+    "start:scanner": "npm run build:scanner && node dist/services/scanner/unifiedScanner.js",
     "postinstall": "prisma generate"
   },
   "dependencies": {

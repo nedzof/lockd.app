@@ -9,7 +9,7 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-model Transaction {
+model transaction {
   id               String       @id @default(cuid())
   txid             String       @unique
   content          String
