@@ -9,40 +9,36 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-model transaction {
-  id               String       @id @default(cuid())
-  txid             String       @unique
-  content          String
-  author_address   String
-  media_type       String?
-  block_height     Int
-  amount           Int?
-  unlock_height    Int?
-  description      String?
-  created_at       DateTime     @default(now())
-  tags             String[]
-  metadata         Json?
-  is_locked        Boolean      @default(false)
-  lock_duration    Int?
-  raw_image_data   String?
-  image_format     String?
-  image_source     String?
-  // Vote-related fields
-  is_vote          Boolean      @default(false)
-  is_vote_question Boolean      @default(false)
-  question_content String?
-  vote_options     VoteOption[]
+model Post {
+  id             String       @id
+  txid           String       @unique
+  content        String
+  author_address String
+  media_type     String?
+  block_height   Int
+  amount         Int?
+  unlock_height  Int?
+  description    String?
+  created_at     DateTime     @default(now())
+  tags           String[]
+  metadata       Json?
+  is_locked      Boolean      @default(false)
+  lock_duration  Int?
+  raw_image_data String?
+  image_format   String?
+  image_source   String?
+  is_vote        Boolean      @default(false)
+  VoteOption     VoteOption[]
 
   @@index([author_address])
-  @@index([created_at])
   @@index([block_height])
-  @@map("transaction")
+  @@index([created_at])
 }
 
 model VoteOption {
-  id              String      @id @default(cuid())
-  txid            String      @unique
-  post_txid       String // Changed from question_txid
+  id              String   @id
+  txid            String   @unique
+  post_txid       String
   content         String
   author_address  String
   created_at      DateTime
@@ -52,8 +48,7 @@ model VoteOption {
   current_height  Int
   lock_percentage Float
   tags            String[]
-  transaction     Transaction @relation(fields: [post_txid], references: [txid]) // Changed from post to transaction
+  Post            Post     @relation(fields: [post_txid], references: [txid])
 
   @@index([post_txid])
-  @@map("vote_options")
 }
