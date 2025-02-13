@@ -24,6 +24,18 @@ async function processTransaction(message) {
         
         console.log('Processing Transaction:', JSON.stringify(tx, null, 2));
 
+        // Check if transaction already exists
+        const existingPost = await prisma.post.findUnique({
+            where: {
+                txid: tx.txid
+            }
+        });
+
+        if (existingPost) {
+            console.log('Transaction already processed, skipping:', tx.txid);
+            return;
+        }
+
         // Process the transaction in a database transaction
         const result = await prisma.$transaction(async (prisma) => {
             try {
