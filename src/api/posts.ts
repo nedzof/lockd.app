@@ -140,7 +140,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
     if (selectedTags) {
       const tags = JSON.parse(selectedTags);
       if (Array.isArray(tags) && tags.length > 0) {
-        where.AND.push({ tags: { hasEvery: tags } });
+        where.AND.push({ tags: { hasSome: tags } });
       }
     }
 
