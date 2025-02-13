@@ -273,6 +273,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         personalFilter,
         blockFilter,
         selectedTags: JSON.stringify(selectedTags),
+        tagFilterType: 'or',
         ...(userId && { userId })
       });
 
@@ -389,6 +390,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           personalFilter,
           blockFilter,
           selectedTags: JSON.stringify(selectedTags),
+          tagFilterType: 'or',
           userId: userId || 'anon'
         })}`);
         const postsData = await postsResponse.json();
