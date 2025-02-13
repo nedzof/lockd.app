@@ -42,14 +42,13 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [showLockOptions, setShowLockOptions] = useState(false);
-  const [lockDuration, setLockDuration] = useState<number>(1); // Default 1 block
-  const [lockAmount, setLockAmount] = useState<number>(1000); // Default 1000 sats
+  const [lockDuration, setLockDuration] = useState<number>(1);
+  const [lockAmount, setLockAmount] = useState<number>(1000);
   const [linkPreview, setLinkPreview] = useState<LinkPreviewData | null>(null);
-  
-  // New state for voting options
   const [hasVoteOptions, setHasVoteOptions] = useState(false);
   const [pollOptions, setPollOptions] = useState<PollOption[]>([]);
   const [showVoteOptions, setShowVoteOptions] = useState(false);
+  const [activeOption, setActiveOption] = useState<'vote' | 'tags' | 'lock' | null>(null);
 
   const onImagesChange = (imageList: ImageListType) => {
     setImages(imageList);
@@ -180,6 +179,32 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
     }
   };
 
+  const handleOptionClick = (option: 'vote' | 'tags' | 'lock') => {
+    if (activeOption === option) {
+      setActiveOption(null);
+      setShowVoteOptions(false);
+      setShowTagSelector(false);
+      setShowLockOptions(false);
+      if (option === 'vote') setHasVoteOptions(false);
+      if (option === 'lock') setIsLocked(false);
+    } else {
+      setActiveOption(option);
+      setShowVoteOptions(option === 'vote');
+      setShowTagSelector(option === 'tags');
+      setShowLockOptions(option === 'lock');
+      if (option === 'vote') {
+        setHasVoteOptions(true);
+        if (pollOptions.length === 0) {
+          setPollOptions([
+            { text: '' },
+            { text: '' }
+          ]);
+        }
+      }
+      if (option === 'lock') setIsLocked(true);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -263,18 +288,9 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
             <div className="flex items-center gap-4 py-2">
               {/* Vote Options Toggle */}
               <button
-                onClick={() => {
-                  setHasVoteOptions(!hasVoteOptions);
-                  setShowVoteOptions(!hasVoteOptions);
-                  if (!hasVoteOptions && pollOptions.length === 0) {
-                    setPollOptions([
-                      { text: '' },
-                      { text: '' }
-                    ]);
-                  }
-                }}
+                onClick={() => handleOptionClick('vote')}
                 className={`flex items-center gap-2 text-sm transition-colors ${
-                  hasVoteOptions
+                  activeOption === 'vote'
                     ? 'text-[#00ffa3]'
                     : 'text-gray-400 hover:text-[#00ffa3]'
                 }`}
@@ -285,9 +301,9 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
 
               {/* Tags Toggle */}
               <button
-                onClick={() => setShowTagSelector(!showTagSelector)}
+                onClick={() => handleOptionClick('tags')}
                 className={`flex items-center gap-2 text-sm transition-colors ${
-                  selectedTags.length > 0
+                  activeOption === 'tags'
                     ? 'text-[#00ffa3]'
                     : 'text-gray-400 hover:text-[#00ffa3]'
                 }`}
@@ -298,23 +314,20 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
 
               {/* Lock Toggle */}
               <button
-                onClick={() => {
-                  setShowLockOptions(!showLockOptions);
-                  if (!showLockOptions) setIsLocked(true);
-                }}
+                onClick={() => handleOptionClick('lock')}
                 className={`flex items-center gap-2 text-sm transition-colors ${
-                  isLocked
+                  activeOption === 'lock'
                     ? 'text-[#00ffa3]'
                     : 'text-gray-400 hover:text-[#00ffa3]'
                 }`}
               >
                 <FiLock className="w-4 h-4" />
-                <span>{isLocked ? `Locking` : 'Add Lock'}</span>
+                <span>{activeOption === 'lock' ? 'Locking' : 'Add Lock'}</span>
               </button>
             </div>
 
             {/* Vote Options Section */}
-            {hasVoteOptions && showVoteOptions && (
+            {activeOption === 'vote' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-gray-400 text-sm">Vote Options</h3>
@@ -350,7 +363,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
             )}
 
             {/* Tag Selector */}
-            {showTagSelector && (
+            {activeOption === 'tags' && (
               <div className="flex flex-wrap gap-2 py-2">
                 {AVAILABLE_TAGS.map((tag) => (
                   <button
@@ -369,7 +382,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
             )}
 
             {/* Lock Options */}
-            {!hasVoteOptions && showLockOptions && (
+            {activeOption === 'lock' && (
               <div className="grid grid-cols-2 gap-4 py-2">
                 <div>
                   <label className="text-gray-400 text-sm block mb-2">Duration (blocks)</label>
