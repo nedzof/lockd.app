@@ -51,6 +51,25 @@ export interface MemeSubmission {
   isTop10Percent: boolean;
   isTop3: boolean;
   locklikes: LockLike[];
+  content: string;
+  unlock_height?: number;
+  block_height?: number;
+  is_vote?: boolean;
+  vote_options?: Array<{
+    id: string;
+    txid: string;
+    postId: string;
+    post_txid: string;
+    content: string;
+    author_address: string;
+    created_at: string;
+    lock_amount: number;
+    lock_duration: number;
+    unlock_height: number;
+    current_height: number;
+    lock_percentage: number;
+    tags: string[];
+  }>;
 }
 
 export interface HODLTransaction {

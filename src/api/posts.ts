@@ -1,5 +1,5 @@
 import express, { Request, Response, Router, RequestHandler } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 
 const router: Router = express.Router();
 const prisma = new PrismaClient({
@@ -63,11 +63,28 @@ interface CreatePostBody {
   [key: string]: any; // Add index signature for dynamic field access
 }
 
+// Define request body type for direct post creation
+interface DirectPostBody {
+  postId: string;
+  content: string;
+  author_address: string;
+  raw_image_data?: string | null;
+  media_type?: string | null;
+  description?: string;
+  tags?: string[];
+  prediction_market_data?: any;
+  isLocked: boolean;
+  lockDuration?: number;
+  lockAmount?: number;
+  created_at: string;
+}
+
 // Define route handler types
 type PostListHandler = RequestHandler<{}, any, any, PostQueryParams>;
 type PostDetailHandler = RequestHandler<PostParams>;
 type PostMediaHandler = RequestHandler<PostParams>;
 type CreatePostHandler = RequestHandler<{}, any, CreatePostBody, any>;
+type CreateDirectPostHandler = RequestHandler<{}, any, DirectPostBody, any>;
 
 const listPosts: PostListHandler = async (req, res, next) => {
   try {
@@ -85,8 +102,24 @@ const listPosts: PostListHandler = async (req, res, next) => {
       userId
     } = req.query;
 
-    // Build the base query
-    let where: any = {};
+    // First, find all txids that have vote posts
+    const voteTxids = await prisma.post.findMany({
+      where: { is_vote: true },
+      select: { txid: true }
+    });
+    const voteTxidSet = new Set(voteTxids.map(p => p.txid));
+
+    // Build the base query - exclude non-vote posts if a vote version exists
+    let where: any = {
+      AND: [
+        {
+          OR: [
+            { is_vote: true }, // Include all vote posts
+            { txid: { notIn: Array.from(voteTxidSet) } } // Include non-vote posts only if no vote version exists
+          ]
+        }
+      ]
+    };
 
     // Apply time filter
     if (timeFilter) {
@@ -99,7 +132,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
       const days = timeFilters[timeFilter];
       if (days) {
         const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-        where.created_at = { gte: startDate };
+        where.AND.push({ created_at: { gte: startDate } });
       }
     }
 
@@ -107,18 +140,18 @@ const listPosts: PostListHandler = async (req, res, next) => {
     if (selectedTags) {
       const tags = JSON.parse(selectedTags);
       if (Array.isArray(tags) && tags.length > 0) {
-        where.tags = { hasEvery: tags };
+        where.AND.push({ tags: { hasEvery: tags } });
       }
     }
 
     // Apply personal filters
     if (personalFilter === 'mylocks' && userId) {
-      where.author_address = userId;
+      where.AND.push({ author_address: userId });
     }
 
     // Apply block filter if provided
     if (blockFilter) {
-      where.block_height = { gte: parseInt(blockFilter, 10) };
+      where.AND.push({ block_height: { gte: parseInt(blockFilter, 10) } });
     }
 
     console.log('Querying posts with where clause:', where);
@@ -236,7 +269,10 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
 
 const createPost: CreatePostHandler = async (req, res, next): Promise<void> => {
   try {
-    console.log('Received post creation request with body:', JSON.stringify(req.body, null, 2));
+    console.log('Received post creation request with body:', {
+      ...req.body,
+      raw_image_data: req.body.raw_image_data ? `[base64 data length: ${req.body.raw_image_data.length}]` : null
+    });
 
     // Validate required fields
     const requiredFields = ['txid', 'postId', 'content', 'author_address'] as const;
@@ -261,7 +297,9 @@ const createPost: CreatePostHandler = async (req, res, next): Promise<void> => {
       is_locked,
       lock_duration,
       is_vote,
-      vote_options
+      vote_options,
+      raw_image_data,
+      image_format
     } = req.body;
 
     // Validate data types
@@ -312,6 +350,8 @@ const createPost: CreatePostHandler = async (req, res, next): Promise<void> => {
           is_locked: is_locked || false,
           lock_duration,
           is_vote: is_vote || false,
+          raw_image_data: raw_image_data || null,
+          image_format: image_format || null,
           vote_options: vote_options ? {
             create: vote_options.map((option: any, index: number) => ({
               id: `${postId}-option-${index}`,
@@ -334,7 +374,11 @@ const createPost: CreatePostHandler = async (req, res, next): Promise<void> => {
         }
       });
 
-      console.log('Successfully created post:', JSON.stringify(post, null, 2));
+      console.log('Successfully created post:', {
+        ...post,
+        raw_image_data: post.raw_image_data ? `[base64 data length: ${post.raw_image_data.length}]` : null
+      });
+      
       res.json(post);
       return;
     } catch (dbError) {
@@ -374,11 +418,85 @@ const createPost: CreatePostHandler = async (req, res, next): Promise<void> => {
   }
 };
 
+// Handler for direct post creation
+const createDirectPost: CreateDirectPostHandler = async (req, res, next): Promise<void> => {
+  try {
+    console.log('Received direct post creation request');
+
+    const {
+      postId,
+      content,
+      author_address,
+      raw_image_data,
+      media_type,
+      description,
+      tags,
+      prediction_market_data,
+      isLocked,
+      lockDuration,
+      lockAmount,
+      created_at
+    } = req.body;
+
+    // Log image data details
+    if (raw_image_data) {
+      console.log('Image upload details:', {
+        hasImageData: true,
+        imageDataLength: raw_image_data.length,
+        mediaType: media_type,
+        imageDataPreview: raw_image_data.substring(0, 100) + '...'
+      });
+    }
+
+    // Create temporary txid for the post
+    const tempTxid = `temp_${postId}_${Date.now()}`;
+
+    const postData = {
+      id: tempTxid,
+      txid: tempTxid,
+      postId,
+      content,
+      author_address,
+      raw_image_data: raw_image_data || null,
+      media_type: media_type || null,
+      description,
+      tags,
+      metadata: {
+        prediction_market_data,
+        app: 'lockd',
+        version: '1.0.0',
+        lock: {
+          isLocked,
+          duration: lockDuration,
+          amount: lockAmount
+        }
+      },
+      is_locked: isLocked,
+      lock_duration: lockDuration,
+      created_at: new Date(created_at),
+      block_height: null
+    } as const;
+
+    const post = await prisma.post.create({
+      data: postData as unknown as Prisma.PostCreateInput
+    });
+
+    res.status(201).json(post);
+  } catch (error) {
+    console.error('Error creating direct post:', error);
+    res.status(500).json({
+      message: 'Error creating direct post',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
 // Register routes
 router.get('/', listPosts);
 router.get('/:id', getPost);
 router.get('/:id/media', getPostMedia);
 router.post('/', createPost);
+router.post('/direct', createDirectPost);
 
 // Add a test endpoint to check database connection
 router.get('/test', async (req, res) => {

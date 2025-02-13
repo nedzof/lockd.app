@@ -4,6 +4,23 @@ import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
 import type { MemeSubmission, LockLike } from '../types';
+import { toast } from 'react-hot-toast';
+
+interface VoteOption {
+  id: string;
+  txid: string;
+  postId: string;
+  post_txid: string;
+  content: string;
+  author_address: string;
+  created_at: string;
+  lock_amount: number;
+  lock_duration: number;
+  unlock_height: number;
+  current_height: number;
+  lock_percentage: number;
+  tags: string[];
+}
 
 interface VoteQuestion {
   id: string;
@@ -14,18 +31,6 @@ interface VoteQuestion {
   options: any;
   tags: string[];
   vote_options: VoteOption[];
-}
-
-interface VoteOption {
-  id: string;
-  txid: string;
-  question_txid: string;
-  content: string;
-  author_address: string;
-  created_at: string;
-  lock_amount: number;
-  lock_duration: number;
-  tags: string[];
 }
 
 interface MemeSubmissionGridProps {
@@ -53,7 +58,17 @@ interface ApiPost {
   metadata: any;
   is_locked: boolean;
   lock_duration: number | null;
+  raw_image_data: string | null;
+  image_format: string | null;
+  is_vote?: boolean;
+  vote_options?: VoteOption[];
 }
+
+// Extend MemeSubmission type to include vote-related properties
+type ExtendedMemeSubmission = MemeSubmission & {
+  is_vote?: boolean;
+  vote_options?: VoteOption[];
+};
 
 const API_URL = 'http://localhost:3001';
 
@@ -66,7 +81,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   selectedTags,
   userId
 }) => {
-  const [submissions, setSubmissions] = useState<MemeSubmission[]>([]);
+  const [submissions, setSubmissions] = useState<ExtendedMemeSubmission[]>([]);
   const [votes, setVotes] = useState<VoteQuestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,95 +108,34 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       containsInvalidChars: /[^A-Za-z0-9+/=]/.test(imageData.split(',')[1] || imageData)
     });
 
-    // If it's a URL or path (but not a raw JPEG), return as is
-    if ((imageData.startsWith('http') || imageData.startsWith('/')) && !imageData.startsWith('/9j/')) {
-      return imageData;
-    }
-
     try {
-      // Create image element
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-
-      // Create canvas
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-
-      if (!ctx) {
-        throw new Error('Could not get canvas context');
-      }
-
-      // Clean base64 data
-      let base64Data = imageData;
+      // If it's already a data URL, return as is
       if (imageData.startsWith('data:image/')) {
-        const [header, base64] = imageData.split(',');
-        if (!base64) {
-          console.error('No base64 data found in data URL');
-          return null;
-        }
-        base64Data = base64;
+        return imageData;
       }
 
-      // Clean the base64 data
-      base64Data = base64Data
-        .replace(/[\r\n\t\f\v ]+/g, '') // Remove all whitespace
-        .replace(/[^A-Za-z0-9+/=]/g, '') // Remove invalid characters
-        .replace(/=+$/, ''); // Remove trailing equals
-
-      // Re-add proper padding
-      const padding = base64Data.length % 4;
-      if (padding > 0) {
-        base64Data += '='.repeat(4 - padding);
+      // If it's a URL or path (but not a raw JPEG), return as is
+      if ((imageData.startsWith('http') || imageData.startsWith('/')) && !imageData.startsWith('/9j/')) {
+        return imageData;
       }
 
-      // Verify the cleaned base64 data
-      try {
-        const decoded = atob(base64Data);
-        if (decoded.length === 0) {
-          console.error('Decoded base64 data is empty');
-          return null;
-        }
-      } catch (e) {
-        console.error('Invalid base64 data:', e);
-        return null;
+      // For raw base64 data (like JPEG starting with /9j/), convert to data URL
+      if (imageData.startsWith('/9j/')) {
+        return `data:image/jpeg;base64,${imageData}`;
       }
 
-      // Wait for image to load
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = imageData.startsWith('data:image/') ? imageData : `data:image/jpeg;base64,${base64Data}`;
-      });
-
-      // Calculate dimensions
-      let width = img.width;
-      let height = img.height;
-
-      // Resize if needed (max 800px)
-      const maxSize = 800;
-      if (width > height) {
-        if (width > maxSize) {
-          height = Math.round((height * maxSize) / width);
-          width = maxSize;
-        }
+      // For other base64 data, try to determine format and create data URL
+      const isJPEG = imageData.startsWith('/9j/');
+      const isPNG = imageData.startsWith('iVBORw0KGgo');
+      
+      if (isJPEG) {
+        return `data:image/jpeg;base64,${imageData}`;
+      } else if (isPNG) {
+        return `data:image/png;base64,${imageData}`;
       } else {
-        if (height > maxSize) {
-          width = Math.round((width * maxSize) / height);
-          height = maxSize;
-        }
+        // Default to JPEG if format can't be determined
+        return `data:image/jpeg;base64,${imageData}`;
       }
-
-      // Set canvas size
-      canvas.width = width;
-      canvas.height = height;
-
-      // Draw with black background
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, width, height);
-      ctx.drawImage(img, 0, 0, width, height);
-
-      // Convert to base64
-      return canvas.toDataURL('image/jpeg', 0.85);
     } catch (error) {
       console.error('Error formatting image URL:', error);
       return null;
@@ -294,23 +248,36 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
       // Process and enrich the posts
       const submissionsWithStats = await Promise.all(posts.map(async (post: ApiPost) => {
-        // Format image URL properly if it's base64 data
-        const imageUrl = await formatImageUrl(post.metadata?.imageData) || 
-                        await formatImageUrl(post.content) || 
-                        `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('No image available')}`;
+        let imageUrl: string = `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('No image available')}`;
+        
+        try {
+          if (post.raw_image_data) {
+            console.log('Processing post image:', {
+              id: post.id,
+              hasImageData: true,
+              imageDataLength: post.raw_image_data.length,
+              mediaType: post.media_type
+            });
+            
+            const formattedUrl = await formatImageUrl(post.raw_image_data);
+            if (formattedUrl) {
+              console.log('Successfully formatted image URL:', {
+                id: post.id,
+                urlLength: formattedUrl.length,
+                urlPreview: formattedUrl.substring(0, 50) + '...'
+              });
+              imageUrl = formattedUrl;
+            } else {
+              console.warn(`Failed to format image for post ${post.id}`);
+              toast.error('Failed to load some images');
+            }
+          }
+        } catch (error) {
+          console.error('Error processing image:', error);
+          toast.error('Error loading some images');
+        }
 
-        // Debug the final URL
-        console.log('Final image URL:', {
-          id: post.id,
-          urlLength: imageUrl.length,
-          urlStart: imageUrl.substring(0, 50),
-          isDataUrl: imageUrl.startsWith('data:image/'),
-          isPlaceholder: imageUrl.includes('placehold.co'),
-          source: imageUrl === await formatImageUrl(post.metadata?.imageData) ? 'metadata' : 
-                 imageUrl === await formatImageUrl(post.content) ? 'content' : 'placeholder'
-        });
-
-        const submission: MemeSubmission = {
+        const submission: ExtendedMemeSubmission = {
           id: post.id,
           creator: post.author_address || 'Anonymous',
           title: `Post by ${post.author_address || 'Anonymous'}`,
@@ -334,14 +301,16 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           locklikes: [],
           content: post.content || '',
           unlock_height: post.unlock_height,
-          block_height: post.block_height
+          block_height: post.block_height,
+          is_vote: post.is_vote || false,
+          vote_options: post.vote_options || []
         };
 
         return submission;
       }));
 
       // Apply ranking filters
-      submissionsWithStats.sort((a: MemeSubmission, b: MemeSubmission) => {
+      submissionsWithStats.sort((a: ExtendedMemeSubmission, b: ExtendedMemeSubmission) => {
         // First sort by total locked amount
         const amountDiff = b.totalLocked - a.totalLocked;
         if (amountDiff !== 0) return amountDiff;
@@ -365,7 +334,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       setSubmissions(filteredSubmissions);
 
       // Update stats
-      const total = filteredSubmissions.reduce((sum: number, sub: MemeSubmission) => sum + (sub.totalLocked || 0), 0);
+      const total = filteredSubmissions.reduce((sum: number, sub: ExtendedMemeSubmission) => sum + (sub.totalLocked || 0), 0);
       onStatsUpdate({
         totalLocked: total,
         participantCount: filteredSubmissions.length,
@@ -398,9 +367,34 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
         // Process posts into MemeSubmission format
         const processedPosts = await Promise.all(postsData.map(async (post: ApiPost) => {
-          const imageUrl = await formatImageUrl(post.metadata?.imageData) || 
-                          await formatImageUrl(post.content) || 
-                          `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('No image available')}`;
+          let imageUrl: string = `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('No image available')}`;
+          
+          try {
+            if (post.raw_image_data) {
+              console.log('Processing post image:', {
+                id: post.id,
+                hasImageData: true,
+                imageDataLength: post.raw_image_data.length,
+                mediaType: post.media_type
+              });
+              
+              const formattedUrl = await formatImageUrl(post.raw_image_data);
+              if (formattedUrl) {
+                console.log('Successfully formatted image URL:', {
+                  id: post.id,
+                  urlLength: formattedUrl.length,
+                  urlPreview: formattedUrl.substring(0, 50) + '...'
+                });
+                imageUrl = formattedUrl;
+              } else {
+                console.warn(`Failed to format image for post ${post.id}`);
+                toast.error('Failed to load some images');
+              }
+            }
+          } catch (error) {
+            console.error('Error processing image:', error);
+            toast.error('Error loading some images');
+          }
 
           return {
             id: post.id,
@@ -426,24 +420,17 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
             locklikes: [],
             content: post.content || '',
             unlock_height: post.unlock_height,
-            block_height: post.block_height
+            block_height: post.block_height,
+            is_vote: post.is_vote || false,
+            vote_options: post.vote_options || []
           };
         }));
 
-        // Fetch votes
-        const votesResponse = await fetch(`${API_URL}/api/votes`);
-        const votesData = await votesResponse.json();
-        console.log('Fetched votes:', votesData);
-
+        // No need to fetch votes separately anymore since they're included in posts
         setSubmissions(processedPosts);
-        setVotes(votesData);
+        setVotes([]); // Clear votes since we're not using them separately anymore
 
-        // Debug combined data
-        const allContent = [
-          ...processedPosts.map((post: MemeSubmission) => ({ type: 'post' as const, data: post })),
-          ...votesData.map((vote: VoteQuestion) => ({ type: 'vote' as const, data: vote }))
-        ];
-        console.log('Combined content:', allContent);
+        console.log('Processed posts:', processedPosts);
 
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -468,78 +455,21 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     </a>
   );
 
-  const renderContent = (submission: MemeSubmission) => {
-    // If it's text only (no image) - more ethereal styling
-    if (submission.content) {
-      return (
-        <div className="w-full p-8 bg-gradient-to-br from-[#2A2A40]/5 to-[#1A1B23]/5 relative group">
-          {/* Top right stats */}
-          <div className="absolute top-3 right-3 flex items-center space-x-2">
-            <span className="text-sm text-[#00ffa3]/60 flex items-center gap-1">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-              </svg>
-              {formatBSV(submission.totalLocked || 0)}
-            </span>
-            <a
-              href={`https://whatsonchain.com/tx/${submission.txId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-2 rounded-full bg-[#1A1B23]/40 text-white/40 hover:text-[#00ffa3] hover:bg-[#1A1B23]/60 transition-all duration-500 backdrop-blur-sm"
-              title="View on WhatsOnChain"
-            >
-              <FiExternalLink className="w-4 h-4" />
-            </a>
-          </div>
+  const renderContent = (submission: ExtendedMemeSubmission) => {
+    console.log('Rendering submission:', {
+      id: submission.id,
+      hasContent: !!submission.content,
+      fileUrl: submission.fileUrl,
+      format: submission.format,
+      isPlaceholder: submission.fileUrl.includes('placehold.co'),
+      isVote: submission.is_vote,
+      hasVoteOptions: !!submission.vote_options
+    });
 
-          {/* Decorative elements */}
-          <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all duration-1000 pointer-events-none">
-            <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-[#00ffa3]/3 to-transparent rounded-full blur-xl" />
-            <div className="absolute bottom-0 right-0 w-32 h-32 bg-gradient-to-tl from-[#00ffa3]/2 to-transparent rounded-full blur-xl" />
-          </div>
-
-          {/* Content - more focused */}
-          <div className="relative">
-            <div className="absolute -left-4 top-0 bottom-0 w-[1px] bg-gradient-to-b from-[#00ffa3]/5 via-[#00ffa3]/3 to-transparent" />
-            <p className="text-gray-200/95 text-xl leading-relaxed whitespace-pre-wrap break-words">{submission.content}</p>
-          </div>
-
-          {/* Footer - more subtle */}
-          <div className="mt-10 pt-4 border-t border-gray-800/10 flex items-center justify-end relative">
-            <div className="flex items-center space-x-6">
-              {submission.unlock_height && submission.block_height && (
-                <div className="text-sm text-white/40">
-                  {Math.max(0, submission.unlock_height - submission.block_height)} blocks left
-                </div>
-              )}
-              <button
-                onClick={() => setShowLockInput(submission.id)}
-                className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#00ffa3]/5 to-[#00ff9d]/5 text-[#00ffa3]/80 text-sm font-medium hover:from-[#00ffa3]/10 hover:to-[#00ff9d]/10 transition-all duration-700 backdrop-blur-sm"
-              >
-                <FiLock className="w-4 h-4" />
-                <span>Lock BSV</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Subtle corner decorations */}
-          <div className="absolute top-0 right-0 w-16 h-16 opacity-30 pointer-events-none">
-            <div className="absolute top-3 right-3 w-[1px] h-6 bg-gradient-to-b from-[#00ffa3]/10 to-transparent transform rotate-45" />
-            <div className="absolute top-3 right-3 w-6 h-[1px] bg-gradient-to-r from-transparent to-[#00ffa3]/10 transform rotate-45" />
-          </div>
-          <div className="absolute bottom-0 left-0 w-16 h-16 opacity-30 pointer-events-none">
-            <div className="absolute bottom-3 left-3 w-[1px] h-6 bg-gradient-to-t from-[#00ffa3]/10 to-transparent transform -rotate-45" />
-            <div className="absolute bottom-3 left-3 w-6 h-[1px] bg-gradient-to-r from-[#00ffa3]/10 to-transparent transform -rotate-45" />
-          </div>
-        </div>
-      );
-    }
-    
-    // If it's an image post
-    if (submission.format?.startsWith('image/')) {
-      return (
-        <>
+    return (
+      <div className="w-full">
+        {/* Image section */}
+        {submission.fileUrl && !submission.fileUrl.includes('placehold.co') && (
           <div className="relative w-full group/image">
             {/* Top right stats */}
             <div className="absolute top-3 right-3 flex items-center space-x-2 z-10">
@@ -568,64 +498,121 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
               alt={submission.description || 'Post image'}
               className="w-full object-cover bg-[#1A1B23] cursor-pointer rounded-t-xl max-h-[400px]"
               onClick={() => handleImageClick(submission.fileUrl)}
+              onLoad={() => console.log('Image loaded successfully:', submission.id)}
               onError={(e) => {
+                console.error('Image load error:', {
+                  id: submission.id,
+                  src: submission.fileUrl
+                });
                 const img = e.target as HTMLImageElement;
                 img.src = `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('Failed to load image')}`;
               }}
               loading="lazy"
             />
-
-            {/* Hover overlay - more ethereal */}
-            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/image:opacity-100 transition-opacity duration-700 bg-gradient-to-t from-black/60 via-transparent to-black/60">
-              <FiMaximize2 className="w-8 h-8 text-white/70" />
-            </div>
           </div>
+        )}
 
-          {/* Content section - more focused */}
+        {/* Content and Vote Options section */}
+        <div className="p-8 bg-gradient-to-b from-[#1A1B23] to-[#1A1B23]/95">
+          {/* Text content */}
           {submission.content && (
-            <div className="p-8 bg-gradient-to-b from-[#1A1B23] to-[#1A1B23]/95 relative group">
-              {/* Decorative elements */}
-              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all duration-1000 pointer-events-none">
-                <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-[#00ffa3]/3 to-transparent rounded-full blur-xl" />
-                <div className="absolute bottom-0 right-0 w-32 h-32 bg-gradient-to-tl from-[#00ffa3]/2 to-transparent rounded-full blur-xl" />
-              </div>
+            <p className="text-gray-200/90 text-lg leading-relaxed whitespace-pre-wrap break-words mb-6">{submission.content}</p>
+          )}
 
-              <p className="text-gray-200/90 text-lg leading-relaxed whitespace-pre-wrap break-words relative">{submission.content}</p>
-              
-              {/* Footer - more subtle */}
-              <div className="mt-8 pt-4 border-t border-gray-800/10 flex items-center justify-end relative">
-                <div className="flex items-center space-x-6">
-                  {submission.unlock_height && submission.block_height && (
-                    <div className="text-sm text-white/40">
-                      {Math.max(0, submission.unlock_height - submission.block_height)} blocks left
+          {/* Vote options */}
+          {submission.is_vote && submission.vote_options && (
+            <div className="space-y-4 mt-6">
+              {submission.vote_options.map((option, index) => {
+                const totalLocked = submission.vote_options?.reduce((sum, opt) => sum + opt.lock_amount, 0) || 0;
+                const percentage = totalLocked > 0 ? (option.lock_amount / totalLocked) * 100 : 0;
+                const gradientColors = [
+                  { from: '#00ffa3', to: '#00ff9d', shadow: '#00ffa3' },
+                  { from: '#3CDFCE', to: '#00ffa3', shadow: '#3CDFCE' },
+                  { from: '#45B7D1', to: '#3CDFCE', shadow: '#45B7D1' }
+                ][index % 3];
+
+                return (
+                  <div key={option.id} className="relative group/option">
+                    {/* Progress bar background */}
+                    <div className="absolute inset-0 bg-[#2A2A40]/10 rounded-lg" />
+                    
+                    {/* Progress bar */}
+                    <div 
+                      className="absolute inset-y-0 left-0 rounded-lg transition-all duration-700 ease-out"
+                      style={{
+                        width: `${percentage}%`,
+                        background: `linear-gradient(90deg, ${gradientColors.from}08, ${gradientColors.to}08)`,
+                        boxShadow: percentage > 0 ? `0 0 30px ${gradientColors.shadow}05` : 'none'
+                      }}
+                    />
+
+                    {/* Hover effect */}
+                    <div 
+                      className="absolute inset-0 opacity-0 group-hover/option:opacity-100 transition-opacity duration-500 rounded-lg"
+                      style={{
+                        background: `linear-gradient(90deg, ${gradientColors.from}10, ${gradientColors.to}10)`
+                      }}
+                    />
+
+                    {/* Content */}
+                    <div className="relative p-4 flex items-center justify-between transition-all duration-300 rounded-lg">
+                      <div className="flex items-center space-x-3">
+                        <span className="text-white/90 font-medium">{option.content}</span>
+                        <span 
+                          className="text-gray-400/70 transition-all duration-300 group-hover/option:text-white/80"
+                          style={{ color: percentage > 0 ? `${gradientColors.from}dd` : undefined }}
+                        >
+                          {percentage.toFixed(1)}%
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          const amount = prompt('Enter amount to lock (in BSV):');
+                          if (amount && !isNaN(Number(amount))) {
+                            handleLockCoins(option.id, Number(amount) * 100000000);
+                          }
+                        }}
+                        disabled={lockingSubmissionId === option.id}
+                        className="opacity-0 group-hover/option:opacity-100 px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-500 disabled:opacity-50 backdrop-blur-sm"
+                        style={{
+                          background: `linear-gradient(90deg, ${gradientColors.from}15, ${gradientColors.to}15)`,
+                          color: gradientColors.from
+                        }}
+                      >
+                        {lockingSubmissionId === option.id ? (
+                          <FiLoader className="animate-spin w-4 h-4" />
+                        ) : (
+                          'Lock BSV'
+                        )}
+                      </button>
                     </div>
-                  )}
-                  <button
-                    onClick={() => setShowLockInput(submission.id)}
-                    className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#00ffa3]/5 to-[#00ff9d]/5 text-[#00ffa3]/80 text-sm font-medium hover:from-[#00ffa3]/10 hover:to-[#00ff9d]/10 transition-all duration-700 backdrop-blur-sm"
-                  >
-                    <FiLock className="w-4 h-4" />
-                    <span>Lock BSV</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Subtle corner decorations */}
-              <div className="absolute top-0 right-0 w-16 h-16 opacity-30 pointer-events-none">
-                <div className="absolute top-3 right-3 w-[1px] h-6 bg-gradient-to-b from-[#00ffa3]/10 to-transparent transform rotate-45" />
-                <div className="absolute top-3 right-3 w-6 h-[1px] bg-gradient-to-r from-transparent to-[#00ffa3]/10 transform rotate-45" />
-              </div>
-              <div className="absolute bottom-0 left-0 w-16 h-16 opacity-30 pointer-events-none">
-                <div className="absolute bottom-3 left-3 w-[1px] h-6 bg-gradient-to-t from-[#00ffa3]/10 to-transparent transform -rotate-45" />
-                <div className="absolute bottom-3 left-3 w-6 h-[1px] bg-gradient-to-r from-[#00ffa3]/10 to-transparent transform -rotate-45" />
-              </div>
+                  </div>
+                );
+              })}
             </div>
           )}
-        </>
-      );
-    }
-
-    return null;
+          
+          {/* Footer with Lock BSV button */}
+          <div className="flex items-center justify-end space-x-6 mt-6">
+            {submission.unlock_height && submission.block_height && (
+              <div className="text-sm text-white/40">
+                {Math.max(0, submission.unlock_height - submission.block_height)} blocks left
+              </div>
+            )}
+            {!submission.is_vote && (
+              <button
+                onClick={() => setShowLockInput(submission.id)}
+                className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#00ffa3]/5 to-[#00ff9d]/5 text-[#00ffa3]/80 text-sm font-medium hover:from-[#00ffa3]/10 hover:to-[#00ff9d]/10 transition-all duration-700 backdrop-blur-sm"
+              >
+                <FiLock className="w-4 h-4" />
+                <span>Lock BSV</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const renderVoteQuestion = (vote: VoteQuestion) => {
@@ -784,37 +771,57 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-center">
           <div className="grid grid-cols-1 gap-8 justify-items-center" style={{ maxWidth: '800px' }}>
-            {[
-              ...submissions.map(submission => ({ 
-                type: 'post' as const, 
-                data: submission,
-                timestamp: submission.createdAt
-              })),
-              ...votes.map(vote => ({ 
-                type: 'vote' as const, 
-                data: vote,
-                timestamp: new Date(vote.created_at)
-              }))
-            ]
-            .sort((a, b) => {
-              const timeA = a.timestamp instanceof Date ? a.timestamp : new Date(0);
-              const timeB = b.timestamp instanceof Date ? b.timestamp : new Date(0);
-              return timeB.getTime() - timeA.getTime();
-            })
-            .map((item) => (
-              <div key={item.data.id} className="w-full">
-                {item.type === 'post' ? (
+            {submissions
+              .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+              .map((submission) => (
+                <div key={`${submission.txId}-${submission.id}`} className="w-full">
                   <div className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-500 hover:shadow-[0_0_40px_rgba(0,255,163,0.03)] bg-[#1A1B23]/20 w-full max-w-md flex flex-col">
-                    {renderContent(item.data)}
+                    {renderContent(submission)}
                   </div>
-                ) : (
-                  renderVoteQuestion(item.data)
-                )}
-              </div>
-            ))}
+                </div>
+              ))}
           </div>
         </div>
       </div>
+
+      {/* Lock Input Modal */}
+      {showLockInput && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#1A1B23] p-8 rounded-xl border border-[#00ffa3]/20 shadow-lg max-w-md w-full mx-4">
+            <h3 className="text-xl font-medium text-white/90 mb-6">Lock BSV</h3>
+            <input
+              type="number"
+              value={lockAmount}
+              onChange={(e) => setLockAmount(e.target.value)}
+              placeholder="Enter amount in BSV"
+              className="w-full px-4 py-2 bg-[#2A2A40]/20 border border-[#00ffa3]/20 rounded-lg text-white/90 placeholder-white/40 focus:outline-none focus:border-[#00ffa3]/40"
+            />
+            <div className="flex justify-end mt-6 space-x-4">
+              <button
+                onClick={() => setShowLockInput(null)}
+                className="px-4 py-2 text-white/60 hover:text-white/90 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (showLockInput && lockAmount) {
+                    handleLockCoins(showLockInput, parseFloat(lockAmount) * 100000000);
+                  }
+                }}
+                disabled={!lockAmount || isNaN(parseFloat(lockAmount))}
+                className="px-4 py-2 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] text-black rounded-lg font-medium disabled:opacity-50"
+              >
+                {lockingSubmissionId === showLockInput ? (
+                  <FiLoader className="animate-spin w-5 h-5" />
+                ) : (
+                  'Confirm'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image Modal */}
       {expandedImage && (

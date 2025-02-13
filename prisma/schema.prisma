@@ -16,7 +16,7 @@ model Post {
   content        String
   author_address String
   media_type     String?
-  block_height   Int
+  block_height   Int?
   amount         Int?
   unlock_height  Int?
   description    String?
@@ -25,7 +25,7 @@ model Post {
   metadata       Json?
   is_locked      Boolean      @default(false)
   lock_duration  Int?
-  raw_image_data String?
+  raw_image_data String? @db.Text
   image_format   String?
   image_source   String?
   is_vote        Boolean      @default(false)

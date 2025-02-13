@@ -568,6 +568,41 @@ export const createVoteOptionPost = async (
   });
 };
 
+// Function to create a direct post in the database before blockchain confirmation
+async function createDirectPost(postData: PostCreationData, imageFile?: File): Promise<Post> {
+  try {
+    let imageData: string | null = null;
+    let imageType: string | null = null;
+    
+    if (imageFile) {
+      imageData = await fileToBase64(imageFile);
+      imageType = imageFile.type;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/posts/direct`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...postData,
+        raw_image_data: imageData,
+        media_type: imageType,
+        created_at: new Date().toISOString(),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to create direct post');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating direct post:', error);
+    throw error;
+  }
+}
+
 export const createPost = async (
   content: string,
   authorAddress: string,
@@ -589,88 +624,6 @@ export const createPost = async (
     const sequence = createSequence();
     const components: InscribeRequest[] = [];
 
-    // Create main content component
-    const contentSeq = sequence.next();
-    const contentComponent = createInscriptionRequest(
-      authorAddress,
-      content,
-      createBaseMapData('content', content, tags || [], postId, contentSeq),
-      await calculateOutputSatoshis(content.length)
-    );
-    
-    if (description) {
-      contentComponent.map.description = description;
-    }
-    
-    if (predictionMarketData) {
-      contentComponent.map.prediction_market_data = JSON.stringify(predictionMarketData);
-    }
-    
-    if (lockData?.isLocked) {
-      const currentHeight = await getCurrentBlockHeight();
-      contentComponent.map.lock_duration = lockData.duration?.toString() || '0';
-      contentComponent.map.lock_amount = lockData.amount?.toString() || '0';
-      contentComponent.map.unlock_height = (currentHeight + (lockData.duration || 0)).toString();
-    }
-    
-    components.push(contentComponent);
-
-    // Add image if present
-    if (imageFile) {
-      const imageComponent = await createImageComponent(
-        imageFile,
-        postId,
-        sequence.next(),
-        contentSeq,
-        authorAddress
-      );
-      components.push(imageComponent);
-    }
-
-    // Add vote components if present
-    if (lockData?.isPoll && lockData.options?.length) {
-      const questionSeq = sequence.next();
-      const questionComponent = await createVoteQuestionComponent(
-        content,
-        lockData.options,
-        postId,
-        questionSeq,
-        contentSeq,
-        authorAddress
-      );
-      components.push(questionComponent);
-
-      // Add vote options
-      lockData.options.forEach((option, idx) => {
-        components.push(
-          createVoteOptionComponent(
-            option,
-            postId,
-            sequence.next(),
-            questionSeq,
-            idx,
-            authorAddress
-          )
-        );
-      });
-    }
-
-    // Add tags if present
-    if (tags?.length) {
-      components.push(
-        createTagsComponent(
-          tags,
-          postId,
-          sequence.next(),
-          contentSeq,
-          authorAddress
-        )
-      );
-    }
-
-    // Validate component structure
-    validateComponentStructure(components);
-
     // Show pending toast
     const pendingToast = toast.loading('Creating post...', {
       style: {
@@ -681,6 +634,96 @@ export const createPost = async (
     });
 
     try {
+      // Process image if present
+      let imageData: string | null = null;
+      let imageType: string | null = null;
+      if (imageFile) {
+        imageData = await fileToBase64(imageFile);
+        imageType = imageFile.type;
+      }
+
+      // Create main content component
+      const contentSeq = sequence.next();
+      const contentComponent = createInscriptionRequest(
+        authorAddress,
+        content,
+        createBaseMapData('content', content, tags || [], postId, contentSeq),
+        await calculateOutputSatoshis(content.length)
+      );
+      
+      if (description) {
+        contentComponent.map.description = description;
+      }
+      
+      if (predictionMarketData) {
+        contentComponent.map.prediction_market_data = JSON.stringify(predictionMarketData);
+      }
+      
+      if (lockData?.isLocked) {
+        const currentHeight = await getCurrentBlockHeight();
+        contentComponent.map.lock_duration = lockData.duration?.toString() || '0';
+        contentComponent.map.lock_amount = lockData.amount?.toString() || '0';
+        contentComponent.map.unlock_height = (currentHeight + (lockData.duration || 0)).toString();
+      }
+      
+      components.push(contentComponent);
+
+      // Add image if present
+      if (imageFile) {
+        const imageComponent = await createImageComponent(
+          imageFile,
+          postId,
+          sequence.next(),
+          contentSeq,
+          authorAddress
+        );
+        components.push(imageComponent);
+      }
+
+      // Add vote components if present
+      if (lockData?.isPoll && lockData.options?.length) {
+        const questionSeq = sequence.next();
+        const questionComponent = await createVoteQuestionComponent(
+          content,
+          lockData.options,
+          postId,
+          questionSeq,
+          contentSeq,
+          authorAddress
+        );
+        components.push(questionComponent);
+
+        // Add vote options
+        lockData.options.forEach((option, idx) => {
+          components.push(
+            createVoteOptionComponent(
+              option,
+              postId,
+              sequence.next(),
+              questionSeq,
+              idx,
+              authorAddress
+            )
+          );
+        });
+      }
+
+      // Add tags if present
+      if (tags?.length) {
+        components.push(
+          createTagsComponent(
+            tags,
+            postId,
+            sequence.next(),
+            contentSeq,
+            authorAddress
+          )
+        );
+      }
+
+      // Validate component structure
+      validateComponentStructure(components);
+
       // Send to wallet
       const response = await wallet.inscribe(components);
       const inscriptionTx = handleTransactionResponse(response);
@@ -691,7 +734,7 @@ export const createPost = async (
         fullTx: response
       });
 
-      // Create post in database immediately
+      // Create post in database with all data including image
       const postData = {
         txid: inscriptionTx.id,
         postId,
@@ -700,6 +743,8 @@ export const createPost = async (
         media_type: imageFile?.type,
         description,
         tags: tags || [],
+        raw_image_data: imageData,
+        image_format: imageFile?.type?.split('/')[1] || null,
         metadata: {
           app: 'lockd.app',
           version: '1.0.0',
@@ -723,7 +768,10 @@ export const createPost = async (
           })) : undefined
       };
 
-      console.log('Creating post in database with data:', postData);
+      console.log('Creating post in database with data:', {
+        ...postData,
+        raw_image_data: imageData ? `[base64 data length: ${imageData.length}]` : null
+      });
 
       // Use configured API URL
       const dbResponse = await fetch(`${API_BASE_URL}/api/posts`, {
