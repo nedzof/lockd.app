@@ -4,12 +4,15 @@ import axios from 'axios';
 import { Worker } from 'worker_threads';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { parseMapTransaction } from './mapTransactionParser';
-import prisma from '../../db';
+import { parseMapTransaction } from './mapTransactionParser.js';
+import { PrismaClient } from '@prisma/client';
 import * as dotenv from 'dotenv';
 
 // Load environment variables
 dotenv.config();
+
+// Initialize Prisma client
+const prisma = new PrismaClient();
 
 // Get current file path for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -44,59 +47,54 @@ const onPublish = async function(tx: JungleBusTransactionType) {
     try {
         // Fetch full transaction data
         const fullTx = await fetchTransaction(tx.id);
-        console.log("FULL TX OUTPUTS:", JSON.stringify(fullTx.outputs, null, 2));
         
-        // Get author address from the transaction outputs
-        const author_address = fullTx.addresses?.[0];
-
-        if (!author_address) {
-            console.error('Could not extract author address from transaction:', tx.id);
-            console.log('Transaction addresses:', JSON.stringify(fullTx.addresses, null, 2));
+        // Parse MAP data using our new parser
+        const parsedData = parseMapTransaction(fullTx);
+        if (!parsedData) {
+            console.log('No valid MAP data found in transaction:', tx.id);
             return;
         }
 
-        // Extract raw MAP data from outputs with more detailed logging
-        const mapData: string[] = [];
-        console.log("Processing outputs for MAP data...");
-        for (const output of fullTx.outputs || []) {
-            if (!output.script?.asm) {
-                console.log("Skipping output without script ASM");
-                continue;
-            }
-            const scriptData = output.script.asm;
-            console.log("Processing script ASM:", scriptData);
-            
-            // Extract MAP fields
-            const mapFields = scriptData.matchAll(/MAP_([A-Z_]+)=([^|]+)/gi);
-            for (const match of mapFields) {
-                const [_, key, value] = match;
-                const mapEntry = `map_${key.toLowerCase()}=${value}`;
-                console.log("Found MAP field:", mapEntry);
-                mapData.push(mapEntry);
-            }
-
-            // Extract content
-            const contentMatch = scriptData.match(/content=([^|]+)/i);
-            if (contentMatch) {
-                console.log("Found content:", contentMatch[1]);
-                mapData.push(`content=${contentMatch[1]}`);
-            }
-        }
-
-        console.log("Final MAP data:", mapData);
-
-        // Send to worker for database processing
-        dbWorker.postMessage({
-            type: 'process_transaction',
-            transaction: {
-                txid: tx.id,
-                data: mapData,
-                block_height: tx.block_height || 0,
-                author_address
+        // Save to database using Prisma
+        await prisma.post.create({
+            data: {
+                id: parsedData.txid,
+                txid: parsedData.txid,
+                content: parsedData.content,
+                author_address: parsedData.author_address,
+                media_type: parsedData.media_type,
+                block_height: parsedData.block_height,
+                amount: parsedData.amount,
+                unlock_height: parsedData.unlock_height,
+                description: parsedData.description,
+                tags: parsedData.tags,
+                metadata: parsedData.metadata,
+                is_locked: parsedData.is_locked,
+                lock_duration: parsedData.lock_duration,
+                raw_image_data: parsedData.raw_image_data,
+                image_format: parsedData.image_format,
+                image_source: parsedData.image_source,
+                is_vote: parsedData.is_vote,
+                vote_options: {
+                    create: parsedData.vote_options.map(option => ({
+                        txid: option.txid,
+                        content: option.content,
+                        author_address: option.author_address,
+                        created_at: option.created_at,
+                        lock_amount: option.lock_amount,
+                        lock_duration: option.lock_duration,
+                        unlock_height: option.unlock_height,
+                        current_height: option.current_height,
+                        lock_percentage: option.lock_percentage,
+                        tags: option.tags
+                    }))
+                }
             }
         });
+
+        console.log('Successfully saved MAP data for transaction:', tx.id);
     } catch (error) {
-        console.error("Error processing transaction:", error);
+        console.error('Error processing transaction:', error);
     }
 };
 

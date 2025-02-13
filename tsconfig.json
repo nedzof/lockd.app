@@ -19,6 +19,6 @@
     "esm": true,
     "experimentalSpecifiers": true
   },
-  "include": ["scripts/**/*"],
+  "include": ["scripts/**/*", "src/**/*"],
   "exclude": ["node_modules", "src/frontend/**/*"]
 } 
