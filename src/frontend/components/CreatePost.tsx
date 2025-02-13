@@ -200,63 +200,64 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
         <div className="p-6 space-y-6">
           {/* Main Content */}
           <div className="space-y-4">
-            <textarea
-              value={content}
-              onChange={handleContentChange}
-              placeholder="What's on your mind?"
-              className="w-full px-4 py-3 text-white bg-[#1A1B23] border border-gray-800 rounded-lg focus:outline-none focus:border-[#00ffa3] resize-none min-h-[120px]"
-              disabled={isSubmitting}
-            />
-
-            {/* Image Upload */}
-            <ImageUploading
-              multiple={false}
-              value={images}
-              onChange={onImagesChange}
-              maxNumber={1}
-              dataURLKey="data_url"
-            >
-              {({
-                imageList,
-                onImageUpload,
-                onImageRemove,
-                isDragging,
-                dragProps
-              }) => (
-                <div className="space-y-4">
-                  {imageList.length === 0 ? (
-                    <button
-                      onClick={onImageUpload}
-                      {...dragProps}
-                      className={`w-full p-4 border-2 border-dashed rounded-lg transition-colors ${
-                        isDragging
-                          ? 'border-[#00ffa3] bg-[#00ffa3]/5'
-                          : 'border-gray-800 hover:border-[#00ffa3]/50'
-                      }`}
-                    >
-                      <div className="flex flex-col items-center space-y-2 text-gray-400">
-                        <FiImage className="w-6 h-6" />
-                        <span>Click or drag image to upload</span>
-                      </div>
-                    </button>
-                  ) : (
-                    <div className="relative">
-                      <img
-                        src={imageList[0].data_url}
-                        alt="Upload preview"
-                        className="w-full h-auto rounded-lg"
-                      />
+            <div className="relative">
+              <textarea
+                value={content}
+                onChange={handleContentChange}
+                placeholder="What's on your mind?"
+                className="w-full px-4 py-3 text-white bg-[#1A1B23] border border-gray-800 rounded-lg focus:outline-none focus:border-[#00ffa3] resize-none min-h-[120px]"
+                disabled={isSubmitting}
+              />
+              
+              {/* Image Upload Button */}
+              <ImageUploading
+                multiple={false}
+                value={images}
+                onChange={onImagesChange}
+                maxNumber={1}
+                dataURLKey="data_url"
+              >
+                {({
+                  imageList,
+                  onImageUpload,
+                  onImageRemove,
+                  isDragging,
+                  dragProps
+                }) => (
+                  <div>
+                    {imageList.length === 0 ? (
                       <button
-                        onClick={() => onImageRemove(0)}
-                        className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
+                        onClick={onImageUpload}
+                        {...dragProps}
+                        className="absolute bottom-3 right-3 p-2 text-gray-400 hover:text-[#00ffa3] transition-colors rounded-lg hover:bg-[#00ffa3]/5"
+                        title="Add image"
                       >
-                        <FiTrash2 className="w-4 h-4" />
+                        <FiImage className="w-5 h-5" />
                       </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </ImageUploading>
+                    ) : (
+                      <div className="mt-2">
+                        <div className="relative rounded-lg overflow-hidden group">
+                          <img
+                            src={imageList[0].data_url}
+                            alt="Upload preview"
+                            className="w-full h-auto max-h-[200px] object-cover rounded-lg"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <button
+                              onClick={() => onImageRemove(0)}
+                              className="p-2 text-white/80 hover:text-white transition-colors"
+                              title="Remove image"
+                            >
+                              <FiTrash2 className="w-5 h-5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </ImageUploading>
+            </div>
 
             {/* Optional Features */}
             <div className="flex flex-wrap gap-4">
