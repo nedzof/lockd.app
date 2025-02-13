@@ -17,148 +17,109 @@ export const NotificationSettings: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-white mb-8">Settings</h1>
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <h1 className="text-xl font-medium text-white/90 mb-8">Settings</h1>
       
       {bsvAddress ? (
-        <div className="space-y-8">
+        <div className="space-y-6">
           <TagPreferences 
             selectedTags={selectedTags}
             onTagsChange={setSelectedTags}
           />
           
-          {/* Header Section */}
-          <div className="bg-gradient-to-br from-[#2A2A40] to-[#1A1B23] rounded-lg p-6 shadow-lg">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center space-x-3">
-                <div className="p-3 bg-[#00ffa3] bg-opacity-20 rounded-lg">
-                  <FiBell className="text-[#00ffa3] w-6 h-6" />
-                </div>
-                <h2 className="text-white text-xl font-medium">Notification Settings</h2>
-              </div>
-              <div className="flex space-x-3">
-                <button className="px-4 py-2 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] text-black text-sm rounded-lg font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 flex items-center">
-                  <FiUser className="mr-2" />
-                  Follow Creator
-                </button>
-                <button 
-                  onClick={() => setShowAddMilestone(true)}
-                  className="px-4 py-2 bg-gradient-to-r from-[#ff00ff] to-[#ff00cc] text-white text-sm rounded-lg font-medium hover:shadow-lg hover:from-[#ff00cc] hover:to-[#ff00ff] transition-all duration-300 flex items-center"
-                >
-                  <FiPlus className="mr-2" />
-                  Add Milestone
-                </button>
-              </div>
-            </div>
-
-            {/* Add Milestone Input */}
-            {showAddMilestone && (
-              <div className="mb-6 bg-black bg-opacity-20 p-4 rounded-lg animate-fadeIn">
-                <div className="flex items-center space-x-3">
-                  <input
-                    type="number"
-                    value={newMilestone}
-                    onChange={(e) => setNewMilestone(e.target.value)}
-                    placeholder="Enter BSV amount"
-                    className="flex-1 bg-[#1A1B23] border border-[#2A2A40] rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:border-[#00ffa3] focus:outline-none transition-colors"
-                  />
-                  <button 
-                    onClick={() => setShowAddMilestone(false)}
-                    className="px-4 py-2 bg-[#00ffa3] text-black rounded-lg hover:bg-[#00ff9d] transition-colors"
-                  >
-                    Add
-                  </button>
-                  <button 
-                    onClick={() => setShowAddMilestone(false)}
-                    className="px-4 py-2 bg-[#2A2A40] text-gray-400 rounded-lg hover:bg-[#3A3A50] transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
+          {/* Main Settings Section */}
+          <div className="bg-[#1E1F2E] rounded-lg border border-white/5">
             {/* Platform Notifications */}
-            <div className="space-y-6">
-              <div className="relative">
-                <h3 className="text-[#00ffa3] text-sm font-medium mb-4 flex items-center">
-                  <FiStar className="mr-2" /> Platform Notifications
+            <div className="divide-y divide-white/5">
+              <div className="p-5">
+                <h3 className="text-sm font-medium text-white/70 mb-4 flex items-center">
+                  <FiStar className="mr-2 w-4 h-4 opacity-50" /> Platform Notifications
                 </h3>
-                <div className="space-y-3">
-                  <div className="group bg-gradient-to-r from-[#2A2A40] to-[#1A1B23] p-4 rounded-lg hover:shadow-lg transition-all duration-300">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="p-2 bg-[#00ffa3] bg-opacity-10 rounded-lg group-hover:bg-opacity-20 transition-all">
-                          <FiStar className="text-[#00ffa3] w-5 h-5" />
-                        </div>
-                        <div>
-                          <div className="text-white font-medium">Viral Posts</div>
-                          <div className="text-sm text-gray-400">Get notified when a post becomes viral</div>
-                        </div>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between py-2">
+                    <div className="flex items-center space-x-3">
+                      <div>
+                        <div className="text-white/80 text-sm font-medium">Viral Posts</div>
+                        <div className="text-xs text-white/50">Get notified when a post becomes viral</div>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" className="sr-only peer" onChange={() => handleSave('viral')} />
-                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-[#00ffa3] peer-checked:to-[#00ff9d]"></div>
-                        {savedAnimation === 'viral' && (
-                          <FiCheck className="absolute -right-6 text-[#00ffa3] animate-fadeIn" />
-                        )}
-                      </label>
                     </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" onChange={() => handleSave('viral')} />
+                      <div className="w-9 h-5 bg-white/5 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/80 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-white/10"></div>
+                    </label>
                   </div>
 
-                  <div className="group bg-gradient-to-r from-[#2A2A40] to-[#1A1B23] p-4 rounded-lg hover:shadow-lg transition-all duration-300">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="p-2 bg-[#ff00ff] bg-opacity-10 rounded-lg group-hover:bg-opacity-20 transition-all">
-                          <FiUnlock className="text-[#ff00ff] w-5 h-5" />
-                        </div>
-                        <div>
-                          <div className="text-white font-medium">Unlocks</div>
-                          <div className="text-sm text-gray-400">Get notified when your locked BSV becomes available</div>
-                        </div>
+                  <div className="flex items-center justify-between py-2">
+                    <div className="flex items-center space-x-3">
+                      <div>
+                        <div className="text-white/80 text-sm font-medium">Unlocks</div>
+                        <div className="text-xs text-white/50">Get notified when your locked BSV becomes available</div>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" className="sr-only peer" onChange={() => handleSave('unlocks')} />
-                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-[#ff00ff] peer-checked:to-[#ff00cc]"></div>
-                        {savedAnimation === 'unlocks' && (
-                          <FiCheck className="absolute -right-6 text-[#ff00ff] animate-fadeIn" />
-                        )}
-                      </label>
                     </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" onChange={() => handleSave('unlocks')} />
+                      <div className="w-9 h-5 bg-white/5 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/80 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-white/10"></div>
+                    </label>
                   </div>
                 </div>
               </div>
 
               {/* Milestone Notifications */}
-              <div className="relative">
-                <h3 className="text-[#00ffff] text-sm font-medium mb-4 flex items-center">
-                  <FiStar className="mr-2" /> Milestone Notifications
-                </h3>
-                <div className="space-y-3">
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-white/70 flex items-center">
+                    <FiStar className="mr-2 w-4 h-4 opacity-50" /> Milestone Notifications
+                  </h3>
+                  <button 
+                    onClick={() => setShowAddMilestone(true)}
+                    className="text-xs text-white/50 hover:text-white/70 transition-colors flex items-center"
+                  >
+                    <FiPlus className="mr-1 w-3 h-3" />
+                    Add
+                  </button>
+                </div>
+
+                {showAddMilestone && (
+                  <div className="mb-4 bg-white/5 p-3 rounded-md">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="number"
+                        value={newMilestone}
+                        onChange={(e) => setNewMilestone(e.target.value)}
+                        placeholder="Enter BSV amount"
+                        className="flex-1 bg-transparent border border-white/10 rounded-md px-3 py-1.5 text-sm text-white/80 placeholder-white/30 focus:border-white/20 focus:outline-none transition-colors"
+                      />
+                      <button 
+                        onClick={() => setShowAddMilestone(false)}
+                        className="px-3 py-1.5 text-xs bg-white/10 text-white/80 rounded-md hover:bg-white/20"
+                      >
+                        Add
+                      </button>
+                      <button 
+                        onClick={() => setShowAddMilestone(false)}
+                        className="px-3 py-1.5 text-xs text-white/50 hover:text-white/70"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-4">
                   {[1, 5, 10].map((amount) => (
-                    <div key={amount} className="group bg-gradient-to-r from-[#2A2A40] to-[#1A1B23] p-4 rounded-lg hover:shadow-lg transition-all duration-300">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <div className="p-2 bg-[#00ffff] bg-opacity-10 rounded-lg group-hover:bg-opacity-20 transition-all">
-                            <FiStar className="text-[#00ffff] w-5 h-5" />
-                          </div>
-                          <div>
-                            <div className="text-white font-medium">{amount} BSV Milestone</div>
-                            <div className="text-sm text-gray-400">Get notified when a post reaches {amount} BSV</div>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-3">
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" className="sr-only peer" onChange={() => handleSave(`milestone-${amount}`)} />
-                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-[#00ffff] peer-checked:to-[#00ccff]"></div>
-                            {savedAnimation === `milestone-${amount}` && (
-                              <FiCheck className="absolute -right-6 text-[#00ffff] animate-fadeIn" />
-                            )}
-                          </label>
-                          <button className="text-gray-500 hover:text-gray-300 transition-colors">
-                            <FiTrash2 className="w-5 h-5" />
-                          </button>
-                        </div>
+                    <div key={amount} className="flex items-center justify-between py-2">
+                      <div>
+                        <div className="text-white/80 text-sm font-medium">{amount} BSV</div>
+                        <div className="text-xs text-white/50">Get notified when a post reaches {amount} BSV</div>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input type="checkbox" className="sr-only peer" onChange={() => handleSave(`milestone-${amount}`)} />
+                          <div className="w-9 h-5 bg-white/5 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/80 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-white/10"></div>
+                        </label>
+                        <button className="text-white/30 hover:text-white/50 transition-colors">
+                          <FiTrash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -166,55 +127,35 @@ export const NotificationSettings: React.FC = () => {
               </div>
 
               {/* Creator Notifications */}
-              <div className="relative">
-                <h3 className="text-[#ffa500] text-sm font-medium mb-4 flex items-center">
-                  <FiUser className="mr-2" /> Creator Notifications
+              <div className="p-5">
+                <h3 className="text-sm font-medium text-white/70 mb-4 flex items-center">
+                  <FiUser className="mr-2 w-4 h-4 opacity-50" /> Creator Notifications
                 </h3>
-                <div className="bg-gradient-to-r from-[#2A2A40] to-[#1A1B23] p-4 rounded-lg">
-                  <div className="text-gray-400 text-sm flex items-center justify-center py-6">
-                    <FiInfo className="mr-2" /> No creators followed yet
+                <div className="bg-white/5 rounded-md p-4">
+                  <div className="text-white/50 text-sm flex items-center justify-center">
+                    <FiInfo className="mr-2 w-4 h-4" /> No creators followed yet
                   </div>
                 </div>
               </div>
 
               {/* How it works */}
-              <div className="bg-gradient-to-br from-[#2A2A40] to-[#1A1B23] rounded-lg p-6 mt-8">
-                <h3 className="text-white text-sm font-medium mb-4 flex items-center">
-                  <FiInfo className="mr-2 text-[#00ffa3]" /> How it works
+              <div className="p-5">
+                <h3 className="text-sm font-medium text-white/70 mb-4 flex items-center">
+                  <FiInfo className="mr-2 w-4 h-4 opacity-50" /> How it works
                 </h3>
                 <ul className="space-y-3 text-sm">
-                  <li className="flex items-start space-x-2 text-gray-400">
-                    <div className="p-1 bg-[#00ffa3] bg-opacity-10 rounded-full mt-0.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[#00ffa3]"></div>
-                    </div>
-                    <span>Viral post notifications are triggered when a post gains significant traction</span>
-                  </li>
-                  <li className="flex items-start space-x-2 text-gray-400">
-                    <div className="p-1 bg-[#ff00ff] bg-opacity-10 rounded-full mt-0.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[#ff00ff]"></div>
-                    </div>
-                    <span>Unlock notifications remind you when your locked BSV becomes available</span>
-                  </li>
-                  <li className="flex items-start space-x-2 text-gray-400">
-                    <div className="p-1 bg-[#00ffff] bg-opacity-10 rounded-full mt-0.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[#00ffff]"></div>
-                    </div>
-                    <span>Creator notifications alert you when specific creators post new content</span>
-                  </li>
-                  <li className="flex items-start space-x-2 text-gray-400">
-                    <div className="p-1 bg-[#ffa500] bg-opacity-10 rounded-full mt-0.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[#ffa500]"></div>
-                    </div>
-                    <span>Milestone notifications trigger when posts reach specific BSV thresholds</span>
-                  </li>
+                  <li className="text-white/50">• Viral post notifications are triggered when a post gains significant traction</li>
+                  <li className="text-white/50">• Unlock notifications remind you when your locked BSV becomes available</li>
+                  <li className="text-white/50">• Creator notifications alert you when specific creators post new content</li>
+                  <li className="text-white/50">• Milestone notifications trigger when posts reach specific BSV thresholds</li>
                 </ul>
               </div>
             </div>
           </div>
         </div>
       ) : (
-        <div className="bg-[#2A2A40] border border-gray-800 rounded-lg p-6">
-          <p className="text-gray-400">Please connect your wallet to manage your settings.</p>
+        <div className="bg-[#1E1F2E] border border-white/5 rounded-lg p-5">
+          <p className="text-white/50">Please connect your wallet to manage your settings.</p>
         </div>
       )}
     </div>
