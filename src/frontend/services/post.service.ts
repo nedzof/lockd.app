@@ -8,6 +8,9 @@ import { YoursWalletAdapter } from '../utils/YoursWalletAdapter';
 import { MimeTypes, MAP } from 'yours-wallet-provider';
 import { getFeeRate } from '../../shared/utils/whatsOnChain';
 
+// Add API base URL configuration at the top of the file
+const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:3001';
+
 export interface PredictionMarketData {
   source: string;
   prediction: string;
@@ -667,59 +670,8 @@ export const createPost = async (
     // Validate component structure
     validateComponentStructure(components);
 
-    // Send to wallet
-    const response = await wallet.inscribe(components);
-    const inscriptionTx = handleTransactionResponse(response);
-
-    // Create post in database immediately
-    const postData = {
-      txid: inscriptionTx.id,
-      postId,
-      content,
-      author_address: authorAddress,
-      media_type: imageFile?.type,
-      description,
-      tags: tags || [],
-      metadata: {
-        app: 'lockd.app',
-        version: '1.0.0',
-        prediction_market_data: predictionMarketData,
-        lock: lockData?.isLocked ? {
-          isLocked: true,
-          duration: lockData.duration,
-          amount: lockData.amount,
-          unlockHeight: lockData.duration ? await getCurrentBlockHeight() + lockData.duration : undefined
-        } : undefined
-      },
-      is_locked: lockData?.isLocked || false,
-      lock_duration: lockData?.duration,
-      is_vote: lockData?.isPoll || false,
-      vote_options: lockData?.isPoll && lockData.options ? 
-        lockData.options.map((option, index) => ({
-          text: option.text,
-          lockAmount: option.lockAmount,
-          lockDuration: option.lockDuration,
-          index
-        })) : undefined
-    };
-
-    // Create post in database
-    try {
-      await fetch('http://localhost:3001/api/posts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(postData)
-      });
-    } catch (error) {
-      console.error('Error creating post in database:', error);
-      // Don't throw here, as the post is already on chain
-    }
-
-    // Show success toast with WhatsOnChain link
-    toast.success('Post created successfully!', {
-      duration: 5000,
+    // Show pending toast
+    const pendingToast = toast.loading('Creating post...', {
       style: {
         background: '#1A1B23',
         color: '#fff',
@@ -727,22 +679,230 @@ export const createPost = async (
       }
     });
 
-    // Open WhatsOnChain link in a new tab
-    window.open(`https://whatsonchain.com/tx/${inscriptionTx.id}`, '_blank');
+    try {
+      // Send to wallet
+      const response = await wallet.inscribe(components);
+      const inscriptionTx = handleTransactionResponse(response);
 
-    // Create and return post object
-    return createPostObject(inscriptionTx.id, content, authorAddress, {
-      postId,
-      tags,
-      media_type: imageFile?.type,
-      prediction_market_data: predictionMarketData,
-      isLocked: lockData?.isLocked || false,
-      lockDuration: lockData?.duration,
-      lockAmount: lockData?.amount,
-      unlockHeight: lockData?.duration ? await getCurrentBlockHeight() + lockData.duration : undefined
-    });
+      console.log('Transaction successful:', inscriptionTx);
+
+      // Create post in database immediately
+      const postData = {
+        txid: inscriptionTx.id,
+        postId,
+        content,
+        author_address: authorAddress,
+        media_type: imageFile?.type,
+        description,
+        tags: tags || [],
+        metadata: {
+          app: 'lockd.app',
+          version: '1.0.0',
+          prediction_market_data: predictionMarketData,
+          lock: lockData?.isLocked ? {
+            isLocked: true,
+            duration: lockData.duration,
+            amount: lockData.amount,
+            unlockHeight: lockData.duration ? await getCurrentBlockHeight() + lockData.duration : undefined
+          } : undefined
+        },
+        is_locked: lockData?.isLocked || false,
+        lock_duration: lockData?.duration,
+        is_vote: lockData?.isPoll || false,
+        vote_options: lockData?.isPoll && lockData.options ? 
+          lockData.options.map((option, index) => ({
+            text: option.text,
+            lockAmount: option.lockAmount,
+            lockDuration: option.lockDuration,
+            index
+          })) : undefined
+      };
+
+      console.log('Creating post in database with data:', postData);
+
+      // Use configured API URL
+      const dbResponse = await fetch(`${API_BASE_URL}/api/posts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(postData)
+      });
+
+      console.log('Database response status:', dbResponse.status);
+      console.log('Database response headers:', Object.fromEntries(dbResponse.headers.entries()));
+
+      let errorData;
+      let responseText;
+      try {
+        responseText = await dbResponse.text(); // Get raw response text first
+        console.log('Raw response text:', responseText);
+        
+        try {
+          errorData = responseText ? JSON.parse(responseText) : {};
+        } catch (parseError) {
+          console.error('Failed to parse response as JSON:', parseError);
+          console.log('Raw response that failed to parse:', responseText);
+        }
+      } catch (textError) {
+        console.error('Failed to get response text:', textError);
+      }
+
+      if (!dbResponse.ok) {
+        throw new Error(
+          `Database error (${dbResponse.status}): ${
+            errorData?.message || 
+            responseText || 
+            'Unknown error'
+          }`
+        );
+      }
+
+      let dbPost;
+      try {
+        dbPost = responseText ? JSON.parse(responseText) : null;
+        console.log('Post created in database:', dbPost);
+      } catch (parseError) {
+        console.error('Failed to parse successful response as JSON:', parseError);
+        throw new Error('Failed to parse server response');
+      }
+
+      if (!dbPost) {
+        throw new Error('No data received from server after creating post');
+      }
+
+      // Update success toast
+      toast.success('Post created successfully!', {
+        id: pendingToast,
+        duration: 5000,
+        style: {
+          background: '#1A1B23',
+          color: '#fff',
+          border: '1px solid rgba(255, 255, 255, 0.1)'
+        }
+      });
+
+      // Open WhatsOnChain link in a new tab
+      window.open(`https://whatsonchain.com/tx/${inscriptionTx.id}`, '_blank');
+
+      // Create and return post object
+      return createPostObject(inscriptionTx.id, content, authorAddress, {
+        postId,
+        tags,
+        media_type: imageFile?.type,
+        prediction_market_data: predictionMarketData,
+        isLocked: lockData?.isLocked || false,
+        lockDuration: lockData?.duration,
+        lockAmount: lockData?.amount,
+        unlockHeight: lockData?.duration ? await getCurrentBlockHeight() + lockData.duration : undefined
+      });
+    } catch (error) {
+      console.error('Detailed error in post creation:', {
+        error,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
+
+      // Update error toast with more specific message
+      const errorMessage = error instanceof Error 
+        ? `Failed to create post: ${error.message}`
+        : 'Failed to create post. Please try again.';
+
+      toast.error(errorMessage, {
+        id: pendingToast,
+        duration: 5000,
+        style: {
+          background: '#1A1B23',
+          color: '#fff',
+          border: '1px solid rgba(255, 255, 255, 0.1)'
+        }
+      });
+      throw error;
+    }
   } catch (error) {
-    console.error('Error creating post:', error);
+    console.error('Top-level error in createPost:', {
+      error,
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
+    });
+
+    // Show error toast
+    const errorMessage = error instanceof Error 
+      ? `Failed to create post: ${error.message}`
+      : 'Failed to create post. Please try again.';
+
+    toast.error(errorMessage, {
+      duration: 5000,
+      style: {
+        background: '#1A1B23',
+        color: '#fff',
+        border: '1px solid rgba(255, 255, 255, 0.1)'
+      }
+    });
     throw error;
+  }
+};
+
+export interface PostFilters {
+  timeFilter?: '1d' | '7d' | '30d';
+  rankingFilter?: string;
+  personalFilter?: string;
+  blockFilter?: string;
+  selectedTags?: string[];
+  userId?: string;
+}
+
+export const fetchPosts = async (filters: PostFilters = {}): Promise<Post[]> => {
+  try {
+    const queryParams = new URLSearchParams();
+    
+    if (filters.timeFilter) {
+      queryParams.append('timeFilter', filters.timeFilter);
+    }
+    if (filters.rankingFilter) {
+      queryParams.append('rankingFilter', filters.rankingFilter);
+    }
+    if (filters.personalFilter) {
+      queryParams.append('personalFilter', filters.personalFilter);
+    }
+    if (filters.blockFilter) {
+      queryParams.append('blockFilter', filters.blockFilter);
+    }
+    if (filters.selectedTags && filters.selectedTags.length > 0) {
+      queryParams.append('selectedTags', JSON.stringify(filters.selectedTags));
+    }
+    if (filters.userId) {
+      queryParams.append('userId', filters.userId);
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/posts?${queryParams.toString()}`);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const posts = await response.json();
+    
+    // Transform the response to match the Post interface
+    return posts.map((post: any) => ({
+      content: post.content,
+      author_address: post.author_address,
+      postId: post.postId,
+      media_url: post.media_type ? `/api/posts/${post.id}/media` : null,
+      media_type: post.media_type,
+      description: post.description,
+      tags: post.tags,
+      prediction_market_data: post.metadata?.prediction_market_data,
+      isLocked: post.is_locked,
+      lockDuration: post.lock_duration,
+      lockAmount: post.amount,
+      unlockHeight: post.unlock_height,
+      txid: post.txid,
+      created_at: post.created_at
+    }));
+  } catch (error) {
+    console.error('Error fetching posts:', error);
+    toast.error('Failed to fetch posts. Please try again later.');
+    return [];
   }
 }; 
