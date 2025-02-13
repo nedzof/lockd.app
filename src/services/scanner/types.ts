@@ -1,3 +1,5 @@
+import { Prisma } from '@prisma/client';
+
 // JungleBus Types
 export interface JungleBusTransaction {
   id: string;
@@ -15,9 +17,6 @@ export interface JungleBusTransaction {
 
 export interface ControlMessage {
   statusCode: number;
-  status?: string;
-  message?: string;
-  block?: number;
 }
 
 export interface SubscriptionErrorContext {
@@ -75,26 +74,23 @@ export interface TransactionInput {
 }
 
 export interface Transaction {
-  txid: string;
-  hash: string;
-  version: number;
-  size: number;
-  locktime: number;
-  vin: TransactionInput[];
-  vout: TransactionOutput[];
-  blockhash: string;
-  confirmations: number;
-  time: number;
-  blocktime: number;
-  blockheight: number;
+  transaction: string;
+  tx: {
+    h: string;  // transaction hash
+  };
+  blk?: {
+    t: number;  // block timestamp
+    h: number;  // block height
+  };
 }
 
 // Vote Types
 export interface VoteOption {
-  option: string;
-  lockAmount: number;
-  lockDuration: number;
-  timestamp: string;
+  content: string;
+  author_address: string;
+  lock_amount: number;
+  lock_duration: number;
+  tags: string[];
 }
 
 export interface VoteQuestionData {
@@ -118,20 +114,19 @@ export interface VoteOptionData {
 }
 
 export interface StructuredTransaction {
-  transaction_id: string;
+  txid: string;
+  content: string;
+  author_address: string;
   block_height: number;
-  block_hash: string;
-  timestamp: number;
-  voteQuestion: VoteQuestionData | null;
-  voteOptions: VoteOptionData[];
-  metadata: {
-    version: string | null;
-    app: string;
-    type: string;
-    severity: string;
-    tags: string[];
-    authorAddress: string | null;
-  };
+  timestamp: Date;
+  tags: string[];
+  metadata?: any;
+  is_vote?: boolean;
+  vote_options?: string[];
+  media_type?: string;
+  raw_image_data?: string;
+  image_format?: string;
+  image_source?: string;
 }
 
 // Media Types
@@ -155,4 +150,109 @@ export const TRANSACTION_TYPES = {
     MAP: 'map'
   },
   ORD_PREFIX: '6f7264' // 'ord' in hex
-} as const; 
+} as const;
+
+export type PostCreateInput = {
+  txid: string;
+  content: string;
+  author_address: string;
+  media_type?: string;
+  block_height: number;
+  amount?: number;
+  unlock_height?: number;
+  description?: string;
+  created_at: Date;
+  tags: string[];
+  metadata?: any;
+  is_locked?: boolean;
+  lock_duration?: number;
+  raw_image_data?: string;
+  image_format?: string;
+  image_source?: string;
+  is_vote?: boolean;
+  vote_options?: {
+    create: Array<{
+      txid: string;
+      post_txid: string;
+      content: string;
+      author_address: string;
+      created_at: Date;
+      lock_amount: number;
+      lock_duration: number;
+      tags: string[];
+    }>;
+  };
+};
+
+export interface MapMetadata {
+  type: string;
+  contentType: string;
+  postId: string;
+  sequence: number;
+  parentSequence?: number;
+  timestamp: string;
+  version: string;
+  author: string;
+  description?: string;
+  totalOutputs?: number;
+}
+
+export interface ContentOutput extends MapMetadata {
+  content: string;
+  lockDuration?: number;
+  lockAmount?: number;
+  unlockHeight?: number;
+  predictionData?: {
+    source: string;
+    prediction: string;
+    endDate: string;
+    probability?: string;
+  };
+}
+
+export interface ImageOutput extends MapMetadata {
+  fileName: string;
+  fileSize: number;
+  imageUrl?: string;
+}
+
+export interface VoteQuestionOutput extends MapMetadata {
+  question: string;
+  optionsCount: number;
+  totalLockAmount: number;
+}
+
+export interface VoteOptionTextOutput extends MapMetadata {
+  optionText: string;
+  optionIndex: number;
+  questionContent: string;
+}
+
+export interface VoteOptionLockOutput extends MapMetadata {
+  optionIndex: number;
+  lockDuration: number;
+  lockAmount: number;
+  currentHeight: number;
+  unlockHeight: number;
+  lockPercentage: number;
+}
+
+export interface TagsOutput extends MapMetadata {
+  tags: string[];
+  tagsCount: number;
+}
+
+export interface ParsedPost {
+  txid: string;
+  content: ContentOutput;
+  image?: ImageOutput;
+  voteQuestion?: VoteQuestionOutput;
+  voteOptions?: Array<{
+    text: VoteOptionTextOutput;
+    lock: VoteOptionLockOutput;
+  }>;
+  tags?: TagsOutput;
+  createdAt: string;
+}
+
+export type OutputType = 'content' | 'image' | 'vote_question' | 'vote_option_text' | 'vote_option_lock' | 'tags'; 

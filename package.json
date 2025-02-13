@@ -15,7 +15,9 @@
     "dev:junglebus": "ts-node --esm scripts/run-junglebus.ts",
     "test:polymarket": "tsx src/frontend/scripts/test-polymarket.ts",
     "api": "tsx watch src/server.ts",
-    "api:dev": "tsx watch src/server.ts"
+    "api:dev": "tsx watch src/server.ts",
+    "start:scanner": "tsx src/services/scanner/unifiedScanner.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@gorillapool/js-junglebus": "^0.3.0",

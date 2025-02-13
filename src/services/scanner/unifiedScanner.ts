@@ -5,30 +5,40 @@ import axios from 'axios';
 import { Worker } from 'worker_threads';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import { parseMapData } from '../../shared/utils/mapProtocol.js';
+import { fetchTransactionData } from '../shared/utils/whatsOnChain';
+import { Transaction, ControlMessage, StructuredTransaction, VoteOption } from './types';
+import { parseMapTransaction, ParsedTransaction } from './mapTransactionParser';
+import { prisma } from '../prisma';
+import * as dotenv from 'dotenv';
 
+// Load environment variables
+dotenv.config();
+
+// Get current file path for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Initialize Prisma client with direct connection
+// Initialize Prisma client
 const prisma = new PrismaClient({
-    log: ['error'],
-    datasources: {
-        db: {
-            url: process.env.DIRECT_URL
-        }
-    }
+    log: ['query', 'info', 'warn', 'error']
 });
 
-// Test database connection
-prisma.$connect()
-    .then(() => {
-        console.log('Successfully connected to the database');
-    })
-    .catch((error) => {
-        console.error('Failed to connect to the database:', error);
-    });
+// Test database connection on startup
+async function testDatabaseConnection() {
+    try {
+        await prisma.$connect();
+        console.log('Successfully connected to database');
+        
+        // Test query
+        const count = await prisma.post.count();
+        console.log(`Current post count in database: ${count}`);
+    } catch (error) {
+        console.error('Failed to connect to database:', error);
+        process.exit(1);
+    }
+}
 
 async function fetchTransaction(txId: string): Promise<any> {
     const url = `https://api.whatsonchain.com/v1/bsv/main/tx/hash/${txId}`;
@@ -55,7 +65,7 @@ const client = new JungleBusClient("junglebus.gorillapool.io", {
 });
 
 // Create a worker for database operations
-const dbWorker = new Worker(path.join(__dirname, 'unifiedDbWorker.js'));
+const dbWorker = new Worker(join(__dirname, 'unifiedDbWorker.js'));
 
 // Handle messages from the worker
 dbWorker.on('message', (message) => {
@@ -74,36 +84,203 @@ dbWorker.on('exit', (code) => {
     }
 });
 
+// Helper function to clean and validate base64 data
+const cleanAndValidateBase64 = (base64Data: string): string | null => {
+    try {
+        const cleaned = base64Data.replace(/[^A-Za-z0-9+/=]/g, '');
+        const decoded = Buffer.from(cleaned, 'base64');
+        
+        if (decoded[0] === 0xFF && decoded[1] === 0xD8 && decoded[2] === 0xFF) {
+            return cleaned;
+        } else if (decoded[0] === 0x89 && decoded[1] === 0x50 && decoded[2] === 0x4E && decoded[3] === 0x47) {
+            return cleaned;
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('Error cleaning/validating base64 data:', error);
+        return null;
+    }
+};
+
+// Parse content from transaction
+function parseContent(tx: any): string {
+    console.log('\n=== Parsing Content ===');
+    try {
+        // Check MAP data first
+        const mapDataArray = parseMapData(tx.data || []);
+        const mapContent = mapDataArray[0]?.content;
+        if (mapContent) {
+            console.log('Found content in MAP data:', mapContent);
+            return mapContent;
+        }
+        console.log('No content found in MAP data, checking script outputs...');
+
+        // Check script outputs for content
+        for (const output of tx.vout) {
+            if (output.scriptPubKey?.hex) {
+                const bytes = Buffer.from(output.scriptPubKey.hex, 'hex');
+                const content = bytes.toString('utf8');
+                const contentMatch = content.match(/content\s*([^\\x00]+)/);
+                if (contentMatch?.[1]) {
+                    console.log('Found content in script output:', contentMatch[1].trim());
+                    return contentMatch[1].trim();
+                }
+            }
+        }
+        console.log('No content found in any outputs');
+        return '';
+    } catch (error) {
+        console.error('Error parsing content:', error);
+        return '';
+    }
+}
+
+// Parse tags from transaction
+function parseTags(tx: any): string[] {
+    console.log('\n=== Parsing Tags ===');
+    try {
+        // Check MAP data first
+        const mapDataArray = parseMapData(tx.data || []);
+        if (mapDataArray[0]?.tags) {
+            try {
+                const tags = JSON.parse(mapDataArray[0].tags);
+                console.log('Found tags in MAP data:', tags);
+                return tags;
+            } catch (e) {
+                console.error('Error parsing MAP tags:', e);
+            }
+        }
+        console.log('No tags found in MAP data, checking script outputs...');
+
+        // Check script outputs for tags
+        for (const output of tx.vout) {
+            if (output.scriptPubKey?.hex) {
+                const bytes = Buffer.from(output.scriptPubKey.hex, 'hex');
+                const content = bytes.toString('utf8');
+                const tagsMatch = content.match(/tags\s*([^\\x00]+)/);
+                if (tagsMatch?.[1]) {
+                    try {
+                        // First try parsing as JSON
+                        const tagsStr = tagsMatch[1].trim();
+                        if (tagsStr.startsWith('[') && tagsStr.endsWith(']')) {
+                            const tags = JSON.parse(tagsStr);
+                            console.log('Found tags in script output:', tags);
+                            return tags;
+                        }
+                        // If not JSON, try parsing as comma-separated string
+                        const tags = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+                        if (tags.length > 0) {
+                            console.log('Found comma-separated tags in script output:', tags);
+                            return tags;
+                        }
+                    } catch (e) {
+                        console.error('Error parsing script tags:', e);
+                    }
+                }
+            }
+        }
+ 
+        console.log('No tags found, using default tag: ["lockdapp"]');
+        return ['lockdapp'];
+    } catch (error) {
+        console.error('Error parsing tags:', error);
+        return ['lockdapp'];
+    }
+}
+
+// Parse locking amount from transaction
+function parseLockingAmount(tx: any): { isLocked: boolean; amount?: number; duration?: number } {
+    console.log('\n=== Parsing Lock Information ===');
+    try {
+        for (const output of tx.vout) {
+            if (output.scriptPubKey?.hex) {
+                const bytes = Buffer.from(output.scriptPubKey.hex, 'hex');
+                const content = bytes.toString('utf8');
+                
+                const amountMatch = content.match(/lockAmount\s*(\d+)/);
+                const durationMatch = content.match(/lockDuration\s*(\d+)/);
+                
+                if (amountMatch || durationMatch) {
+                    const result = {
+                        isLocked: true,
+                        amount: amountMatch ? parseInt(amountMatch[1], 10) : undefined,
+                        duration: durationMatch ? parseInt(durationMatch[1], 10) : undefined
+                    };
+                    console.log('Found lock information:', result);
+                    return result;
+                }
+            }
+        }
+        console.log('No lock information found');
+        return { isLocked: false };
+    } catch (error) {
+        console.error('Error parsing locking amount:', error);
+        return { isLocked: false };
+    }
+}
+
+// Parse vote options from transaction
+function parseVoteOptions(tx: any): { isVote: boolean; options: any[] } {
+    console.log('\n=== Parsing Vote Options ===');
+    try {
+        const optionsMap = new Map(); // Use a map to prevent duplicates
+        let isVote = false;
+
+        for (const output of tx.vout) {
+            if (output.scriptPubKey?.hex) {
+                const bytes = Buffer.from(output.scriptPubKey.hex, 'hex');
+                const content = bytes.toString('utf8');
+                
+                if (content.includes('isVoteQuestion') || content.includes('vote_option')) {
+                    isVote = true;
+                    console.log('Found vote indicators in output');
+                    
+                    const optionMatch = content.match(/vote_option\s*([^\\x00]+)/);
+                    const lockAmountMatch = content.match(/lockAmount\s*(\d+)/);
+                    const lockDurationMatch = content.match(/lockDuration\s*(\d+)/);
+                    
+                    if (optionMatch) {
+                        const optionContent = optionMatch[1].trim();
+                        const option = {
+                            content: optionContent,
+                            lock_amount: lockAmountMatch ? parseInt(lockAmountMatch[1], 10) : 1000,
+                            lock_duration: lockDurationMatch ? parseInt(lockDurationMatch[1], 10) : 1
+                        };
+                        console.log('Found vote option:', option);
+                        // Use content as key to prevent duplicates
+                        optionsMap.set(optionContent, option);
+                    }
+                }
+            }
+        }
+
+        const result = { isVote, options: Array.from(optionsMap.values()) };
+        if (isVote) {
+            console.log('Vote parsing result:', result);
+        }
+ 
+        return result;
+    } catch (error) {
+        console.error('Error parsing vote options:', error);
+        return { isVote: false, options: [] };
+    }
+}
+
 // Helper function to extract image data from transaction
 function extractImageFromTransaction(tx: string, source: string): { data: string; type: string; source: string } | null {
+    console.log('\n=== Extracting Image Data ===');
     try {
         const buffer = Buffer.from(tx, 'hex');
         const rawContent = buffer.toString('utf8');
         
-        // Helper function to clean and validate base64 data
-        const cleanAndValidateBase64 = (base64Data: string): string | null => {
-            try {
-                const cleaned = base64Data.replace(/[^A-Za-z0-9+/=]/g, '');
-                const decoded = Buffer.from(cleaned, 'base64');
-                
-                if (decoded[0] === 0xFF && decoded[1] === 0xD8 && decoded[2] === 0xFF) {
-                    return cleaned;
-                } else if (decoded[0] === 0x89 && decoded[1] === 0x50 && decoded[2] === 0x4E && decoded[3] === 0x47) {
-                    return cleaned;
-                }
-                
-                return null;
-            } catch (error) {
-                console.error('Error cleaning/validating base64 data:', error);
-                return null;
-            }
-        };
-
         // First try to find data URL pattern
         const dataUrlMatch = rawContent.match(/data:image\/(jpeg|png|gif);base64,([A-Za-z0-9+/=]+)/);
         if (dataUrlMatch) {
+            console.log('Found image data URL pattern');
             const cleanedBase64 = cleanAndValidateBase64(dataUrlMatch[2]);
             if (cleanedBase64) {
+                console.log('Successfully extracted and validated image from data URL');
                 return {
                     type: `image/${dataUrlMatch[1]}`,
                     data: cleanedBase64,
@@ -112,12 +289,15 @@ function extractImageFromTransaction(tx: string, source: string): { data: string
             }
         }
 
+        console.log('Checking for raw base64 data...');
         // Try to find raw base64 data
         const jpegBase64Match = rawContent.match(/\/9j\/([A-Za-z0-9+/=]+)/);
         if (jpegBase64Match) {
+            console.log('Found JPEG pattern');
             const fullBase64 = '/9j/' + jpegBase64Match[1];
             const cleanedBase64 = cleanAndValidateBase64(fullBase64);
             if (cleanedBase64) {
+                console.log('Successfully extracted and validated JPEG image');
                 return {
                     type: 'image/jpeg',
                     data: cleanedBase64,
@@ -128,9 +308,11 @@ function extractImageFromTransaction(tx: string, source: string): { data: string
 
         const pngBase64Match = rawContent.match(/iVBORw0KGg([A-Za-z0-9+/=]+)/);
         if (pngBase64Match) {
+            console.log('Found PNG pattern');
             const fullBase64 = 'iVBORw0KGg' + pngBase64Match[1];
             const cleanedBase64 = cleanAndValidateBase64(fullBase64);
             if (cleanedBase64) {
+                console.log('Successfully extracted and validated PNG image');
                 return {
                     type: 'image/png',
                     data: cleanedBase64,
@@ -139,63 +321,11 @@ function extractImageFromTransaction(tx: string, source: string): { data: string
             }
         }
 
+        console.log('No valid image data found');
         return null;
     } catch (error) {
         console.error('Error extracting image:', error);
         return null;
-    }
-}
-
-// Helper function to parse vote-related data
-function parseVoteData(scriptPubKeyHex: string): { isVote: boolean; content: string; lockAmount?: number; lockDuration?: number } {
-    try {
-        const bytes = Buffer.from(scriptPubKeyHex, 'hex');
-        const fullString = bytes.toString('utf8');
-        
-        // Helper function to extract content between markers
-        const extractContent = (start: string, end: string = '\x00'): string | null => {
-            const startIdx = fullString.indexOf(start);
-            if (startIdx === -1) return null;
-            
-            const contentStart = startIdx + start.length;
-            const endIdx = fullString.indexOf(end, contentStart);
-            if (endIdx === -1) return null;
-            
-            return fullString.slice(contentStart, endIdx).trim();
-        };
-
-        const data = {
-            isVote: false,
-            content: '',
-            lockAmount: undefined as number | undefined,
-            lockDuration: undefined as number | undefined
-        };
-
-        // Check for vote indicators
-        if (fullString.includes('isVoteQuestion') || fullString.includes('vote_option')) {
-            data.isVote = true;
-            
-            // Extract content
-            data.content = extractContent('content') || 
-                         extractContent('what will flip btc') || 
-                         extractContent('vote_option') || '';
-
-            // Extract lock details
-            const lockAmount = extractContent('lockAmount');
-            if (lockAmount) {
-                data.lockAmount = parseInt(lockAmount, 10);
-            }
-
-            const lockDuration = extractContent('lockDuration');
-            if (lockDuration) {
-                data.lockDuration = parseInt(lockDuration, 10);
-            }
-        }
-
-        return data;
-    } catch (error) {
-        console.error('Error parsing vote data:', error);
-        return { isVote: false, content: '' };
     }
 }
 
@@ -213,60 +343,38 @@ const onPublish = async function(tx: JungleBusTransaction) {
             return;
         }
 
-        // Parse MAP data
-        const mapDataArray = parseMapData(fullTx.data || []);
-        const parsedMapData = mapDataArray.length > 0 ? mapDataArray[0] : {};
-        console.log('Parsed MAP data:', JSON.stringify(parsedMapData, null, 2));
+        // Parse all components separately
+        const content = parseContent(fullTx);
+        const tags = parseTags(fullTx);
+        const lockingInfo = parseLockingAmount(fullTx);
+        const imageData = extractImageFromTransaction(fullTx.vout[0]?.scriptPubKey?.hex || '', 'scriptPubKey');
+        const voteData = parseVoteOptions(fullTx);
 
-        // Check for vote data in all outputs
-        let voteData = { isVote: false, content: '', options: [] as any[] };
-        for (const output of fullTx.vout) {
-            if (output.scriptPubKey?.hex) {
-                const parsedVote = parseVoteData(output.scriptPubKey.hex);
-                if (parsedVote.isVote) {
-                    voteData.isVote = true;
-                    if (!voteData.content && parsedVote.content) {
-                        voteData.content = parsedVote.content;
-                    }
-                    if (parsedVote.lockAmount) {
-                        voteData.options.push({
-                            content: parsedVote.content,
-                            lock_amount: parsedVote.lockAmount,
-                            lock_duration: parsedVote.lockDuration || 1
-                        });
-                    }
-                }
-            }
-        }
-
-        // Extract image data if present
-        let imageData = null;
-        if (parsedMapData.contentType?.startsWith('image/') || parsedMapData.type === 'image') {
-            for (const output of fullTx.vout) {
-                if (output.scriptPubKey?.hex) {
-                    imageData = extractImageFromTransaction(output.scriptPubKey.hex, 'scriptPubKey');
-                    if (imageData) break;
-                }
-            }
-        }
+        console.log('Parsed Components:', {
+            content,
+            tags,
+            lockingInfo,
+            hasImage: !!imageData,
+            voteData
+        });
 
         // Send to worker for database processing
         dbWorker.postMessage({
             type: 'process_transaction',
             transaction: {
                 txid: tx.id,
-                content: voteData.content || parsedMapData.content || '',
+                content,
                 author_address,
                 block_height: tx.block_height || 0,
-                created_at: new Date(parsedMapData.timestamp || Date.now()),
-                tags: parsedMapData.tags ? JSON.parse(parsedMapData.tags) : ['lockdapp'],
+                created_at: new Date(),
+                tags,
                 is_vote: voteData.isVote,
                 vote_options: voteData.options,
-                media_type: imageData?.type || parsedMapData.contentType,
+                media_type: imageData?.type,
                 raw_image_data: imageData?.data,
                 image_format: imageData?.type ? imageData.type.split('/')[1] : null,
                 image_source: imageData?.source,
-                metadata: parsedMapData
+                metadata: {}
             }
         });
     } catch (error) {
@@ -298,8 +406,33 @@ const onMempool = async function(tx: JungleBusTransaction) {
 process.on('SIGINT', async () => {
     console.log('Shutting down...');
     try {
-        await client.Disconnect();
-        dbWorker.terminate();
+        if (client) {
+            try {
+                await client.Disconnect();
+                console.log('JungleBus client disconnected');
+            } catch (error) {
+                console.error('Error disconnecting JungleBus client:', error);
+            }
+        }
+        
+        if (dbWorker) {
+            try {
+                await dbWorker.terminate();
+                console.log('Database worker terminated');
+            } catch (error) {
+                console.error('Error terminating database worker:', error);
+            }
+        }
+        
+        if (prisma) {
+            try {
+                await prisma.$disconnect();
+                console.log('Prisma client disconnected');
+            } catch (error) {
+                console.error('Error disconnecting Prisma client:', error);
+            }
+        }
+        
         console.log('Shutdown complete');
         process.exit(0);
     } catch (error) {
@@ -311,10 +444,16 @@ process.on('SIGINT', async () => {
 // Start the subscription
 export async function startUnifiedScanner() {
     try {
-        console.log('Starting unified scanner from block 883520...');
+        await testDatabaseConnection();
+        
+        console.log('Starting unified scanner from block 883819...');
+        console.log('Using database URL:', process.env.DATABASE_URL?.split('?')[0]); // Log DB URL without credentials
+        
+        console.log('Starting regular subscription...');
+        // Start regular subscription
         await client.Subscribe(
             "436d4681e23186b369291cf3e494285724964e92f319de5f56b6509d32627693",
-            883804,
+            883819,
             onPublish,
             onStatus,
             onError,
@@ -323,5 +462,295 @@ export async function startUnifiedScanner() {
     } catch (error) {
         console.error("Error starting subscription:", error);
         process.exit(1);
+    }
+}
+
+// Immediately start the scanner
+(async () => {
+    try {
+        await startUnifiedScanner();
+    } catch (error) {
+        console.error('Failed to start scanner:', error);
+        process.exit(1);
+    }
+})();
+
+class UnifiedScanner {
+    private static cleanString(s: string): string {
+        return s.replace(/[\x00-\x1F\x7F-\x9F]/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    private static hexToBytes(hex: string): Uint8Array {
+        const bytes = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < hex.length; i += 2) {
+            bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+        }
+        return bytes;
+    }
+
+    private static bytesToString(bytes: Uint8Array): string {
+        return new TextDecoder().decode(bytes);
+    }
+
+    private static extractImageFromTransaction(tx: string): { raw_image_data: string; image_format: string; image_source: string } | null {
+        try {
+            console.log('Starting image extraction from hex:', {
+                hexLength: tx.length
+            });
+            
+            const buffer = Buffer.from(tx, 'hex');
+            const rawContent = buffer.toString('utf8');
+            
+            if (rawContent.includes('data:image')) {
+                const match = rawContent.match(/data:image\/[^;]+;base64,[^"]+/);
+                if (match) {
+                    const [fullMatch] = match;
+                    const [header, base64Data] = fullMatch.split(',');
+                    const format = header.split('/')[1].split(';')[0];
+                    
+                    return {
+                        raw_image_data: base64Data,
+                        image_format: format,
+                        image_source: 'transaction'
+                    };
+                }
+            }
+            return null;
+        } catch (error) {
+            console.error('Error extracting image:', error);
+            return null;
+        }
+    }
+
+    private static parseScriptData(hex: string): Record<string, any> {
+        try {
+            const bytes = this.hexToBytes(hex);
+            const data: Record<string, any> = {};
+            const fullString = this.bytesToString(bytes);
+            
+            const extractContent = (start: string, end: string = '\x00'): string | null => {
+                const startIdx = fullString.indexOf(start);
+                if (startIdx === -1) return null;
+                
+                const contentStart = startIdx + start.length;
+                const endIdx = fullString.indexOf(end, contentStart);
+                if (endIdx === -1) return null;
+                
+                return this.cleanString(fullString.slice(contentStart, endIdx));
+            };
+
+            data.content = extractContent('content');
+            data.version = extractContent('version') || '1.0.0';
+            data.author_address = extractContent('author') || '';
+            data.tags = [];
+            
+            // Extract tags
+            let tagIndex = 1;
+            while (true) {
+                const tag = extractContent(`tag${tagIndex}`);
+                if (!tag) break;
+                data.tags.push(tag);
+                tagIndex++;
+            }
+            
+            // Handle vote-specific data
+            if (fullString.includes('isVoteQuestion') || fullString.includes('what will flip btc')) {
+                data.is_vote = true;
+                data.vote_options = [];
+                
+                // Extract vote options
+                let optionIndex = 1;
+                while (true) {
+                    const option = extractContent(`option${optionIndex}`);
+                    if (!option) break;
+                    data.vote_options.push(option);
+                    optionIndex++;
+                }
+            }
+
+            return data;
+        } catch (error) {
+            console.error('Error parsing script data:', error);
+            return {};
+        }
+    }
+
+    private static async processTransaction(tx: Transaction): Promise<void> {
+        try {
+            const scriptData = this.parseScriptData(tx.transaction);
+            const imageData = this.extractImageFromTransaction(tx.transaction);
+            
+            const baseData = {
+                txid: tx.tx.h,
+                content: scriptData.content || '',
+                author_address: scriptData.author_address || '',
+                block_height: tx.blk?.h || 0,
+                created_at: new Date(tx.blk?.t ? tx.blk.t * 1000 : Date.now()),
+                tags: scriptData.tags || [],
+                metadata: { version: scriptData.version }
+            };
+            
+            if (scriptData.is_vote) {
+                await this.processVoteTransaction(tx, { ...baseData, vote_options: scriptData.vote_options || [] });
+            } else {
+                await this.processPostTransaction(tx, { ...baseData, ...imageData });
+            }
+        } catch (error) {
+            console.error('Error processing transaction:', error);
+        }
+    }
+
+    private static async processPostTransaction(tx: Transaction, data: any): Promise<void> {
+        await prisma.post.create({
+            data: {
+                ...data,
+                is_vote: false
+            }
+        });
+    }
+
+    private static async processVoteTransaction(tx: Transaction, data: any): Promise<void> {
+        await prisma.post.create({
+            data: {
+                ...data,
+                is_vote: true
+            }
+        });
+    }
+
+    public static async start(): Promise<void> {
+        const client = new JungleBusClient(process.env.JUNGLEBUS_URL || "");
+        
+        const subscription = await client.Subscribe(
+            "lockd.app",  // subscription name
+            Number(process.env.START_BLOCK) || 0,  // from block
+            {
+                onTransaction: this.processTransaction.bind(this),
+                onError: (error: any) => console.error('Subscription error:', error),
+                onStatus: (message: ControlMessage) => {
+                    if (message.statusCode === ControlMessageStatusCode.WAITING) {
+                        console.log('Caught up with the chain');
+                    }
+                },
+                onMempool: this.processTransaction.bind(this)
+            }
+        );
+
+        console.log('UnifiedScanner started successfully');
+    }
+}
+
+export default UnifiedScanner;
+
+async function processMapTransaction(tx: JungleBusTransaction) {
+    try {
+        if (!tx.data) return;
+        const parsedTx = parseMapTransaction(tx.data);
+        
+        console.log('Processing transaction:', {
+            txid: tx.id,
+            type: parsedTx.type,
+            hasImage: !!parsedTx.image,
+            hasVote: !!parsedTx.vote,
+            hasLock: !!parsedTx.lock
+        });
+
+        // Process based on transaction type
+        switch (parsedTx.type) {
+            case 'content':
+                await processContentTransaction(parsedTx, tx.id);
+                break;
+            case 'vote':
+                await processVoteTransaction(parsedTx, tx.id);
+                break;
+            case 'image':
+                await processImageTransaction(parsedTx, tx.id);
+                break;
+            case 'mixed':
+                await processMixedTransaction(parsedTx, tx.id);
+                break;
+        }
+
+        console.log('Successfully processed and saved transaction:', tx.id);
+    } catch (error) {
+        console.error('Error processing MAP transaction:', error);
+    }
+}
+
+async function processContentTransaction(tx: ParsedTransaction, txid: string) {
+    console.log('Creating content post:', { txid, content: tx.content });
+    const post = await prisma.post.create({
+        data: {
+            txid,
+            content: tx.content,
+            author_address: tx.author,
+            created_at: new Date(tx.timestamp),
+            is_locked: tx.lock?.isLocked || false,
+            lock_duration: tx.lock?.duration,
+            amount: tx.lock?.amount,
+            unlock_height: tx.lock?.unlockHeight,
+            block_height: tx.lock?.currentHeight || 0,
+            tags: []
+        }
+    });
+    console.log('Created content post:', post);
+}
+
+async function processVoteTransaction(tx: ParsedTransaction, txid: string) {
+    // Create the main post first
+    const post = await prisma.post.create({
+        data: {
+            txid,
+            content: tx.content,
+            author_address: tx.author,
+            created_at: new Date(tx.timestamp),
+            is_vote: true,
+            block_height: tx.lock?.currentHeight || 0
+        }
+    });
+
+    // Create vote options
+    if (tx.vote?.options) {
+        await Promise.all(tx.vote.options.map(option =>
+            prisma.voteOption.create({
+                data: {
+                    txid: `${txid}-${option.index}`, // Create unique txid for each option
+                    post_txid: txid,
+                    content: option.text,
+                    author_address: tx.author,
+                    created_at: new Date(tx.timestamp),
+                    lock_amount: option.lockAmount,
+                    lock_duration: option.lockDuration,
+                    tags: []
+                }
+            })
+        ));
+    }
+}
+
+async function processImageTransaction(tx: ParsedTransaction, txid: string) {
+    await prisma.post.create({
+        data: {
+            txid,
+            content: tx.content,
+            author_address: tx.author,
+            created_at: new Date(tx.timestamp),
+            media_type: tx.image?.mimeType,
+            raw_image_data: tx.image?.base64Data,
+            image_format: tx.image?.mimeType?.split('/')[1],
+            is_locked: tx.lock?.isLocked || false,
+            lock_duration: tx.lock?.duration,
+            amount: tx.lock?.amount,
+            unlock_height: tx.lock?.unlockHeight,
+            block_height: tx.lock?.currentHeight || 0
+        }
+    });
+}
+
+async function processMixedTransaction(tx: ParsedTransaction, txid: string) {
+    if (tx.vote) {
+        await processVoteTransaction(tx, txid);
+    } else {
+        await processImageTransaction(tx, txid);
     }
 } 

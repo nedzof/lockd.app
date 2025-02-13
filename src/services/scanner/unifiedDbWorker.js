@@ -1,109 +1,127 @@
 import { parentPort } from 'worker_threads';
 import { PrismaClient } from '@prisma/client';
+import * as dotenv from 'dotenv';
 
-// Initialize Prisma client with direct connection
+// Load environment variables
+dotenv.config();
+
+// Initialize Prisma client
 const prisma = new PrismaClient({
-    log: ['error'],
-    datasources: {
-        db: {
-            url: process.env.DIRECT_URL
-        }
-    }
+    log: ['query', 'info', 'warn', 'error']
 });
 
-async function processTransaction(message) {
+// Test database connection
+async function testConnection() {
     try {
-        console.log('========== Processing New Transaction ==========');
-        console.log('Transaction ID:', message.transaction.txid);
-        
-        const tx = message.transaction;
-        if (!tx) {
-            console.error('No transaction data available');
-            return;
-        }
-        
-        console.log('Processing Transaction:', JSON.stringify(tx, null, 2));
-
-        // Check if transaction already exists
-        const existingPost = await prisma.post.findUnique({
-            where: {
-                txid: tx.txid
-            }
-        });
-
-        if (existingPost) {
-            console.log('Transaction already processed, skipping:', tx.txid);
-            return;
-        }
-
-        // Process the transaction in a database transaction
-        const result = await prisma.$transaction(async (prisma) => {
-            try {
-                // Create the post
-                const post = await prisma.post.create({
-                    data: {
-                        txid: tx.txid,
-                        content: tx.content,
-                        author_address: tx.author_address,
-                        block_height: tx.block_height,
-                        created_at: tx.created_at,
-                        tags: tx.tags,
-                        metadata: tx.metadata || {},
-                        is_vote: tx.is_vote,
-                        media_type: tx.media_type,
-                        raw_image_data: tx.raw_image_data,
-                        image_format: tx.image_format,
-                        image_source: tx.image_source
-                    }
-                });
-                
-                console.log('Created post:', post);
-
-                // If this is a vote post, create the vote options
-                if (tx.is_vote && tx.vote_options?.length > 0) {
-                    console.log('Creating vote options:', tx.vote_options);
-                    
-                    const voteOptionsPromises = tx.vote_options.map(option =>
-                        prisma.voteOption.create({
-                            data: {
-                                txid: `${tx.txid}_${option.content}`, // Create unique txid for each option
-                                post_txid: tx.txid,
-                                content: option.content,
-                                author_address: tx.author_address,
-                                created_at: tx.created_at,
-                                lock_amount: option.lock_amount,
-                                lock_duration: option.lock_duration,
-                                tags: tx.tags
-                            }
-                        })
-                    );
-
-                    const createdOptions = await Promise.all(voteOptionsPromises);
-                    console.log('Created vote options:', createdOptions);
-
-                    return { post, options: createdOptions };
-                }
-
-                return { post };
-            } catch (error) {
-                console.error('Error in database transaction:', error);
-                throw error;
-            }
-        });
-
-        console.log('Transaction processed successfully:', result);
-
+        await prisma.$connect();
+        console.log('Database worker connected to database');
     } catch (error) {
-        console.error('Error processing transaction:', error);
-        if (error?.code === 'P2002') {
-            console.log('Duplicate transaction detected');
-        }
+        console.error('Database worker failed to connect:', error);
+        process.exit(1);
     }
 }
 
-// Listen for messages from the main thread
-parentPort.on('message', async (message) => {
-    if (message.type === 'process_transaction') {
-        await processTransaction(message);
+// Handle messages from main thread
+parentPort?.on('message', async (message) => {
+    try {
+        console.log('Database worker received message:', message);
+
+        if (message.type === 'process_transaction') {
+            const tx = message.transaction;
+            
+            await processTransaction(tx);
+        }
+    } catch (error) {
+        console.error('Database worker error:', error);
+        parentPort?.postMessage({
+            type: 'error',
+            error: error instanceof Error ? error.message : 'Unknown error',
+            txid: message.transaction?.txid
+        });
     }
-}); 
+});
+
+async function processTransaction(tx) {
+    try {
+        // Create or update the post
+        const post = await prisma.post.upsert({
+            where: {
+                txid: tx.txid
+            },
+            update: {
+                content: tx.content,
+                author_address: tx.author_address,
+                block_height: tx.block_height,
+                created_at: tx.created_at,
+                tags: tx.tags || [],
+                is_locked: false,
+                media_type: tx.media_type,
+                raw_image_data: tx.raw_image_data,
+                image_format: tx.image_format,
+                image_source: tx.image_source,
+                metadata: tx.metadata || {},
+                is_vote: tx.is_vote || false
+            },
+            create: {
+                txid: tx.txid,
+                content: tx.content,
+                author_address: tx.author_address,
+                block_height: tx.block_height,
+                created_at: tx.created_at,
+                tags: tx.tags || [],
+                is_locked: false,
+                media_type: tx.media_type,
+                raw_image_data: tx.raw_image_data,
+                image_format: tx.image_format,
+                image_source: tx.image_source,
+                metadata: tx.metadata || {},
+                is_vote: tx.is_vote || false
+            }
+        });
+
+        // If it's a vote post, create or update vote options
+        if (tx.is_vote && tx.vote_options) {
+            await Promise.all(tx.vote_options.map(option =>
+                prisma.voteOption.upsert({
+                    where: {
+                        txid: `${tx.txid}-${option.content}`
+                    },
+                    update: {
+                        content: option.content,
+                        author_address: tx.author_address,
+                        created_at: tx.created_at,
+                        lock_amount: option.lock_amount,
+                        lock_duration: option.lock_duration,
+                        tags: []
+                    },
+                    create: {
+                        txid: `${tx.txid}-${option.content}`,
+                        post_txid: tx.txid,
+                        content: option.content,
+                        author_address: tx.author_address,
+                        created_at: tx.created_at,
+                        lock_amount: option.lock_amount,
+                        lock_duration: option.lock_duration,
+                        tags: []
+                    }
+                })
+            ));
+        }
+
+        parentPort?.postMessage({
+            type: 'transaction_processed',
+            txid: tx.txid,
+            success: true
+        });
+    } catch (error) {
+        console.error('Database worker error:', error);
+        parentPort?.postMessage({
+            type: 'error',
+            error: error.message,
+            txid: tx.txid
+        });
+    }
+}
+
+// Initialize connection
+testConnection(); 

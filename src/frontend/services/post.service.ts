@@ -6,6 +6,7 @@ import { bsv, Addr, PandaSigner } from 'scrypt-ts';
 import { OrdiProvider } from 'scrypt-ord';
 import { YoursWalletAdapter } from '../utils/YoursWalletAdapter';
 import { MimeTypes, MAP } from 'yours-wallet-provider';
+import { getFeeRate } from '../../shared/utils/whatsOnChain';
 
 export interface PredictionMarketData {
   source: string;
@@ -174,20 +175,6 @@ interface LockData {
   unlockHeight?: number;
 }
 
-interface MapData extends MAP {
-  content: string;
-  timestamp: string;
-  contentType: string;
-  version: string;
-  tags: string[];
-  prediction?: string;
-  lockDuration?: string;
-  lockAmount?: string;
-  unlockHeight?: string;
-  voteOptions?: string;
-  isVoteQuestion?: string;
-}
-
 interface InscribeRequest {
   address: string;
   base64Data: string;
@@ -245,66 +232,169 @@ interface VotePostData extends PostCreationData {
   totalOptions?: number;
 }
 
+function createMapData(data: Record<string, any>): MAP {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (Array.isArray(value)) {
+      result[key] = JSON.stringify(value);
+    } else if (typeof value === 'object' && value !== null) {
+      result[key] = JSON.stringify(value);
+    } else {
+      result[key] = String(value);
+    }
+  }
+  return result as MAP;
+}
+
+// Helper function to create base MAP data
+function createBaseMapData(type: string, content: string, tags?: string[]): Record<string, string> {
+  return {
+    app: 'lockd.app',
+    type,
+    content: content.toString(),
+    timestamp: new Date().toISOString().toLowerCase(),
+    contentType: 'text/plain',
+    version: '1.0.0',
+    tags: JSON.stringify([...(tags || [])])
+  };
+}
+
+// Helper function to create lock data
+function createLockData(duration: number, amount: number, currentBlockHeight: number): Record<string, string> {
+  return {
+    lockDuration: duration.toString(),
+    lockAmount: amount.toString(),
+    unlockHeight: (currentBlockHeight + duration).toString()
+  };
+}
+
+// Helper function to create inscription request
+function createInscriptionRequest(
+  address: string, 
+  content: string, 
+  map: MAP, 
+  satoshis: number,
+  mimeType: string = 'text/plain'
+): InscribeRequest {
+  return {
+    address,
+    base64Data: btoa(content),
+    mimeType: mimeType as MimeTypes,
+    map: map as MAP,
+    satoshis
+  };
+}
+
+// Helper function to handle transaction response
+function handleTransactionResponse(response: any): TransactionResponse {
+  const inscriptionTx = {
+    id: response.txid || response.id,
+    tx: response.tx
+  };
+
+  if (!inscriptionTx?.id) {
+    throw new Error('Failed to create inscription - no transaction ID returned');
+  }
+
+  return inscriptionTx;
+}
+
+// Helper function to create a post object
+function createPostObject(
+  txid: string,
+  content: string,
+  authorAddress: string,
+  options: {
+    tags?: string[],
+    media_type?: string,
+    media_url?: string,
+    prediction_market_data?: PredictionMarketData,
+    isLocked?: boolean,
+    lockDuration?: number,
+    lockAmount?: number,
+    unlockHeight?: number
+  } = {}
+): Post {
+  return {
+    txid,
+    content,
+    author_address: authorAddress,
+    created_at: new Date().toISOString(),
+    media_type: options.media_type,
+    media_url: options.media_url,
+    tags: options.tags || [],
+    prediction_market_data: options.prediction_market_data,
+    isLocked: options.isLocked || false,
+    lockDuration: options.lockDuration,
+    lockAmount: options.lockAmount,
+    unlockHeight: options.unlockHeight
+  };
+}
+
+// Helper function to create vote question content
+function createVoteQuestionContent(content: string): string {
+  return `MAP_TYPE=vote_question\nCONTENT=${content}`;
+}
+
+// Helper function to create vote option content
+function createVoteOptionContent(opt: { text: string; lockAmount: number; lockDuration: number }): string {
+  return `MAP_TYPE=vote_option\nCONTENT=${opt.text}\nLOCK_AMOUNT=${opt.lockAmount}\nLOCK_DURATION=${opt.lockDuration}`;
+}
+
+// Helper function to create image content
+function createImageContent(imageFile: File, b64: string, description?: string): string {
+  return [
+    'MAP_TYPE=image',
+    `MIME_TYPE=${imageFile.type}`,
+    `DESCRIPTION=${description || ''}`,
+    `CONTENT=data:${imageFile.type};base64,${b64}`
+  ].join('\n');
+}
+
+// Calculate satoshis based on fee rate and content size
+async function calculateOutputSatoshis(contentSize: number): Promise<number> {
+  try {
+    const feeRate = await getFeeRate();
+    // Estimate transaction size: base size (250 bytes) + content size
+    const estimatedTxSize = 250 + contentSize;
+    // Calculate required satoshis based on fee rate
+    return Math.ceil(estimatedTxSize * feeRate);
+  } catch (error) {
+    console.error('Error calculating fee:', error);
+    // Default to minimum viable fee if calculation fails
+    return 1; // Minimum 1 satoshi as dust limit
+  }
+}
+
 export const createVoteOptionPost = async (
   optionData: VoteOptionData,
   authorAddress: string,
   wallet: YoursWallet,
 ): Promise<Post> => {
-  const mapData: MapData = {
-    app: 'lockd.app',
-    type: 'vote_option',
-    content: optionData.optionText,
-    timestamp: new Date().toISOString().toLowerCase(),
-    contentType: 'text/plain',
-    version: '1.0.0',
-    tags: ['lockdapp', 'vote_option'],
-    lockDuration: optionData.lockDuration.toString(),
-    lockAmount: optionData.lockAmount.toString(),
-    voteOptions: JSON.stringify({
-      questionTxid: optionData.questionTxid,
-      optionText: optionData.optionText,
-      isVoteOption: 'true'
-    })
-  };
+  const mapData = createBaseMapData('vote_option', optionData.optionText);
+  Object.assign(mapData, createLockData(optionData.lockDuration, optionData.lockAmount, 0));
+  mapData.voteOptions = JSON.stringify({
+    questionTxid: optionData.questionTxid,
+    optionText: optionData.optionText,
+    isVoteOption: 'true'
+  });
 
-  // Convert to Record<string, string> for wallet API
-  const stringifiedMapData: Record<string, string> = {
-    ...mapData,
-    tags: JSON.stringify(mapData.tags)
-  };
+  const request = createInscriptionRequest(
+    authorAddress,
+    optionData.optionText,
+    mapData as MAP,
+    optionData.lockAmount
+  );
 
-  // Create inscription transaction using MAP protocol
-  const response = await wallet.inscribe([{
-    address: authorAddress,
-    base64Data: btoa(optionData.optionText),
-    mimeType: 'text/plain',
-    map: stringifiedMapData,
-    satoshis: optionData.lockAmount
-  }]);
+  const response = await wallet.inscribe([request]);
+  const inscriptionTx = handleTransactionResponse(response);
 
-  // Convert response to expected format
-  const inscriptionTx = {
-    id: (response as any).txid || (response as any).id,
-    tx: (response as any).tx
-  };
-
-  if (!inscriptionTx?.id) {
-    throw new Error('Failed to create vote option - no transaction ID returned');
-  }
-
-  // Create the post object
-  const post: Post = {
-    txid: inscriptionTx.id,
-    content: optionData.optionText,
-    author_address: authorAddress,
-    created_at: new Date().toISOString(),
+  return createPostObject(inscriptionTx.id, optionData.optionText, authorAddress, {
     tags: ['vote_option'],
     isLocked: true,
     lockDuration: optionData.lockDuration,
     lockAmount: optionData.lockAmount
-  };
-
-  return post;
+  });
 };
 
 export const createPost = async (
@@ -358,270 +448,237 @@ export const createPost = async (
     const balance = await wallet.getBalance();
     console.log('Current wallet balance:', balance);
 
-    // Calculate required balance for vote options
-    const requiredBalance = lockData?.isPoll 
-      ? (lockData.options?.reduce((sum, opt) => sum + opt.lockAmount, 0) || 0) + 10 
-      : (lockData?.isLocked ? (lockData.amount || 0) : 0) + 10;
+    // Calculate base satoshis per output based on content size
+    const contentSize = new TextEncoder().encode(content).length;
+    const baseSatoshis = await calculateOutputSatoshis(contentSize);
+
+    // Calculate total required balance for all outputs
+    const outputCount = 1 + // Content output
+      (imageFile ? 1 : 0) + // Image output
+      (lockData?.isPoll ? 1 : 0) + // Vote question output
+      (lockData?.options?.length || 0) + // Vote options outputs
+      (tags && tags.length > 0 ? 1 : 0); // Tags output
+
+    const requiredBalance = (outputCount * baseSatoshis) +
+      (lockData?.isPoll 
+        ? (lockData.options?.reduce((sum, opt) => sum + opt.lockAmount, 0) || 0)
+        : (lockData?.isLocked ? (lockData.amount || 0) : 0));
 
     if (!balance?.satoshis || balance.satoshis < requiredBalance) {
       throw new Error(`Insufficient balance. Required: ${requiredBalance} satoshis`);
     }
 
-    let inscriptionTx: TransactionResponse;
+    let inscriptionRequests: InscribeRequest[] = [];
     let media_url: string | undefined;
     let media_type: string | undefined;
+    const timestamp = new Date().toISOString().toLowerCase();
+    const postId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
 
-    // Handle different post types
+    // Create content output
+    const contentMap = createBaseMapData('content', content, []);
+    contentMap.MAP_CONTENT_TYPE = 'text/plain';
+    contentMap.MAP_DESCRIPTION = description || '';
+    contentMap.MAP_POST_ID = postId;
+    contentMap.MAP_SEQUENCE = '0';
+    contentMap.MAP_TOTAL_OUTPUTS = '1'; // Will be updated as we add more outputs
+    contentMap.MAP_TIMESTAMP = timestamp;
+    contentMap.MAP_VERSION = '1.0.0';
+    contentMap.MAP_TYPE = 'content';
+    contentMap.MAP_AUTHOR = authorAddress;
+    
+    inscriptionRequests.push(createInscriptionRequest(
+      authorAddress,
+      content,
+      contentMap as MAP,
+      baseSatoshis
+    ));
+
+    // Create image output if present
     if (imageFile) {
-      console.log("Starting image inscription process:", {
-        fileName: imageFile.name,
-        fileType: imageFile.type,
-        fileSize: imageFile.size,
-        contentDescription: content || 'No description'
-      });
-      
       console.log("Converting image to base64...");
       const b64 = await fileToBase64(imageFile);
-      console.log("Base64 conversion metrics:", {
-        originalFileSize: imageFile.size,
-        base64Length: b64.length,
-        base64ByteSize: Math.ceil(b64.length * 3/4),
-        estimatedHexSize: Math.ceil(b64.length * 3/4) * 2
-      });
       
-      console.log("Creating image inscription transaction...");
-      try {
-        // Initialize ordinal inscription
-        console.log("Initializing ordinal inscription...");
-        const provider = new OrdiProvider();
-        const signer = new YoursWalletAdapter(wallet, provider);
-        
-        // Request authentication
-        console.log("Requesting authentication...");
-        const { isAuthenticated, error } = await signer.requestAuth();
-        if (!isAuthenticated) {
-            throw new Error(`Authentication failed: ${error}`);
-        }
+      const imageMap = createBaseMapData('image', '', []);
+      imageMap.MAP_CONTENT_TYPE = imageFile.type;
+      imageMap.MAP_IS_IMAGE = 'true';
+      imageMap.MAP_POST_ID = postId;
+      imageMap.MAP_SEQUENCE = '1';
+      imageMap.MAP_PARENT_SEQUENCE = '0';
+      imageMap.MAP_TIMESTAMP = timestamp;
+      imageMap.MAP_VERSION = '1.0.0';
+      imageMap.MAP_FILE_SIZE = imageFile.size.toString();
+      imageMap.MAP_FILE_NAME = imageFile.name;
+      imageMap.MAP_TYPE = 'image';
+      imageMap.MAP_AUTHOR = authorAddress;
+      
+      inscriptionRequests.push(createInscriptionRequest(
+        authorAddress,
+        createImageContent(imageFile, b64, ''),
+        imageMap as MAP,
+        baseSatoshis,
+        imageFile.type
+      ));
 
-        // Create metadata object
-        const metadata: MetadataObject = {
-          app: 'lockd.app',
-          type: 'image',
-          description: description || content || 'Image inscription',
-          tags: ['lockdapp', ...(tags || [])],
-          timestamp: new Date().toISOString(),
-          version: '1.0.0'
-        };
-
-        // Add lock data only if present
-        if (lockData?.isLocked && currentBlockHeight && lockData.duration) {
-          metadata.lock_data = {
-            isLocked: true,
-            duration: lockData.duration,
-            amount: lockData.amount || 1000,
-            unlockHeight: currentBlockHeight + lockData.duration
-          };
-        }
-
-        // Create the inscription content following 1Sat Ordinals format
-        const inscriptionContent = `data:${imageFile.type};base64,${b64}`;
-
-        // Create inscription transaction using MAP protocol format
-        const response = await wallet.inscribe([{
-          address: authorAddress,
-          base64Data: btoa(inscriptionContent),
-          mimeType: imageFile.type,
-          satoshis: lockData?.isLocked ? (lockData.amount || 1000) : 1000,
-          map: {
-            app: 'lockd.app',
-            type: 'image',
-            content: description || content || '',
-            contentType: imageFile.type,
-            tags: JSON.stringify(['lockdapp', ...(tags || [])]),
-            timestamp: new Date().toISOString().toLowerCase(),
-            version: '1.0.0',
-            ...(lockData?.isLocked && currentBlockHeight && lockData.duration) && {
-              lockDuration: lockData.duration.toString(),
-              lockAmount: (lockData.amount || 1000).toString(),
-              unlockHeight: (currentBlockHeight + lockData.duration).toString()
-            }
-          }
-        }]);
-
-        // Convert response to expected format
-        inscriptionTx = {
-          id: (response as any).txid || (response as any).id,
-          tx: (response as any).tx
-        };
-        
-        // Analyze raw transaction
-        if (inscriptionTx?.tx) {
-          const txHex = inscriptionTx.tx.toString('hex');
-          
-          console.log("Raw transaction analysis:", {
-            success: !!inscriptionTx?.id,
-            txid: inscriptionTx?.id,
-            size: {
-              total: txHex.length,
-              hex: txHex.length / 2,
-              estimated: inscriptionContent.length
-            }
-          });
-        }
-
-        if (!inscriptionTx?.id) {
-          console.error('Transaction response invalid:', inscriptionTx);
-          throw new Error('Failed to create image inscription - no transaction ID returned');
-        }
-
-        // Use testnet URLs
-        media_url = `https://testnet.ordinals.sv/content/${inscriptionTx.id}`;
-        media_type = imageFile.type;
-        console.log("Image inscription complete:", JSON.stringify({
-          txid: inscriptionTx.id,
-          media_url,
-          media_type,
-          metadata
-        }, null, 2));
-
-      } catch (txError) {
-        console.error("Image inscription error:", {
-          error: txError,
-          message: txError instanceof Error ? txError.message : 'Unknown error',
-          stack: txError instanceof Error ? txError.stack : undefined
-        });
-        throw txError;
-      }
-    } else {
-      console.log("Creating text post:", content);
-      try {
-        if (lockData?.isPoll && lockData.options) {
-          // Create an array of inscriptions - one for the question and one for each option
-          const inscriptions = [
-            // Question inscription
-            {
-              address: authorAddress,
-              base64Data: btoa(content),
-              mimeType: 'text/plain' as MimeTypes,
-              map: {
-                app: 'lockd.app',
-                type: 'vote',
-                severity: 'info',
-                content,
-                timestamp: new Date().toISOString().toLowerCase(),
-                contentType: 'text/plain',
-                version: '1.0.0',
-                tags: JSON.stringify(['lockdapp', 'vote_question', ...(tags || [])]),
-                isVoteQuestion: 'true'
-              } satisfies MAP,
-              satoshis: 1000
-            },
-            // Option inscriptions
-            ...lockData.options.map(opt => ({
-              address: authorAddress,
-              base64Data: btoa(opt.text),
-              mimeType: 'text/plain' as MimeTypes,
-              map: {
-                app: 'lockd.app',
-                type: 'vote_option',
-                severity: 'info',
-                content: opt.text,
-                timestamp: new Date().toISOString().toLowerCase(),
-                contentType: 'text/plain',
-                version: '1.0.0',
-                tags: JSON.stringify(['lockdapp', 'vote_option', ...(tags || [])]),
-                lockDuration: opt.lockDuration.toString(),
-                lockAmount: opt.lockAmount.toString()
-              } satisfies MAP,
-              satoshis: opt.lockAmount
-            }))
-          ];
-
-          // Create inscription transaction with multiple outputs
-          const response = await wallet.inscribe(inscriptions);
-
-          // Convert response to expected format
-          inscriptionTx = {
-            id: (response as any).txid || (response as any).id,
-            tx: (response as any).tx
-          };
-        } else {
-          // Create MAP data with tags, prediction market data, and vote data
-          const mapData: Record<string, string> = {
-            app: 'lockd.app',
-            type: predictionMarketData ? 'prediction' : 'text',
-            content,
-            timestamp: new Date().toISOString().toLowerCase(),
-            contentType: 'text/plain',
-            version: '1.0.0',
-            tags: JSON.stringify(['lockdapp', ...(tags || [])]),
-            ...(predictionMarketData && {
-              prediction: JSON.stringify(predictionMarketData)
-            }),
-            ...(lockData?.isLocked && currentBlockHeight && lockData.duration && {
-              lockDuration: lockData.duration.toString(),
-              lockAmount: (lockData.amount || 1000).toString(),
-              unlockHeight: (currentBlockHeight + lockData.duration).toString()
-            })
-          };
-
-          // Create inscription transaction using MAP protocol
-          const response = await wallet.inscribe([{
-            address: authorAddress,
-            base64Data: btoa(content),
-            mimeType: 'text/plain' as MimeTypes,
-            map: mapData,
-            satoshis: lockData?.isLocked ? (lockData.amount || 1000) : 1000
-          }]);
-
-          // Convert response to expected format
-          inscriptionTx = {
-            id: (response as any).txid || (response as any).id,
-            tx: (response as any).tx
-          };
-        }
-        
-        // Log and validate text inscription
-        if (inscriptionTx?.tx) {
-          console.log("MAP transaction response:", JSON.stringify({
-            txid: inscriptionTx?.id,
-            inscriptions: lockData?.isPoll ? 'Multiple outputs for vote' : 'Single output'
-          }, null, 2));
-        }
-      } catch (txError) {
-        console.error("Text inscription error:", JSON.stringify({
-          error: txError,
-          message: txError instanceof Error ? txError.message : 'Unknown error',
-          stack: txError instanceof Error ? txError.stack : undefined
-        }, null, 2));
-        throw txError;
-      }
+      media_type = imageFile.type;
     }
-    
-    console.log('Final inscription transaction state:', JSON.stringify({
-      txid: inscriptionTx?.id,
-      hasRawTx: !!inscriptionTx?.tx,
-      rawTxLength: inscriptionTx?.tx?.toString('hex').length,
-      responseType: typeof inscriptionTx,
-      fullResponse: inscriptionTx
-    }, null, 2));
+
+    // Create vote question and options outputs if it's a poll
+    if (lockData?.isPoll && lockData.options) {
+      // First, create the vote question output
+      const questionMap = createBaseMapData('vote_question', content, []);
+      questionMap.MAP_CONTENT_TYPE = 'text/plain';
+      questionMap.MAP_POST_ID = postId;
+      questionMap.MAP_SEQUENCE = imageFile ? '2' : '1';
+      questionMap.MAP_PARENT_SEQUENCE = '0';
+      questionMap.MAP_IS_VOTE = 'true';
+      questionMap.MAP_IS_VOTE_QUESTION = 'true';
+      questionMap.MAP_VOTE_OPTIONS_COUNT = lockData.options.length.toString();
+      questionMap.MAP_SEVERITY = 'info';
+      questionMap.MAP_TIMESTAMP = timestamp;
+      questionMap.MAP_VERSION = '1.0.0';
+      questionMap.MAP_TYPE = 'vote_question';
+      questionMap.MAP_AUTHOR = authorAddress;
+      questionMap.MAP_VOTE_OPTIONS_TOTAL_LOCK = lockData.options
+        .reduce((sum, opt) => sum + opt.lockAmount, 0)
+        .toString();
+
+      inscriptionRequests.push(createInscriptionRequest(
+        authorAddress,
+        content,
+        questionMap as MAP,
+        baseSatoshis
+      ));
+
+      // Then create individual outputs for each option
+      lockData.options.forEach((opt, index) => {
+        const baseSequence = ((imageFile ? 3 : 2) + (index * 2)); // Adjust base sequence based on image presence
+
+        // Create option text output
+        const optionTextMap = createBaseMapData('vote_option_text', opt.text, []);
+        optionTextMap.MAP_CONTENT_TYPE = 'text/plain';
+        optionTextMap.MAP_POST_ID = postId;
+        optionTextMap.MAP_SEQUENCE = baseSequence.toString();
+        optionTextMap.MAP_PARENT_SEQUENCE = imageFile ? '2' : '1'; // Parent is vote question
+        optionTextMap.MAP_IS_VOTE = 'true';
+        optionTextMap.MAP_VOTE_OPTION_INDEX = index.toString();
+        optionTextMap.MAP_QUESTION_CONTENT = content;
+        optionTextMap.MAP_TIMESTAMP = timestamp;
+        optionTextMap.MAP_VERSION = '1.0.0';
+        optionTextMap.MAP_TYPE = 'vote_option_text';
+        optionTextMap.MAP_AUTHOR = authorAddress;
+
+        inscriptionRequests.push(createInscriptionRequest(
+          authorAddress,
+          opt.text,
+          optionTextMap as MAP,
+          baseSatoshis
+        ));
+
+        // Create option lock data output
+        const optionLockMap = createBaseMapData('vote_option_lock', '', []);
+        optionLockMap.MAP_CONTENT_TYPE = 'application/json';
+        optionLockMap.MAP_POST_ID = postId;
+        optionLockMap.MAP_SEQUENCE = (baseSequence + 1).toString();
+        optionLockMap.MAP_PARENT_SEQUENCE = baseSequence.toString(); // Parent is option text
+        optionLockMap.MAP_IS_VOTE = 'true';
+        optionLockMap.MAP_VOTE_OPTION_INDEX = index.toString();
+        optionLockMap.MAP_TIMESTAMP = timestamp;
+        optionLockMap.MAP_VERSION = '1.0.0';
+        optionLockMap.MAP_TYPE = 'vote_option_lock';
+        optionLockMap.MAP_AUTHOR = authorAddress;
+        Object.assign(optionLockMap, {
+          MAP_LOCK_DURATION: opt.lockDuration.toString(),
+          MAP_LOCK_AMOUNT: opt.lockAmount.toString(),
+          MAP_UNLOCK_HEIGHT: ((currentBlockHeight || 0) + opt.lockDuration).toString(),
+          MAP_CURRENT_HEIGHT: (currentBlockHeight || 0).toString(),
+          MAP_LOCK_PERCENTAGE: ((opt.lockAmount / requiredBalance) * 100).toFixed(2)
+        });
+
+        inscriptionRequests.push(createInscriptionRequest(
+          authorAddress,
+          JSON.stringify({
+            lockDuration: opt.lockDuration,
+            lockAmount: opt.lockAmount,
+            optionIndex: index,
+            postId: postId,
+            currentHeight: currentBlockHeight || 0,
+            unlockHeight: (currentBlockHeight || 0) + opt.lockDuration,
+            lockPercentage: ((opt.lockAmount / requiredBalance) * 100).toFixed(2)
+          }),
+          optionLockMap as MAP,
+          opt.lockAmount
+        ));
+      });
+    }
+
+    // Create tags output if present
+    if (tags && tags.length > 0) {
+      const tagsMap = createBaseMapData('tags', '', tags);
+      tagsMap.MAP_CONTENT_TYPE = 'application/json';
+      tagsMap.MAP_POST_ID = postId;
+      tagsMap.MAP_SEQUENCE = inscriptionRequests.length.toString();
+      tagsMap.MAP_PARENT_SEQUENCE = '0';
+      tagsMap.MAP_TIMESTAMP = timestamp;
+      tagsMap.MAP_VERSION = '1.0.0';
+      tagsMap.MAP_TAGS_COUNT = tags.length.toString();
+      tagsMap.MAP_TYPE = 'tags';
+      tagsMap.MAP_AUTHOR = authorAddress;
+      
+      inscriptionRequests.push(createInscriptionRequest(
+        authorAddress,
+        JSON.stringify(tags),
+        tagsMap as MAP,
+        baseSatoshis
+      ));
+    }
+
+    // Update total outputs count in content map
+    contentMap.MAP_TOTAL_OUTPUTS = inscriptionRequests.length.toString();
+
+    // Add lock data to content output if present
+    if (lockData?.isLocked && currentBlockHeight && lockData.duration) {
+      Object.assign(contentMap, {
+        MAP_LOCK_DURATION: lockData.duration.toString(),
+        MAP_LOCK_AMOUNT: (lockData.amount || baseSatoshis).toString(),
+        MAP_UNLOCK_HEIGHT: (currentBlockHeight + lockData.duration).toString()
+      });
+    }
+
+    // Add prediction market data if present
+    if (predictionMarketData) {
+      contentMap.MAP_PREDICTION_DATA = JSON.stringify({
+        source: predictionMarketData.source,
+        prediction: predictionMarketData.prediction,
+        endDate: predictionMarketData.endDate.toISOString(),
+        probability: predictionMarketData.probability?.toString()
+      });
+    }
+
+    console.log('Creating inscription with requests:', {
+      count: inscriptionRequests.length,
+      types: inscriptionRequests.map(req => req.map.type)
+    });
+
+    const response = await wallet.inscribe(inscriptionRequests);
+    const inscriptionTx = handleTransactionResponse(response);
 
     if (!inscriptionTx?.id) {
       console.error('No txid in response:', inscriptionTx);
       throw new Error('Failed to broadcast inscription - no transaction ID returned');
     }
 
+    // If it was an image inscription, set the media URL
+    if (imageFile) {
+      media_url = `https://testnet.ordinals.sv/content/${inscriptionTx.id}`;
+    }
+
     console.log('Inscription successful with txid:', inscriptionTx.id);
 
     // Create the post object
-    const post: Post = {
-      txid: inscriptionTx.id,
-      content: content,
-      author_address: authorAddress,
-      created_at: new Date().toISOString(),
+    const post = createPostObject(inscriptionTx.id, content, authorAddress, {
       media_type,
       media_url,
-      tags: tags || [],
+      tags,
       prediction_market_data: predictionMarketData,
       isLocked: lockData?.isLocked || false,
       lockDuration: lockData?.duration,
@@ -629,7 +686,7 @@ export const createPost = async (
       unlockHeight: lockData?.isLocked && currentBlockHeight && lockData.duration 
         ? currentBlockHeight + lockData.duration 
         : undefined
-    };
+    });
     console.log('Created post object:', post);
 
     toast.success('Post created successfully!');
