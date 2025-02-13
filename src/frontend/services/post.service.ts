@@ -7,6 +7,7 @@ import { OrdiProvider } from 'scrypt-ord';
 import { YoursWalletAdapter } from '../utils/YoursWalletAdapter';
 import { MimeTypes, MAP } from 'yours-wallet-provider';
 import { getFeeRate } from '../../shared/utils/whatsOnChain';
+import { FiExternalLink } from 'react-icons/fi';
 
 // Add API base URL configuration at the top of the file
 const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:3001';
@@ -684,7 +685,11 @@ export const createPost = async (
       const response = await wallet.inscribe(components);
       const inscriptionTx = handleTransactionResponse(response);
 
-      console.log('Transaction successful:', inscriptionTx);
+      console.log('Transaction details:', {
+        inscriptionTx,
+        txId: inscriptionTx.id,
+        fullTx: response
+      });
 
       // Create post in database immediately
       const postData = {
@@ -771,19 +776,40 @@ export const createPost = async (
         throw new Error('No data received from server after creating post');
       }
 
-      // Update success toast
-      toast.success('Post created successfully!', {
-        id: pendingToast,
-        duration: 5000,
-        style: {
-          background: '#1A1B23',
-          color: '#fff',
-          border: '1px solid rgba(255, 255, 255, 0.1)'
+      // Update success toast and open WhatsOnChain link
+      const whatsOnChainUrl = `https://whatsonchain.com/tx/${inscriptionTx.id}`;
+      console.log('WhatsOnChain URL:', whatsOnChainUrl);
+      
+      toast.success(
+        React.createElement('div', { className: 'flex flex-col space-y-2' },
+          React.createElement('span', null, 'Post created successfully!'),
+          React.createElement('a', {
+            href: whatsOnChainUrl,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            className: 'text-sm text-[#00ffa3] hover:text-[#00ff9d] flex items-center gap-1',
+            onClick: (e) => {
+              e.preventDefault();
+              window.open(whatsOnChainUrl, '_blank');
+            }
+          },
+            React.createElement('span', null, 'View on WhatsOnChain'),
+            React.createElement(FiExternalLink, { className: 'w-3 h-3' })
+          )
+        ),
+        {
+          id: pendingToast,
+          duration: 5000,
+          style: {
+            background: '#1A1B23',
+            color: '#fff',
+            border: '1px solid rgba(255, 255, 255, 0.1)'
+          }
         }
-      });
+      );
 
       // Open WhatsOnChain link in a new tab
-      window.open(`https://whatsonchain.com/tx/${inscriptionTx.id}`, '_blank');
+      window.open(whatsOnChainUrl, '_blank');
 
       // Create and return post object
       return createPostObject(inscriptionTx.id, content, authorAddress, {

@@ -396,17 +396,51 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         const postsData = await postsResponse.json();
         console.log('Fetched posts:', postsData);
 
+        // Process posts into MemeSubmission format
+        const processedPosts = await Promise.all(postsData.map(async (post: ApiPost) => {
+          const imageUrl = await formatImageUrl(post.metadata?.imageData) || 
+                          await formatImageUrl(post.content) || 
+                          `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('No image available')}`;
+
+          return {
+            id: post.id,
+            creator: post.author_address || 'Anonymous',
+            title: `Post by ${post.author_address || 'Anonymous'}`,
+            description: post.description || post.content || '',
+            prompt: '',
+            style: 'viral',
+            duration: 30,
+            format: post.media_type || 'text/plain',
+            fileUrl: imageUrl,
+            thumbnailUrl: imageUrl,
+            txId: post.txid,
+            locks: post.amount || 0,
+            status: 'minted' as const,
+            tags: post.tags || [],
+            createdAt: new Date(post.created_at),
+            updatedAt: new Date(post.created_at),
+            totalLocked: post.amount || 0,
+            threshold: 1000000000,
+            isTop10Percent: (post.amount || 0) > 1000000000,
+            isTop3: (post.amount || 0) > 2000000000,
+            locklikes: [],
+            content: post.content || '',
+            unlock_height: post.unlock_height,
+            block_height: post.block_height
+          };
+        }));
+
         // Fetch votes
         const votesResponse = await fetch(`${API_URL}/api/votes`);
         const votesData = await votesResponse.json();
         console.log('Fetched votes:', votesData);
 
-        setSubmissions(postsData);
+        setSubmissions(processedPosts);
         setVotes(votesData);
 
         // Debug combined data
         const allContent = [
-          ...postsData.map((post: MemeSubmission) => ({ type: 'post' as const, data: post })),
+          ...processedPosts.map((post: MemeSubmission) => ({ type: 'post' as const, data: post })),
           ...votesData.map((vote: VoteQuestion) => ({ type: 'vote' as const, data: vote }))
         ];
         console.log('Combined content:', allContent);
@@ -439,7 +473,26 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     if (submission.content) {
       return (
         <div className="w-full p-8 bg-gradient-to-br from-[#2A2A40]/5 to-[#1A1B23]/5 relative group">
-          {renderWhatsOnChainLink(submission.txId)}
+          {/* Top right stats */}
+          <div className="absolute top-3 right-3 flex items-center space-x-2">
+            <span className="text-sm text-[#00ffa3]/60 flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              {formatBSV(submission.totalLocked || 0)}
+            </span>
+            <a
+              href={`https://whatsonchain.com/tx/${submission.txId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2 rounded-full bg-[#1A1B23]/40 text-white/40 hover:text-[#00ffa3] hover:bg-[#1A1B23]/60 transition-all duration-500 backdrop-blur-sm"
+              title="View on WhatsOnChain"
+            >
+              <FiExternalLink className="w-4 h-4" />
+            </a>
+          </div>
+
           {/* Decorative elements */}
           <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all duration-1000 pointer-events-none">
             <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-[#00ffa3]/3 to-transparent rounded-full blur-xl" />
@@ -453,10 +506,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           </div>
 
           {/* Footer - more subtle */}
-          <div className="mt-10 pt-4 border-t border-gray-800/10 flex items-center justify-between relative">
-            <span className="text-sm text-[#00ffa3]/60">
-              {formatBSV(submission.totalLocked || 0)} BSV locked
-            </span>
+          <div className="mt-10 pt-4 border-t border-gray-800/10 flex items-center justify-end relative">
             <div className="flex items-center space-x-6">
               {submission.unlock_height && submission.block_height && (
                 <div className="text-sm text-white/40">
@@ -491,6 +541,26 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       return (
         <>
           <div className="relative w-full group/image">
+            {/* Top right stats */}
+            <div className="absolute top-3 right-3 flex items-center space-x-2 z-10">
+              <span className="text-sm text-[#00ffa3]/60 flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                {formatBSV(submission.totalLocked || 0)}
+              </span>
+              <a
+                href={`https://whatsonchain.com/tx/${submission.txId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2 rounded-full bg-[#1A1B23]/40 text-white/40 hover:text-[#00ffa3] hover:bg-[#1A1B23]/60 transition-all duration-500 backdrop-blur-sm"
+                title="View on WhatsOnChain"
+              >
+                <FiExternalLink className="w-4 h-4" />
+              </a>
+            </div>
+
             {/* Image */}
             <img
               ref={(el) => el && handleImageLoad(submission.id, el)}
@@ -514,7 +584,6 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           {/* Content section - more focused */}
           {submission.content && (
             <div className="p-8 bg-gradient-to-b from-[#1A1B23] to-[#1A1B23]/95 relative group">
-              {renderWhatsOnChainLink(submission.txId)}
               {/* Decorative elements */}
               <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all duration-1000 pointer-events-none">
                 <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-[#00ffa3]/3 to-transparent rounded-full blur-xl" />
@@ -524,10 +593,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
               <p className="text-gray-200/90 text-lg leading-relaxed whitespace-pre-wrap break-words relative">{submission.content}</p>
               
               {/* Footer - more subtle */}
-              <div className="mt-8 pt-4 border-t border-gray-800/10 flex items-center justify-between relative">
-                <span className="text-sm text-[#00ffa3]/60">
-                  {formatBSV(submission.totalLocked || 0)} BSV locked
-                </span>
+              <div className="mt-8 pt-4 border-t border-gray-800/10 flex items-center justify-end relative">
                 <div className="flex items-center space-x-6">
                   {submission.unlock_height && submission.block_height && (
                     <div className="text-sm text-white/40">
