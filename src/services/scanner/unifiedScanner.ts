@@ -19,7 +19,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Create a worker for database operations
-const dbWorker = new Worker(join(__dirname, 'unifiedDbWorker.js'));
+const workerPath = join(__dirname, 'unifiedDbWorker.js');
+const dbWorker = new Worker(workerPath);
 
 // Handle messages from the worker
 dbWorker.on('message', (message) => {
@@ -41,7 +42,7 @@ async function fetchTransaction(txid: string): Promise<any> {
     }
 }
 
-const onPublish = async function(tx: JungleBusTransactionType) {
+const onPublish = async function(tx: any) {
     console.log("📥 TRANSACTION", JSON.stringify(tx, null, 2));
     
     try {
@@ -62,9 +63,9 @@ const onPublish = async function(tx: JungleBusTransactionType) {
 
         console.log("✨ Found MAP data:", {
             txid: parsedData.txid,
-            is_vote: parsedData.is_vote,
-            has_image: !!parsedData.raw_image_data || !!parsedData.image_source,
-            vote_options: parsedData.vote_options.length
+            hasVote: !!parsedData.vote,
+            hasImage: parsedData.images.length > 0,
+            voteOptions: parsedData.vote?.options?.length || 0
         });
 
         // Send to worker for processing

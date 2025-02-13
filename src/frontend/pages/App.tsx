@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, createRoutesFromElements } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import Layout from '../components/layout/Layout';
 import Home from './Home';
@@ -10,7 +10,7 @@ export default function App() {
   const { connect, disconnect, isConnected, bsvAddress, balance, isWalletDetected } = useWallet();
 
   return (
-    <Router>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Layout
         connected={isConnected}
         bsvAddress={bsvAddress}
