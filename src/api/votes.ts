@@ -1,13 +1,16 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 // Get all vote questions with their options
-router.get('/', async (req, res) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
-    const voteQuestions = await prisma.voteQuestion.findMany({
+    const voteQuestions = await prisma.post.findMany({
+      where: {
+        is_vote: true
+      },
       include: {
         vote_options: true
       },
@@ -24,11 +27,12 @@ router.get('/', async (req, res) => {
 });
 
 // Get a specific vote question by ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const voteQuestion = await prisma.voteQuestion.findUnique({
+    const voteQuestion = await prisma.post.findUnique({
       where: {
-        id: req.params.id
+        id: req.params.id,
+        is_vote: true
       },
       include: {
         vote_options: true
