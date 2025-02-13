@@ -584,12 +584,11 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           <div className="space-y-3">
             {optionsWithPercentages.map((option, index) => {
               // Generate a gradient color based on index
-              const gradientStart = index === 0 ? 'from-[#FF6B6B]' : 
-                                  index === 1 ? 'from-[#4ECDC4]' : 
-                                  index === 2 ? 'from-[#45B7D1]' : 'from-[#96CEB4]';
-              const gradientEnd = index === 0 ? 'to-[#FF8E8E]' : 
-                                index === 1 ? 'to-[#6EE7E7]' : 
-                                index === 2 ? 'to-[#65D7F1]' : 'to-[#B6EED4]';
+              const gradientColors = [
+                { from: '#00ffa3', to: '#00ff9d', shadow: '#00ffa3' },
+                { from: '#3CDFCE', to: '#00ffa3', shadow: '#3CDFCE' },
+                { from: '#45B7D1', to: '#3CDFCE', shadow: '#45B7D1' }
+              ][index % 3];
 
               return (
                 <div 
@@ -599,17 +598,34 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                   {/* Progress bar background */}
                   <div className="absolute inset-0 bg-[#2A2A40]/20 rounded-lg" />
                   
-                  {/* Progress bar fill */}
+                  {/* Progress bar fill with animated gradient */}
                   <div 
-                    className={`absolute inset-y-0 left-0 bg-gradient-to-r ${gradientStart} ${gradientEnd} opacity-10 rounded-lg transition-all duration-300`}
-                    style={{ width: `${option.percentage}%` }}
+                    className="absolute inset-y-0 left-0 rounded-lg transition-all duration-700 ease-out"
+                    style={{
+                      width: `${option.percentage}%`,
+                      background: `linear-gradient(90deg, ${gradientColors.from}10, ${gradientColors.to}10)`,
+                      boxShadow: option.percentage > 0 ? `0 0 20px ${gradientColors.shadow}10` : 'none'
+                    }}
+                  />
+
+                  {/* Hover effect overlay */}
+                  <div 
+                    className="absolute inset-0 opacity-0 group-hover/option:opacity-100 transition-opacity duration-300 rounded-lg"
+                    style={{
+                      background: `linear-gradient(90deg, ${gradientColors.from}15, ${gradientColors.to}15)`
+                    }}
                   />
 
                   {/* Content */}
-                  <div className="relative p-4 flex items-center justify-between group-hover/option:bg-[#2A2A40]/10 transition-all duration-300 rounded-lg">
+                  <div className="relative p-4 flex items-center justify-between transition-all duration-300 rounded-lg">
                     <div className="flex items-center space-x-3">
                       <span className="text-white font-medium">{option.content}</span>
-                      <span className="text-gray-400">{option.percentage.toFixed(1)}%</span>
+                      <span 
+                        className="text-gray-400 transition-all duration-300 group-hover/option:text-white"
+                        style={{ color: option.percentage > 0 ? gradientColors.from : undefined }}
+                      >
+                        {option.percentage.toFixed(1)}%
+                      </span>
                     </div>
 
                     {/* Lock button */}
@@ -621,7 +637,11 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                         }
                       }}
                       disabled={lockingSubmissionId === option.id || daysLeft <= 0}
-                      className="opacity-0 group-hover/option:opacity-100 px-4 py-1.5 bg-gradient-to-r from-[#00ffa3]/10 to-[#00ff9d]/10 text-[#00ffa3] rounded-lg text-sm font-medium hover:from-[#00ffa3]/20 hover:to-[#00ff9d]/20 transition-all duration-300 disabled:opacity-50"
+                      className="opacity-0 group-hover/option:opacity-100 px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 disabled:opacity-50"
+                      style={{
+                        background: `linear-gradient(90deg, ${gradientColors.from}20, ${gradientColors.to}20)`,
+                        color: gradientColors.from
+                      }}
                     >
                       {lockingSubmissionId === option.id ? (
                         <FiLoader className="animate-spin w-4 h-4" />
