@@ -4,8 +4,9 @@ import { Prisma } from '@prisma/client';
 export interface JungleBusTransaction {
   id: string;
   transaction: string;
+  addresses: string[];
   block_hash?: string;
-  block_height?: number;
+  block_height: number;
   block_time?: number;
   block_index?: number;
   merkle_proof?: any;
@@ -13,6 +14,14 @@ export interface JungleBusTransaction {
   contexts?: string[];
   sub_contexts?: string[];
   data?: string[];
+  outputs?: JungleBusOutput[];
+}
+
+export interface JungleBusOutput {
+  script?: {
+    asm?: string;
+    hex?: string;
+  };
 }
 
 export interface ControlMessage {
@@ -184,20 +193,106 @@ export type PostCreateInput = {
   };
 };
 
-export interface MapMetadata {
-  type: string;
-  contentType: string;
+export enum MAP_TYPES {
+  CONTENT = 'content',
+  IMAGE = 'image',
+  VOTE_QUESTION = 'vote_question',
+  VOTE_OPTION = 'vote_option',
+  TAGS = 'tags'
+}
+
+export interface BaseMapMetadata {
+  app: string;
+  version: string;
+  type: MAP_TYPES;
   postId: string;
   sequence: number;
   parentSequence?: number;
   timestamp: string;
-  version: string;
-  author: string;
-  description?: string;
-  totalOutputs?: number;
 }
 
-export interface ContentOutput extends MapMetadata {
+export interface ContentMapMetadata extends BaseMapMetadata {
+  type: MAP_TYPES.CONTENT;
+  title?: string;
+  description?: string;
+}
+
+export interface ImageMapMetadata extends BaseMapMetadata {
+  type: MAP_TYPES.IMAGE;
+  contentType: string;
+  encoding: 'base64' | 'hex';
+}
+
+export interface VoteQuestionMapMetadata extends BaseMapMetadata {
+  type: MAP_TYPES.VOTE_QUESTION;
+  totalOptions: number;
+  optionsHash: string;
+}
+
+export interface VoteOptionMapMetadata extends BaseMapMetadata {
+  type: MAP_TYPES.VOTE_OPTION;
+  parentSequence: number;
+  optionIndex: number;
+  lockAmount?: number;
+  lockDuration?: number;
+}
+
+export interface TagsMapMetadata extends BaseMapMetadata {
+  type: MAP_TYPES.TAGS;
+}
+
+export type MapMetadata = 
+  | ContentMapMetadata 
+  | ImageMapMetadata 
+  | VoteQuestionMapMetadata 
+  | VoteOptionMapMetadata 
+  | TagsMapMetadata;
+
+export interface ParsedPost {
+  postId: string;
+  content?: {
+    title?: string;
+    description?: string;
+    text: string;
+  };
+  images: Array<{
+    data: string;
+    contentType: string;
+    encoding: string;
+  }>;
+  vote?: {
+    question: string;
+    options: Array<{
+      text: string;
+      lockAmount?: number;
+      lockDuration?: number;
+      index: number;
+      unlockHeight?: number;
+      currentHeight?: number;
+      lockPercentage?: number;
+    }>;
+    totalOptions: number;
+    optionsHash: string;
+  };
+  tags: string[];
+  author: string;
+  timestamp: string;
+  txid: string;
+  blockHeight: number;
+  metadata: {
+    app: string;
+    version: string;
+    lock?: {
+      isLocked: boolean;
+      duration?: number;
+      amount?: number;
+      unlockHeight?: number;
+    };
+  };
+}
+
+export interface ContentOutput {
+  type: MAP_TYPES.CONTENT;
   content: string;
   lockDuration?: number;
   lockAmount?: number;
@@ -208,51 +303,49 @@ export interface ContentOutput extends MapMetadata {
     endDate: string;
     probability?: string;
   };
+  metadata: BaseMapMetadata;
 }
 
-export interface ImageOutput extends MapMetadata {
+export interface ImageOutput {
+  type: MAP_TYPES.IMAGE;
   fileName: string;
   fileSize: number;
   imageUrl?: string;
+  metadata: BaseMapMetadata;
 }
 
-export interface VoteQuestionOutput extends MapMetadata {
+export interface VoteQuestionOutput {
+  type: MAP_TYPES.VOTE_QUESTION;
   question: string;
   optionsCount: number;
   totalLockAmount: number;
+  metadata: BaseMapMetadata;
 }
 
-export interface VoteOptionTextOutput extends MapMetadata {
+export interface VoteOptionTextOutput {
+  type: MAP_TYPES.VOTE_OPTION;
   optionText: string;
   optionIndex: number;
   questionContent: string;
+  metadata: BaseMapMetadata;
 }
 
-export interface VoteOptionLockOutput extends MapMetadata {
+export interface VoteOptionLockOutput {
+  type: MAP_TYPES.VOTE_OPTION;
   optionIndex: number;
   lockDuration: number;
   lockAmount: number;
   currentHeight: number;
   unlockHeight: number;
   lockPercentage: number;
+  metadata: BaseMapMetadata;
 }
 
-export interface TagsOutput extends MapMetadata {
+export interface TagsOutput {
+  type: MAP_TYPES.TAGS;
   tags: string[];
   tagsCount: number;
-}
-
-export interface ParsedPost {
-  txid: string;
-  content: ContentOutput;
-  image?: ImageOutput;
-  voteQuestion?: VoteQuestionOutput;
-  voteOptions?: Array<{
-    text: VoteOptionTextOutput;
-    lock: VoteOptionLockOutput;
-  }>;
-  tags?: TagsOutput;
-  createdAt: string;
+  metadata: BaseMapMetadata;
 }
 
 export type OutputType = 'content' | 'image' | 'vote_question' | 'vote_option_text' | 'vote_option_lock' | 'tags'; 

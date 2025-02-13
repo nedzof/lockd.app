@@ -12,6 +12,7 @@ datasource db {
 model Post {
   id             String       @id
   txid           String       @unique
+  postId         String
   content        String
   author_address String
   media_type     String?
@@ -28,27 +29,30 @@ model Post {
   image_format   String?
   image_source   String?
   is_vote        Boolean      @default(false)
-  VoteOption     VoteOption[]
+  vote_options   VoteOption[]
 
   @@index([author_address])
   @@index([block_height])
   @@index([created_at])
+  @@index([postId])
 }
 
 model VoteOption {
-  id              String   @id
-  txid            String   @unique
-  post_txid       String
-  content         String
-  author_address  String
-  created_at      DateTime
-  lock_amount     Int
-  lock_duration   Int
-  unlock_height   Int
-  current_height  Int
+  id             String   @id
+  txid           String   @unique
+  postId         String
+  post_txid      String
+  content        String
+  author_address String
+  created_at     DateTime
+  lock_amount    Int
+  lock_duration  Int
+  unlock_height  Int
+  current_height Int
   lock_percentage Float
-  tags            String[]
-  Post            Post     @relation(fields: [post_txid], references: [txid])
+  tags           String[]
+  post           Post     @relation(fields: [post_txid], references: [txid])
 
+  @@index([postId])
   @@index([post_txid])
 }

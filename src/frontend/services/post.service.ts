@@ -18,6 +18,7 @@ export interface PredictionMarketData {
 export interface PostCreationData {
   content: string;
   author_address: string;
+  postId: string;
   media_url?: string | null;
   media_type?: string;
   description?: string;
@@ -246,25 +247,142 @@ function createMapData(data: Record<string, any>): MAP {
   return result as MAP;
 }
 
-// Helper function to create base MAP data
-function createBaseMapData(type: string, content: string, tags?: string[]): Record<string, string> {
+// Add new helper functions for sequence management
+function generatePostId(): string {
+  return [
+    Date.now().toString(36),
+    Math.random().toString(36).substr(2, 9)
+  ].join('-').substr(0, 32);
+}
+
+interface ComponentSequence {
+  current: number;
+  next(): number;
+}
+
+function createSequence(): ComponentSequence {
+  let current = 0;
   return {
-    app: 'lockd.app',
-    type,
-    content: content.toString(),
-    timestamp: new Date().toISOString().toLowerCase(),
-    contentType: 'text/plain',
-    version: '1.0.0',
-    tags: JSON.stringify([...(tags || [])])
+    get current() { return current; },
+    next() { return current++; }
   };
 }
 
-// Helper function to create lock data
-function createLockData(duration: number, amount: number, currentBlockHeight: number): Record<string, string> {
+// Update base MAP data creation
+function createBaseMapData(
+  type: string,
+  content: string,
+  tags: string[],
+  postId: string,
+  sequence: number,
+  parentSequence?: number
+): MAP {
   return {
-    lockDuration: duration.toString(),
-    lockAmount: amount.toString(),
-    unlockHeight: (currentBlockHeight + duration).toString()
+    app: 'lockd.app',
+    type,
+    content,
+    timestamp: new Date().toISOString(),
+    postId,
+    sequence: sequence.toString(),
+    parentSequence: parentSequence?.toString(),
+    version: '1.0.0',
+    tags: JSON.stringify(tags)
+  } as MAP;
+}
+
+// Add component creation functions
+async function createImageComponent(
+  imageFile: File,
+  postId: string,
+  sequence: number,
+  parentSequence: number,
+  address: string
+): Promise<InscribeRequest> {
+  const b64 = await fileToBase64(imageFile);
+  return {
+    address,
+    base64Data: b64,
+    mimeType: imageFile.type as MimeTypes,
+    map: {
+      ...createBaseMapData('image', '', [], postId, sequence, parentSequence),
+      contentType: imageFile.type,
+      encoding: 'base64',
+      fileName: imageFile.name,
+      fileSize: imageFile.size.toString()
+    },
+    satoshis: await calculateOutputSatoshis(b64.length)
+  };
+}
+
+// Replace the hashContent function with a browser-compatible version
+async function hashContent(data: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const dataBuffer = encoder.encode(data);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Update the createVoteQuestionComponent function to use async/await
+async function createVoteQuestionComponent(
+  question: string,
+  options: Array<{ text: string }>,
+  postId: string,
+  sequence: number,
+  parentSequence: number,
+  address: string
+): Promise<InscribeRequest> {
+  return {
+    address,
+    base64Data: btoa(question),
+    mimeType: 'text/plain',
+    map: {
+      ...createBaseMapData('vote_question', question, [], postId, sequence, parentSequence),
+      totalOptions: options.length.toString(),
+      optionsHash: await hashContent(options.map(o => o.text).join('|'))
+    },
+    satoshis: 1000
+  };
+}
+
+function createVoteOptionComponent(
+  option: { text: string; lockDuration: number; lockAmount: number },
+  postId: string,
+  sequence: number,
+  parentSequence: number,
+  optionIndex: number,
+  address: string
+): InscribeRequest {
+  return {
+    address,
+    base64Data: btoa(option.text),
+    mimeType: 'text/plain',
+    map: {
+      ...createBaseMapData('vote_option', option.text, [], postId, sequence, parentSequence),
+      optionIndex: optionIndex.toString(),
+      lockAmount: option.lockAmount.toString(),
+      lockDuration: option.lockDuration.toString()
+    },
+    satoshis: option.lockAmount
+  };
+}
+
+function createTagsComponent(
+  tags: string[],
+  postId: string,
+  sequence: number,
+  parentSequence: number,
+  address: string
+): InscribeRequest {
+  return {
+    address,
+    base64Data: btoa(JSON.stringify(tags)),
+    mimeType: 'application/json',
+    map: {
+      ...createBaseMapData('tags', '', tags, postId, sequence, parentSequence),
+      count: tags.length.toString()
+    },
+    satoshis: 1000
   };
 }
 
@@ -299,12 +417,58 @@ function handleTransactionResponse(response: any): TransactionResponse {
   return inscriptionTx;
 }
 
-// Helper function to create a post object
+// Update component validation
+function validateComponentStructure(components: InscribeRequest[]) {
+  // Check for content component
+  const contentComp = components.find(c => c.map.type === 'content');
+  if (!contentComp) {
+    throw new Error('Missing content component');
+  }
+
+  // Check for unique sequence numbers
+  const sequences = components.map(c => Number(c.map.sequence));
+  if (new Set(sequences).size !== components.length) {
+    throw new Error('Duplicate sequence numbers detected');
+  }
+
+  // Validate parent-child relationships
+  components.forEach(comp => {
+    const parentSeq = comp.map.parentSequence;
+    if (parentSeq !== undefined) {
+      const parentExists = components.some(c => Number(c.map.sequence) === Number(parentSeq));
+      if (!parentExists) {
+        throw new Error(`Parent sequence ${parentSeq} not found for component with sequence ${comp.map.sequence}`);
+      }
+    }
+  });
+
+  // Validate vote options
+  const voteQuestion = components.find(c => c.map.type === 'vote_question');
+  if (voteQuestion) {
+    const voteOptions = components.filter(c => 
+      c.map.type === 'vote_option' && 
+      Number(c.map.parentSequence) === Number(voteQuestion.map.sequence)
+    );
+    
+    if (voteOptions.length === 0) {
+      throw new Error('Vote question found but no vote options');
+    }
+
+    // Check option indexes
+    const optionIndexes = voteOptions.map(opt => Number(opt.map.optionIndex));
+    if (new Set(optionIndexes).size !== voteOptions.length) {
+      throw new Error('Duplicate vote option indexes detected');
+    }
+  }
+}
+
+// Update createPostObject to include postId
 function createPostObject(
   txid: string,
   content: string,
   authorAddress: string,
   options: {
+    postId: string,
     tags?: string[],
     media_type?: string,
     media_url?: string,
@@ -313,10 +477,11 @@ function createPostObject(
     lockDuration?: number,
     lockAmount?: number,
     unlockHeight?: number
-  } = {}
+  }
 ): Post {
   return {
     txid,
+    postId: options.postId,
     content,
     author_address: authorAddress,
     created_at: new Date().toISOString(),
@@ -371,26 +536,28 @@ export const createVoteOptionPost = async (
   authorAddress: string,
   wallet: YoursWallet,
 ): Promise<Post> => {
-  const mapData = createBaseMapData('vote_option', optionData.optionText);
-  Object.assign(mapData, createLockData(optionData.lockDuration, optionData.lockAmount, 0));
+  const mapData = createBaseMapData('vote_option', optionData.optionText, [], generatePostId(), 0, 0);
+  mapData.lock_duration = optionData.lockDuration.toString();
+  mapData.lock_amount = optionData.lockAmount.toString();
   mapData.voteOptions = JSON.stringify({
     questionTxid: optionData.questionTxid,
     optionText: optionData.optionText,
-    isVoteOption: 'true'
+    lockDuration: optionData.lockDuration,
+    lockAmount: optionData.lockAmount
   });
 
-  const request = createInscriptionRequest(
+  const inscriptionRequest = createInscriptionRequest(
     authorAddress,
     optionData.optionText,
     mapData as MAP,
     optionData.lockAmount
   );
 
-  const response = await wallet.inscribe([request]);
+  const response = await wallet.inscribe([inscriptionRequest]);
   const inscriptionTx = handleTransactionResponse(response);
 
   return createPostObject(inscriptionTx.id, optionData.optionText, authorAddress, {
-    tags: ['vote_option'],
+    postId: generatePostId(),
     isLocked: true,
     lockDuration: optionData.lockDuration,
     lockAmount: optionData.lockAmount
@@ -398,308 +565,125 @@ export const createVoteOptionPost = async (
 };
 
 export const createPost = async (
-  content: string, 
-  authorAddress: string, 
+  content: string,
+  authorAddress: string,
   wallet: YoursWallet,
   imageFile?: File,
   description?: string,
   tags?: string[],
   predictionMarketData?: PredictionMarketData,
-  lockData?: { isLocked: boolean; duration?: number; amount?: number; isPoll?: boolean; options?: Array<{ text: string; lockDuration: number; lockAmount: number }> }
+  lockData?: {
+    isLocked: boolean;
+    duration?: number;
+    amount?: number;
+    isPoll?: boolean;
+    options?: Array<{ text: string; lockDuration: number; lockAmount: number }>;
+  }
 ): Promise<Post> => {
   try {
-    console.log('Creating post with:', { 
-      content, 
-      authorAddress, 
-      hasImage: !!imageFile, 
-      imageType: imageFile?.type,
-      imageSize: imageFile?.size,
-      description,
-      tags,
-      predictionMarketData,
-      lockData
-    });
-    
-    // Validate input based on post type
-    if (!imageFile && !content.trim()) {
-      throw new Error('Please provide either text content or an image');
-    }
+    const postId = generatePostId();
+    const sequence = createSequence();
+    const components: InscribeRequest[] = [];
 
-    // For vote posts, validate options
-    if (lockData?.isPoll) {
-      if (!lockData.options || lockData.options.length < 2) {
-        throw new Error('Please provide at least 2 vote options');
-      }
-      if (lockData.options.some(opt => !opt.text.trim())) {
-        throw new Error('Please fill in all vote options');
-      }
-      if (lockData.options.some(opt => !opt.lockAmount || !opt.lockDuration)) {
-        throw new Error('Please provide both lock duration and amount for all options');
-      }
-    }
-
-    // Get current block height if locking
-    let currentBlockHeight: number | undefined;
-    if (lockData?.isLocked || (lockData?.isPoll && lockData.options?.some(opt => opt.lockAmount > 0))) {
-      currentBlockHeight = await getCurrentBlockHeight();
-    }
-
-    // Get current balance to ensure we have enough funds
-    const balance = await wallet.getBalance();
-    console.log('Current wallet balance:', balance);
-
-    // Calculate base satoshis per output based on content size
-    const contentSize = new TextEncoder().encode(content).length;
-    const baseSatoshis = await calculateOutputSatoshis(contentSize);
-
-    // Calculate total required balance for all outputs
-    const outputCount = 1 + // Content output
-      (imageFile ? 1 : 0) + // Image output
-      (lockData?.isPoll ? 1 : 0) + // Vote question output
-      (lockData?.options?.length || 0) + // Vote options outputs
-      (tags && tags.length > 0 ? 1 : 0); // Tags output
-
-    const requiredBalance = (outputCount * baseSatoshis) +
-      (lockData?.isPoll 
-        ? (lockData.options?.reduce((sum, opt) => sum + opt.lockAmount, 0) || 0)
-        : (lockData?.isLocked ? (lockData.amount || 0) : 0));
-
-    if (!balance?.satoshis || balance.satoshis < requiredBalance) {
-      throw new Error(`Insufficient balance. Required: ${requiredBalance} satoshis`);
-    }
-
-    let inscriptionRequests: InscribeRequest[] = [];
-    let media_url: string | undefined;
-    let media_type: string | undefined;
-    const timestamp = new Date().toISOString().toLowerCase();
-    const postId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
-
-    // Create content output
-    const contentMap = createBaseMapData('content', content, []);
-    contentMap.MAP_CONTENT_TYPE = 'text/plain';
-    contentMap.MAP_DESCRIPTION = description || '';
-    contentMap.MAP_POST_ID = postId;
-    contentMap.MAP_SEQUENCE = '0';
-    contentMap.MAP_TOTAL_OUTPUTS = '1'; // Will be updated as we add more outputs
-    contentMap.MAP_TIMESTAMP = timestamp;
-    contentMap.MAP_VERSION = '1.0.0';
-    contentMap.MAP_TYPE = 'content';
-    contentMap.MAP_AUTHOR = authorAddress;
-    
-    inscriptionRequests.push(createInscriptionRequest(
+    // Create main content component
+    const contentSeq = sequence.next();
+    const contentComponent = createInscriptionRequest(
       authorAddress,
       content,
-      contentMap as MAP,
-      baseSatoshis
-    ));
-
-    // Create image output if present
-    if (imageFile) {
-      console.log("Converting image to base64...");
-      const b64 = await fileToBase64(imageFile);
-      
-      const imageMap = createBaseMapData('image', '', []);
-      imageMap.MAP_CONTENT_TYPE = imageFile.type;
-      imageMap.MAP_IS_IMAGE = 'true';
-      imageMap.MAP_POST_ID = postId;
-      imageMap.MAP_SEQUENCE = '1';
-      imageMap.MAP_PARENT_SEQUENCE = '0';
-      imageMap.MAP_TIMESTAMP = timestamp;
-      imageMap.MAP_VERSION = '1.0.0';
-      imageMap.MAP_FILE_SIZE = imageFile.size.toString();
-      imageMap.MAP_FILE_NAME = imageFile.name;
-      imageMap.MAP_TYPE = 'image';
-      imageMap.MAP_AUTHOR = authorAddress;
-      
-      inscriptionRequests.push(createInscriptionRequest(
-        authorAddress,
-        createImageContent(imageFile, b64, ''),
-        imageMap as MAP,
-        baseSatoshis,
-        imageFile.type
-      ));
-
-      media_type = imageFile.type;
+      createBaseMapData('content', content, tags || [], postId, contentSeq),
+      await calculateOutputSatoshis(content.length)
+    );
+    
+    if (description) {
+      contentComponent.map.description = description;
     }
-
-    // Create vote question and options outputs if it's a poll
-    if (lockData?.isPoll && lockData.options) {
-      // First, create the vote question output
-      const questionMap = createBaseMapData('vote_question', content, []);
-      questionMap.MAP_CONTENT_TYPE = 'text/plain';
-      questionMap.MAP_POST_ID = postId;
-      questionMap.MAP_SEQUENCE = imageFile ? '2' : '1';
-      questionMap.MAP_PARENT_SEQUENCE = '0';
-      questionMap.MAP_IS_VOTE = 'true';
-      questionMap.MAP_IS_VOTE_QUESTION = 'true';
-      questionMap.MAP_VOTE_OPTIONS_COUNT = lockData.options.length.toString();
-      questionMap.MAP_SEVERITY = 'info';
-      questionMap.MAP_TIMESTAMP = timestamp;
-      questionMap.MAP_VERSION = '1.0.0';
-      questionMap.MAP_TYPE = 'vote_question';
-      questionMap.MAP_AUTHOR = authorAddress;
-      questionMap.MAP_VOTE_OPTIONS_TOTAL_LOCK = lockData.options
-        .reduce((sum, opt) => sum + opt.lockAmount, 0)
-        .toString();
-
-      inscriptionRequests.push(createInscriptionRequest(
-        authorAddress,
-        content,
-        questionMap as MAP,
-        baseSatoshis
-      ));
-
-      // Then create individual outputs for each option
-      lockData.options.forEach((opt, index) => {
-        const baseSequence = ((imageFile ? 3 : 2) + (index * 2)); // Adjust base sequence based on image presence
-
-        // Create option text output
-        const optionTextMap = createBaseMapData('vote_option_text', opt.text, []);
-        optionTextMap.MAP_CONTENT_TYPE = 'text/plain';
-        optionTextMap.MAP_POST_ID = postId;
-        optionTextMap.MAP_SEQUENCE = baseSequence.toString();
-        optionTextMap.MAP_PARENT_SEQUENCE = imageFile ? '2' : '1'; // Parent is vote question
-        optionTextMap.MAP_IS_VOTE = 'true';
-        optionTextMap.MAP_VOTE_OPTION_INDEX = index.toString();
-        optionTextMap.MAP_QUESTION_CONTENT = content;
-        optionTextMap.MAP_TIMESTAMP = timestamp;
-        optionTextMap.MAP_VERSION = '1.0.0';
-        optionTextMap.MAP_TYPE = 'vote_option_text';
-        optionTextMap.MAP_AUTHOR = authorAddress;
-
-        inscriptionRequests.push(createInscriptionRequest(
-          authorAddress,
-          opt.text,
-          optionTextMap as MAP,
-          baseSatoshis
-        ));
-
-        // Create option lock data output
-        const optionLockMap = createBaseMapData('vote_option_lock', '', []);
-        optionLockMap.MAP_CONTENT_TYPE = 'application/json';
-        optionLockMap.MAP_POST_ID = postId;
-        optionLockMap.MAP_SEQUENCE = (baseSequence + 1).toString();
-        optionLockMap.MAP_PARENT_SEQUENCE = baseSequence.toString(); // Parent is option text
-        optionLockMap.MAP_IS_VOTE = 'true';
-        optionLockMap.MAP_VOTE_OPTION_INDEX = index.toString();
-        optionLockMap.MAP_TIMESTAMP = timestamp;
-        optionLockMap.MAP_VERSION = '1.0.0';
-        optionLockMap.MAP_TYPE = 'vote_option_lock';
-        optionLockMap.MAP_AUTHOR = authorAddress;
-        Object.assign(optionLockMap, {
-          MAP_LOCK_DURATION: opt.lockDuration.toString(),
-          MAP_LOCK_AMOUNT: opt.lockAmount.toString(),
-          MAP_UNLOCK_HEIGHT: ((currentBlockHeight || 0) + opt.lockDuration).toString(),
-          MAP_CURRENT_HEIGHT: (currentBlockHeight || 0).toString(),
-          MAP_LOCK_PERCENTAGE: ((opt.lockAmount / requiredBalance) * 100).toFixed(2)
-        });
-
-        inscriptionRequests.push(createInscriptionRequest(
-          authorAddress,
-          JSON.stringify({
-            lockDuration: opt.lockDuration,
-            lockAmount: opt.lockAmount,
-            optionIndex: index,
-            postId: postId,
-            currentHeight: currentBlockHeight || 0,
-            unlockHeight: (currentBlockHeight || 0) + opt.lockDuration,
-            lockPercentage: ((opt.lockAmount / requiredBalance) * 100).toFixed(2)
-          }),
-          optionLockMap as MAP,
-          opt.lockAmount
-        ));
-      });
-    }
-
-    // Create tags output if present
-    if (tags && tags.length > 0) {
-      const tagsMap = createBaseMapData('tags', '', tags);
-      tagsMap.MAP_CONTENT_TYPE = 'application/json';
-      tagsMap.MAP_POST_ID = postId;
-      tagsMap.MAP_SEQUENCE = inscriptionRequests.length.toString();
-      tagsMap.MAP_PARENT_SEQUENCE = '0';
-      tagsMap.MAP_TIMESTAMP = timestamp;
-      tagsMap.MAP_VERSION = '1.0.0';
-      tagsMap.MAP_TAGS_COUNT = tags.length.toString();
-      tagsMap.MAP_TYPE = 'tags';
-      tagsMap.MAP_AUTHOR = authorAddress;
-      
-      inscriptionRequests.push(createInscriptionRequest(
-        authorAddress,
-        JSON.stringify(tags),
-        tagsMap as MAP,
-        baseSatoshis
-      ));
-    }
-
-    // Update total outputs count in content map
-    contentMap.MAP_TOTAL_OUTPUTS = inscriptionRequests.length.toString();
-
-    // Add lock data to content output if present
-    if (lockData?.isLocked && currentBlockHeight && lockData.duration) {
-      Object.assign(contentMap, {
-        MAP_LOCK_DURATION: lockData.duration.toString(),
-        MAP_LOCK_AMOUNT: (lockData.amount || baseSatoshis).toString(),
-        MAP_UNLOCK_HEIGHT: (currentBlockHeight + lockData.duration).toString()
-      });
-    }
-
-    // Add prediction market data if present
+    
     if (predictionMarketData) {
-      contentMap.MAP_PREDICTION_DATA = JSON.stringify({
-        source: predictionMarketData.source,
-        prediction: predictionMarketData.prediction,
-        endDate: predictionMarketData.endDate.toISOString(),
-        probability: predictionMarketData.probability?.toString()
+      contentComponent.map.prediction_market_data = JSON.stringify(predictionMarketData);
+    }
+    
+    if (lockData?.isLocked) {
+      const currentHeight = await getCurrentBlockHeight();
+      contentComponent.map.lock_duration = lockData.duration?.toString() || '0';
+      contentComponent.map.lock_amount = lockData.amount?.toString() || '0';
+      contentComponent.map.unlock_height = (currentHeight + (lockData.duration || 0)).toString();
+    }
+    
+    components.push(contentComponent);
+
+    // Add image if present
+    if (imageFile) {
+      const imageComponent = await createImageComponent(
+        imageFile,
+        postId,
+        sequence.next(),
+        contentSeq,
+        authorAddress
+      );
+      components.push(imageComponent);
+    }
+
+    // Add vote components if present
+    if (lockData?.isPoll && lockData.options?.length) {
+      const questionSeq = sequence.next();
+      const questionComponent = await createVoteQuestionComponent(
+        content,
+        lockData.options,
+        postId,
+        questionSeq,
+        contentSeq,
+        authorAddress
+      );
+      components.push(questionComponent);
+
+      // Add vote options
+      lockData.options.forEach((option, idx) => {
+        components.push(
+          createVoteOptionComponent(
+            option,
+            postId,
+            sequence.next(),
+            questionSeq,
+            idx,
+            authorAddress
+          )
+        );
       });
     }
 
-    console.log('Creating inscription with requests:', {
-      count: inscriptionRequests.length,
-      types: inscriptionRequests.map(req => req.map.type)
-    });
+    // Add tags if present
+    if (tags?.length) {
+      components.push(
+        createTagsComponent(
+          tags,
+          postId,
+          sequence.next(),
+          contentSeq,
+          authorAddress
+        )
+      );
+    }
 
-    const response = await wallet.inscribe(inscriptionRequests);
+    // Validate component structure
+    validateComponentStructure(components);
+
+    // Send to wallet
+    const response = await wallet.inscribe(components);
     const inscriptionTx = handleTransactionResponse(response);
 
-    if (!inscriptionTx?.id) {
-      console.error('No txid in response:', inscriptionTx);
-      throw new Error('Failed to broadcast inscription - no transaction ID returned');
-    }
-
-    // If it was an image inscription, set the media URL
-    if (imageFile) {
-      media_url = `https://testnet.ordinals.sv/content/${inscriptionTx.id}`;
-    }
-
-    console.log('Inscription successful with txid:', inscriptionTx.id);
-
-    // Create the post object
-    const post = createPostObject(inscriptionTx.id, content, authorAddress, {
-      media_type,
-      media_url,
+    // Create and return post object
+    return createPostObject(inscriptionTx.id, content, authorAddress, {
+      postId,
       tags,
+      media_type: imageFile?.type,
       prediction_market_data: predictionMarketData,
       isLocked: lockData?.isLocked || false,
       lockDuration: lockData?.duration,
       lockAmount: lockData?.amount,
-      unlockHeight: lockData?.isLocked && currentBlockHeight && lockData.duration 
-        ? currentBlockHeight + lockData.duration 
-        : undefined
+      unlockHeight: lockData?.duration ? await getCurrentBlockHeight() + lockData.duration : undefined
     });
-    console.log('Created post object:', post);
-
-    toast.success('Post created successfully!');
-    
-    // Open WhatsOnChain in a new tab with mainnet URL
-    const whatsOnChainUrl = `https://whatsonchain.com/tx/${inscriptionTx.id}`;
-    console.log('Opening WhatsOnChain URL:', whatsOnChainUrl);
-    window.open(whatsOnChainUrl, '_blank');
-    
-    return post;
   } catch (error) {
     console.error('Error creating post:', error);
-    toast.error('Failed to create post: ' + (error instanceof Error ? error.message : 'Unknown error'));
     throw error;
   }
 }; 

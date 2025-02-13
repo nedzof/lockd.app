@@ -103,17 +103,13 @@ async function reprocessTransaction(txid: string) {
             image_format: parsedTx.image?.mimeType?.split('/')[1] || null,
             image_source: parsedTx.image?.source || null,
             is_vote: !!parsedTx.vote,
-            is_vote_question: parsedTx.type === 'vote' || parsedTx.type === 'mixed',
-            question_content: parsedTx.vote?.questionContent || null,
-            amount: parsedTx.lock?.amount || null,
-            lock_duration: parsedTx.lock?.duration || null,
             description: parsedTx.description || parsedTx.content.substring(0, 255)
         };
 
         console.log("\nPrepared data:", JSON.stringify(finalData, null, 2));
 
         // Update database
-        await prisma.transaction.update({
+        await prisma.post.update({
             where: { txid },
             data: finalData
         });
@@ -154,7 +150,7 @@ async function reprocessTransaction(txid: string) {
             }));
         }
 
-        console.log(`Successfully reprocessed transaction ${txid}`);
+        console.log(`Successfully reprocessed post ${txid}`);
     } catch (error) {
         console.error(`Error reprocessing transaction ${txid}:`, error);
     }
@@ -162,19 +158,19 @@ async function reprocessTransaction(txid: string) {
 
 async function main() {
     try {
-        // Get all transactions
-        const transactions = await prisma.transaction.findMany({
+        // Get all posts
+        const posts = await prisma.post.findMany({
             select: { txid: true }
         });
 
-        console.log(`Found ${transactions.length} transactions to reprocess`);
+        console.log(`Found ${posts.length} posts to reprocess`);
 
-        // Process each transaction
-        for (const tx of transactions) {
-            await reprocessTransaction(tx.txid);
+        // Process each post
+        for (const post of posts) {
+            await reprocessTransaction(post.txid);
         }
 
-        console.log('Finished reprocessing all transactions');
+        console.log('Finished reprocessing all posts');
     } catch (error) {
         console.error('Error in main:', error);
     } finally {

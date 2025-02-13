@@ -15,7 +15,7 @@ const prisma = new PrismaClient({
 
 async function main() {
     try {
-        const transactions = await prisma.transaction.findMany({
+        const posts = await prisma.post.findMany({
             select: {
                 txid: true,
                 content: true,
@@ -24,7 +24,6 @@ async function main() {
                 block_height: true,
                 raw_image_data: true,
                 is_vote: true,
-                is_vote_question: true,
                 vote_options: {
                     select: {
                         content: true,
@@ -36,18 +35,17 @@ async function main() {
             }
         });
 
-        console.log('Found transactions:', transactions.length);
-        transactions.forEach(tx => {
-            console.log('\nTransaction:', {
-                txid: tx.txid,
-                content: tx.content?.substring(0, 100) + '...',
-                author_address: tx.author_address,
-                media_type: tx.media_type,
-                block_height: tx.block_height,
-                has_image: !!tx.raw_image_data,
-                is_vote: tx.is_vote,
-                is_vote_question: tx.is_vote_question,
-                vote_options: tx.vote_options
+        console.log('Found posts:', posts.length);
+        posts.forEach(post => {
+            console.log('\nPost:', {
+                txid: post.txid,
+                content: post.content?.substring(0, 100) + '...',
+                author_address: post.author_address,
+                media_type: post.media_type,
+                block_height: post.block_height,
+                has_image: !!post.raw_image_data,
+                is_vote: post.is_vote,
+                vote_options: post.vote_options
             });
         });
     } catch (error) {
