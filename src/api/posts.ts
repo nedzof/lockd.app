@@ -111,14 +111,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
 
     // Build the base query - exclude non-vote posts if a vote version exists
     let where: any = {
-      AND: [
-        {
-          OR: [
-            { is_vote: true }, // Include all vote posts
-            { txid: { notIn: Array.from(voteTxidSet) } } // Include non-vote posts only if no vote version exists
-          ]
-        }
-      ]
+      OR: []
     };
 
     // Apply time filter
@@ -132,7 +125,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
       const days = timeFilters[timeFilter];
       if (days) {
         const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-        where.AND.push({ created_at: { gte: startDate } });
+        where.OR.push({ created_at: { gte: startDate } });
       }
     }
 
@@ -140,19 +133,37 @@ const listPosts: PostListHandler = async (req, res, next) => {
     if (selectedTags) {
       const tags = JSON.parse(selectedTags);
       if (Array.isArray(tags) && tags.length > 0) {
-        where.AND.push({ tags: { hasSome: tags } });
+        where.OR.push({ tags: { hasSome: tags } });
       }
     }
 
     // Apply personal filters
     if (personalFilter === 'mylocks' && userId) {
-      where.AND.push({ author_address: userId });
+      where.OR.push({ author_address: userId });
     }
 
     // Apply block filter if provided
     if (blockFilter) {
-      where.AND.push({ block_height: { gte: parseInt(blockFilter, 10) } });
+      where.OR.push({ block_height: { gte: parseInt(blockFilter, 10) } });
     }
+
+    // If no filters are applied, show all posts
+    if (where.OR.length === 0) {
+      delete where.OR;
+    }
+
+    // Add vote post handling
+    where = {
+      AND: [
+        where,
+        {
+          OR: [
+            { is_vote: true },
+            { txid: { notIn: Array.from(voteTxidSet) } }
+          ]
+        }
+      ]
+    };
 
     console.log('Querying posts with where clause:', where);
 
