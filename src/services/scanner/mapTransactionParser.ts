@@ -1,5 +1,6 @@
 import { MAP_TYPES, ParsedPost } from './types.js';
 import { createHash } from 'crypto';
+import { extractImageFromTransaction, validateImageData } from './imageProcessor.js';
 
 interface JungleBusOutput {
   script?: {
@@ -143,91 +144,81 @@ function processVoteOptions(
   };
 }
 
-export function parseMapTransaction(tx: JungleBusTransaction): ParsedPost | null {
+export async function parseMapTransaction(tx: JungleBusTransaction): Promise<ParsedPost | null> {
   try {
-    const components = new Map<string, ParsedComponent[]>();
-    let mainPostId: string | null = null;
-
-    // First pass: Collect all components
-    for (const output of tx.outputs || []) {
-      const component = parseComponent(output);
-      if (!component) continue;
-
-      // Track main post ID using content component
-      if (component.type === MAP_TYPES.CONTENT && !mainPostId) {
-        mainPostId = component.postId;
+    // Extract image data first
+    const imageData = await extractImageFromTransaction(tx);
+    const isValidImage = validateImageData(imageData);
+    
+    // Parse MAP fields from outputs
+    const mapFields = tx.outputs?.reduce((fields: Record<string, any>, output: JungleBusOutput) => {
+      if (output.script?.asm) {
+        const parsedFields = parseMapFields(output.script.asm);
+        return { ...fields, ...parsedFields };
       }
+      return fields;
+    }, {}) || {};
 
-      if (!components.has(component.postId)) {
-        components.set(component.postId, []);
-      }
-      components.get(component.postId)?.push(component);
-    }
+    // Get the first address as author
+    const author = tx.addresses?.[0] || '';
 
-    if (!mainPostId) return null;
+    // Create post ID if not present
+    const postId = mapFields.post_id || createHash('sha256').update(tx.id).digest('hex').substring(0, 16);
 
-    // Initialize result
-    const result: ParsedPost = {
-      postId: mainPostId,
-      images: [],
-      tags: [],
-      author: tx.addresses[0],
-      timestamp: tx.block_time ? new Date(tx.block_time * 1000).toISOString() : new Date().toISOString(),
-      txid: tx.id,
-      blockHeight: tx.block_height,
-      metadata: {
-        app: 'lockd.app',
-        version: '1.0.0'
-      }
+    // Parse content
+    const content = {
+      text: mapFields.content || '',
+      title: mapFields.title || undefined,
+      description: mapFields.description || undefined
     };
 
-    // Process components in sequence order
-    const postComponents = components.get(mainPostId) || [];
-    postComponents.sort((a, b) => a.sequence - b.sequence);
+    // Parse metadata
+    const metadata = {
+      app: mapFields.app || 'lockd.app',
+      version: mapFields.version || '1.0.0',
+      lock: mapFields.is_locked ? {
+        isLocked: true,
+        duration: mapFields.lock_duration || 0,
+        unlockHeight: mapFields.unlock_height
+      } : undefined
+    };
 
-    for (const component of postComponents) {
-      switch (component.type) {
-        case MAP_TYPES.CONTENT:
-          result.content = {
-            title: component.data.title,
-            description: component.data.description,
-            text: component.data.content || ''
-          };
-          
-          // Handle lock data
-          if (component.data.is_locked) {
-            result.metadata.lock = {
-              isLocked: true,
-              duration: component.data.lock_duration,
-              amount: component.data.lock_amount,
-              unlockHeight: component.data.unlock_height
-            };
-          }
-          break;
+    // Parse vote data if present
+    const vote = mapFields.is_vote ? {
+      question: mapFields.vote_question || '',
+      totalOptions: mapFields.total_options || 0,
+      optionsHash: createHash('sha256').update(tx.id + ':options').digest('hex'),
+      options: Array.from({ length: mapFields.total_options || 0 }, (_, i) => ({
+        index: i,
+        text: mapFields[`option_${i}`] || '',
+        lockAmount: mapFields[`option_${i}_lock_amount`] || undefined,
+        lockDuration: mapFields[`option_${i}_lock_duration`] || undefined,
+        unlockHeight: mapFields[`option_${i}_unlock_height`] || undefined,
+        currentHeight: tx.block_height,
+        lockPercentage: 0
+      }))
+    } : undefined;
 
-        case MAP_TYPES.IMAGE:
-          const imageData = processImageData(component);
-          if (imageData) {
-            result.images.push(imageData);
-          }
-          break;
+    // Construct the final parsed post
+    const parsedPost: ParsedPost = {
+      txid: tx.id,
+      postId,
+      author,
+      content,
+      metadata,
+      vote,
+      tags: mapFields.tags || [],
+      timestamp: tx.block_time ? tx.block_time * 1000 : Date.now(),
+      blockHeight: tx.block_height,
+      images: isValidImage && imageData ? [{
+        contentType: imageData.mimeType,
+        data: imageData.rawData,
+        encoding: 'base64',
+        dataURL: imageData.dataURL
+      }] : []
+    };
 
-        case MAP_TYPES.VOTE_QUESTION:
-          result.vote = processVoteOptions(component, postComponents, tx.id, tx.block_height);
-          break;
-
-        case MAP_TYPES.TAGS:
-          try {
-            const tags = component.data.tags;
-            result.tags = Array.isArray(tags) ? tags : [];
-          } catch (error) {
-            console.error('Error parsing tags:', error);
-          }
-          break;
-      }
-    }
-
-    return result;
+    return parsedPost;
   } catch (error) {
     console.error('Error parsing MAP transaction:', error);
     return null;

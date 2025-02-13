@@ -249,46 +249,46 @@ export type MapMetadata =
   | TagsMapMetadata;
 
 export interface ParsedPost {
+  txid: string;
   postId: string;
-  content?: {
+  author: string;
+  content: {
+    text: string;
     title?: string;
     description?: string;
-    text: string;
   };
-  images: Array<{
-    data: string;
-    contentType: string;
-    encoding: string;
-  }>;
-  vote?: {
-    question: string;
-    options: Array<{
-      text: string;
-      lockAmount?: number;
-      lockDuration?: number;
-      index: number;
-      unlockHeight?: number;
-      currentHeight?: number;
-      lockPercentage?: number;
-    }>;
-    totalOptions: number;
-    optionsHash: string;
-  };
-  tags: string[];
-  author: string;
-  timestamp: string;
-  txid: string;
-  blockHeight: number;
   metadata: {
     app: string;
     version: string;
     lock?: {
       isLocked: boolean;
-      duration?: number;
-      amount?: number;
+      duration: number;
       unlockHeight?: number;
     };
   };
+  vote?: {
+    question: string;
+    totalOptions: number;
+    optionsHash: string;
+    options: {
+      text: string;
+      index: number;
+      lockAmount?: number;
+      lockDuration?: number;
+      unlockHeight?: number;
+      currentHeight?: number;
+      lockPercentage?: number;
+    }[];
+  };
+  tags: string[];
+  timestamp: number;
+  blockHeight: number;
+  images: {
+    data: string;
+    contentType: string;
+    encoding: string;
+    dataURL?: string;
+  }[];
 }
 
 export interface ContentOutput {

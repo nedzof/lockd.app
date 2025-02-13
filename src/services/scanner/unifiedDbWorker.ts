@@ -55,6 +55,8 @@ export async function processTransaction(prisma: PrismaClient, post: ParsedPost)
           },
           raw_image_data: post.images[0]?.data,
           image_format: post.images[0]?.contentType?.split('/')[1],
+          image_encoding: post.images[0]?.encoding,
+          image_data_url: post.images[0]?.dataURL,
           lock_duration: post.metadata.lock?.duration,
           unlock_height: post.metadata.lock?.unlockHeight
         },
@@ -73,6 +75,8 @@ export async function processTransaction(prisma: PrismaClient, post: ParsedPost)
           },
           raw_image_data: post.images[0]?.data,
           image_format: post.images[0]?.contentType?.split('/')[1],
+          image_encoding: post.images[0]?.encoding,
+          image_data_url: post.images[0]?.dataURL,
           lock_duration: post.metadata.lock?.duration,
           unlock_height: post.metadata.lock?.unlockHeight
         }

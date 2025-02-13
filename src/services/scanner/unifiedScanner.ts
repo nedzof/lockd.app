@@ -55,7 +55,7 @@ const onPublish = async function(tx: any) {
         });
         
         // Parse MAP data using our new parser
-        const parsedData = parseMapTransaction(fullTx);
+        const parsedData = await parseMapTransaction(fullTx);
         if (!parsedData) {
             console.log('⏭️ No valid MAP data found in transaction:', tx.id);
             return;
