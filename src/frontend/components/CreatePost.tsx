@@ -260,7 +260,7 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
             </div>
 
             {/* Optional Features */}
-            <div className="flex flex-wrap gap-4">
+            <div className="flex items-center gap-4 py-2">
               {/* Vote Options Toggle */}
               <button
                 onClick={() => {
@@ -273,31 +273,27 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
                     ]);
                   }
                 }}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                className={`flex items-center gap-2 text-sm transition-colors ${
                   hasVoteOptions
-                    ? 'bg-[#00ffa3]/10 text-[#00ffa3]'
-                    : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/5'
+                    ? 'text-[#00ffa3]'
+                    : 'text-gray-400 hover:text-[#00ffa3]'
                 }`}
               >
                 <FiBarChart2 className="w-4 h-4" />
-                <span>{hasVoteOptions ? 'Vote Options Added' : 'Add Vote Options'}</span>
+                <span>Add Vote Options</span>
               </button>
 
               {/* Tags Toggle */}
               <button
                 onClick={() => setShowTagSelector(!showTagSelector)}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                className={`flex items-center gap-2 text-sm transition-colors ${
                   selectedTags.length > 0
-                    ? 'bg-[#00ffa3]/10 text-[#00ffa3]'
-                    : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/5'
+                    ? 'text-[#00ffa3]'
+                    : 'text-gray-400 hover:text-[#00ffa3]'
                 }`}
               >
                 <FiTag className="w-4 h-4" />
-                <span>
-                  {selectedTags.length > 0
-                    ? `${selectedTags.length} Tags Selected`
-                    : 'Add Tags'}
-                </span>
+                <span>Add Tags</span>
               </button>
 
               {/* Lock Toggle */}
@@ -307,16 +303,14 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
                     setShowLockOptions(!showLockOptions);
                     if (!showLockOptions) setIsLocked(true);
                   }}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                  className={`flex items-center gap-2 text-sm transition-colors ${
                     isLocked
-                      ? 'bg-[#00ffa3]/10 text-[#00ffa3]'
-                      : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/5'
+                      ? 'text-[#00ffa3]'
+                      : 'text-gray-400 hover:text-[#00ffa3]'
                   }`}
                 >
                   <FiLock className="w-4 h-4" />
-                  <span>
-                    {isLocked ? `Locked: ${lockAmount} sats` : 'Add Lock'}
-                  </span>
+                  <span>{isLocked ? `Locked: ${lockAmount} sats` : 'Add Lock'}</span>
                 </button>
               )}
             </div>
@@ -363,73 +357,51 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
 
             {/* Tag Selector */}
             {showTagSelector && (
-              <div className="p-4 bg-[#1A1B23] border border-gray-800 rounded-lg">
-                <div className="flex flex-wrap gap-2">
-                  {AVAILABLE_TAGS.map((tag) => (
-                    <button
-                      key={tag}
-                      onClick={() => handleTagToggle(tag)}
-                      className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                        selectedTags.includes(tag)
-                          ? 'bg-[#00ffa3] text-black'
-                          : 'bg-gray-800/50 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex flex-wrap gap-2 py-2">
+                {AVAILABLE_TAGS.map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => handleTagToggle(tag)}
+                    className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                      selectedTags.includes(tag)
+                        ? 'bg-[#1A1B23] text-[#00ffa3] border border-[#00ffa3]/20'
+                        : 'bg-[#1A1B23] text-gray-400 border border-gray-800/50 hover:text-white hover:border-gray-700'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                ))}
               </div>
             )}
 
             {/* Lock Options */}
             {!hasVoteOptions && showLockOptions && (
-              <div className="p-4 bg-[#1A1B23] border border-gray-800 rounded-lg space-y-4">
-                <div className="flex items-center justify-between mb-4">
-                  <label className="text-gray-400">Lock Post</label>
-                  <button
-                    onClick={() => setIsLocked(!isLocked)}
-                    className={`relative w-11 h-6 rounded-full transition-colors ${
-                      isLocked ? 'bg-[#00ffa3]' : 'bg-gray-700'
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform transform ${
-                        isLocked ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
+              <div className="grid grid-cols-2 gap-4 py-2">
+                <div>
+                  <label className="text-gray-400 text-sm block mb-2">Duration (blocks)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="52560"
+                    value={lockDuration}
+                    onChange={(e) => setLockDuration(Math.min(52560, Math.max(1, parseInt(e.target.value) || 0)))}
+                    className="w-full px-3 py-2 text-sm bg-[#1A1B23] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:border-[#00ffa3]/50"
+                  />
+                  <span className="text-xs text-gray-500 mt-1 block">≈ {(lockDuration / 144).toFixed(1)} days</span>
                 </div>
 
-                {isLocked && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-2">Duration (blocks)</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="52560"
-                        value={lockDuration}
-                        onChange={(e) => setLockDuration(Math.min(52560, Math.max(1, parseInt(e.target.value) || 0)))}
-                        className="w-full px-3 py-2 bg-[#1A1B23] border border-gray-800 rounded-lg text-white focus:outline-none focus:border-[#00ffa3]"
-                      />
-                      <span className="text-xs text-gray-500 mt-1 block">≈ {(lockDuration / 144).toFixed(1)} days</span>
-                    </div>
-
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-2">Amount (sats)</label>
-                      <input
-                        type="number"
-                        min="1000"
-                        step="1000"
-                        value={lockAmount}
-                        onChange={(e) => setLockAmount(Math.max(1000, parseInt(e.target.value) || 0))}
-                        className="w-full px-3 py-2 bg-[#1A1B23] border border-gray-800 rounded-lg text-white focus:outline-none focus:border-[#00ffa3]"
-                      />
-                      <span className="text-xs text-gray-500 mt-1 block">Min: 1000 sats</span>
-                    </div>
-                  </div>
-                )}
+                <div>
+                  <label className="text-gray-400 text-sm block mb-2">Amount (sats)</label>
+                  <input
+                    type="number"
+                    min="1000"
+                    step="1000"
+                    value={lockAmount}
+                    onChange={(e) => setLockAmount(Math.max(1000, parseInt(e.target.value) || 0))}
+                    className="w-full px-3 py-2 text-sm bg-[#1A1B23] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:border-[#00ffa3]/50"
+                  />
+                  <span className="text-xs text-gray-500 mt-1 block">Min: 1000 sats</span>
+                </div>
               </div>
             )}
           </div>
