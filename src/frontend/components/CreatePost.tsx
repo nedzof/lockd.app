@@ -317,12 +317,12 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
 
             {/* Vote Options Section */}
             {hasVoteOptions && showVoteOptions && (
-              <div className="space-y-3 p-4 bg-[#1A1B23] border border-gray-800/10 rounded-lg">
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-white/80 font-medium text-sm">Vote Options</h3>
+                  <h3 className="text-gray-400 text-sm">Vote Options</h3>
                   <button
                     onClick={addPollOption}
-                    className="px-3 py-1 text-xs bg-[#00ffa3]/5 text-[#00ffa3] rounded-lg hover:bg-[#00ffa3]/10 transition-colors"
+                    className="text-[#00ffa3] text-xs hover:text-[#00ffa3]/80 transition-colors"
                   >
                     Add Option
                   </button>
@@ -347,10 +347,6 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
                       </button>
                     </div>
                   ))}
-                </div>
-                
-                <div className="text-xs text-gray-500 mt-2">
-                  Note: Lock settings can be configured after creating the vote
                 </div>
               </div>
             )}
