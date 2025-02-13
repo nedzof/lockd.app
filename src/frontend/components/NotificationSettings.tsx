@@ -8,10 +8,17 @@ export const NotificationSettings: React.FC = () => {
   const { bsvAddress } = useWallet();
   const [savedAnimation, setSavedAnimation] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [milestoneEnabled, setMilestoneEnabled] = useState(false);
+  const [milestoneThreshold, setMilestoneThreshold] = useState(1);
 
   const handleSave = (id: string) => {
     setSavedAnimation(id);
     setTimeout(() => setSavedAnimation(null), 2000);
+  };
+
+  const handleMilestoneChange = (value: string) => {
+    setMilestoneThreshold(Number(value));
+    setMilestoneEnabled(true);
   };
 
   return (
@@ -75,26 +82,45 @@ export const NotificationSettings: React.FC = () => {
               <h3 className="text-[#00ffff] text-sm font-medium mb-4 flex items-center">
                 <FiStar className="mr-2" /> Milestone Notifications
               </h3>
-              <div className="space-y-3">
-                {[1, 5, 10].map((amount) => (
-                  <div key={amount} className="group p-4 rounded-lg border border-gray-800/10">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="p-2 bg-[#00ffff] bg-opacity-5 rounded-lg">
-                          <FiStar className="text-[#00ffff] w-5 h-5" />
-                        </div>
-                        <div>
-                          <div className="text-white font-medium">{amount} BSV Milestone</div>
-                          <div className="text-sm text-gray-400">Get notified when a post reaches {amount} BSV</div>
-                        </div>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" className="sr-only peer" onChange={() => handleSave(`milestone-${amount}`)} />
-                        <div className="w-11 h-6 bg-gray-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#00ffff]"></div>
-                      </label>
+              <div className="group p-4 rounded-lg border border-gray-800/10">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-[#00ffff] bg-opacity-5 rounded-lg">
+                      <FiStar className="text-[#00ffff] w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-white font-medium">BSV Milestone</div>
+                      <div className="text-sm text-gray-400">Get notified when a post reaches {milestoneThreshold} BSV</div>
                     </div>
                   </div>
-                ))}
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={milestoneEnabled}
+                      onChange={(e) => setMilestoneEnabled(e.target.checked)} 
+                    />
+                    <div className="w-11 h-6 bg-gray-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#00ffff]"></div>
+                  </label>
+                </div>
+                <div className={`transition-opacity duration-200 ${milestoneEnabled ? 'opacity-100' : 'opacity-50'}`}>
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    value={milestoneThreshold}
+                    onChange={(e) => handleMilestoneChange(e.target.value)}
+                    className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-800"
+                    style={{
+                      background: `linear-gradient(to right, #00ffff ${milestoneThreshold}%, #1f2937 ${milestoneThreshold}%)`,
+                    }}
+                  />
+                  <div className="flex justify-between text-xs text-gray-400 mt-2">
+                    <span>1 BSV</span>
+                    <span>{milestoneThreshold} BSV</span>
+                    <span>100 BSV</span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -120,7 +146,7 @@ export const NotificationSettings: React.FC = () => {
                   <div className="p-1 bg-[#00ffff] bg-opacity-5 rounded-full mt-0.5">
                     <div className="w-1.5 h-1.5 rounded-full bg-[#00ffff]"></div>
                   </div>
-                  <span>Milestone notifications trigger when posts reach specific BSV thresholds</span>
+                  <span>Milestone notifications trigger when posts reach your set BSV threshold</span>
                 </li>
               </ul>
             </div>
