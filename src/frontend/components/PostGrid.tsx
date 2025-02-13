@@ -707,12 +707,6 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-center">
           <div className="grid grid-cols-1 gap-6 justify-items-center" style={{ maxWidth: '800px' }}>
-            {/* Debug output */}
-            <div className="text-white">
-              Number of posts: {submissions.length}
-              <br />
-              Number of votes: {votes.length}
-            </div>
             {/* Combine and sort posts and votes */}
             {[
               ...submissions.map(submission => ({ 
