@@ -1,4 +1,4 @@
-import { MAP_TYPES, ParsedPost } from './types';
+import { MAP_TYPES, ParsedPost } from './types.js';
 import { createHash } from 'crypto';
 
 interface JungleBusOutput {

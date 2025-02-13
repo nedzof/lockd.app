@@ -1,6 +1,6 @@
 import { parentPort } from 'worker_threads';
-import { PrismaClient, VoteOption, Post } from '@prisma/client';
-import { ParsedPost } from './types';
+import { PrismaClient, VoteOption } from '@prisma/client';
+import { ParsedPost } from './types.js';
 
 const prisma = new PrismaClient();
 
