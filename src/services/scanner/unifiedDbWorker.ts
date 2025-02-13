@@ -59,11 +59,7 @@ export async function processTransaction(prisma: PrismaClient, post: ParsedPost)
           unlock_height: post.metadata.lock?.unlockHeight
         },
         update: {
-          postId: post.postId,
-          content: post.content?.text || '',
-          author_address: post.author,
           block_height: post.blockHeight,
-          created_at: new Date(post.timestamp),
           is_vote: !!post.vote,
           is_locked: !!post.metadata.lock?.isLocked,
           media_type: post.images[0]?.contentType,
@@ -82,7 +78,7 @@ export async function processTransaction(prisma: PrismaClient, post: ParsedPost)
         }
       });
 
-      // If this is a vote post, create the vote options
+      // If this is a vote post, create or update the vote options
       if (post.vote?.options) {
         // Delete existing vote options first to handle updates
         await tx.voteOption.deleteMany({

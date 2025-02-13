@@ -120,4 +120,67 @@ router.get('/test', async (req, res) => {
   }
 });
 
+// Create a new post directly in the database
+router.post('/', async (req, res) => {
+  try {
+    const {
+      txid,
+      postId,
+      content,
+      author_address,
+      media_type,
+      description,
+      tags,
+      metadata,
+      is_locked,
+      lock_duration,
+      is_vote,
+      vote_options
+    } = req.body;
+
+    const post = await prisma.post.create({
+      data: {
+        id: postId,
+        txid,
+        postId,
+        content,
+        author_address,
+        media_type,
+        block_height: 0, // Will be updated by scanner
+        description,
+        tags: tags || [],
+        metadata: metadata || {},
+        is_locked: is_locked || false,
+        lock_duration,
+        is_vote: is_vote || false,
+        vote_options: vote_options ? {
+          create: vote_options.map((option: any) => ({
+            id: `${txid}:vote_option:${option.index}`,
+            txid: `${txid}:vote_option:${option.index}`,
+            postId,
+            post_txid: txid,
+            content: option.text,
+            author_address,
+            created_at: new Date(),
+            lock_amount: option.lockAmount || 0,
+            lock_duration: option.lockDuration || 0,
+            unlock_height: 0, // Will be updated by scanner
+            current_height: 0, // Will be updated by scanner
+            lock_percentage: 0, // Will be updated by scanner
+            tags: []
+          }))
+        } : undefined
+      },
+      include: {
+        vote_options: true
+      }
+    });
+
+    res.json(post);
+  } catch (error) {
+    console.error('Error creating post:', error);
+    res.status(500).json({ message: 'Error creating post' });
+  }
+});
+
 export default router; 

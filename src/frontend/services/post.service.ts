@@ -671,6 +671,65 @@ export const createPost = async (
     const response = await wallet.inscribe(components);
     const inscriptionTx = handleTransactionResponse(response);
 
+    // Create post in database immediately
+    const postData = {
+      txid: inscriptionTx.id,
+      postId,
+      content,
+      author_address: authorAddress,
+      media_type: imageFile?.type,
+      description,
+      tags: tags || [],
+      metadata: {
+        app: 'lockd.app',
+        version: '1.0.0',
+        prediction_market_data: predictionMarketData,
+        lock: lockData?.isLocked ? {
+          isLocked: true,
+          duration: lockData.duration,
+          amount: lockData.amount,
+          unlockHeight: lockData.duration ? await getCurrentBlockHeight() + lockData.duration : undefined
+        } : undefined
+      },
+      is_locked: lockData?.isLocked || false,
+      lock_duration: lockData?.duration,
+      is_vote: lockData?.isPoll || false,
+      vote_options: lockData?.isPoll && lockData.options ? 
+        lockData.options.map((option, index) => ({
+          text: option.text,
+          lockAmount: option.lockAmount,
+          lockDuration: option.lockDuration,
+          index
+        })) : undefined
+    };
+
+    // Create post in database
+    try {
+      await fetch('http://localhost:3001/api/posts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(postData)
+      });
+    } catch (error) {
+      console.error('Error creating post in database:', error);
+      // Don't throw here, as the post is already on chain
+    }
+
+    // Show success toast with WhatsOnChain link
+    toast.success('Post created successfully!', {
+      duration: 5000,
+      style: {
+        background: '#1A1B23',
+        color: '#fff',
+        border: '1px solid rgba(255, 255, 255, 0.1)'
+      }
+    });
+
+    // Open WhatsOnChain link in a new tab
+    window.open(`https://whatsonchain.com/tx/${inscriptionTx.id}`, '_blank');
+
     // Create and return post object
     return createPostObject(inscriptionTx.id, content, authorAddress, {
       postId,
