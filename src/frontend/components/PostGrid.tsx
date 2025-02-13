@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2 } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
-import type { LockLike } from '../types';
+import type { MemeSubmission, LockLike } from '../types';
 
 interface VoteQuestion {
   id: string;
@@ -45,7 +45,7 @@ interface ApiPost {
   author_address: string;
   media_type: string | null;
   block_height: number;
-  amount: number;
+  amount: number | null;
   unlock_height: number | null;
   description: string | null;
   created_at: string;
@@ -56,47 +56,6 @@ interface ApiPost {
 }
 
 const API_URL = 'http://localhost:3001';
-
-const AVAILABLE_TAGS = [
-  'Crypto',
-  'Sports',
-  'Tech',
-  'Business',
-  'Memes',
-  'Current Events',
-  'Health',
-  'Politics',
-  'Finance',
-  'Pop Culture'
-] as const;
-
-interface MemeSubmission {
-  id: string;
-  content: string;
-  format?: string;
-  fileUrl: string;
-  description?: string;
-  created_at: string;
-  createdAt: Date;
-  updatedAt: Date;
-  totalLocked: number;
-  threshold?: number;
-  block_height?: number;
-  unlock_height?: number;
-  creator: string;
-  title: string;
-  prompt: string;
-  style: string;
-  duration: number;
-  thumbnailUrl: string;
-  txId: string;
-  locks: number;
-  status: 'minted';
-  tags: string[];
-  isTop10Percent: boolean;
-  isTop3: boolean;
-  locklikes: LockLike[];
-}
 
 const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ 
   onStatsUpdate,
@@ -119,7 +78,6 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement }>({});
   const imageRefs = useRef<{ [key: string]: HTMLImageElement }>({});
-  const [visibleTags, setVisibleTags] = useState<Set<string>>(new Set(AVAILABLE_TAGS));
 
   const formatImageUrl = async (imageData: string | undefined) => {
     if (!imageData) return null;
@@ -363,16 +321,15 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           fileUrl: imageUrl,
           thumbnailUrl: imageUrl,
           txId: post.txid,
-          locks: post.amount,
+          locks: post.amount || 0,
           status: 'minted' as const,
           tags: post.tags || [],
           createdAt: new Date(post.created_at),
           updatedAt: new Date(post.created_at),
-          created_at: post.created_at,
-          totalLocked: post.amount,
+          totalLocked: post.amount || 0,
           threshold: 1000000000, // 10 BSV threshold
-          isTop10Percent: post.amount > 1000000000,
-          isTop3: post.amount > 2000000000,
+          isTop10Percent: (post.amount || 0) > 1000000000,
+          isTop3: (post.amount || 0) > 2000000000,
           locklikes: [],
           content: post.content || '',
           unlock_height: post.unlock_height,
@@ -384,7 +341,12 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
       // Apply ranking filters
       submissionsWithStats.sort((a: MemeSubmission, b: MemeSubmission) => {
-        return b.totalLocked - a.totalLocked || b.createdAt.getTime() - a.createdAt.getTime();
+        // First sort by total locked amount
+        const amountDiff = b.totalLocked - a.totalLocked;
+        if (amountDiff !== 0) return amountDiff;
+        
+        // If amounts are equal, sort by most recent
+        return b.createdAt.getTime() - a.createdAt.getTime();
       });
 
       // Apply limit based on filter
@@ -463,12 +425,30 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     if (submission.format?.startsWith('image/')) {
       return (
         <>
-          <div className="relative w-full">
+          <div className="relative w-full group/image">
+            {/* Header */}
+            <div className="absolute top-0 left-0 right-0 p-4 z-10 bg-gradient-to-b from-black/70 to-transparent">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <div className="w-8 h-8 rounded-full bg-[#00ffa3]/10 flex items-center justify-center">
+                    <FiLock className="w-4 h-4 text-[#00ffa3]" />
+                  </div>
+                  <span className="text-white/90 font-medium">{formatBSV(submission.totalLocked || 0)} BSV</span>
+                </div>
+                {submission.unlock_height && submission.block_height && (
+                  <div className="text-sm text-white/70">
+                    {Math.max(0, submission.unlock_height - submission.block_height)} blocks left
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Image */}
             <img
               ref={(el) => el && handleImageLoad(submission.id, el)}
               src={submission.fileUrl}
               alt={submission.description || 'Post image'}
-              className="w-full object-contain bg-[#1A1B23] cursor-pointer rounded-t-xl"
+              className="w-full object-cover bg-[#1A1B23] cursor-pointer rounded-t-xl max-h-[400px]"
               onClick={() => handleImageClick(submission.fileUrl)}
               onError={(e) => {
                 console.error('Image load error for submission:', {
@@ -482,13 +462,35 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
               }}
               loading="lazy"
             />
-            <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity duration-300 bg-black/50">
+
+            {/* Hover overlay */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/image:opacity-100 transition-opacity duration-300 bg-gradient-to-t from-black/80 via-black/50 to-black/80">
               <FiMaximize2 className="w-8 h-8 text-white" />
             </div>
           </div>
+
+          {/* Content section */}
           {submission.content && (
-            <div className="px-4 py-3 text-gray-200/90 border-y border-gray-800/30 bg-[#1A1B23]/50">
-              <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{submission.content}</p>
+            <div className="p-4 bg-gradient-to-b from-[#1A1B23] to-[#1A1B23]/95">
+              <p className="text-gray-200/90 text-sm leading-relaxed whitespace-pre-wrap break-words">{submission.content}</p>
+              
+              {/* Footer */}
+              <div className="mt-4 pt-3 border-t border-gray-800/30 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  {submission.tags.map((tag, index) => (
+                    <span key={index} className="text-xs px-2 py-1 rounded-full bg-[#2A2A40]/30 text-[#00ffa3]/80">
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setShowLockInput(submission.id)}
+                  className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#00ffa3]/10 to-[#00ff9d]/10 text-[#00ffa3] text-sm font-medium hover:from-[#00ffa3]/20 hover:to-[#00ff9d]/20 transition-all duration-300"
+                >
+                  <FiLock className="w-4 h-4" />
+                  <span>Lock BSV</span>
+                </button>
+              </div>
             </div>
           )}
         </>
@@ -498,8 +500,45 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     // If it's text only (no image)
     if (submission.content) {
       return (
-        <div className="w-full px-4 py-6 bg-gradient-to-br from-[#2A2A40]/20 to-[#1A1B23]/20">
-          <p className="text-gray-200/90 text-base leading-relaxed whitespace-pre-wrap break-words">{submission.content}</p>
+        <div className="w-full p-6 bg-gradient-to-br from-[#2A2A40]/20 to-[#1A1B23]/20">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 rounded-full bg-[#00ffa3]/10 flex items-center justify-center">
+                <FiLock className="w-4 h-4 text-[#00ffa3]" />
+              </div>
+              <span className="text-white/90 font-medium">{formatBSV(submission.totalLocked || 0)} BSV</span>
+            </div>
+            {submission.unlock_height && submission.block_height && (
+              <div className="text-sm text-white/70">
+                {Math.max(0, submission.unlock_height - submission.block_height)} blocks left
+              </div>
+            )}
+          </div>
+
+          {/* Content */}
+          <div className="relative">
+            <div className="absolute -left-4 top-0 bottom-0 w-[2px] bg-gradient-to-b from-[#00ffa3]/20 to-transparent" />
+            <p className="text-gray-200/90 text-base leading-relaxed whitespace-pre-wrap break-words">{submission.content}</p>
+          </div>
+
+          {/* Footer */}
+          <div className="mt-6 pt-4 border-t border-gray-800/30 flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              {submission.tags.map((tag, index) => (
+                <span key={index} className="text-xs px-2 py-1 rounded-full bg-[#2A2A40]/30 text-[#00ffa3]/80">
+                  #{tag}
+                </span>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowLockInput(submission.id)}
+              className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#00ffa3]/10 to-[#00ff9d]/10 text-[#00ffa3] text-sm font-medium hover:from-[#00ffa3]/20 hover:to-[#00ff9d]/20 transition-all duration-300"
+            >
+              <FiLock className="w-4 h-4" />
+              <span>Lock BSV</span>
+            </button>
+          </div>
         </div>
       );
     }
@@ -509,85 +548,95 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   };
 
   const renderVoteQuestion = (vote: VoteQuestion) => {
+    // Calculate total locked amount for this vote
+    const totalLocked = vote.vote_options?.reduce((sum, option) => sum + (option.lock_amount || 0), 0) || 0;
+    
+    // Calculate percentages for each option
+    const optionsWithPercentages = (vote.vote_options || []).map(option => ({
+      ...option,
+      percentage: totalLocked > 0 ? ((option.lock_amount || 0) / totalLocked) * 100 : 0
+    }));
+
+    // Get deadline (for now using a fixed 7-day period from creation)
+    const deadline = new Date(vote.created_at);
+    deadline.setDate(deadline.getDate() + 7);
+    const timeLeft = Math.max(0, deadline.getTime() - new Date().getTime());
+    const daysLeft = Math.ceil(timeLeft / (1000 * 60 * 60 * 24));
+
     return (
-      <div key={vote.id} className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg p-6 space-y-4">
-        <div className="flex items-start justify-between">
-          <div>
+      <div className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/10 hover:border-[#00ffa3]/20 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.05)] bg-[#1A1B23]/30 w-full max-w-md">
+        <div className="p-6 space-y-4">
+          {/* Header */}
+          <div className="flex items-center justify-between">
             <h3 className="text-lg font-medium text-white">{vote.content}</h3>
-            <p className="text-sm text-gray-400">
-              by {vote.author_address.substring(0, 8)}...
-            </p>
-          </div>
-          <div className="flex items-center space-x-2">
-            <FiBarChart2 className="w-5 h-5 text-[#00ffa3]" />
-            <span className="text-sm text-gray-400">Vote</span>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          {vote.vote_options.map((option) => (
-            <div key={option.id} className="bg-[#1A1B23] rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-white">{option.content}</span>
-                <div className="text-sm text-gray-400">
-                  <span>{formatBSV(option.lock_amount)} BSV</span>
-                  <span className="mx-2">•</span>
-                  <span>{option.lock_duration} blocks</span>
-                </div>
-              </div>
-              <button
-                onClick={() => handleLockCoins(option.id, option.lock_amount)}
-                disabled={lockingSubmissionId === option.id}
-                className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-gradient-to-r from-[#00ffa3]/10 to-[#00ff9d]/10 text-[#00ffa3] rounded-lg font-medium hover:from-[#00ffa3]/20 hover:to-[#00ff9d]/20 transition-all duration-300 disabled:opacity-50"
-              >
-                {lockingSubmissionId === option.id ? (
-                  <FiLoader className="animate-spin w-4 h-4" />
-                ) : (
-                  <>
-                    <FiHeart className="w-4 h-4" />
-                    <span>Vote ({formatBSV(option.lock_amount)} BSV)</span>
-                  </>
-                )}
-              </button>
+            <div className="flex items-center space-x-2 text-sm">
+              <span className="text-[#00ffa3]">{formatBSV(totalLocked)} BSV</span>
+              <span className="text-gray-400">locked</span>
             </div>
-          ))}
-        </div>
+          </div>
 
-        <div className="flex items-center space-x-2 text-sm text-gray-400">
-          <span>{new Date(vote.created_at).toLocaleDateString()}</span>
-          {vote.tags.map((tag) => (
-            <span key={tag} className="px-2 py-1 bg-[#1A1B23] rounded-full">
-              #{tag}
-            </span>
-          ))}
+          {/* Deadline */}
+          <div className="text-sm text-gray-400">
+            {daysLeft > 0 ? `${daysLeft} days left` : 'Voting ended'}
+          </div>
+
+          {/* Options */}
+          <div className="space-y-3">
+            {optionsWithPercentages.map((option, index) => {
+              // Generate a gradient color based on index
+              const gradientStart = index === 0 ? 'from-[#FF6B6B]' : 
+                                  index === 1 ? 'from-[#4ECDC4]' : 
+                                  index === 2 ? 'from-[#45B7D1]' : 'from-[#96CEB4]';
+              const gradientEnd = index === 0 ? 'to-[#FF8E8E]' : 
+                                index === 1 ? 'to-[#6EE7E7]' : 
+                                index === 2 ? 'to-[#65D7F1]' : 'to-[#B6EED4]';
+
+              return (
+                <div 
+                  key={option.id} 
+                  className="relative group/option"
+                >
+                  {/* Progress bar background */}
+                  <div className="absolute inset-0 bg-[#2A2A40]/20 rounded-lg" />
+                  
+                  {/* Progress bar fill */}
+                  <div 
+                    className={`absolute inset-y-0 left-0 bg-gradient-to-r ${gradientStart} ${gradientEnd} opacity-10 rounded-lg transition-all duration-300`}
+                    style={{ width: `${option.percentage}%` }}
+                  />
+
+                  {/* Content */}
+                  <div className="relative p-4 flex items-center justify-between group-hover/option:bg-[#2A2A40]/10 transition-all duration-300 rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <span className="text-white font-medium">{option.content}</span>
+                      <span className="text-gray-400">{option.percentage.toFixed(1)}%</span>
+                    </div>
+
+                    {/* Lock button */}
+                    <button
+                      onClick={() => {
+                        const amount = prompt('Enter amount to lock (in BSV):');
+                        if (amount && !isNaN(Number(amount))) {
+                          handleLockCoins(option.id, Number(amount) * 100000000);
+                        }
+                      }}
+                      disabled={lockingSubmissionId === option.id || daysLeft <= 0}
+                      className="opacity-0 group-hover/option:opacity-100 px-4 py-1.5 bg-gradient-to-r from-[#00ffa3]/10 to-[#00ff9d]/10 text-[#00ffa3] rounded-lg text-sm font-medium hover:from-[#00ffa3]/20 hover:to-[#00ff9d]/20 transition-all duration-300 disabled:opacity-50"
+                    >
+                      {lockingSubmissionId === option.id ? (
+                        <FiLoader className="animate-spin w-4 h-4" />
+                      ) : (
+                        'Lock BSV'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     );
-  };
-
-  // Helper function to toggle tag visibility
-  const toggleTagVisibility = (tag: string) => {
-    setVisibleTags(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(tag)) {
-        newSet.delete(tag);
-      } else {
-        newSet.add(tag);
-      }
-      return newSet;
-    });
-  };
-
-  // Helper function to get content for a specific tag
-  const getContentForTag = (tag: string) => {
-    const allContent = [
-      ...submissions.map(submission => ({ type: 'post' as const, data: submission })),
-      ...votes.map(vote => ({ type: 'vote' as const, data: vote }))
-    ].sort((a, b) => {
-      return new Date(b.data.created_at).getTime() - new Date(a.data.created_at).getTime();
-    });
-
-    return allContent.filter(item => item.data.tags.includes(tag));
   };
 
   if (isLoading) {
@@ -646,11 +695,22 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
             </div>
             {/* Combine and sort posts and votes */}
             {[
-              ...submissions.map(submission => ({ type: 'post' as const, data: submission })),
-              ...votes.map(vote => ({ type: 'vote' as const, data: vote }))
+              ...submissions.map(submission => ({ 
+                type: 'post' as const, 
+                data: submission,
+                timestamp: submission.createdAt // Use createdAt for posts
+              })),
+              ...votes.map(vote => ({ 
+                type: 'vote' as const, 
+                data: vote,
+                timestamp: new Date(vote.created_at) // Convert string to Date for votes
+              }))
             ]
             .sort((a, b) => {
-              return new Date(b.data.created_at).getTime() - new Date(a.data.created_at).getTime();
+              // Safely handle timestamps
+              const timeA = a.timestamp instanceof Date ? a.timestamp : new Date(0);
+              const timeB = b.timestamp instanceof Date ? b.timestamp : new Date(0);
+              return timeB.getTime() - timeA.getTime();
             })
             .map((item) => (
               <div key={item.data.id} className="w-full">
