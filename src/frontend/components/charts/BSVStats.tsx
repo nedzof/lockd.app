@@ -54,8 +54,18 @@ interface StatsData {
   }[];
 }
 
+const defaultStatsData: StatsData = {
+  totalLocked: 0,
+  uniqueUsers: 0,
+  totalTransactions: 0,
+  timeSeriesData: [],
+  poolDistribution: [],
+  durationDistribution: [],
+  volumeOverTime: []
+};
+
 export const BSVStats: React.FC = () => {
-  const [statsData, setStatsData] = useState<StatsData | null>(null);
+  const [statsData, setStatsData] = useState<StatsData>(defaultStatsData);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -67,7 +77,10 @@ export const BSVStats: React.FC = () => {
         throw new Error('Failed to fetch stats');
       }
       const data = await response.json();
-      setStatsData(data);
+      setStatsData({
+        ...defaultStatsData,
+        ...data
+      });
       setLastUpdated(new Date());
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -111,7 +124,98 @@ export const BSVStats: React.FC = () => {
     );
   }
 
-  if (!statsData) return null;
+  const timelineData = {
+    labels: statsData.timeSeriesData.map(d => new Date(d.timestamp).toLocaleDateString()),
+    datasets: [
+      {
+        label: 'Locked BSV',
+        data: statsData.timeSeriesData.map(d => d.lockedAmount),
+        borderColor: '#00ffa3',
+        backgroundColor: 'rgba(0, 255, 163, 0.1)',
+        fill: true,
+        tension: 0.4
+      },
+      {
+        label: 'Unique Locks',
+        data: statsData.timeSeriesData.map(d => d.uniqueLocks),
+        borderColor: '#ff00ff',
+        backgroundColor: 'rgba(255, 0, 255, 0.1)',
+        fill: true,
+        tension: 0.4
+      }
+    ]
+  };
+
+  const poolData = {
+    labels: statsData.poolDistribution.map(d => d.range),
+    datasets: [
+      {
+        data: statsData.poolDistribution.map(d => d.amount),
+        backgroundColor: [
+          '#00ffa3',
+          '#ff00ff',
+          '#00ffff',
+          '#ffa500',
+          '#ff0000'
+        ]
+      }
+    ]
+  };
+
+  const durationData = {
+    labels: statsData.durationDistribution.map(d => d.duration),
+    datasets: [
+      {
+        label: 'Number of Locks',
+        data: statsData.durationDistribution.map(d => d.count),
+        backgroundColor: '#00ffff'
+      }
+    ]
+  };
+
+  const volumeData = {
+    labels: statsData.volumeOverTime.map(d => new Date(d.timestamp).toLocaleDateString()),
+    datasets: [
+      {
+        label: 'Volume (BSV)',
+        data: statsData.volumeOverTime.map(d => d.volume),
+        borderColor: '#ffa500',
+        backgroundColor: 'rgba(255, 165, 0, 0.1)',
+        fill: true,
+        tension: 0.4
+      }
+    ]
+  };
+
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top' as const,
+        labels: {
+          color: '#fff'
+        }
+      }
+    },
+    scales: {
+      x: {
+        grid: {
+          color: 'rgba(255, 255, 255, 0.1)'
+        },
+        ticks: {
+          color: '#fff'
+        }
+      },
+      y: {
+        grid: {
+          color: 'rgba(255, 255, 255, 0.1)'
+        },
+        ticks: {
+          color: '#fff'
+        }
+      }
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -167,79 +271,14 @@ export const BSVStats: React.FC = () => {
         {/* Timeline Chart */}
         <div className="bg-gradient-to-br from-[#2A2A40]/50 to-[#1A1B23]/50 rounded-lg p-6 border border-gray-800/10">
           <h3 className="text-white font-medium mb-4">Lock Timeline</h3>
-          <Line
-            data={{
-              labels: statsData.timeSeriesData.map(d => new Date(d.timestamp).toLocaleDateString()),
-              datasets: [
-                {
-                  label: 'Locked BSV',
-                  data: statsData.timeSeriesData.map(d => d.lockedAmount),
-                  borderColor: '#00ffa3',
-                  backgroundColor: 'rgba(0, 255, 163, 0.1)',
-                  fill: true,
-                  tension: 0.4
-                },
-                {
-                  label: 'Unique Locks',
-                  data: statsData.timeSeriesData.map(d => d.uniqueLocks),
-                  borderColor: '#ff00ff',
-                  backgroundColor: 'rgba(255, 0, 255, 0.1)',
-                  fill: true,
-                  tension: 0.4
-                }
-              ]
-            }}
-            options={{
-              responsive: true,
-              plugins: {
-                legend: {
-                  position: 'top' as const,
-                  labels: {
-                    color: '#fff'
-                  }
-                }
-              },
-              scales: {
-                x: {
-                  grid: {
-                    color: 'rgba(255, 255, 255, 0.1)'
-                  },
-                  ticks: {
-                    color: '#fff'
-                  }
-                },
-                y: {
-                  grid: {
-                    color: 'rgba(255, 255, 255, 0.1)'
-                  },
-                  ticks: {
-                    color: '#fff'
-                  }
-                }
-              }
-            }}
-          />
+          <Line data={timelineData} options={chartOptions} />
         </div>
 
         {/* Pool Distribution Chart */}
         <div className="bg-gradient-to-br from-[#2A2A40]/50 to-[#1A1B23]/50 rounded-lg p-6 border border-gray-800/10">
           <h3 className="text-white font-medium mb-4">Pool Distribution</h3>
           <Pie
-            data={{
-              labels: statsData.poolDistribution.map(d => d.range),
-              datasets: [
-                {
-                  data: statsData.poolDistribution.map(d => d.amount),
-                  backgroundColor: [
-                    '#00ffa3',
-                    '#ff00ff',
-                    '#00ffff',
-                    '#ffa500',
-                    '#ff0000'
-                  ]
-                }
-              ]
-            }}
+            data={poolData}
             options={{
               responsive: true,
               plugins: {
@@ -258,39 +297,13 @@ export const BSVStats: React.FC = () => {
         <div className="bg-gradient-to-br from-[#2A2A40]/50 to-[#1A1B23]/50 rounded-lg p-6 border border-gray-800/10">
           <h3 className="text-white font-medium mb-4">Lock Duration Distribution</h3>
           <Bar
-            data={{
-              labels: statsData.durationDistribution.map(d => d.duration),
-              datasets: [
-                {
-                  label: 'Number of Locks',
-                  data: statsData.durationDistribution.map(d => d.count),
-                  backgroundColor: '#00ffff'
-                }
-              ]
-            }}
+            data={durationData}
             options={{
-              responsive: true,
+              ...chartOptions,
               plugins: {
+                ...chartOptions.plugins,
                 legend: {
                   display: false
-                }
-              },
-              scales: {
-                x: {
-                  grid: {
-                    color: 'rgba(255, 255, 255, 0.1)'
-                  },
-                  ticks: {
-                    color: '#fff'
-                  }
-                },
-                y: {
-                  grid: {
-                    color: 'rgba(255, 255, 255, 0.1)'
-                  },
-                  ticks: {
-                    color: '#fff'
-                  }
                 }
               }
             }}
@@ -300,50 +313,7 @@ export const BSVStats: React.FC = () => {
         {/* Transaction Volume Chart */}
         <div className="bg-gradient-to-br from-[#2A2A40]/50 to-[#1A1B23]/50 rounded-lg p-6 border border-gray-800/10">
           <h3 className="text-white font-medium mb-4">Transaction Volume</h3>
-          <Line
-            data={{
-              labels: statsData.volumeOverTime.map(d => new Date(d.timestamp).toLocaleDateString()),
-              datasets: [
-                {
-                  label: 'Volume (BSV)',
-                  data: statsData.volumeOverTime.map(d => d.volume),
-                  borderColor: '#ffa500',
-                  backgroundColor: 'rgba(255, 165, 0, 0.1)',
-                  fill: true,
-                  tension: 0.4
-                }
-              ]
-            }}
-            options={{
-              responsive: true,
-              plugins: {
-                legend: {
-                  position: 'top' as const,
-                  labels: {
-                    color: '#fff'
-                  }
-                }
-              },
-              scales: {
-                x: {
-                  grid: {
-                    color: 'rgba(255, 255, 255, 0.1)'
-                  },
-                  ticks: {
-                    color: '#fff'
-                  }
-                },
-                y: {
-                  grid: {
-                    color: 'rgba(255, 255, 255, 0.1)'
-                  },
-                  ticks: {
-                    color: '#fff'
-                  }
-                }
-              }
-            }}
-          />
+          <Line data={volumeData} options={chartOptions} />
         </div>
       </div>
     </div>
