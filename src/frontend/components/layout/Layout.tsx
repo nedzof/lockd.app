@@ -76,7 +76,7 @@ export default function Layout({
                   to="/settings"
                   className="text-gray-400 hover:text-white transition-colors duration-300 text-sm"
                 >
-                  Notifications
+                  Settings
                 </Link>
                 <Link
                   to="/wtf"
