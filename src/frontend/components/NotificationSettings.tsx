@@ -9,6 +9,7 @@ export const NotificationSettings: React.FC = () => {
   const [showAddMilestone, setShowAddMilestone] = useState(false);
   const [newMilestone, setNewMilestone] = useState('');
   const [savedAnimation, setSavedAnimation] = useState<string | null>(null);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   const handleSave = (id: string) => {
     setSavedAnimation(id);
@@ -21,7 +22,10 @@ export const NotificationSettings: React.FC = () => {
       
       {bsvAddress ? (
         <div className="space-y-8">
-          <TagPreferences userId={bsvAddress} />
+          <TagPreferences 
+            selectedTags={selectedTags}
+            onTagsChange={setSelectedTags}
+          />
           
           {/* Header Section */}
           <div className="bg-gradient-to-br from-[#2A2A40] to-[#1A1B23] rounded-lg p-6 shadow-lg">
