@@ -10,8 +10,8 @@ datasource db {
 }
 
 model Post {
-  id             String   @id @default(cuid())
-  txid           String   @unique
+  id             String       @id @default(cuid())
+  txid           String       @unique
   content        String
   author_address String
   media_type     String?
@@ -19,44 +19,35 @@ model Post {
   amount         Int?
   unlock_height  Int?
   description    String?
-  created_at     DateTime @default(now())
+  created_at     DateTime     @default(now())
   tags           String[]
   metadata       Json?
-  is_locked      Boolean  @default(false)
+  is_locked      Boolean      @default(false)
   lock_duration  Int?
   raw_image_data String?
   image_format   String?
   image_source   String?
+  // Vote-related fields
+  is_vote        Boolean      @default(false)
+  vote_options   VoteOption[]
 
   @@index([author_address])
   @@index([created_at])
   @@index([block_height])
 }
 
-model VoteQuestion {
-  id             String       @id @default(cuid())
-  txid           String       @unique
-  content        String
-  author_address String
-  created_at     DateTime
-  options        Json
-  tags           String[]
-  vote_options   VoteOption[]
-
-  @@map("vote_questions")
-}
-
 model VoteOption {
-  id             String       @id @default(cuid())
-  txid           String       @unique
-  question_txid  String
+  id             String   @id @default(cuid())
+  txid           String   @unique
+  post_txid      String   // Changed from question_txid
   content        String
   author_address String
   created_at     DateTime
   lock_amount    Int
   lock_duration  Int
   tags           String[]
-  question       VoteQuestion @relation(fields: [question_txid], references: [txid])
+  post           Post     @relation(fields: [post_txid], references: [txid]) // Changed from question to post
 
   @@map("vote_options")
+  @@index([post_txid])
 }
