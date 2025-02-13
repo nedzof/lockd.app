@@ -297,22 +297,20 @@ export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostC
               </button>
 
               {/* Lock Toggle */}
-              {!hasVoteOptions && (
-                <button
-                  onClick={() => {
-                    setShowLockOptions(!showLockOptions);
-                    if (!showLockOptions) setIsLocked(true);
-                  }}
-                  className={`flex items-center gap-2 text-sm transition-colors ${
-                    isLocked
-                      ? 'text-[#00ffa3]'
-                      : 'text-gray-400 hover:text-[#00ffa3]'
-                  }`}
-                >
-                  <FiLock className="w-4 h-4" />
-                  <span>{isLocked ? `Locked: ${lockAmount} sats` : 'Add Lock'}</span>
-                </button>
-              )}
+              <button
+                onClick={() => {
+                  setShowLockOptions(!showLockOptions);
+                  if (!showLockOptions) setIsLocked(true);
+                }}
+                className={`flex items-center gap-2 text-sm transition-colors ${
+                  isLocked
+                    ? 'text-[#00ffa3]'
+                    : 'text-gray-400 hover:text-[#00ffa3]'
+                }`}
+              >
+                <FiLock className="w-4 h-4" />
+                <span>{isLocked ? `Locking` : 'Add Lock'}</span>
+              </button>
             </div>
 
             {/* Vote Options Section */}
