@@ -313,19 +313,18 @@ const createPost: CreatePostHandler = async (req, res, next): Promise<void> => {
           lock_duration,
           is_vote: is_vote || false,
           vote_options: vote_options ? {
-            create: vote_options.map((option) => ({
-              id: `${txid}:vote_option:${option.index}`,
-              txid: `${txid}:vote_option:${option.index}`,
+            create: vote_options.map((option: any, index: number) => ({
+              id: `${postId}-option-${index}`,
+              txid: `${txid}-option-${index}`,
               postId,
-              post_txid: txid,
               content: option.text,
               author_address,
               created_at: new Date(),
               lock_amount: option.lockAmount || 0,
               lock_duration: option.lockDuration || 0,
-              unlock_height: 0, // Will be updated by scanner
-              current_height: 0, // Will be updated by scanner
-              lock_percentage: 0, // Will be updated by scanner
+              unlock_height: 0,
+              current_height: 0,
+              lock_percentage: 0,
               tags: []
             }))
           } : undefined

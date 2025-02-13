@@ -717,8 +717,8 @@ export const createPost = async (
         vote_options: lockData?.isPoll && lockData.options ? 
           lockData.options.map((option, index) => ({
             text: option.text,
-            lockAmount: option.lockAmount,
-            lockDuration: option.lockDuration,
+            lockAmount: option.lockAmount || 1000,
+            lockDuration: option.lockDuration || 1,
             index
           })) : undefined
       };
@@ -734,72 +734,30 @@ export const createPost = async (
         body: JSON.stringify(postData)
       });
 
-      console.log('Database response status:', dbResponse.status);
-      console.log('Database response headers:', Object.fromEntries(dbResponse.headers.entries()));
-
-      let errorData;
-      let responseText;
-      try {
-        responseText = await dbResponse.text(); // Get raw response text first
-        console.log('Raw response text:', responseText);
-        
-        try {
-          errorData = responseText ? JSON.parse(responseText) : {};
-        } catch (parseError) {
-          console.error('Failed to parse response as JSON:', parseError);
-          console.log('Raw response that failed to parse:', responseText);
-        }
-      } catch (textError) {
-        console.error('Failed to get response text:', textError);
-      }
-
       if (!dbResponse.ok) {
-        throw new Error(
-          `Database error (${dbResponse.status}): ${
-            errorData?.message || 
-            responseText || 
-            'Unknown error'
-          }`
-        );
+        const errorData = await dbResponse.json();
+        console.error('Detailed error in post creation:', errorData);
+        throw new Error(`Database error (${dbResponse.status}): ${errorData.message || 'Failed to create post in database'}`);
       }
 
-      let dbPost;
-      try {
-        dbPost = responseText ? JSON.parse(responseText) : null;
-        console.log('Post created in database:', dbPost);
-      } catch (parseError) {
-        console.error('Failed to parse successful response as JSON:', parseError);
-        throw new Error('Failed to parse server response');
-      }
+      const createdPost = await dbResponse.json();
+      console.log('Successfully created post:', createdPost);
 
-      if (!dbPost) {
-        throw new Error('No data received from server after creating post');
-      }
+      // Update toast
+      toast.success('Post created successfully!', {
+        id: pendingToast,
+        style: {
+          background: '#1A1B23',
+          color: '#fff',
+          border: '1px solid rgba(255, 255, 255, 0.1)'
+        }
+      });
 
-      // Update success toast and open WhatsOnChain link
-      const whatsOnChainUrl = `https://whatsonchain.com/tx/${inscriptionTx.id}`;
-      console.log('WhatsOnChain URL:', whatsOnChainUrl);
-      
+      // Show WhatsOnChain link
       toast.success(
-        React.createElement('div', { className: 'flex flex-col space-y-2' },
-          React.createElement('span', null, 'Post created successfully!'),
-          React.createElement('a', {
-            href: whatsOnChainUrl,
-            target: '_blank',
-            rel: 'noopener noreferrer',
-            className: 'text-sm text-[#00ffa3] hover:text-[#00ff9d] flex items-center gap-1',
-            onClick: (e) => {
-              e.preventDefault();
-              window.open(whatsOnChainUrl, '_blank');
-            }
-          },
-            React.createElement('span', null, 'View on WhatsOnChain'),
-            React.createElement(FiExternalLink, { className: 'w-3 h-3' })
-          )
-        ),
+        `View on WhatsOnChain: https://whatsonchain.com/tx/${inscriptionTx.id}`,
         {
-          id: pendingToast,
-          duration: 5000,
+          duration: 10000,
           style: {
             background: '#1A1B23',
             color: '#fff',
@@ -808,35 +766,11 @@ export const createPost = async (
         }
       );
 
-      // Open WhatsOnChain link in a new tab
-      window.open(whatsOnChainUrl, '_blank');
-
-      // Create and return post object
-      return createPostObject(inscriptionTx.id, content, authorAddress, {
-        postId,
-        tags,
-        media_type: imageFile?.type,
-        prediction_market_data: predictionMarketData,
-        isLocked: lockData?.isLocked || false,
-        lockDuration: lockData?.duration,
-        lockAmount: lockData?.amount,
-        unlockHeight: lockData?.duration ? await getCurrentBlockHeight() + lockData.duration : undefined
-      });
+      return createdPost;
     } catch (error) {
-      console.error('Detailed error in post creation:', {
-        error,
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined
-      });
-
-      // Update error toast with more specific message
-      const errorMessage = error instanceof Error 
-        ? `Failed to create post: ${error.message}`
-        : 'Failed to create post. Please try again.';
-
-      toast.error(errorMessage, {
+      console.error('Top-level error in createPost:', error);
+      toast.error('Failed to create post', {
         id: pendingToast,
-        duration: 5000,
         style: {
           background: '#1A1B23',
           color: '#fff',
@@ -846,25 +780,7 @@ export const createPost = async (
       throw error;
     }
   } catch (error) {
-    console.error('Top-level error in createPost:', {
-      error,
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
-    });
-
-    // Show error toast
-    const errorMessage = error instanceof Error 
-      ? `Failed to create post: ${error.message}`
-      : 'Failed to create post. Please try again.';
-
-    toast.error(errorMessage, {
-      duration: 5000,
-      style: {
-        background: '#1A1B23',
-        color: '#fff',
-        border: '1px solid rgba(255, 255, 255, 0.1)'
-      }
-    });
+    console.error('Error in createPost:', error);
     throw error;
   }
 };
