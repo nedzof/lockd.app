@@ -421,28 +421,61 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   }, [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, userId]);
 
   const renderContent = (submission: MemeSubmission) => {
+    // If it's text only (no image) - more ethereal styling
+    if (submission.content) {
+      return (
+        <div className="w-full p-8 bg-gradient-to-br from-[#2A2A40]/5 to-[#1A1B23]/5 relative group">
+          {/* Decorative elements */}
+          <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all duration-1000 pointer-events-none">
+            <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-[#00ffa3]/3 to-transparent rounded-full blur-xl" />
+            <div className="absolute bottom-0 right-0 w-32 h-32 bg-gradient-to-tl from-[#00ffa3]/2 to-transparent rounded-full blur-xl" />
+          </div>
+
+          {/* Content - more focused */}
+          <div className="relative">
+            <div className="absolute -left-4 top-0 bottom-0 w-[1px] bg-gradient-to-b from-[#00ffa3]/5 via-[#00ffa3]/3 to-transparent" />
+            <p className="text-gray-200/95 text-xl leading-relaxed whitespace-pre-wrap break-words">{submission.content}</p>
+          </div>
+
+          {/* Footer - more subtle */}
+          <div className="mt-10 pt-4 border-t border-gray-800/10 flex items-center justify-between relative">
+            <span className="text-sm text-[#00ffa3]/60">
+              {formatBSV(submission.totalLocked || 0)} BSV locked
+            </span>
+            <div className="flex items-center space-x-6">
+              {submission.unlock_height && submission.block_height && (
+                <div className="text-sm text-white/40">
+                  {Math.max(0, submission.unlock_height - submission.block_height)} blocks left
+                </div>
+              )}
+              <button
+                onClick={() => setShowLockInput(submission.id)}
+                className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#00ffa3]/5 to-[#00ff9d]/5 text-[#00ffa3]/80 text-sm font-medium hover:from-[#00ffa3]/10 hover:to-[#00ff9d]/10 transition-all duration-700 backdrop-blur-sm"
+              >
+                <FiLock className="w-4 h-4" />
+                <span>Lock BSV</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Subtle corner decorations */}
+          <div className="absolute top-0 right-0 w-16 h-16 opacity-30 pointer-events-none">
+            <div className="absolute top-3 right-3 w-[1px] h-6 bg-gradient-to-b from-[#00ffa3]/10 to-transparent transform rotate-45" />
+            <div className="absolute top-3 right-3 w-6 h-[1px] bg-gradient-to-r from-transparent to-[#00ffa3]/10 transform rotate-45" />
+          </div>
+          <div className="absolute bottom-0 left-0 w-16 h-16 opacity-30 pointer-events-none">
+            <div className="absolute bottom-3 left-3 w-[1px] h-6 bg-gradient-to-t from-[#00ffa3]/10 to-transparent transform -rotate-45" />
+            <div className="absolute bottom-3 left-3 w-6 h-[1px] bg-gradient-to-r from-[#00ffa3]/10 to-transparent transform -rotate-45" />
+          </div>
+        </div>
+      );
+    }
+    
     // If it's an image post
     if (submission.format?.startsWith('image/')) {
       return (
         <>
           <div className="relative w-full group/image">
-            {/* Header */}
-            <div className="absolute top-0 left-0 right-0 p-4 z-10 bg-gradient-to-b from-black/70 to-transparent">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <div className="w-8 h-8 rounded-full bg-[#00ffa3]/10 flex items-center justify-center">
-                    <FiLock className="w-4 h-4 text-[#00ffa3]" />
-                  </div>
-                  <span className="text-white/90 font-medium">{formatBSV(submission.totalLocked || 0)} BSV</span>
-                </div>
-                {submission.unlock_height && submission.block_height && (
-                  <div className="text-sm text-white/70">
-                    {Math.max(0, submission.unlock_height - submission.block_height)} blocks left
-                  </div>
-                )}
-              </div>
-            </div>
-
             {/* Image */}
             <img
               ref={(el) => el && handleImageLoad(submission.id, el)}
@@ -451,139 +484,96 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
               className="w-full object-cover bg-[#1A1B23] cursor-pointer rounded-t-xl max-h-[400px]"
               onClick={() => handleImageClick(submission.fileUrl)}
               onError={(e) => {
-                console.error('Image load error for submission:', {
-                  id: submission.id,
-                  format: submission.format,
-                  urlLength: submission.fileUrl.length,
-                  urlStart: submission.fileUrl.substring(0, 50)
-                });
                 const img = e.target as HTMLImageElement;
                 img.src = `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('Failed to load image')}`;
               }}
               loading="lazy"
             />
 
-            {/* Hover overlay */}
-            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/image:opacity-100 transition-opacity duration-300 bg-gradient-to-t from-black/80 via-black/50 to-black/80">
-              <FiMaximize2 className="w-8 h-8 text-white" />
+            {/* Hover overlay - more ethereal */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/image:opacity-100 transition-opacity duration-700 bg-gradient-to-t from-black/60 via-transparent to-black/60">
+              <FiMaximize2 className="w-8 h-8 text-white/70" />
             </div>
           </div>
 
-          {/* Content section */}
+          {/* Content section - more focused */}
           {submission.content && (
-            <div className="p-4 bg-gradient-to-b from-[#1A1B23] to-[#1A1B23]/95">
-              <p className="text-gray-200/90 text-sm leading-relaxed whitespace-pre-wrap break-words">{submission.content}</p>
+            <div className="p-8 bg-gradient-to-b from-[#1A1B23] to-[#1A1B23]/95 relative group">
+              {/* Decorative elements */}
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all duration-1000 pointer-events-none">
+                <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-[#00ffa3]/3 to-transparent rounded-full blur-xl" />
+                <div className="absolute bottom-0 right-0 w-32 h-32 bg-gradient-to-tl from-[#00ffa3]/2 to-transparent rounded-full blur-xl" />
+              </div>
+
+              <p className="text-gray-200/90 text-lg leading-relaxed whitespace-pre-wrap break-words relative">{submission.content}</p>
               
-              {/* Footer */}
-              <div className="mt-4 pt-3 border-t border-gray-800/30 flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  {submission.tags.map((tag, index) => (
-                    <span key={index} className="text-xs px-2 py-1 rounded-full bg-[#2A2A40]/30 text-[#00ffa3]/80">
-                      #{tag}
-                    </span>
-                  ))}
+              {/* Footer - more subtle */}
+              <div className="mt-8 pt-4 border-t border-gray-800/10 flex items-center justify-between relative">
+                <span className="text-sm text-[#00ffa3]/60">
+                  {formatBSV(submission.totalLocked || 0)} BSV locked
+                </span>
+                <div className="flex items-center space-x-6">
+                  {submission.unlock_height && submission.block_height && (
+                    <div className="text-sm text-white/40">
+                      {Math.max(0, submission.unlock_height - submission.block_height)} blocks left
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setShowLockInput(submission.id)}
+                    className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#00ffa3]/5 to-[#00ff9d]/5 text-[#00ffa3]/80 text-sm font-medium hover:from-[#00ffa3]/10 hover:to-[#00ff9d]/10 transition-all duration-700 backdrop-blur-sm"
+                  >
+                    <FiLock className="w-4 h-4" />
+                    <span>Lock BSV</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => setShowLockInput(submission.id)}
-                  className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#00ffa3]/10 to-[#00ff9d]/10 text-[#00ffa3] text-sm font-medium hover:from-[#00ffa3]/20 hover:to-[#00ff9d]/20 transition-all duration-300"
-                >
-                  <FiLock className="w-4 h-4" />
-                  <span>Lock BSV</span>
-                </button>
+              </div>
+
+              {/* Subtle corner decorations */}
+              <div className="absolute top-0 right-0 w-16 h-16 opacity-30 pointer-events-none">
+                <div className="absolute top-3 right-3 w-[1px] h-6 bg-gradient-to-b from-[#00ffa3]/10 to-transparent transform rotate-45" />
+                <div className="absolute top-3 right-3 w-6 h-[1px] bg-gradient-to-r from-transparent to-[#00ffa3]/10 transform rotate-45" />
+              </div>
+              <div className="absolute bottom-0 left-0 w-16 h-16 opacity-30 pointer-events-none">
+                <div className="absolute bottom-3 left-3 w-[1px] h-6 bg-gradient-to-t from-[#00ffa3]/10 to-transparent transform -rotate-45" />
+                <div className="absolute bottom-3 left-3 w-6 h-[1px] bg-gradient-to-r from-[#00ffa3]/10 to-transparent transform -rotate-45" />
               </div>
             </div>
           )}
         </>
       );
     }
-    
-    // If it's text only (no image)
-    if (submission.content) {
-      return (
-        <div className="w-full p-6 bg-gradient-to-br from-[#2A2A40]/20 to-[#1A1B23]/20">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 rounded-full bg-[#00ffa3]/10 flex items-center justify-center">
-                <FiLock className="w-4 h-4 text-[#00ffa3]" />
-              </div>
-              <span className="text-white/90 font-medium">{formatBSV(submission.totalLocked || 0)} BSV</span>
-            </div>
-            {submission.unlock_height && submission.block_height && (
-              <div className="text-sm text-white/70">
-                {Math.max(0, submission.unlock_height - submission.block_height)} blocks left
-              </div>
-            )}
-          </div>
 
-          {/* Content */}
-          <div className="relative">
-            <div className="absolute -left-4 top-0 bottom-0 w-[2px] bg-gradient-to-b from-[#00ffa3]/20 to-transparent" />
-            <p className="text-gray-200/90 text-base leading-relaxed whitespace-pre-wrap break-words">{submission.content}</p>
-          </div>
-
-          {/* Footer */}
-          <div className="mt-6 pt-4 border-t border-gray-800/30 flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              {submission.tags.map((tag, index) => (
-                <span key={index} className="text-xs px-2 py-1 rounded-full bg-[#2A2A40]/30 text-[#00ffa3]/80">
-                  #{tag}
-                </span>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowLockInput(submission.id)}
-              className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#00ffa3]/10 to-[#00ff9d]/10 text-[#00ffa3] text-sm font-medium hover:from-[#00ffa3]/20 hover:to-[#00ff9d]/20 transition-all duration-300"
-            >
-              <FiLock className="w-4 h-4" />
-              <span>Lock BSV</span>
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    // If no content at all
     return null;
   };
 
   const renderVoteQuestion = (vote: VoteQuestion) => {
-    // Calculate total locked amount for this vote
     const totalLocked = vote.vote_options?.reduce((sum, option) => sum + (option.lock_amount || 0), 0) || 0;
     
-    // Calculate percentages for each option
     const optionsWithPercentages = (vote.vote_options || []).map(option => ({
       ...option,
       percentage: totalLocked > 0 ? ((option.lock_amount || 0) / totalLocked) * 100 : 0
     }));
 
-    // Get deadline (for now using a fixed 7-day period from creation)
     const deadline = new Date(vote.created_at);
     deadline.setDate(deadline.getDate() + 7);
     const timeLeft = Math.max(0, deadline.getTime() - new Date().getTime());
     const daysLeft = Math.ceil(timeLeft / (1000 * 60 * 60 * 24));
 
     return (
-      <div className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/10 hover:border-[#00ffa3]/20 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.05)] bg-[#1A1B23]/30 w-full max-w-md">
-        <div className="p-6 space-y-4">
+      <div className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-500 hover:shadow-[0_0_40px_rgba(0,255,163,0.03)] bg-[#1A1B23]/20 w-full max-w-md">
+        <div className="p-8 space-y-6">
           {/* Header */}
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium text-white">{vote.content}</h3>
+          <div className="space-y-2">
+            <h3 className="text-xl font-medium text-white/90">{vote.content}</h3>
             <div className="flex items-center space-x-2 text-sm">
-              <span className="text-[#00ffa3]">{formatBSV(totalLocked)} BSV</span>
-              <span className="text-gray-400">locked</span>
+              <span className="text-[#00ffa3]/80">{formatBSV(totalLocked)} BSV</span>
+              <span className="text-gray-400/70">locked</span>
             </div>
-          </div>
-
-          {/* Deadline */}
-          <div className="text-sm text-gray-400">
-            {daysLeft > 0 ? `${daysLeft} days left` : 'Voting ended'}
           </div>
 
           {/* Options */}
           <div className="space-y-3">
             {optionsWithPercentages.map((option, index) => {
-              // Generate a gradient color based on index
               const gradientColors = [
                 { from: '#00ffa3', to: '#00ff9d', shadow: '#00ffa3' },
                 { from: '#3CDFCE', to: '#00ffa3', shadow: '#3CDFCE' },
@@ -596,39 +586,38 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                   className="relative group/option"
                 >
                   {/* Progress bar background */}
-                  <div className="absolute inset-0 bg-[#2A2A40]/20 rounded-lg" />
+                  <div className="absolute inset-0 bg-[#2A2A40]/10 rounded-lg" />
                   
-                  {/* Progress bar fill with animated gradient */}
+                  {/* Progress bar fill */}
                   <div 
                     className="absolute inset-y-0 left-0 rounded-lg transition-all duration-700 ease-out"
                     style={{
                       width: `${option.percentage}%`,
-                      background: `linear-gradient(90deg, ${gradientColors.from}10, ${gradientColors.to}10)`,
-                      boxShadow: option.percentage > 0 ? `0 0 20px ${gradientColors.shadow}10` : 'none'
+                      background: `linear-gradient(90deg, ${gradientColors.from}08, ${gradientColors.to}08)`,
+                      boxShadow: option.percentage > 0 ? `0 0 30px ${gradientColors.shadow}05` : 'none'
                     }}
                   />
 
-                  {/* Hover effect overlay */}
+                  {/* Hover effect */}
                   <div 
-                    className="absolute inset-0 opacity-0 group-hover/option:opacity-100 transition-opacity duration-300 rounded-lg"
+                    className="absolute inset-0 opacity-0 group-hover/option:opacity-100 transition-opacity duration-500 rounded-lg"
                     style={{
-                      background: `linear-gradient(90deg, ${gradientColors.from}15, ${gradientColors.to}15)`
+                      background: `linear-gradient(90deg, ${gradientColors.from}10, ${gradientColors.to}10)`
                     }}
                   />
 
                   {/* Content */}
                   <div className="relative p-4 flex items-center justify-between transition-all duration-300 rounded-lg">
                     <div className="flex items-center space-x-3">
-                      <span className="text-white font-medium">{option.content}</span>
+                      <span className="text-white/90 font-medium">{option.content}</span>
                       <span 
-                        className="text-gray-400 transition-all duration-300 group-hover/option:text-white"
-                        style={{ color: option.percentage > 0 ? gradientColors.from : undefined }}
+                        className="text-gray-400/70 transition-all duration-300 group-hover/option:text-white/80"
+                        style={{ color: option.percentage > 0 ? `${gradientColors.from}dd` : undefined }}
                       >
                         {option.percentage.toFixed(1)}%
                       </span>
                     </div>
 
-                    {/* Lock button */}
                     <button
                       onClick={() => {
                         const amount = prompt('Enter amount to lock (in BSV):');
@@ -637,9 +626,9 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                         }
                       }}
                       disabled={lockingSubmissionId === option.id || daysLeft <= 0}
-                      className="opacity-0 group-hover/option:opacity-100 px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 disabled:opacity-50"
+                      className="opacity-0 group-hover/option:opacity-100 px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-500 disabled:opacity-50 backdrop-blur-sm"
                       style={{
-                        background: `linear-gradient(90deg, ${gradientColors.from}20, ${gradientColors.to}20)`,
+                        background: `linear-gradient(90deg, ${gradientColors.from}15, ${gradientColors.to}15)`,
                         color: gradientColors.from
                       }}
                     >
@@ -653,6 +642,11 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                 </div>
               );
             })}
+          </div>
+
+          {/* Deadline at bottom */}
+          <div className="text-sm text-gray-400/70 pt-4 border-t border-gray-800/20">
+            {daysLeft > 0 ? `${daysLeft} days left` : 'Voting ended'}
           </div>
         </div>
       </div>
@@ -706,22 +700,20 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     <div className="min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-center">
-          <div className="grid grid-cols-1 gap-6 justify-items-center" style={{ maxWidth: '800px' }}>
-            {/* Combine and sort posts and votes */}
+          <div className="grid grid-cols-1 gap-8 justify-items-center" style={{ maxWidth: '800px' }}>
             {[
               ...submissions.map(submission => ({ 
                 type: 'post' as const, 
                 data: submission,
-                timestamp: submission.createdAt // Use createdAt for posts
+                timestamp: submission.createdAt
               })),
               ...votes.map(vote => ({ 
                 type: 'vote' as const, 
                 data: vote,
-                timestamp: new Date(vote.created_at) // Convert string to Date for votes
+                timestamp: new Date(vote.created_at)
               }))
             ]
             .sort((a, b) => {
-              // Safely handle timestamps
               const timeA = a.timestamp instanceof Date ? a.timestamp : new Date(0);
               const timeB = b.timestamp instanceof Date ? b.timestamp : new Date(0);
               return timeB.getTime() - timeA.getTime();
@@ -729,7 +721,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
             .map((item) => (
               <div key={item.data.id} className="w-full">
                 {item.type === 'post' ? (
-                  <div className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/10 hover:border-[#00ffa3]/20 transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,163,0.05)] bg-[#1A1B23]/30 w-full max-w-md flex flex-col">
+                  <div className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-500 hover:shadow-[0_0_40px_rgba(0,255,163,0.03)] bg-[#1A1B23]/20 w-full max-w-md flex flex-col">
                     {renderContent(item.data)}
                   </div>
                 ) : (
@@ -744,11 +736,11 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       {/* Image Modal */}
       {expandedImage && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-lg"
           onClick={() => setExpandedImage(null)}
         >
           <button 
-            className="absolute top-4 right-4 text-white hover:text-[#00ffa3] transition-colors"
+            className="absolute top-4 right-4 text-white/70 hover:text-[#00ffa3] transition-colors duration-300"
             onClick={() => setExpandedImage(null)}
           >
             <FiX className="w-8 h-8" />
