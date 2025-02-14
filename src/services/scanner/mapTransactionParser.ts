@@ -1,231 +1,404 @@
-import { MAP_TYPES, ParsedPost } from './types.js';
-import { createHash } from 'crypto';
-import { extractImageFromTransaction, validateImageData } from './imageProcessor.js';
+import type { JungleBusTransaction, JungleBusOutput } from './types';
+import type { ParsedPost, ParsedComponent, MAP_TYPES } from './types';
 
-interface JungleBusOutput {
-  script?: {
-    asm?: string;
-    hex?: string;
-  };
-}
-
-interface JungleBusTransaction {
-  id: string;
-  addresses: string[];
-  block_height: number;
-  block_time?: number;
-  outputs?: JungleBusOutput[];
-}
-
-interface ParsedComponent {
-  type: MAP_TYPES;
-  postId: string;
-  sequence: number;
-  parentSequence?: number;
-  data: Record<string, any>;
-  rawHex?: string;
-}
-
+// Function to parse MAP fields from a script
 function parseMapFields(scriptData: string): Record<string, any> {
-  const mapFields: Record<string, any> = {};
-  const matches = scriptData.matchAll(/(MAP_)([A-Z_]+)=([^|]+)/gi);
-  
-  for (const match of Array.from(matches)) {
-    const [_, prefix, key, value] = match;
-    const fieldName = key.toLowerCase();
-    
-    // Handle special fields
-    switch(fieldName) {
-      case 'sequence':
-      case 'parent_sequence':
-      case 'total_options':
-      case 'option_index':
-      case 'lock_amount':
-      case 'lock_duration':
-        mapFields[fieldName] = Number(value) || 0;
-        break;
-      case 'is_vote':
-      case 'is_locked':
-        mapFields[fieldName] = value.toLowerCase() === 'true';
-        break;
-      case 'tags':
-        try {
-          mapFields[fieldName] = JSON.parse(value);
-        } catch (e) {
-          mapFields[fieldName] = [];
+    try {
+        const parts = scriptData.split(' ');
+        const fields: Record<string, any> = {};
+        let plainTextContent = '';
+        
+        for (let i = 0; i < parts.length; i++) {
+            if (parts[i] === 'OP_RETURN' || parts[i] === 'OP_FALSE') {
+                i++;
+                continue;
+            }
+            
+            const hex = parts[i];
+            if (!hex) continue;
+            
+            try {
+                const text = Buffer.from(hex, 'hex').toString('utf8');
+                
+                // Log the raw decoded text for debugging
+                console.log(' Raw decoded text:', {
+                    hex: hex.substring(0, 50),
+                    text: text.substring(0, 100),
+                    length: text.length
+                });
+                
+                // Try to parse MAP fields
+                if (text.startsWith('MAP_')) {
+                    const mapMatch = text.match(/MAP_([A-Z_]+)=(.+)/i);
+                    if (mapMatch) {
+                        const [_, key, value] = mapMatch;
+                        const keyLower = key.toLowerCase();
+                        if (keyLower === 'content' || keyLower === 'text') {
+                            plainTextContent = value.trim();
+                        } else {
+                            fields[keyLower] = value.trim();
+                        }
+                        console.log(' Found MAP field:', { key: keyLower, value: value.trim() });
+                    }
+                } else if (text.startsWith('1Map')) {
+                    // Handle 1Map format
+                    const mapData = text.substring(4);
+                    try {
+                        const jsonData = JSON.parse(mapData);
+                        if (jsonData.content || jsonData.text) {
+                            plainTextContent = jsonData.content || jsonData.text;
+                            delete jsonData.content;
+                            delete jsonData.text;
+                        }
+                        Object.assign(fields, jsonData);
+                        console.log(' Found 1Map data:', jsonData);
+                    } catch (e) {
+                        // Not valid JSON, treat as content
+                        plainTextContent = mapData;
+                    }
+                } else if (text.includes('=')) {
+                    const [key, value] = text.split('=');
+                    const keyLower = key.trim().toLowerCase();
+                    if (keyLower === 'content' || keyLower === 'text') {
+                        plainTextContent = value.trim();
+                    } else {
+                        fields[keyLower] = value.trim();
+                    }
+                    console.log(' Found field:', { key: keyLower, value: value.trim() });
+                } else if (text.startsWith('{') && text.endsWith('}')) {
+                    try {
+                        const jsonData = JSON.parse(text);
+                        if (jsonData.content || jsonData.text) {
+                            plainTextContent = jsonData.content || jsonData.text;
+                            delete jsonData.content;
+                            delete jsonData.text;
+                        }
+                        Object.assign(fields, jsonData);
+                        console.log(' Found JSON data:', jsonData);
+                    } catch (e) {
+                        // Not valid JSON, treat as content
+                        plainTextContent = text;
+                    }
+                } else if (text.startsWith('data:image/')) {
+                    fields.image_data = text;
+                    fields.media_type = text.split(';')[0].split(':')[1];
+                    console.log(' Found inline image:', {
+                        mediaType: fields.media_type,
+                        dataLength: text.length
+                    });
+                } else if (text.length > 0) {
+                    // Try to detect if it's base64 encoded
+                    try {
+                        const decoded = Buffer.from(text, 'base64');
+                        if (decoded.length > 100 && isImageBuffer(decoded)) {
+                            fields.image_data = decoded;
+                            fields.media_type = getImageContentType(decoded);
+                            console.log(' Found base64 image:', {
+                                size: decoded.length,
+                                mediaType: fields.media_type
+                            });
+                        } else {
+                            // Not an image, treat as content
+                            plainTextContent = text;
+                        }
+                    } catch (e) {
+                        // Not base64, treat as content
+                        plainTextContent = text;
+                    }
+                }
+            } catch (e) {
+                console.warn(' Failed to decode hex:', hex.substring(0, 50));
+                continue;
+            }
         }
-        break;
-      default:
-        mapFields[fieldName] = value;
+
+        // Set the content field with any plain text we found
+        if (plainTextContent.trim()) {
+            fields.content = plainTextContent.trim();
+            console.log(' Using plain text as content:', {
+                length: plainTextContent.length,
+                preview: plainTextContent.substring(0, 100)
+            });
+        }
+        
+        return fields;
+    } catch (error) {
+        console.error(' Error parsing MAP fields:', error);
+        return {};
     }
-  }
-  
-  return mapFields;
 }
 
-function parseComponent(output: JungleBusOutput): ParsedComponent | null {
-  if (!output.script?.asm) return null;
+// Function to extract image data from a transaction
+async function extractImageFromTransaction(tx: JungleBusTransaction): Promise<{ data: Buffer | null; contentType: string | null }> {
+    try {
+        // First check outputs for B or B64 data
+        for (const output of tx.outputs || []) {
+            if (!output.script?.asm) continue;
 
-  const mapFields = parseMapFields(output.script.asm);
-  const type = mapFields.type as MAP_TYPES;
-  const postId = mapFields.post_id;
-  
-  if (!type || !postId) return null;
+            const parts = output.script.asm.split(' ');
+            for (let i = 0; i < parts.length; i++) {
+                try {
+                    const hex = parts[i];
+                    if (!hex) continue;
 
-  return {
-    type,
-    postId,
-    sequence: Number(mapFields.sequence) || 0,
-    parentSequence: mapFields.parent_sequence ? Number(mapFields.parent_sequence) : undefined,
-    data: mapFields,
-    rawHex: output.script.hex
-  };
-}
+                    // Try to decode as text first
+                    const text = Buffer.from(hex, 'hex').toString('utf8');
+                    
+                    // Log what we're examining
+                    console.log(' Examining potential image data:', {
+                        hexPrefix: hex.substring(0, 50),
+                        textPrefix: text.substring(0, 50),
+                        length: text.length
+                    });
+                    
+                    // Check for data URL format
+                    if (text.startsWith('data:image/')) {
+                        const [header, base64Data] = text.split(',');
+                        const contentType = header.split(';')[0].split(':')[1];
+                        
+                        if (base64Data) {
+                            const buffer = Buffer.from(base64Data, 'base64');
+                            if (buffer.length > 100) {
+                                console.log(' Found base64 image:', {
+                                    size: buffer.length,
+                                    contentType
+                                });
+                                return { data: buffer, contentType };
+                            }
+                        }
+                    }
+                    
+                    // Try direct base64 decode
+                    try {
+                        const buffer = Buffer.from(text, 'base64');
+                        if (buffer.length > 100 && isImageBuffer(buffer)) {
+                            console.log(' Found base64 image data:', {
+                                size: buffer.length,
+                                contentType: getImageContentType(buffer)
+                            });
+                            return { 
+                                data: buffer, 
+                                contentType: getImageContentType(buffer) 
+                            };
+                        }
+                    } catch (e) {
+                        // Not valid base64
+                    }
 
-function processImageData(component: ParsedComponent): { data: string; contentType: string; encoding: string } | null {
-  if (!component.rawHex) return null;
+                    // Try direct hex decode
+                    const buffer = Buffer.from(hex, 'hex');
+                    if (buffer.length > 100 && isImageBuffer(buffer)) {
+                        console.log(' Found hex image data:', {
+                            size: buffer.length,
+                            contentType: getImageContentType(buffer)
+                        });
+                        return { 
+                            data: buffer, 
+                            contentType: getImageContentType(buffer) 
+                        };
+                    }
+                } catch (e) {
+                    // Skip invalid data
+                    continue;
+                }
+            }
+        }
 
-  try {
-    const buffer = Buffer.from(component.rawHex, 'hex');
-    const content = buffer.toString('utf8');
-    
-    // Try base64 pattern first
-    const base64Match = content.match(/data:image\/(\w+);base64,([^"]+)/);
-    if (base64Match) {
-      return {
-        data: base64Match[2],
-        contentType: `image/${base64Match[1].toLowerCase()}`,
-        encoding: 'base64'
-      };
+        // Check MAP data if available
+        if (tx.MAP) {
+            for (const map of tx.MAP) {
+                if (map.type === 'image' && map.data) {
+                    try {
+                        const buffer = Buffer.from(map.data, 'base64');
+                        if (buffer.length > 100 && isImageBuffer(buffer)) {
+                            console.log(' Found MAP image data:', {
+                                size: buffer.length,
+                                contentType: getImageContentType(buffer)
+                            });
+                            return { 
+                                data: buffer, 
+                                contentType: getImageContentType(buffer) 
+                            };
+                        }
+                    } catch (e) {
+                        console.error(' Error decoding MAP image data:', e);
+                    }
+                }
+            }
+        }
+
+        return { data: null, contentType: null };
+    } catch (error) {
+        console.error(' Error extracting image:', error);
+        return { data: null, contentType: null };
     }
-    
-    // If no base64 pattern found, check if it's raw image data
-    if (component.data.content_type?.startsWith('image/')) {
-      return {
-        data: content,
-        contentType: component.data.content_type,
-        encoding: component.data.encoding || 'base64'
-      };
+}
+
+// Helper function to check if a buffer is an image
+function isImageBuffer(buffer: Buffer): boolean {
+    if (buffer.length < 100) return false;
+
+    // Check for JPEG or PNG magic numbers
+    const isJPEG = buffer[0] === 0xFF && buffer[1] === 0xD8;
+    const isPNG = buffer[0] === 0x89 && buffer[1] === 0x50;
+
+    return isJPEG || isPNG;
+}
+
+// Helper function to get content type from image buffer
+function getImageContentType(buffer: Buffer): string {
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8) {
+        return 'image/jpeg';
+    } else if (buffer[0] === 0x89 && buffer[1] === 0x50) {
+        return 'image/png';
     }
-  } catch (error) {
-    console.error('Error processing image data:', error);
-  }
-  
-  return null;
+    return 'application/octet-stream';
 }
 
-function processVoteOptions(
-  questionComponent: ParsedComponent,
-  allComponents: ParsedComponent[],
-  txid: string,
-  blockHeight: number
-) {
-  const options = allComponents
-    .filter(c => 
-      c.type === MAP_TYPES.VOTE_OPTION && 
-      c.parentSequence === questionComponent.sequence
-    )
-    .sort((a, b) => (a.data.option_index || 0) - (b.data.option_index || 0))
-    .map(opt => ({
-      text: opt.data.content || '',
-      lockAmount: opt.data.lock_amount,
-      lockDuration: opt.data.lock_duration,
-      index: opt.data.option_index || 0,
-      unlockHeight: opt.data.unlock_height,
-      currentHeight: blockHeight,
-      lockPercentage: 0 // This will be calculated later
-    }));
-
-  return {
-    question: questionComponent.data.content || '',
-    options,
-    totalOptions: questionComponent.data.total_options || options.length,
-    optionsHash: questionComponent.data.options_hash || ''
-  };
-}
-
+// Main function to parse a MAP transaction
 export async function parseMapTransaction(tx: JungleBusTransaction): Promise<ParsedPost | null> {
-  try {
-    // Extract image data first
-    const imageData = await extractImageFromTransaction(tx);
-    const isValidImage = validateImageData(imageData);
-    
-    // Parse MAP fields from outputs
-    const mapFields = tx.outputs?.reduce((fields: Record<string, any>, output: JungleBusOutput) => {
-      if (output.script?.asm) {
-        const parsedFields = parseMapFields(output.script.asm);
-        return { ...fields, ...parsedFields };
-      }
-      return fields;
-    }, {}) || {};
+    try {
+        console.log('\n🔍 Parsing MAP transaction:', tx.txid);
+        
+        // Initialize post data
+        const post: ParsedPost = {
+            txid: tx.txid,
+            blockHeight: tx.blockHeight,
+            timestamp: tx.timestamp,
+            content: { text: '' },
+            images: [],
+            author: tx.inputs?.[0]?.address || '',
+            metadata: {}
+        };
 
-    // Get the first address as author
-    const author = tx.addresses?.[0] || '';
+        // Handle data array from JungleBus API
+        if (tx.data?.length) {
+            for (const item of tx.data) {
+                const [key, value] = item.split('=');
+                if (!key || !value) continue;
 
-    // Create post ID if not present
-    const postId = mapFields.post_id || createHash('sha256').update(tx.id).digest('hex').substring(0, 16);
+                const keyLower = key.toLowerCase();
+                
+                switch (keyLower) {
+                    case 'content':
+                    case 'text':
+                        post.content.text = value;
+                        console.log('📝 Found content in data:', {
+                            length: value.length,
+                            preview: value.substring(0, 100)
+                        });
+                        break;
+                    case 'type':
+                        post.metadata.type = value;
+                        break;
+                    case 'app':
+                        post.metadata.app = value;
+                        break;
+                    case 'postid':
+                        post.metadata.postId = value;
+                        break;
+                    case 'timestamp':
+                        post.metadata.timestamp = value;
+                        break;
+                    case 'sequence':
+                        post.metadata.sequence = parseInt(value);
+                        break;
+                    case 'tags':
+                        try {
+                            post.tags = JSON.parse(value);
+                        } catch (e) {
+                            post.tags = value.split(',').map(t => t.trim());
+                        }
+                        break;
+                    case 'cmd':
+                    case 'command':
+                        post.metadata.command = value;
+                        break;
+                    case 'contenttype':
+                        if (value.startsWith('image/')) {
+                            post.metadata.contentType = value;
+                        }
+                        break;
+                }
+            }
+        }
 
-    // Parse content
-    const content = {
-      text: mapFields.content || '',
-      title: mapFields.title || undefined,
-      description: mapFields.description || undefined
-    };
+        // Parse outputs for additional data and images
+        for (const output of tx.outputs || []) {
+            if (!output) continue;
 
-    // Parse metadata
-    const metadata = {
-      app: mapFields.app || 'lockd.app',
-      version: mapFields.version || '1.0.0',
-      lock: mapFields.is_locked ? {
-        isLocked: true,
-        duration: mapFields.lock_duration || 0,
-        unlockHeight: mapFields.unlock_height
-      } : undefined
-    };
+            // Try to decode the script
+            try {
+                const scriptData = output;
+                if (!scriptData) continue;
 
-    // Parse vote data if present - check both is_vote flag and vote-related fields
-    const hasVoteFields = mapFields.is_vote || 
-                         mapFields.vote_question || 
-                         mapFields.total_options || 
-                         Object.keys(mapFields).some(key => key.startsWith('option_'));
-    
-    const vote = hasVoteFields ? {
-      question: mapFields.vote_question || '',
-      totalOptions: mapFields.total_options || 0,
-      optionsHash: createHash('sha256').update(tx.id + ':options').digest('hex'),
-      options: Array.from({ length: mapFields.total_options || 0 }, (_, i) => ({
-        index: i,
-        text: mapFields[`option_${i}`] || '',
-        lockAmount: mapFields[`option_${i}_lock_amount`] || undefined,
-        lockDuration: mapFields[`option_${i}_lock_duration`] || undefined,
-        unlockHeight: mapFields[`option_${i}_unlock_height`] || undefined,
-        currentHeight: tx.block_height,
-        lockPercentage: 0
-      }))
-    } : undefined;
+                // Parse hex data
+                try {
+                    const text = Buffer.from(scriptData, 'hex').toString('utf8');
+                    console.log('🔍 Decoded output:', {
+                        hex: scriptData.substring(0, 50),
+                        text: text.substring(0, 100)
+                    });
 
-    // Construct the final parsed post
-    const parsedPost: ParsedPost = {
-      txid: tx.id,
-      postId,
-      author,
-      content,
-      metadata,
-      vote,
-      tags: mapFields.tags || [],
-      timestamp: tx.block_time ? tx.block_time * 1000 : Date.now(),
-      blockHeight: tx.block_height,
-      images: isValidImage && imageData ? [{
-        contentType: imageData.mimeType,
-        data: imageData.rawData,
-        encoding: 'base64',
-        dataURL: imageData.dataURL
-      }] : []
-    };
+                    // Check for image data
+                    if (text.startsWith('data:image/')) {
+                        const [header, base64Data] = text.split(',');
+                        if (base64Data) {
+                            const contentType = header.split(';')[0].split(':')[1];
+                            const data = Buffer.from(base64Data, 'base64');
+                            post.images?.push({
+                                data,
+                                contentType,
+                                dataURL: text
+                            });
+                        }
+                    } else if (!post.content.text) {
+                        // Try to parse content from the output if we don't have it yet
+                        const fields = parseMapFields(scriptData);
+                        if (fields.content) {
+                            post.content.text = fields.content;
+                            console.log('📝 Found content in output:', {
+                                length: fields.content.length,
+                                preview: fields.content.substring(0, 100)
+                            });
+                        }
+                    }
+                } catch (error) {
+                    // Not valid UTF-8, might be binary data
+                    if (isImageBuffer(Buffer.from(scriptData, 'hex'))) {
+                        const data = Buffer.from(scriptData, 'hex');
+                        const contentType = getImageContentType(data);
+                        post.images?.push({
+                            data,
+                            contentType,
+                            dataURL: `data:${contentType};base64,${data.toString('base64')}`
+                        });
+                    }
+                }
+            } catch (error) {
+                console.warn('⚠️ Error parsing output:', error);
+                continue;
+            }
+        }
 
-    return parsedPost;
-  } catch (error) {
-    console.error('Error parsing MAP transaction:', error);
-    return null;
-  }
-} 
+        // Validate required fields
+        if (!post.content?.text && (!post.images || post.images.length === 0)) {
+            console.log('❌ No content or images found in transaction');
+            return null;
+        }
+
+        console.log('✅ Successfully parsed MAP transaction:', {
+            txid: post.txid,
+            content: post.content?.text,
+            contentLength: post.content?.text?.length || 0,
+            author: post.author,
+            metadata: post.metadata,
+            imageCount: post.images?.length
+        });
+
+        return post;
+    } catch (error) {
+        console.error('❌ Error parsing MAP transaction:', error);
+        return null;
+    }
+}

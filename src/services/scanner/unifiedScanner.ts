@@ -1,15 +1,13 @@
-import { JungleBusClient, Transaction as JungleBusTransaction, ControlMessageStatusCode } from '@gorillapool/js-junglebus';
-import type { JungleBusTransaction as JungleBusTransactionType } from './types';
-import type { ParsedPost } from './types';
-import axios from 'axios';
 import { fork } from 'child_process';
+import path from 'path';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { JungleBusClient as JungleBus, ControlMessageStatusCode } from '@gorillapool/js-junglebus';
+import dotenv from 'dotenv';
 import { parseMapTransaction } from './mapTransactionParser.js';
+import type { JungleBusTransaction } from './types';
+import fs from 'fs';
+import axios from 'axios';
 import { PrismaClient } from '@prisma/client';
-import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as path from 'path';
 
 // Load environment variables
 dotenv.config();
@@ -52,278 +50,287 @@ const prisma = new PrismaClient({
     log: ['query', 'info', 'warn', 'error']
 });
 
-// Get current file path for ES modules
+// Get current file directory
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = path.dirname(__filename);
 
 // Create a worker for database operations
-const workerPath = join(__dirname, 'unifiedDbWorker.ts');
-console.log(`📂 Creating database worker from: ${workerPath}`);
-
-// Verify worker file exists
-if (!fs.existsSync(workerPath)) {
-    console.error(`❌ Worker file not found at: ${workerPath}`);
-    process.exit(1);
-}
-
-// Use child process with ts-node
-const dbWorker = fork(workerPath, [], {
-    execArgv: ['--loader', 'ts-node/esm']
+let dbWorker = fork(path.join(__dirname, 'unifiedDbWorker.ts'), [], {
+    execArgv: ['--loader', 'tsx']
 });
 
-export default class UnifiedScanner {
-    private client: JungleBusClient;
-    private dbWorker: any;
-    private pendingTransactions: Map<string, number>;
-    private workerAvailable: boolean;
-    private startTime: number;
+// Initialize database worker
+function initializeDbWorker(): void {
+    console.log('🌟 Initializing database worker...');
+    
+    // Create worker
+    dbWorker = fork(path.join(__dirname, 'unifiedDbWorker.ts'), [], {
+        execArgv: ['--loader', 'tsx']
+    });
 
-    constructor() {
-        console.log('🚀 Initializing UnifiedScanner...');
-        this.client = new JungleBusClient(process.env.JUNGLEBUS_URL || 'https://junglebus.gorillapool.io');
-        console.log('✅ JungleBus client initialized');
-        
-        this.dbWorker = dbWorker;
-        this.pendingTransactions = new Map();
-        this.workerAvailable = true;
-        this.startTime = Date.now();
+    // Handle worker messages
+    dbWorker.on('message', (message: any) => {
+        console.log('📬 Worker message:', message);
+    });
 
-        // Set up worker message handling with enhanced validation
-        this.dbWorker.on('message', (message: any) => {
-            if (!message || !message.type) {
-                console.error('❌ Received invalid message from worker:', message);
-                return;
-            }
+    // Handle worker errors
+    dbWorker.on('error', (error: Error) => {
+        console.error('❌ Worker error:', error);
+        // Restart worker
+        setTimeout(() => {
+            console.log('🔄 Restarting worker after error...');
+            initializeDbWorker();
+        }, 1000);
+    });
 
-            if (message.type === 'transaction_processed') {
-                const processingTime = Date.now() - (this.pendingTransactions.get(message.txid) || 0);
-                this.pendingTransactions.delete(message.txid);
-                this.workerAvailable = true;
-                console.log(`✅ Transaction processed successfully:`, {
-                    txid: message.txid,
-                    processingTime: `${processingTime}ms`,
-                    queueSize: this.pendingTransactions.size
-                });
-            } else if (message.type === 'error') {
-                const processingTime = Date.now() - (this.pendingTransactions.get(message.error.txid) || 0);
-                this.pendingTransactions.delete(message.error.txid);
-                this.workerAvailable = true;
-                console.error(`❌ Worker reported error:`, {
-                    txid: message.error.txid,
-                    error: message.error,
-                    processingTime: `${processingTime}ms`,
-                    queueSize: this.pendingTransactions.size
-                });
-            }
-        });
+    // Handle worker exit
+    dbWorker.on('exit', (code: number) => {
+        console.log('👋 Worker exited with code:', code);
+        // Restart worker if it exits
+        if (code !== 0) {
+            setTimeout(() => {
+                console.log('🔄 Restarting worker after exit...');
+                initializeDbWorker();
+            }, 1000);
+        }
+    });
 
-        // Handle worker errors
-        this.dbWorker.on('error', (error: Error) => {
-            console.error('❌ Worker error:', error);
-        });
+    // Send initialization message
+    dbWorker.send({ type: 'init' });
+    console.log('✅ Database worker initialized');
+}
 
-        // Handle worker exit
-        this.dbWorker.on('exit', (code: number) => {
-            console.error(`❌ Worker exited with code ${code}`);
-            process.exit(1);
-        });
+// Cleanup function
+function cleanup(): void {
+    console.log('🧹 Cleaning up...');
+    
+    if (dbWorker) {
+        console.log('👋 Terminating database worker...');
+        dbWorker.kill();
     }
+    
+    process.exit(0);
+}
 
-    private async sendToWorkerWithBackpressure(parsedData: ParsedPost) {
-        const MAX_QUEUE = 100;
-        console.log(`\n🔄 Attempting to send transaction to worker:`, {
-            txid: parsedData.txid,
-            queueSize: this.pendingTransactions.size,
-            maxQueue: MAX_QUEUE
+// Handle process termination
+process.on('SIGINT', cleanup);
+process.on('SIGTERM', cleanup);
+
+async function fetchFullTransaction(txid: string): Promise<any> {
+    try {
+        const response = await axios.get(`https://junglebus.gorillapool.io/v1/transaction/get/${txid}`);
+        console.log('📦 Full transaction details:', JSON.stringify(response.data, null, 2));
+        return response.data;
+    } catch (error) {
+        console.error('❌ Error fetching transaction:', error);
+        return null;
+    }
+}
+
+async function processTransaction(tx: JungleBusTransaction): Promise<void> {
+    try {
+        // Fetch full transaction details
+        const fullTx = await fetchFullTransaction(tx.id);
+        
+        console.log('\n🔍 Processing transaction:', {
+            txid: tx.id,
+            blockHeight: tx.block_height,
+            outputs: fullTx?.outputs,
+            inputs: fullTx?.inputs,
+            data: fullTx?.data,
+            contexts: fullTx?.contexts
         });
 
-        if (this.pendingTransactions.size >= MAX_QUEUE) {
-            console.warn('⚠️ Worker queue full, dropping TX:', parsedData.txid);
+        // Check if this is a MAP protocol transaction
+        let isMapTransaction = false;
+        
+        // Check contexts for MAP protocol markers
+        if (fullTx?.contexts?.length) {
+            isMapTransaction = fullTx.contexts.some(ctx => 
+                ctx === '1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5' || // MAP protocol address
+                ctx === 'map' || // MAP context
+                ctx.startsWith('text/') || // Content type
+                ctx.startsWith('image/') // Image type
+            );
+        }
+
+        // Check data array for MAP protocol markers
+        if (!isMapTransaction && fullTx?.data?.length) {
+            isMapTransaction = fullTx.data.some(item => {
+                const [key, value] = item.split('=');
+                const keyLower = key?.toLowerCase();
+                return keyLower === 'app' || 
+                       keyLower === 'type' || 
+                       keyLower === 'content' ||
+                       keyLower === 'map' ||
+                       keyLower === 'postid' ||
+                       keyLower === 'timestamp' ||
+                       keyLower === 'sequence' ||
+                       keyLower.startsWith('map_');
+            });
+        }
+
+        if (!isMapTransaction) {
+            console.log('⏭️ Not a MAP protocol transaction:', tx.id);
             return;
         }
 
-        console.log(`⏳ Waiting for worker availability...`);
-        while (!this.workerAvailable) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
-        this.pendingTransactions.set(parsedData.txid, Date.now());
-        this.workerAvailable = false;
+        // Parse MAP transaction
+        console.log('✨ Found MAP protocol transaction:', tx.id);
         
-        console.log(`📤 Sending transaction to worker:`, {
-            txid: parsedData.txid,
-            queueSize: this.pendingTransactions.size
-        });
-
-        this.dbWorker.send({
-            type: 'process_transaction',
-            data: parsedData
-        });
-    }
-
-    async onPublish(tx: any) {
-        console.log("\n📥 Received new transaction:", {
+        // Convert JungleBus transaction to our format
+        const mappedTx = {
             txid: tx.id,
-            timestamp: new Date().toISOString()
-        });
-        
-        try {
-            console.log(`🔍 Fetching full transaction data for ${tx.id}`);
-            const fullTx = await fetchTransaction(tx.id);
-            console.log("✅ Transaction data retrieved:", {
-                txid: fullTx.id,
-                outputs: fullTx.outputs?.length || 0,
-                block_height: fullTx.block_height
-            });
-            
-            console.log(`🔍 Parsing MAP data from transaction ${fullTx.id}`);
-            const parsedData = await parseMapTransaction(fullTx);
-            if (!parsedData) {
-                console.log('⏭️ No valid MAP data found, skipping transaction:', tx.id);
-                return;
-            }
-
-            console.log("✨ Successfully parsed MAP data:", {
-                txid: parsedData.txid,
-                hasVote: !!parsedData.vote,
-                hasImage: parsedData.images.length > 0,
-                voteOptions: parsedData.vote?.options?.length || 0,
-                timestamp: parsedData.timestamp
-            });
-
-            // Use backpressure-managed send
-            await this.sendToWorkerWithBackpressure(parsedData);
-
-        } catch (error) {
-            console.error('❌ Transaction processing error:', {
-                txid: tx.id,
-                error: error instanceof Error ? {
-                    message: error.message,
-                    name: error.name,
-                    stack: error.stack
-                } : 'Unknown error'
-            });
-        }
-    }
-
-    async start() {
-        try {
-            console.log('\n🚀 Starting unified scanner...');
-            console.log('📊 Scanner status:', {
-                startBlock: 883800,
-                jungleBusUrl: process.env.JUNGLEBUS_URL || 'https://junglebus.gorillapool.io',
-                pendingTransactions: this.pendingTransactions.size,
-                uptime: `${Math.floor((Date.now() - this.startTime) / 1000)}s`
-            });
-
-            await this.client.Subscribe(
-                "2dfb47cb42e93df9c8bbccec89425417f4e5a094c9c7d6fcda9dab12e845fd09",
-                883800,
-                this.onPublish.bind(this),
-                this.onStatus.bind(this),
-                this.onError.bind(this),
-                this.onMempool.bind(this)
-            );
-
-            console.log('✅ JungleBus subscription started successfully');
-        } catch (error) {
-            console.error("❌ Error starting subscription:", error);
-            process.exit(1);
-        }
-    }
-
-    async stop() {
-        console.log('\n🛑 Stopping scanner...');
-        
-        // Wait for pending transactions to complete
-        if (this.pendingTransactions.size > 0) {
-            console.log(`⏳ Waiting for ${this.pendingTransactions.size} pending transactions to complete...`);
-            
-            while (this.pendingTransactions.size > 0) {
-                console.log(`📊 Remaining transactions: ${this.pendingTransactions.size}`);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-        }
-
-        console.log('🔌 Disconnecting from JungleBus...');
-        await this.client.Disconnect();
-        
-        console.log('👋 Waiting for worker to exit...');
-        await new Promise(resolve => this.dbWorker.once('exit', resolve));
-        
-        console.log('✅ Scanner stopped successfully');
-    }
-
-    private onStatus(message: any) {
-        const statusMessages: Record<number, string> = {
-            [ControlMessageStatusCode.BLOCK_DONE]: "✅ BLOCK PROCESSED",
-            [ControlMessageStatusCode.WAITING]: "⏳ WAITING FOR NEW BLOCK",
-            [ControlMessageStatusCode.REORG]: "⚠️ BLOCKCHAIN REORG DETECTED",
-            [ControlMessageStatusCode.ERROR]: "❌ JUNGLEBUS ERROR"
+            blockHeight: tx.block_height || 0,
+            timestamp: tx.block_time ? tx.block_time * 1000 : Date.now(),
+            inputs: fullTx?.inputs || [],
+            outputs: fullTx?.outputs || [],
+            data: fullTx?.data || [],
+            contexts: fullTx?.contexts || []
         };
 
-        const status = statusMessages[message.statusCode] || "❓ UNKNOWN STATUS";
-        console.log(`${status}:`, {
-            statusCode: message.statusCode,
-            block: message.block,
-            timestamp: new Date().toISOString(),
-            pendingTransactions: this.pendingTransactions.size,
-            uptime: `${Math.floor((Date.now() - this.startTime) / 1000)}s`
-        });
-    }
-
-    private onError(err: any) {
-        console.error("❌ JungleBus error:", {
-            error: err instanceof Error ? {
-                message: err.message,
-                name: err.name,
-                stack: err.stack
-            } : err,
-            timestamp: new Date().toISOString(),
-            pendingTransactions: this.pendingTransactions.size
-        });
-    }
-
-    private onMempool(tx: any) {
-        console.log("💭 MEMPOOL TRANSACTION:", {
-            txid: tx.id,
-            timestamp: new Date().toISOString()
-        });
-        this.onPublish(tx); // Process mempool transactions the same way
+        const post = await parseMapTransaction(mappedTx);
+        
+        if (post) {
+            // Send to database worker
+            dbWorker.send({
+                type: 'transaction',
+                data: post
+            });
+            
+            console.log('✅ MAP transaction processed:', {
+                txid: post.txid,
+                content: post.content?.text,
+                author: post.author,
+                metadata: post.metadata,
+                imageCount: post.images?.length
+            });
+        } else {
+            console.log('❌ Failed to parse MAP transaction:', tx.id);
+        }
+    } catch (error) {
+        console.error('❌ Error processing transaction:', error);
     }
 }
 
-// Create and start the scanner
-console.log('\n🎬 Initializing scanner process...');
-const scanner = new UnifiedScanner();
+// Process transactions in order
+async function processTransactions(transactions: JungleBusTransaction[]): Promise<void> {
+    try {
+        console.log(`\n🔄 Processing ${transactions.length} transactions`);
+        
+        for (const tx of transactions) {
+            const startTime = Date.now();
+            
+            try {
+                // Basic transaction validation
+                if (!tx || !tx.id) {
+                    console.error('❌ Invalid transaction data:', tx);
+                    continue;
+                }
 
-// Handle graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('\n📣 Received shutdown signal...');
-    await scanner.stop();
-    console.log('👋 Process exiting gracefully');
-    process.exit(0);
-});
+                console.log('\n✅ Transaction data retrieved:', {
+                    txid: tx.id,
+                    outputs: tx.outputs?.length || 0,
+                    block_height: tx.block_height
+                });
+
+                await processTransaction(tx);
+                
+                const duration = Date.now() - startTime;
+                console.log(`⚡ Transaction fetch completed in ${duration}ms`);
+            } catch (error) {
+                console.error('❌ Error processing transaction:', {
+                    txid: tx.id,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error in transaction batch processing:', error);
+    }
+}
+
+// Initialize scanner
+async function initializeScanner(): Promise<void> {
+    try {
+        console.log('\n🚀 Starting transaction scanner...');
+        
+        // Initialize database worker
+        initializeDbWorker();
+
+        // Initialize JungleBus client
+        console.log('🌟 Initializing JungleBus client...');
+        
+        const client = new JungleBus("wss://junglebus.gorillapool.io", {
+            useSSL: true,
+            onConnected(ctx) {
+                console.log("🔌 Connected to JungleBus:", ctx);
+            },
+            onConnecting(ctx) {
+                console.log("🔄 Connecting to JungleBus:", ctx);
+            },
+            onDisconnected(ctx) {
+                console.log("❌ Disconnected from JungleBus:", ctx);
+            },
+            onError(ctx) {
+                console.error("❌ JungleBus error:", ctx);
+            }
+        });
+
+        // Subscribe to MAP protocol transactions
+        await client.Subscribe(
+            "2dfb47cb42e93df9c8bbccec89425417f4e5a094c9c7d6fcda9dab12e845fd09",
+            883800,
+            async (tx: JungleBusTransaction) => {
+                try {
+                    console.log("\n📥 Received transaction:", tx.id);
+
+                    await processTransaction(tx);
+                } catch (error) {
+                    console.error('❌ Error processing transaction:', error);
+                }
+            },
+            (msg: any) => {
+                if (msg.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
+                    console.log("✅ Block processed:", msg.block);
+                } else if (msg.statusCode === ControlMessageStatusCode.WAITING) {
+                    console.log("⏳ Waiting for new block:", msg);
+                } else if (msg.statusCode === ControlMessageStatusCode.REORG) {
+                    console.log("⚠️ Reorg triggered:", msg);
+                } else if (msg.statusCode === ControlMessageStatusCode.ERROR) {
+                    console.error("❌ JungleBus error:", msg);
+                }
+            },
+            (error: any) => {
+                console.error("❌ Subscription error:", error);
+            }
+        );
+
+        console.log('✅ Subscribed to MAP protocol transactions');
+        console.log('✅ Scanner initialization complete');
+
+    } catch (error) {
+        console.error('❌ Failed to initialize scanner:', error);
+        process.exit(1);
+    }
+}
 
 // Start the scanner
-scanner.start();
+initializeScanner().catch(error => {
+    console.error('❌ Fatal error:', error);
+    process.exit(1);
+});
 
 // Helper function to fetch transaction data
 async function fetchTransaction(txid: string): Promise<any> {
     try {
-        const startTime = Date.now();
-        const response = await axios.get(`https://junglebus.gorillapool.io/v1/transaction/get/${txid}`);
-        console.log(`⚡ Transaction fetch completed in ${Date.now() - startTime}ms`);
+        const response = await axios.get(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/raw`);
+        if (!response.data) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         return response.data;
     } catch (error) {
-        console.error('❌ Error fetching transaction:', {
-            txid,
-            error: error instanceof Error ? {
-                message: error.message,
-                name: error.name,
-                code: (error as any).code
-            } : 'Unknown error'
-        });
+        console.error('❌ Error fetching transaction:', error);
         throw error;
     }
-} 
+}

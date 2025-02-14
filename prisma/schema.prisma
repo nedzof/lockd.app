@@ -25,7 +25,7 @@ model Post {
   metadata       Json?
   is_locked      Boolean      @default(false)
   lock_duration  Int?
-  raw_image_data String? @db.Text
+  raw_image_data Bytes?
   image_format   String?
   image_source   String?
   is_vote        Boolean      @default(false)
@@ -38,20 +38,20 @@ model Post {
 }
 
 model VoteOption {
-  id             String   @id
-  txid           String   @unique
-  postId         String
-  post_txid      String
-  content        String
-  author_address String
-  created_at     DateTime
-  lock_amount    Int
-  lock_duration  Int
-  unlock_height  Int
-  current_height Int
+  id              String   @id
+  txid            String   @unique
+  postId          String
+  post_txid       String
+  content         String
+  author_address  String
+  created_at      DateTime
+  lock_amount     Int
+  lock_duration   Int
+  unlock_height   Int
+  current_height  Int
   lock_percentage Float
-  tags           String[]
-  post           Post     @relation(fields: [post_txid], references: [txid])
+  tags            String[]
+  post            Post     @relation(fields: [post_txid], references: [txid])
 
   @@index([postId])
   @@index([post_txid])

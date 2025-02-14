@@ -1,19 +1,21 @@
 {
   "name": "lockd.app",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "description": "Blockchain transaction scanner for MAP protocol",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"vite\" \"tsx watch src/server.ts\"",
-    "build-worker": "tsc -p tsconfig.worker.json",
-    "scanner": "tsx watch src/services/scanner/unifiedScanner.ts",
+    "start": "tsx src/server.ts",
+    "scanner": "tsx src/services/scanner/unifiedScanner.ts",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "@gorillapool/js-junglebus": "^0.3.0",
+    "@gorillapool/js-junglebus": "^0.4.4",
     "@prisma/client": "^6.3.1",
     "@supabase/supabase-js": "^2.48.1",
     "@tanstack/react-query": "^4.36.1",
@@ -30,6 +32,7 @@
     "express": "^4.21.2",
     "jimp": "^1.6.0",
     "node-fetch": "^2.7.0",
+    "prisma": "^6.3.1",
     "react": "^18.2.0",
     "react-chartjs-2": "^5.3.0",
     "react-dom": "^18.2.0",
@@ -64,7 +67,6 @@
     "jest": "^29.7.0",
     "nodemon": "^3.1.0",
     "postcss": "^8.4.35",
-    "prisma": "^6.3.1",
     "rollup-plugin-node-polyfills": "^0.2.1",
     "tailwindcss": "^3.4.1",
     "ts-jest": "^29.1.1",

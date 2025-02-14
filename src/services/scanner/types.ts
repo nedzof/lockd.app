@@ -3,18 +3,26 @@ import { Prisma } from '@prisma/client';
 // JungleBus Types
 export interface JungleBusTransaction {
   id: string;
-  transaction: string;
-  addresses: string[];
   block_hash?: string;
-  block_height: number;
+  block_height?: number;
   block_time?: number;
   block_index?: number;
-  merkle_proof?: any;
+  data?: string[];
+  addresses?: string[];
+  inputs?: {
+    address?: string;
+    txid?: string;
+    vout?: number;
+    script?: string;
+  }[];
+  outputs?: {
+    value?: number;
+    script?: string;
+    addresses?: string[];
+  }[];
   output_types?: string[];
   contexts?: string[];
   sub_contexts?: string[];
-  data?: string[];
-  outputs?: JungleBusOutput[];
 }
 
 export interface JungleBusOutput {
@@ -260,35 +268,16 @@ export interface ParsedPost {
   metadata: {
     app: string;
     version: string;
-    lock?: {
-      isLocked: boolean;
-      duration: number;
-      unlockHeight?: number;
-    };
+    type?: string;
   };
-  vote?: {
-    question: string;
-    totalOptions: number;
-    optionsHash: string;
-    options: {
-      text: string;
-      index: number;
-      lockAmount?: number;
-      lockDuration?: number;
-      unlockHeight?: number;
-      currentHeight?: number;
-      lockPercentage?: number;
-    }[];
-  };
-  tags: string[];
+  images: {
+    data: Buffer | null;
+    contentType: string;
+    dataURL: string | null;
+  }[];
   timestamp: number;
   blockHeight: number;
-  images: {
-    data: string;
-    contentType: string;
-    encoding: string;
-    dataURL?: string;
-  }[];
+  tags: string[];
 }
 
 export interface ContentOutput {

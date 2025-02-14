@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import * as dotenv from 'dotenv';
+import dotenv from 'dotenv';
 
 // Load environment variables
 dotenv.config();
@@ -13,6 +13,10 @@ const prisma = new PrismaClient({
 interface VoteOptionInput {
     text: string;
     index: number;
+    lockAmount?: number;
+    lockDuration?: number;
+    unlockHeight?: number;
+    lockPercentage?: number;
 }
 
 interface Vote {
@@ -31,9 +35,37 @@ interface Post {
     blockHeight: number;
     timestamp: number;
     content?: {
+        text?: string;
         description?: string;
     };
-    imageData?: Buffer | null;
+    images?: {
+        data?: Buffer | null;
+        contentType?: string;
+        dataURL?: string;
+    }[];
+    author?: string;
+    tags?: string[];
+    vote?: Vote;
+    metadata: {
+        lock?: Lock;
+    };
+}
+
+interface ParsedPost {
+    txid: string;
+    blockHeight: number;
+    timestamp: number;
+    content?: {
+        text?: string;
+        description?: string;
+    };
+    images?: {
+        data?: Buffer | null;
+        contentType?: string;
+        dataURL?: string;
+    }[];
+    author?: string;
+    tags?: string[];
     vote?: Vote;
     metadata: {
         lock?: Lock;
@@ -59,97 +91,139 @@ function convertMetadataToJson(metadata: any): Record<string, any> {
 }
 
 // Process a transaction
-async function processTransaction(prisma: PrismaClient, post: Post) {
+async function processTransaction(post: ParsedPost) {
     try {
-        console.log('🔄 Processing transaction:', {
-            txid: post.txid,
-            timestamp: new Date().toISOString()
-        });
+        console.log('\n💾 Processing transaction for database:', post.txid);
 
-        // Check if post already exists
-        const existingPost = await prisma.post.findUnique({
-            where: { txid: post.txid }
-        });
-
-        if (existingPost) {
-            console.log('⚠️ Post already exists:', {
+        // Validate post data
+        if (!post.txid || (!post.content?.text && !post.images?.length)) {
+            console.warn('⚠️ Invalid post data:', {
                 txid: post.txid,
-                timestamp: new Date().toISOString()
+                hasContent: !!post.content?.text,
+                hasImages: post.images?.length > 0
             });
             return;
         }
 
-        // Create post
-        const dbPost = await prisma.post.create({
-            data: {
+        // Prepare image data
+        const imageData = post.images?.[0]?.data;
+        const mediaType = post.images?.[0]?.contentType;
+
+        // Extract metadata
+        const metadata = post.metadata || {};
+        const postId = metadata.postId || post.txid;
+        const isVote = metadata.type === 'vote_question' || metadata.type === 'vote_option';
+        const lockDuration = metadata.lock?.duration;
+        const unlockHeight = metadata.lock?.unlockHeight;
+        const isLocked = !!metadata.lock?.isLocked;
+
+        console.log('📦 Saving post:', {
+            txid: post.txid,
+            postId,
+            contentLength: post.content?.text?.length || 0,
+            hasAuthor: !!post.author,
+            mediaType: mediaType || 'none',
+            imageSize: imageData?.length || 0,
+            isVote,
+            isLocked
+        });
+
+        // Create or update post in database
+        const result = await prisma.post.upsert({
+            where: { txid: post.txid },
+            create: {
                 id: post.txid,
                 txid: post.txid,
-                postId: post.txid,
-                content: post.content?.description || '',
-                author_address: '',
-                block_height: post.blockHeight,
+                postId: postId,
+                content: post.content?.text || '',
+                author_address: post.author || '',
+                media_type: mediaType || 'none',
+                raw_image_data: imageData || null,
                 created_at: new Date(post.timestamp),
-                is_vote: hasVote(post),
-                media_type: '',
-                description: post.content?.description || '',
-                tags: [],
-                metadata: convertMetadataToJson(post.metadata),
-                raw_image_data: post.imageData?.toString('base64') || null,
-                is_locked: !!post.metadata.lock?.isLocked,
-                lock_duration: post.metadata.lock?.duration || null,
-                unlock_height: post.metadata.lock?.unlockHeight || null
+                metadata: metadata,
+                tags: post.tags || [],
+                is_vote: isVote,
+                is_locked: isLocked,
+                lock_duration: lockDuration,
+                unlock_height: unlockHeight,
+                block_height: post.blockHeight,
+                image_format: mediaType?.split('/')?.[1] || null,
+                description: post.content?.description || null
+            },
+            update: {
+                content: post.content?.text || '',
+                author_address: post.author || '',
+                media_type: mediaType || 'none',
+                raw_image_data: imageData || null,
+                created_at: new Date(post.timestamp),
+                metadata: metadata,
+                tags: post.tags || [],
+                is_vote: isVote,
+                is_locked: isLocked,
+                lock_duration: lockDuration,
+                unlock_height: unlockHeight,
+                block_height: post.blockHeight,
+                image_format: mediaType?.split('/')?.[1] || null,
+                description: post.content?.description || null
             }
         });
 
-        // Create vote options if present
-        if (hasVote(post) && post.vote?.options) {
-            const options = post.vote.options.map((option: VoteOptionInput, index: number) => ({
-                id: `${post.txid}:vote_option:${index}`,
-                txid: `${post.txid}:vote_option:${index}`,
-                postId: post.txid,
-                post_txid: post.txid,
-                content: option.text,
-                author_address: '',
-                created_at: new Date(post.timestamp),
-                lock_amount: 0,
-                lock_duration: 0,
-                unlock_height: 0,
-                current_height: post.blockHeight,
-                lock_percentage: 0,
-                tags: []
-            }));
+        console.log('✅ Saved post:', {
+            id: result.id,
+            txid: result.txid,
+            postId: result.postId,
+            contentLength: result.content?.length || 0,
+            mediaType: result.media_type,
+            imageSize: result.raw_image_data?.length || 0,
+            metadata: result.metadata,
+            isVote: result.is_vote,
+            isLocked: result.is_locked
+        });
 
-            await prisma.voteOption.createMany({
-                data: options,
-                skipDuplicates: true
+        // If this is a vote option, create the vote option record
+        if (metadata.type === 'vote_option') {
+            const voteOption = await prisma.voteOption.upsert({
+                where: { txid: post.txid },
+                create: {
+                    id: post.txid,
+                    txid: post.txid,
+                    postId: postId,
+                    post_txid: metadata.parentTxid || post.txid,
+                    content: post.content?.text || '',
+                    author_address: post.author || '',
+                    created_at: new Date(post.timestamp),
+                    lock_amount: metadata.lockAmount || 0,
+                    lock_duration: metadata.lockDuration || 0,
+                    unlock_height: metadata.unlockHeight || 0,
+                    current_height: post.blockHeight,
+                    lock_percentage: metadata.lockPercentage || 0,
+                    tags: post.tags || []
+                },
+                update: {
+                    content: post.content?.text || '',
+                    author_address: post.author || '',
+                    created_at: new Date(post.timestamp),
+                    lock_amount: metadata.lockAmount || 0,
+                    lock_duration: metadata.lockDuration || 0,
+                    unlock_height: metadata.unlockHeight || 0,
+                    current_height: post.blockHeight,
+                    lock_percentage: metadata.lockPercentage || 0,
+                    tags: post.tags || []
+                }
+            });
+
+            console.log('✅ Saved vote option:', {
+                id: voteOption.id,
+                txid: voteOption.txid,
+                postId: voteOption.postId,
+                content: voteOption.content,
+                lockAmount: voteOption.lock_amount,
+                lockDuration: voteOption.lock_duration
             });
         }
 
-        console.log('✅ Transaction processed successfully:', {
-            txid: post.txid,
-            timestamp: new Date().toISOString()
-        });
-
-        // Send success message to parent
-        process.send?.({
-            type: 'transaction_processed',
-            txid: post.txid
-        });
-    } catch (error: any) {
-        console.error('❌ Error processing transaction:', {
-            txid: post.txid,
-            error: error.message,
-            timestamp: new Date().toISOString()
-        });
-
-        // Send error message to parent
-        process.send?.({
-            type: 'error',
-            error: {
-                txid: post.txid,
-                message: error.message
-            }
-        });
+    } catch (error) {
+        console.error('❌ Error processing transaction:', error);
     }
 }
 
@@ -166,12 +240,16 @@ process.on('message', async (message: any) => {
     }
 
     switch (message.type) {
-        case 'process_transaction':
+        case 'init':
+            console.log('🌟 Initializing worker...');
+            await initializeWorker();
+            break;
+        case 'transaction':
             if (!message.data) {
                 console.error('❌ No transaction data provided');
                 return;
             }
-            await processTransaction(prisma, message.data);
+            await processTransaction(message.data);
             break;
         default:
             console.error('❌ Unknown message type:', message.type);
@@ -179,50 +257,48 @@ process.on('message', async (message: any) => {
 });
 
 // Database health check
-async function checkDatabaseConnection() {
+async function checkDatabaseConnection(): Promise<void> {
     try {
         const result = await prisma.$queryRaw`SELECT current_timestamp, current_database(), version()`;
         console.log('✅ Database connection verified:', result);
-        return true;
     } catch (error) {
         console.error('❌ Database connection failed:', error);
-        return false;
+        process.exit(1);
     }
 }
 
 // Initialize worker
-async function initializeWorker() {
+async function initializeWorker(): Promise<void> {
     try {
-        // Check database connection
-        const isConnected = await checkDatabaseConnection();
-        if (!isConnected) {
-            throw new Error('Database connection failed');
-        }
-
+        await checkDatabaseConnection();
         console.log('✅ Worker initialization complete');
+        if (process.send) {
+            process.send({ type: 'initialized' });
+        }
     } catch (error) {
         console.error('❌ Worker initialization failed:', error);
         process.exit(1);
     }
 }
 
-// Start worker initialization
-console.log('🌟 Worker process starting...');
-initializeWorker().catch(error => {
-    console.error('❌ Fatal error during worker initialization:', {
-        error: error.message,
-        timestamp: new Date().toISOString()
-    });
-    process.exit(1);
-});
-
-// Handle graceful shutdown
-process.on('SIGTERM', async () => {
-    console.log('📣 Received SIGTERM signal, cleaning up...');
-    await prisma.$disconnect();
-    console.log('✅ Database disconnected cleanly');
+// Handle process termination
+process.on('SIGINT', () => {
+    console.log('🧹 Worker received SIGINT');
     process.exit(0);
 });
+
+process.on('SIGTERM', () => {
+    console.log('🧹 Worker received SIGTERM');
+    process.exit(0);
+});
+
+process.on('exit', (code) => {
+    console.log(`🧹 Worker exiting with code ${code}`);
+    prisma.$disconnect();
+});
+
+// Start worker
+console.log('🌟 Worker process starting...');
 
 // Set up logging to file
 const logFile = 'worker.log';
