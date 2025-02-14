@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"vite\" \"tsx watch src/server.ts\"",
-    "build-worker": "tsc src/services/scanner/unifiedDbWorker.ts --outDir dist/scanner --module commonjs",
+    "build-worker": "tsc -p tsconfig.worker.json",
     "scanner": "tsx watch src/services/scanner/unifiedScanner.ts",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
@@ -40,7 +40,7 @@
     "scrypt-ord": "^1.0.17",
     "scrypt-ts": "^1.4.4",
     "sharp": "^0.33.5",
-    "tsx": "^4.7.0",
+    "tsx": "^3.12.2",
     "yours-wallet-provider": "^3.5.0",
     "zustand": "^4.4.7"
   },

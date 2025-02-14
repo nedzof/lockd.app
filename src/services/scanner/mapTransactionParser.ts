@@ -183,8 +183,13 @@ export async function parseMapTransaction(tx: JungleBusTransaction): Promise<Par
       } : undefined
     };
 
-    // Parse vote data if present
-    const vote = mapFields.is_vote ? {
+    // Parse vote data if present - check both is_vote flag and vote-related fields
+    const hasVoteFields = mapFields.is_vote || 
+                         mapFields.vote_question || 
+                         mapFields.total_options || 
+                         Object.keys(mapFields).some(key => key.startsWith('option_'));
+    
+    const vote = hasVoteFields ? {
       question: mapFields.vote_question || '',
       totalOptions: mapFields.total_options || 0,
       optionsHash: createHash('sha256').update(tx.id + ':options').digest('hex'),

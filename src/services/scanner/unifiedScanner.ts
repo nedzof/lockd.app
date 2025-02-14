@@ -2,7 +2,7 @@ import { JungleBusClient, Transaction as JungleBusTransaction, ControlMessageSta
 import type { JungleBusTransaction as JungleBusTransactionType } from './types';
 import type { ParsedPost } from './types';
 import axios from 'axios';
-import { Worker } from 'worker_threads';
+import { fork } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { parseMapTransaction } from './mapTransactionParser.js';
@@ -57,11 +57,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Create a worker for database operations
-const workerPath = join(__dirname, 'unifiedDbWorker.js');
+const workerPath = join(__dirname, 'unifiedDbWorker.ts');
+console.log(`📂 Creating database worker from: ${workerPath}`);
+
+// Verify worker file exists
+if (!fs.existsSync(workerPath)) {
+    console.error(`❌ Worker file not found at: ${workerPath}`);
+    process.exit(1);
+}
+
+// Use child process with ts-node
+const dbWorker = fork(workerPath, [], {
+    execArgv: ['--loader', 'ts-node/esm']
+});
 
 export default class UnifiedScanner {
     private client: JungleBusClient;
-    private dbWorker: Worker;
+    private dbWorker: any;
     private pendingTransactions: Map<string, number>;
     private workerAvailable: boolean;
     private startTime: number;
@@ -71,8 +83,7 @@ export default class UnifiedScanner {
         this.client = new JungleBusClient(process.env.JUNGLEBUS_URL || 'https://junglebus.gorillapool.io');
         console.log('✅ JungleBus client initialized');
         
-        console.log(`📂 Creating database worker from: ${workerPath}`);
-        this.dbWorker = new Worker(workerPath);
+        this.dbWorker = dbWorker;
         this.pendingTransactions = new Map();
         this.workerAvailable = true;
         this.startTime = Date.now();
@@ -99,25 +110,22 @@ export default class UnifiedScanner {
                 this.workerAvailable = true;
                 console.error(`❌ Worker reported error:`, {
                     txid: message.error.txid,
+                    error: message.error,
                     processingTime: `${processingTime}ms`,
-                    error: {
-                        message: message.error.message,
-                        code: message.error.code
-                    },
                     queueSize: this.pendingTransactions.size
                 });
             }
         });
 
         // Handle worker errors
-        this.dbWorker.on('error', (error) => {
+        this.dbWorker.on('error', (error: Error) => {
             console.error('❌ Worker error:', error);
-            this.workerAvailable = true;
         });
 
         // Handle worker exit
-        this.dbWorker.on('exit', (code) => {
-            console.log(`📤 Worker exited with code ${code}`);
+        this.dbWorker.on('exit', (code: number) => {
+            console.error(`❌ Worker exited with code ${code}`);
+            process.exit(1);
         });
     }
 
@@ -147,9 +155,9 @@ export default class UnifiedScanner {
             queueSize: this.pendingTransactions.size
         });
 
-        this.dbWorker.postMessage({
+        this.dbWorker.send({
             type: 'process_transaction',
-            transaction: parsedData
+            data: parsedData
         });
     }
 
