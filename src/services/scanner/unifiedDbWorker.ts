@@ -112,11 +112,127 @@ async function processTransaction(post: ParsedPost) {
         // Extract metadata
         const metadata = post.metadata || {};
         const postId = metadata.postId || post.txid;
-        const isVote = metadata.type === 'vote_question' || metadata.type === 'vote_option';
+        const isVoteOption = metadata.type === 'vote_option' || metadata.isVoteOption;
+        const isVoteQuestion = metadata.type === 'vote_question';
+        const hasVoteOptions = Array.isArray(metadata.voteOptions) && metadata.voteOptions.length > 0;
         const lockDuration = metadata.lock?.duration;
         const unlockHeight = metadata.lock?.unlockHeight;
         const isLocked = !!metadata.lock?.isLocked;
 
+        // If this is a vote option, only create the vote option record
+        if (isVoteOption) {
+            console.log('📦 Saving vote option:', {
+                txid: post.txid,
+                postId,
+                content: post.content?.text,
+                lockAmount: metadata.lockAmount,
+                lockDuration: metadata.lockDuration,
+                parentTxid: metadata.parentTxid,
+                optionIndex: metadata.optionIndex
+            });
+
+            const voteOption = await prisma.voteOption.upsert({
+                where: { txid: post.txid },
+                create: {
+                    id: post.txid,
+                    txid: post.txid,
+                    postId: postId,
+                    post_txid: metadata.parentTxid || post.txid,
+                    content: post.content?.text || '',
+                    author_address: post.author || '',
+                    created_at: new Date(post.timestamp),
+                    lock_amount: metadata.lockAmount || 0,
+                    lock_duration: metadata.lockDuration || 0,
+                    unlock_height: metadata.unlockHeight || 0,
+                    current_height: post.blockHeight,
+                    lock_percentage: metadata.lockPercentage || 0,
+                    option_index: metadata.optionIndex || 0,
+                    tags: post.tags || []
+                },
+                update: {
+                    content: post.content?.text || '',
+                    author_address: post.author || '',
+                    created_at: new Date(post.timestamp),
+                    lock_amount: metadata.lockAmount || 0,
+                    lock_duration: metadata.lockDuration || 0,
+                    unlock_height: metadata.unlockHeight || 0,
+                    current_height: post.blockHeight,
+                    lock_percentage: metadata.lockPercentage || 0,
+                    option_index: metadata.optionIndex || 0,
+                    tags: post.tags || []
+                }
+            });
+
+            console.log('✅ Saved vote option:', {
+                id: voteOption.id,
+                txid: voteOption.txid,
+                postId: voteOption.postId,
+                content: voteOption.content,
+                lockAmount: voteOption.lock_amount,
+                lockDuration: voteOption.lock_duration,
+                parentTxid: voteOption.post_txid,
+                optionIndex: voteOption.option_index
+            });
+            return;
+        }
+
+        // If this post has embedded vote options, create them first
+        if (hasVoteOptions) {
+            console.log('📦 Creating vote options from post:', {
+                postTxid: post.txid,
+                optionCount: metadata.voteOptions.length
+            });
+
+            // Create vote options
+            for (const option of metadata.voteOptions) {
+                const voteOption = await prisma.voteOption.upsert({
+                    where: { 
+                        txid: `${post.txid}_${option.optionIndex}` 
+                    },
+                    create: {
+                        id: `${post.txid}_${option.optionIndex}`,
+                        txid: `${post.txid}_${option.optionIndex}`,
+                        postId: postId,
+                        post_txid: post.txid,
+                        content: option.content || '',
+                        author_address: post.author || '',
+                        created_at: new Date(post.timestamp),
+                        lock_amount: option.lockAmount || 0,
+                        lock_duration: option.lockDuration || 0,
+                        current_height: post.blockHeight,
+                        lock_percentage: option.lockPercentage || 0,
+                        option_index: option.optionIndex || 0,
+                        tags: post.tags || []
+                    },
+                    update: {
+                        content: option.content || '',
+                        author_address: post.author || '',
+                        created_at: new Date(post.timestamp),
+                        lock_amount: option.lockAmount || 0,
+                        lock_duration: option.lockDuration || 0,
+                        current_height: post.blockHeight,
+                        lock_percentage: option.lockPercentage || 0,
+                        option_index: option.optionIndex || 0,
+                        tags: post.tags || []
+                    }
+                });
+
+                console.log('✅ Created vote option from post:', {
+                    id: voteOption.id,
+                    txid: voteOption.txid,
+                    postId: voteOption.postId,
+                    content: voteOption.content,
+                    lockAmount: voteOption.lock_amount,
+                    lockDuration: voteOption.lock_duration,
+                    optionIndex: voteOption.option_index
+                });
+            }
+
+            // Don't create a post record, since this is a vote with options
+            return;
+        }
+
+        // For regular posts (non-vote options), create a post record
         console.log('📦 Saving post:', {
             txid: post.txid,
             postId,
@@ -124,7 +240,7 @@ async function processTransaction(post: ParsedPost) {
             hasAuthor: !!post.author,
             mediaType: mediaType || 'none',
             imageSize: imageData?.length || 0,
-            isVote,
+            isVoteQuestion,
             isLocked
         });
 
@@ -142,7 +258,7 @@ async function processTransaction(post: ParsedPost) {
                 created_at: new Date(post.timestamp),
                 metadata: metadata,
                 tags: post.tags || [],
-                is_vote: isVote,
+                is_vote: isVoteQuestion,
                 is_locked: isLocked,
                 lock_duration: lockDuration,
                 unlock_height: unlockHeight,
@@ -158,7 +274,7 @@ async function processTransaction(post: ParsedPost) {
                 created_at: new Date(post.timestamp),
                 metadata: metadata,
                 tags: post.tags || [],
-                is_vote: isVote,
+                is_vote: isVoteQuestion,
                 is_locked: isLocked,
                 lock_duration: lockDuration,
                 unlock_height: unlockHeight,
@@ -176,52 +292,9 @@ async function processTransaction(post: ParsedPost) {
             mediaType: result.media_type,
             imageSize: result.raw_image_data?.length || 0,
             metadata: result.metadata,
-            isVote: result.is_vote,
+            isVoteQuestion: result.is_vote,
             isLocked: result.is_locked
         });
-
-        // If this is a vote option, create the vote option record
-        if (metadata.type === 'vote_option') {
-            const voteOption = await prisma.voteOption.upsert({
-                where: { txid: post.txid },
-                create: {
-                    id: post.txid,
-                    txid: post.txid,
-                    postId: postId,
-                    post_txid: metadata.parentTxid || post.txid,
-                    content: post.content?.text || '',
-                    author_address: post.author || '',
-                    created_at: new Date(post.timestamp),
-                    lock_amount: metadata.lockAmount || 0,
-                    lock_duration: metadata.lockDuration || 0,
-                    unlock_height: metadata.unlockHeight || 0,
-                    current_height: post.blockHeight,
-                    lock_percentage: metadata.lockPercentage || 0,
-                    tags: post.tags || []
-                },
-                update: {
-                    content: post.content?.text || '',
-                    author_address: post.author || '',
-                    created_at: new Date(post.timestamp),
-                    lock_amount: metadata.lockAmount || 0,
-                    lock_duration: metadata.lockDuration || 0,
-                    unlock_height: metadata.unlockHeight || 0,
-                    current_height: post.blockHeight,
-                    lock_percentage: metadata.lockPercentage || 0,
-                    tags: post.tags || []
-                }
-            });
-
-            console.log('✅ Saved vote option:', {
-                id: voteOption.id,
-                txid: voteOption.txid,
-                postId: voteOption.postId,
-                content: voteOption.content,
-                lockAmount: voteOption.lock_amount,
-                lockDuration: voteOption.lock_duration
-            });
-        }
-
     } catch (error) {
         console.error('❌ Error processing transaction:', error);
     }

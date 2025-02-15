@@ -294,6 +294,37 @@ export async function parseMapTransaction(tx: JungleBusTransaction): Promise<Par
                         break;
                     case 'type':
                         post.metadata.type = value;
+                        // Skip content validation for vote options
+                        if (value === 'vote_option') {
+                            post.metadata.isVoteOption = true;
+                        }
+                        break;
+                    case 'options':
+                        try {
+                            // Parse vote options if they're included in the post
+                            if (typeof value === 'string') {
+                                const options = JSON.parse(value);
+                                if (Array.isArray(options)) {
+                                    post.metadata.voteOptions = options.map(option => ({
+                                        content: option.text || option.content || '',
+                                        lockAmount: parseInt(option.lockAmount) || 0,
+                                        lockDuration: parseInt(option.lockDuration) || 0,
+                                        lockPercentage: parseInt(option.lockPercentage) || 0,
+                                        optionIndex: parseInt(option.optionIndex) || 0
+                                    }));
+                                }
+                            } else if (Array.isArray(value)) {
+                                post.metadata.voteOptions = value.map(option => ({
+                                    content: option.text || option.content || '',
+                                    lockAmount: parseInt(option.lockAmount) || 0,
+                                    lockDuration: parseInt(option.lockDuration) || 0,
+                                    lockPercentage: parseInt(option.lockPercentage) || 0,
+                                    optionIndex: parseInt(option.optionIndex) || 0
+                                }));
+                            }
+                        } catch (e) {
+                            console.warn('⚠️ Error parsing vote options:', e);
+                        }
                         break;
                     case 'app':
                         post.metadata.app = value;
@@ -301,18 +332,23 @@ export async function parseMapTransaction(tx: JungleBusTransaction): Promise<Par
                     case 'postid':
                         post.metadata.postId = value;
                         break;
+                    case 'parenttxid':
+                        post.metadata.parentTxid = value;
+                        break;
+                    case 'lockamount':
+                        post.metadata.lockAmount = parseInt(value);
+                        break;
+                    case 'lockduration':
+                        post.metadata.lockDuration = parseInt(value);
+                        break;
+                    case 'optionindex':
+                        post.metadata.optionIndex = parseInt(value);
+                        break;
+                    case 'lockpercentage':
+                        post.metadata.lockPercentage = parseInt(value);
+                        break;
                     case 'timestamp':
                         post.metadata.timestamp = value;
-                        break;
-                    case 'sequence':
-                        post.metadata.sequence = parseInt(value);
-                        break;
-                    case 'tags':
-                        try {
-                            post.tags = JSON.parse(value);
-                        } catch (e) {
-                            post.tags = value.split(',').map(t => t.trim());
-                        }
                         break;
                     case 'cmd':
                     case 'command':
@@ -323,61 +359,137 @@ export async function parseMapTransaction(tx: JungleBusTransaction): Promise<Par
                             post.metadata.contentType = value;
                         }
                         break;
+                    case 'tags':
+                        try {
+                            post.tags = JSON.parse(value);
+                        } catch (e) {
+                            post.tags = value.split(',').map(t => t.trim());
+                        }
+                        break;
                 }
             }
         }
 
         // Parse outputs for additional data and images
-        for (const output of tx.outputs || []) {
-            if (!output) continue;
-
-            // Try to decode the script
+        for (const output of tx.outputs) {
             try {
-                const scriptData = output;
-                if (!scriptData) continue;
+                const script = output.outputScript;
+                if (!script) continue;
 
-                // Parse hex data
+                // Convert script to Buffer if it's not already
+                const scriptBuffer = Buffer.isBuffer(script) ? script : Buffer.from(script);
+                
+                // Convert to hex string for parsing
+                const scriptHex = scriptBuffer.toString('hex');
+
+                // Check for OP_FALSE OP_RETURN
+                if (!scriptHex.startsWith('006a')) {
+                    continue;
+                }
+
+                // Extract MAP prefix
+                const mapPrefix = scriptHex.slice(4, 8);
+                if (mapPrefix !== '6d01') {
+                    continue;
+                }
+
+                // Extract and parse JSON data
+                const jsonHex = scriptHex.slice(8);
+                const jsonData = Buffer.from(jsonHex, 'hex').toString('utf8');
+
                 try {
-                    const text = Buffer.from(scriptData, 'hex').toString('utf8');
-                    console.log('🔍 Decoded output:', {
-                        hex: scriptData.substring(0, 50),
-                        text: text.substring(0, 100)
-                    });
+                    const data = JSON.parse(jsonData);
+                    console.log('📦 Parsed MAP data:', data);
 
-                    // Check for image data
-                    if (text.startsWith('data:image/')) {
-                        const [header, base64Data] = text.split(',');
-                        if (base64Data) {
-                            const contentType = header.split(';')[0].split(':')[1];
-                            const data = Buffer.from(base64Data, 'base64');
-                            post.images?.push({
-                                data,
-                                contentType,
-                                dataURL: text
-                            });
-                        }
-                    } else if (!post.content.text) {
-                        // Try to parse content from the output if we don't have it yet
-                        const fields = parseMapFields(scriptData);
-                        if (fields.content) {
-                            post.content.text = fields.content;
-                            console.log('📝 Found content in output:', {
-                                length: fields.content.length,
-                                preview: fields.content.substring(0, 100)
-                            });
+                    // Process each key-value pair
+                    for (const [key, value] of Object.entries(data)) {
+                        switch (key.toLowerCase()) {
+                            case 'content':
+                            case 'text':
+                                post.content.text = value;
+                                console.log('📝 Found content in output:', {
+                                    length: value.length,
+                                    preview: value.substring(0, 100)
+                                });
+                                break;
+                            case 'type':
+                                post.metadata.type = value;
+                                // Skip content validation for vote options
+                                if (value === 'vote_option') {
+                                    post.metadata.isVoteOption = true;
+                                }
+                                break;
+                            case 'options':
+                                try {
+                                    // Parse vote options if they're included in the post
+                                    if (typeof value === 'string') {
+                                        const options = JSON.parse(value);
+                                        if (Array.isArray(options)) {
+                                            post.metadata.voteOptions = options.map(option => ({
+                                                content: option.text || option.content || '',
+                                                lockAmount: parseInt(option.lockAmount) || 0,
+                                                lockDuration: parseInt(option.lockDuration) || 0,
+                                                lockPercentage: parseInt(option.lockPercentage) || 0,
+                                                optionIndex: parseInt(option.optionIndex) || 0
+                                            }));
+                                        }
+                                    } else if (Array.isArray(value)) {
+                                        post.metadata.voteOptions = value.map(option => ({
+                                            content: option.text || option.content || '',
+                                            lockAmount: parseInt(option.lockAmount) || 0,
+                                            lockDuration: parseInt(option.lockDuration) || 0,
+                                            lockPercentage: parseInt(option.lockPercentage) || 0,
+                                            optionIndex: parseInt(option.optionIndex) || 0
+                                        }));
+                                    }
+                                } catch (e) {
+                                    console.warn('⚠️ Error parsing vote options:', e);
+                                }
+                                break;
+                            case 'app':
+                                post.metadata.app = value;
+                                break;
+                            case 'postid':
+                                post.metadata.postId = value;
+                                break;
+                            case 'parenttxid':
+                                post.metadata.parentTxid = value;
+                                break;
+                            case 'lockamount':
+                                post.metadata.lockAmount = parseInt(value);
+                                break;
+                            case 'lockduration':
+                                post.metadata.lockDuration = parseInt(value);
+                                break;
+                            case 'optionindex':
+                                post.metadata.optionIndex = parseInt(value);
+                                break;
+                            case 'lockpercentage':
+                                post.metadata.lockPercentage = parseInt(value);
+                                break;
+                            case 'timestamp':
+                                post.metadata.timestamp = value;
+                                break;
+                            case 'cmd':
+                            case 'command':
+                                post.metadata.command = value;
+                                break;
+                            case 'contenttype':
+                                if (value.startsWith('image/')) {
+                                    post.metadata.contentType = value;
+                                }
+                                break;
+                            case 'tags':
+                                try {
+                                    post.tags = JSON.parse(value);
+                                } catch (e) {
+                                    post.tags = value.split(',').map(t => t.trim());
+                                }
+                                break;
                         }
                     }
-                } catch (error) {
-                    // Not valid UTF-8, might be binary data
-                    if (isImageBuffer(Buffer.from(scriptData, 'hex'))) {
-                        const data = Buffer.from(scriptData, 'hex');
-                        const contentType = getImageContentType(data);
-                        post.images?.push({
-                            data,
-                            contentType,
-                            dataURL: `data:${contentType};base64,${data.toString('base64')}`
-                        });
-                    }
+                } catch (e) {
+                    console.error(' Error parsing JSON data:', e);
                 }
             } catch (error) {
                 console.warn('⚠️ Error parsing output:', error);
@@ -385,8 +497,8 @@ export async function parseMapTransaction(tx: JungleBusTransaction): Promise<Par
             }
         }
 
-        // Validate required fields
-        if (!post.content?.text && (!post.images || post.images.length === 0)) {
+        // Validate required fields - skip validation for vote options
+        if (!post.metadata.isVoteOption && !post.content?.text && (!post.images || post.images.length === 0)) {
             console.log('❌ No content or images found in transaction');
             return null;
         }
