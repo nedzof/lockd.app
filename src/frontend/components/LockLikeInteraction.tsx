@@ -31,6 +31,27 @@ export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike 
   const [showInput, setShowInput] = React.useState(false);
   const [amount, setAmount] = React.useState(DEFAULT_LOCKLIKE_AMOUNT.toString());
 
+  // Handle escape key press and body scroll lock
+  React.useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showInput) {
+        setShowInput(false);
+      }
+    };
+
+    if (showInput) {
+      document.addEventListener('keydown', handleEscape);
+      // Prevent body scrolling when modal is open
+      document.body.style.overflow = 'hidden';
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      // Restore body scrolling when modal is closed
+      document.body.style.overflow = 'unset';
+    };
+  }, [showInput]);
+
   // Fetch wallet balance when showing input
   React.useEffect(() => {
     if (showInput && isConnected) {
@@ -216,7 +237,7 @@ export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike 
                 <div className="flex min-h-full items-center justify-center p-4">
                   {/* Modal panel */}
                   <div 
-                    className="relative transform overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow-xl transition-all w-full max-w-md"
+                    className="relative transform overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow-xl transition-all w-full max-w-lg"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {/* Close button */}
@@ -232,46 +253,58 @@ export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike 
                     </div>
 
                     {/* Content */}
-                    <div className="p-6">
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                    <div className="p-8">
+                      <h3 className="text-2xl font-semibold text-gray-900 dark:text-white mb-6">
                         Lock BSV
                       </h3>
                       
-                      <div className="space-y-4">
+                      <div className="space-y-6">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          <label className="block text-base font-medium text-gray-700 dark:text-gray-300 mb-2">
                             Amount (BSV)
                           </label>
                           <input
                             type="number"
                             value={amount}
                             onChange={handleAmountChange}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleLockLike();
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                setShowInput(false);
+                              }
+                            }}
                             onWheel={(e) => {
-                              e.preventDefault();
+                              // Instead of preventing default (which causes the error),
+                              // we handle the wheel event directly
                               const delta = e.deltaY > 0 ? -1 : 1;
                               const currentSats = Math.floor(parseFloat(amount) * SATS_PER_BSV);
                               const newSats = Math.max(MIN_SATS, currentSats + delta);
                               setAmount((newSats / SATS_PER_BSV).toString());
+                              // Keep focus on the input
+                              e.currentTarget.focus();
                             }}
-                            className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-700 shadow-sm focus:border-orange-500 focus:ring-orange-500 bg-white dark:bg-gray-900 text-sm"
+                            className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-700 shadow-sm focus:border-orange-500 focus:ring-orange-500 bg-white dark:bg-gray-900 text-lg py-3 px-4"
                             placeholder="0.00000000"
                             min="0"
                             max={balance.bsv}
                             step={1 / SATS_PER_BSV}
                           />
-                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
                             Available balance: {balance.bsv.toLocaleString(undefined, {
                               minimumFractionDigits: 0,
                               maximumFractionDigits: 8
                             })} BSV
                           </p>
-                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
                             Locks for 1 block (≈ 10 minutes)
                           </p>
                         </div>
                         <button
                           onClick={handleLockLike}
-                          className="w-full px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
+                          className="w-full px-6 py-3 text-base font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 transition-colors duration-200"
                         >
                           Lock BSV
                         </button>
