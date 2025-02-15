@@ -41,7 +41,7 @@ declare module 'yours-wallet-provider' {
     rawtx: string;
   }
 
-  export interface YoursWallet {
+  export interface WalletMethods {
     isReady: boolean;
     connect: () => Promise<void>;
     disconnect: () => Promise<void>;
@@ -60,17 +60,15 @@ declare module 'yours-wallet-provider' {
     }>>;
   }
 
-  export type YoursProviderType = Omit<YoursWallet, 'off'>;
-
   export interface WalletProvider {
-    useYoursWallet: () => YoursProviderType;
+    useYoursWallet: () => WalletMethods;
     YoursProvider: (props: { children: ReactNode }) => JSX.Element;
   }
 }
 
 declare global {
   interface Window {
-    yours: import('yours-wallet-provider').YoursWallet | undefined;
+    yours: import('yours-wallet-provider').WalletMethods;
   }
 }
 

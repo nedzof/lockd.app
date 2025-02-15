@@ -1,7 +1,7 @@
-import express, { Request, Response, RequestHandler } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 
-const router = express.Router();
+const router = Router();
 const prisma = new PrismaClient();
 
 interface LockLikeRequest {
@@ -12,12 +12,28 @@ interface LockLikeRequest {
   txid: string;    // The lock transaction id
 }
 
-const handleLockLike: RequestHandler = async (req, res) => {
+interface LockLikeResponse {
+  id: string;
+  txid: string;
+  postId: string;
+  amount: number;
+  handle: string;
+  lockPeriod: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+const handleLockLike = async (
+  req: Request<{}, any, LockLikeRequest>,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
-    const { postTxid, handle, amount, nLockTime, txid } = req.body as LockLikeRequest;
+    const { postTxid, handle, amount, nLockTime, txid } = req.body;
 
     if (!postTxid || !amount || !handle || !nLockTime || !txid) {
-      return res.status(400).json({ message: 'Missing required fields' });
+      res.status(400).json({ message: 'Missing required fields' });
+      return;
     }
 
     // First find the post by its txid
@@ -28,7 +44,8 @@ const handleLockLike: RequestHandler = async (req, res) => {
     });
 
     if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
+      res.status(404).json({ message: 'Post not found' });
+      return;
     }
 
     // Create the lock like record using the post's id
@@ -54,10 +71,10 @@ const handleLockLike: RequestHandler = async (req, res) => {
       }
     });
 
-    return res.json(lockLike);
+    res.json(lockLike);
   } catch (error) {
     console.error('Error creating lock like:', error);
-    return res.status(500).json({ 
+    res.status(500).json({ 
       message: 'Error creating lock like', 
       error: error instanceof Error ? error.message : 'Unknown error' 
     });

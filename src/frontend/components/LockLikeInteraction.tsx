@@ -7,7 +7,7 @@ import { useWallet } from '../providers/WalletProvider';
 import { toast } from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
 import { createPortal } from 'react-dom';
-import type { YoursWallet } from 'yours-wallet-provider';
+import type { WalletMethods, SendResponse } from 'yours-wallet-provider';
 
 interface LockLikeInteractionProps {
   postTxid?: string;
@@ -129,14 +129,18 @@ export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike 
       const nLockTime = currentBlockHeight + 1; // Lock for 1 block
 
       // Create the lock transaction
-      const { txid } = await wallet.lockBsv([{
+      const lockResponse = await wallet.lockBsv([{
         address: addresses.identityAddress,
         blockHeight: nLockTime,
         sats: parsedAmount * SATS_PER_BSV,
       }]);
 
+      if (!lockResponse) {
+        throw new Error('Failed to create lock transaction');
+      }
+
       // Create the lock like record
-      const response = await fetch('http://localhost:3001/api/lockLikes', {
+      const apiResponse = await fetch('http://localhost:3001/api/lockLikes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -146,12 +150,12 @@ export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike 
           handle: addresses.identityAddress,
           amount: parsedAmount * SATS_PER_BSV,
           nLockTime,
-          txid,
+          txid: lockResponse.txid,
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
+      if (!apiResponse.ok) {
+        const error = await apiResponse.json();
         throw new Error(error.message || 'Error creating lock like');
       }
 
