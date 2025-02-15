@@ -30,7 +30,7 @@ model Post {
   image_source   String?
   is_vote        Boolean      @default(false)
   vote_options   VoteOption[]
-  lock_likes     LockLike[]
+  lock_likes     LockLike[]   @relation("PostLockLikes")
 
   @@index([author_address])
   @@index([block_height])
@@ -39,8 +39,8 @@ model Post {
 }
 
 model VoteOption {
-  id              String   @id
-  txid            String   @unique
+  id              String     @id
+  txid            String     @unique
   postId          String
   post_txid       String
   content         String
@@ -52,24 +52,29 @@ model VoteOption {
   current_height  Int
   lock_percentage Float
   tags            String[]
-  post            Post     @relation(fields: [post_txid], references: [txid])
+  post            Post       @relation(fields: [post_txid], references: [txid])
+  lock_likes      LockLike[] @relation("VoteOptionLockLikes")
 
   @@index([postId])
   @@index([post_txid])
 }
 
 model LockLike {
-  id          String   @id @default(cuid())
-  txid        String   @unique
-  postId      String
-  amount      Int
-  handle      String
-  lockPeriod  Int
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-  post        Post     @relation(fields: [postId], references: [id])
+  id              String      @id @default(cuid())
+  txid            String      @unique
+  amount          Int
+  handle          String
+  lockPeriod      Int
+  created_at      DateTime    @default(now())
+  updated_at      DateTime    @updatedAt
+  // Optional relations to either Post or VoteOption
+  post_id         String?
+  vote_option_id  String?
+  post            Post?       @relation("PostLockLikes", fields: [post_id], references: [id])
+  vote_option     VoteOption? @relation("VoteOptionLockLikes", fields: [vote_option_id], references: [id])
 
-  @@index([postId])
   @@index([handle])
   @@index([created_at])
+  @@index([post_id])
+  @@index([vote_option_id])
 }

@@ -7,7 +7,6 @@ import { useWallet } from '../providers/WalletProvider';
 import { toast } from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
 import { createPortal } from 'react-dom';
-import type { WalletMethods, SendResponse } from 'yours-wallet-provider';
 
 interface LockLikeInteractionProps {
   postTxid?: string;
