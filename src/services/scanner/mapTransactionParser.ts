@@ -261,16 +261,20 @@ export async function parseMapTransaction(tx: JungleBusTransaction): Promise<Par
         console.log('\n🔍 Parsing MAP transaction:', tx.txid);
         
         // Initialize post data
+        console.log('🏷️ Transaction addresses:', tx.addresses);
+
         const post: ParsedPost = {
             txid: tx.txid,
             blockHeight: tx.blockHeight,
             timestamp: tx.timestamp,
             content: { text: '' },
             images: [],
-            author: tx.inputs?.[0]?.address || '',
+            author: tx.addresses?.[0] || '',
             metadata: {}
         };
 
+        console.log('👤 Author address:', post.author);
+        
         // Handle data array from JungleBus API
         if (tx.data?.length) {
             for (const item of tx.data) {

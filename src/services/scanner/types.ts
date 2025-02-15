@@ -10,16 +10,11 @@ export interface JungleBusTransaction {
   data?: string[];
   addresses?: string[];
   inputs?: {
-    address?: string;
     txid?: string;
     vout?: number;
     script?: string;
   }[];
-  outputs?: {
-    value?: number;
-    script?: string;
-    addresses?: string[];
-  }[];
+  outputs?: string[];
   output_types?: string[];
   contexts?: string[];
   sub_contexts?: string[];

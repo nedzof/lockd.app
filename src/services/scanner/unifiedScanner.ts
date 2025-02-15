@@ -138,7 +138,8 @@ async function processTransaction(tx: JungleBusTransaction): Promise<void> {
             outputs: fullTx?.outputs,
             inputs: fullTx?.inputs,
             data: fullTx?.data,
-            contexts: fullTx?.contexts
+            contexts: fullTx?.contexts,
+            addresses: fullTx?.addresses // Added logging for addresses
         });
 
         // Check if this is a MAP protocol transaction
@@ -186,8 +187,14 @@ async function processTransaction(tx: JungleBusTransaction): Promise<void> {
             inputs: fullTx?.inputs || [],
             outputs: fullTx?.outputs || [],
             data: fullTx?.data || [],
-            contexts: fullTx?.contexts || []
+            contexts: fullTx?.contexts || [],
+            addresses: fullTx?.addresses || []
         };
+
+        console.log('📦 Mapped transaction:', {
+            txid: mappedTx.txid,
+            addresses: mappedTx.addresses
+        });
 
         const post = await parseMapTransaction(mappedTx);
         
