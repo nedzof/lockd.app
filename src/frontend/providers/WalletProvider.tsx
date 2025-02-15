@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useYoursWallet } from 'yours-wallet-provider';
+import type { YoursWallet } from 'yours-wallet-provider';
 
 interface WalletContextType {
   connect: () => Promise<void>;
@@ -8,9 +9,10 @@ interface WalletContextType {
   isConnected: boolean;
   publicKey: string | undefined;
   bsvAddress: string | null;
-  balance: number;
+  balance: { bsv: number; satoshis: number; usdInCents: number };
   isWalletDetected: boolean;
   wallet: ReturnType<typeof useYoursWallet>;
+  refreshBalance: () => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -28,20 +30,48 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [publicKey, setPublicKey] = useState<string>();
   const [bsvAddress, setBsvAddress] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [balance, setBalance] = useState<number>(0);
+  const [balance, setBalance] = useState<{ bsv: number; satoshis: number; usdInCents: number }>({
+    bsv: 0,
+    satoshis: 0,
+    usdInCents: 0
+  });
   const [isWalletDetected, setIsWalletDetected] = useState(false);
+
+  const refreshBalance = useCallback(async () => {
+    if (wallet && isConnected) {
+      try {
+        const balanceResult = await wallet.getBalance();
+        if (balanceResult) {
+          setBalance({
+            bsv: balanceResult.bsv ?? 0,
+            satoshis: balanceResult.satoshis ?? 0,
+            usdInCents: balanceResult.usdInCents ?? 0
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching balance:', error);
+      }
+    }
+  }, [wallet, isConnected]);
 
   // Check if wallet is detected
   useEffect(() => {
     setIsWalletDetected(!!wallet?.isReady);
-  }, [wallet?.isReady]);
+    // If wallet is ready and connected, fetch balance
+    const checkAndFetchBalance = async () => {
+      if (wallet?.isReady && wallet.isConnected && await wallet.isConnected()) {
+        refreshBalance();
+      }
+    };
+    checkAndFetchBalance();
+  }, [wallet?.isReady, refreshBalance]);
 
   // Cleanup function to reset state
   const resetState = useCallback(() => {
     setIsConnected(false);
     setPublicKey(undefined);
     setBsvAddress(null);
-    setBalance(0);
+    setBalance({ bsv: 0, satoshis: 0, usdInCents: 0 });
   }, []);
 
   // Handle wallet connection
@@ -60,17 +90,30 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     try {
       await wallet.connect();
-      setIsConnected(true);
-      const addresses = await wallet.getAddresses();
-      console.log('Got addresses:', addresses);
-      if (addresses?.bsvAddress) {
-        console.log('Setting BSV address:', addresses.bsvAddress);
-        setBsvAddress(addresses.bsvAddress);
-        const bal = await wallet.getBalance();
-        console.log('Setting balance:', bal);
-        setBalance(Number(bal.satoshis));
+      const isConnected = await wallet.isConnected();
+      if (isConnected) {
+        setIsConnected(true);
+        const addresses = await wallet.getAddresses();
+        console.log('Got addresses:', addresses);
+        if (addresses?.bsvAddress) {
+          console.log('Setting BSV address:', addresses.bsvAddress);
+          setBsvAddress(addresses.bsvAddress);
+          // Immediately fetch balance after successful connection
+          const balanceResult = await wallet.getBalance();
+          console.log('Initial balance:', balanceResult);
+          if (balanceResult) {
+            setBalance({
+              bsv: balanceResult.bsv ?? 0,
+              satoshis: balanceResult.satoshis ?? 0,
+              usdInCents: balanceResult.usdInCents ?? 0
+            });
+          }
+        } else {
+          console.error('No BSV address found in wallet response');
+          resetState();
+        }
       } else {
-        console.error('No BSV address found in wallet response');
+        console.error('Wallet did not connect successfully');
         resetState();
       }
     } catch (error) {
@@ -98,19 +141,38 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [resetState]);
 
-  // Check initial connection state
+  // Check initial connection state and set up balance refresh
   useEffect(() => {
     const checkConnection = async () => {
       if (wallet?.isConnected) {
-        const isConnected = await wallet.isConnected();
-        if (!isConnected) {
+        try {
+          const isConnected = await wallet.isConnected();
+          if (isConnected) {
+            setIsConnected(true);
+            await refreshBalance();
+          } else {
+            resetState();
+          }
+        } catch (error) {
+          console.error('Error checking connection:', error);
           resetState();
         }
       }
     };
     
     checkConnection();
-  }, [wallet, resetState]);
+
+    // Set up periodic balance refresh
+    const balanceInterval = setInterval(() => {
+      if (isConnected) {
+        refreshBalance();
+      }
+    }, 30000); // Refresh every 30 seconds
+
+    return () => {
+      clearInterval(balanceInterval);
+    };
+  }, [wallet, resetState, refreshBalance, isConnected]);
 
   const value = React.useMemo(() => ({
     connect,
@@ -120,8 +182,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     bsvAddress,
     balance,
     isWalletDetected,
-    wallet
-  }), [connect, disconnect, isConnected, publicKey, bsvAddress, balance, isWalletDetected, wallet]);
+    wallet,
+    refreshBalance
+  }), [connect, disconnect, isConnected, publicKey, bsvAddress, balance, isWalletDetected, wallet, refreshBalance]);
 
   return (
     <WalletContext.Provider value={value}>

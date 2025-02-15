@@ -1,4 +1,4 @@
-import express, { Request, Response, Router, RequestHandler } from 'express';
+import express, { Request, Response, Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 
 const router: Router = express.Router();
@@ -6,37 +6,48 @@ const prisma = new PrismaClient();
 
 interface LockLikeRequest {
   postId: string;
-  handle?: string;
+  handle: string;
   amount: number;
-  lockPeriod?: number;
+  nLockTime: number;
+  txid: string;
 }
 
-const handleLockLike: RequestHandler = async (req, res) => {
+router.post('/', async (req: Request<{}, {}, LockLikeRequest>, res: Response) => {
   try {
-    const { postId, handle, amount, lockPeriod } = req.body as LockLikeRequest;
+    const { postId, handle, amount, nLockTime, txid } = req.body;
 
-    if (!postId || !amount) {
+    if (!postId || !amount || !handle || !nLockTime || !txid) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    const lockLike = await prisma.post.update({
+    // Create the lock like record
+    const lockLike = await prisma.lockLike.create({
+      data: {
+        txid,
+        postId,
+        amount,
+        handle,
+        lockPeriod: nLockTime,
+      }
+    });
+
+    // Update the post's total locked amount
+    await prisma.post.update({
       where: {
         id: postId
       },
       data: {
         amount: {
-          increment: Math.floor(amount * 100000000) // Convert BSV to satoshis
+          increment: amount
         }
       }
     });
 
-    res.json(lockLike);
+    return res.json(lockLike);
   } catch (error) {
     console.error('Error creating lock like:', error);
-    res.status(500).json({ message: 'Error creating lock like' });
+    return res.status(500).json({ message: 'Error creating lock like', error: error instanceof Error ? error.message : 'Unknown error' });
   }
-};
-
-router.post('/', handleLockLike);
+});
 
 export default router; 

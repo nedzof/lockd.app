@@ -5,6 +5,8 @@ import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
 import type { MemeSubmission, LockLike } from '../types';
 import { toast } from 'react-hot-toast';
+import LockLikeInteraction from './LockLikeInteraction';
+import { useYoursWallet } from 'yours-wallet-provider';
 
 interface VoteOption {
   id: string;
@@ -72,6 +74,18 @@ type ExtendedMemeSubmission = MemeSubmission & {
 
 const API_URL = 'http://localhost:3001';
 
+interface GradientColors {
+  from: string;
+  to: string;
+  shadow: string;
+}
+
+const VOTE_OPTION_COLORS: GradientColors[] = [
+  { from: '#00ffa3', to: '#00ff9d', shadow: '#00ffa3' },
+  { from: '#3CDFCE', to: '#00ffa3', shadow: '#3CDFCE' },
+  { from: '#45B7D1', to: '#3CDFCE', shadow: '#45B7D1' }
+];
+
 const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ 
   onStatsUpdate,
   timeFilter,
@@ -86,13 +100,11 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeVideo, setActiveVideo] = useState<string | null>(null);
-  const [showLockInput, setShowLockInput] = useState<string | null>(null);
-  const [lockAmount, setLockAmount] = useState<string>('');
-  const [showConfetti, setShowConfetti] = useState<string | null>(null);
-  const [lockingSubmissionId, setLockingSubmissionId] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
+  const [showConfetti, setShowConfetti] = useState<string | null>(null);
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement }>({});
   const imageRefs = useRef<{ [key: string]: HTMLImageElement }>({});
+  const wallet = useYoursWallet();
 
   const formatImageUrl = async (imageData: string | undefined) => {
     if (!imageData) return null;
@@ -176,10 +188,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     imageRefs.current[id] = img;
   };
 
-  const handleLockCoins = async (postId: string, amount: number) => {
-    if (!amount || amount <= 0) return;
-
-    setLockingSubmissionId(postId);
+  const handleLockLike = async (txid: string, amount: number, nLockTime: number, handle: string, postTxid?: string, replyTxid?: string) => {
     try {
       const response = await fetch(`${API_URL}/api/lockLikes`, {
         method: 'POST',
@@ -187,31 +196,31 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          postId,
+          postId: txid,
+          handle,
           amount,
-          handle: 'anon', // Using anonymous user for now
-          lockPeriod: 30, // 30 days default lock period
+          nLockTime,
+          postTxid,
+          replyTxid
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to lock coins');
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to save lock like');
       }
 
       // Show confetti animation
-      setShowConfetti(postId);
+      setShowConfetti(txid);
       setTimeout(() => setShowConfetti(null), 3000);
-
-      // Reset lock input
-      setShowLockInput(null);
-      setLockAmount('');
 
       // Refresh submissions to show updated lock amount
       fetchSubmissions();
+
+      return response.json();
     } catch (error) {
-      console.error('Error locking coins:', error);
-    } finally {
-      setLockingSubmissionId(null);
+      console.error('Error locking:', error);
+      throw error;
     }
   };
 
@@ -525,11 +534,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
               {submission.vote_options.map((option, index) => {
                 const totalLocked = submission.vote_options?.reduce((sum, opt) => sum + opt.lock_amount, 0) || 0;
                 const percentage = totalLocked > 0 ? (option.lock_amount / totalLocked) * 100 : 0;
-                const gradientColors = [
-                  { from: '#00ffa3', to: '#00ff9d', shadow: '#00ffa3' },
-                  { from: '#3CDFCE', to: '#00ffa3', shadow: '#3CDFCE' },
-                  { from: '#45B7D1', to: '#3CDFCE', shadow: '#45B7D1' }
-                ][index % 3];
+                const gradientColors = VOTE_OPTION_COLORS[index % VOTE_OPTION_COLORS.length];
 
                 return (
                   <div key={option.id} className="relative group/option">
@@ -566,26 +571,13 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
                         </span>
                       </div>
 
-                      <button
-                        onClick={() => {
-                          const amount = prompt('Enter amount to lock (in BSV):');
-                          if (amount && !isNaN(Number(amount))) {
-                            handleLockCoins(option.id, Number(amount) * 100000000);
-                          }
-                        }}
-                        disabled={lockingSubmissionId === option.id}
-                        className="opacity-0 group-hover/option:opacity-100 px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-500 disabled:opacity-50 backdrop-blur-sm"
-                        style={{
-                          background: `linear-gradient(90deg, ${gradientColors.from}15, ${gradientColors.to}15)`,
-                          color: gradientColors.from
-                        }}
-                      >
-                        {lockingSubmissionId === option.id ? (
-                          <FiLoader className="animate-spin w-4 h-4" />
-                        ) : (
-                          'Lock BSV'
-                        )}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <LockLikeInteraction
+                          postTxid={option.id}
+                          replyTxid={undefined}
+                          postLockLike={handleLockLike}
+                        />
+                      </div>
                     </div>
                   </div>
                 );
@@ -601,13 +593,10 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
               </div>
             )}
             {!submission.is_vote && (
-              <button
-                onClick={() => setShowLockInput(submission.id)}
-                className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#00ffa3]/5 to-[#00ff9d]/5 text-[#00ffa3]/80 text-sm font-medium hover:from-[#00ffa3]/10 hover:to-[#00ff9d]/10 transition-all duration-700 backdrop-blur-sm"
-              >
-                <FiLock className="w-4 h-4" />
-                <span>Lock BSV</span>
-              </button>
+              <LockLikeInteraction
+                postTxid={submission.txId}
+                postLockLike={handleLockLike}
+              />
             )}
           </div>
         </div>
@@ -617,11 +606,10 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
 
   const renderVoteQuestion = (vote: VoteQuestion) => {
     const totalLocked = vote.vote_options?.reduce((sum, option) => sum + (option.lock_amount || 0), 0) || 0;
-    
-    const optionsWithPercentages = (vote.vote_options || []).map(option => ({
+    const optionsWithPercentages = vote.vote_options?.map(option => ({
       ...option,
-      percentage: totalLocked > 0 ? ((option.lock_amount || 0) / totalLocked) * 100 : 0
-    }));
+      percentage: totalLocked > 0 ? (option.lock_amount / totalLocked) * 100 : 0
+    })) || [];
 
     const deadline = new Date(vote.created_at);
     deadline.setDate(deadline.getDate() + 7);
@@ -641,73 +629,41 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
             </div>
           </div>
 
-          {/* Options */}
-          <div className="space-y-3">
+          {/* Vote options */}
+          <div className="space-y-2 mt-4">
             {optionsWithPercentages.map((option, index) => {
-              const gradientColors = [
-                { from: '#00ffa3', to: '#00ff9d', shadow: '#00ffa3' },
-                { from: '#3CDFCE', to: '#00ffa3', shadow: '#3CDFCE' },
-                { from: '#45B7D1', to: '#3CDFCE', shadow: '#45B7D1' }
-              ][index % 3];
+              const gradientColors = VOTE_OPTION_COLORS[index % VOTE_OPTION_COLORS.length];
+              const percentage = option.percentage || 0;
 
               return (
-                <div 
-                  key={option.id} 
-                  className="relative group/option"
+                <div
+                  key={option.id}
+                  className="group/option relative"
                 >
-                  {/* Progress bar background */}
-                  <div className="absolute inset-0 bg-[#2A2A40]/10 rounded-lg" />
-                  
-                  {/* Progress bar fill */}
-                  <div 
-                    className="absolute inset-y-0 left-0 rounded-lg transition-all duration-700 ease-out"
+                  {/* Progress bar */}
+                  <div
+                    className="absolute inset-0 rounded-lg transition-all duration-300"
                     style={{
-                      width: `${option.percentage}%`,
-                      background: `linear-gradient(90deg, ${gradientColors.from}08, ${gradientColors.to}08)`,
-                      boxShadow: option.percentage > 0 ? `0 0 30px ${gradientColors.shadow}05` : 'none'
+                      background: `linear-gradient(90deg, ${gradientColors.from}15, ${gradientColors.to}15)`,
+                      width: `${percentage}%`
                     }}
                   />
 
-                  {/* Hover effect */}
-                  <div 
-                    className="absolute inset-0 opacity-0 group-hover/option:opacity-100 transition-opacity duration-500 rounded-lg"
-                    style={{
-                      background: `linear-gradient(90deg, ${gradientColors.from}10, ${gradientColors.to}10)`
-                    }}
-                  />
-
-                  {/* Content */}
                   <div className="relative p-4 flex items-center justify-between transition-all duration-300 rounded-lg">
                     <div className="flex items-center space-x-3">
                       <span className="text-white/90 font-medium">{option.content}</span>
                       <span 
                         className="text-gray-400/70 transition-all duration-300 group-hover/option:text-white/80"
-                        style={{ color: option.percentage > 0 ? `${gradientColors.from}dd` : undefined }}
+                        style={{ color: percentage > 0 ? `${gradientColors.from}dd` : undefined }}
                       >
-                        {option.percentage.toFixed(1)}%
+                        {percentage.toFixed(1)}%
                       </span>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        const amount = prompt('Enter amount to lock (in BSV):');
-                        if (amount && !isNaN(Number(amount))) {
-                          handleLockCoins(option.id, Number(amount) * 100000000);
-                        }
-                      }}
-                      disabled={lockingSubmissionId === option.id || daysLeft <= 0}
-                      className="opacity-0 group-hover/option:opacity-100 px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-500 disabled:opacity-50 backdrop-blur-sm"
-                      style={{
-                        background: `linear-gradient(90deg, ${gradientColors.from}15, ${gradientColors.to}15)`,
-                        color: gradientColors.from
-                      }}
-                    >
-                      {lockingSubmissionId === option.id ? (
-                        <FiLoader className="animate-spin w-4 h-4" />
-                      ) : (
-                        'Lock BSV'
-                      )}
-                    </button>
+                    <LockLikeInteraction
+                      postTxid={option.id}
+                      postLockLike={handleLockLike}
+                    />
                   </div>
                 </div>
               );
@@ -783,45 +739,6 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Lock Input Modal */}
-      {showLockInput && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#1A1B23] p-8 rounded-xl border border-[#00ffa3]/20 shadow-lg max-w-md w-full mx-4">
-            <h3 className="text-xl font-medium text-white/90 mb-6">Lock BSV</h3>
-            <input
-              type="number"
-              value={lockAmount}
-              onChange={(e) => setLockAmount(e.target.value)}
-              placeholder="Enter amount in BSV"
-              className="w-full px-4 py-2 bg-[#2A2A40]/20 border border-[#00ffa3]/20 rounded-lg text-white/90 placeholder-white/40 focus:outline-none focus:border-[#00ffa3]/40"
-            />
-            <div className="flex justify-end mt-6 space-x-4">
-              <button
-                onClick={() => setShowLockInput(null)}
-                className="px-4 py-2 text-white/60 hover:text-white/90 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (showLockInput && lockAmount) {
-                    handleLockCoins(showLockInput, parseFloat(lockAmount) * 100000000);
-                  }
-                }}
-                disabled={!lockAmount || isNaN(parseFloat(lockAmount))}
-                className="px-4 py-2 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] text-black rounded-lg font-medium disabled:opacity-50"
-              >
-                {lockingSubmissionId === showLockInput ? (
-                  <FiLoader className="animate-spin w-5 h-5" />
-                ) : (
-                  'Confirm'
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Image Modal */}
       {expandedImage && (

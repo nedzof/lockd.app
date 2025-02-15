@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react';
-import type { InscribeRequest, SendResponse } from './inscribe';
 
 declare module 'yours-wallet-provider' {
-  export type MimeTypes = 
+  export type MimeType = 
     | "text/plain"
     | "text/markdown"
     | "image/png"
@@ -21,16 +20,25 @@ declare module 'yours-wallet-provider' {
     script?: string;  // hex string
   }
 
-  export interface MAP {
-    [key: string]: string;
-  }
+  export type MetadataMap = Record<string, string>;
 
-  export interface InscribeRequest {
+  export interface InscriptionParams {
     address: string;
     base64Data: string;
-    mimeType: MimeTypes;
-    map?: Record<string, string>;
+    mimeType: string;
+    map?: MetadataMap;
     satoshis?: number;
+  }
+
+  export interface LockParams {
+    address: string;
+    blockHeight: number;
+    sats: number;
+  }
+
+  export interface SendResponse {
+    txid: string;
+    rawtx: string;
   }
 
   export interface YoursWallet {
@@ -38,12 +46,13 @@ declare module 'yours-wallet-provider' {
     connect: () => Promise<void>;
     disconnect: () => Promise<void>;
     isConnected: () => Promise<boolean>;
-    getAddresses: () => Promise<{ bsvAddress: string }>;
+    getAddresses: () => Promise<{ bsvAddress: string; identityAddress: string }>;
     getBalance: () => Promise<{ bsv: number; satoshis: number; usdInCents: number }>;
     on: (event: string, callback: Function) => void;
     off: (event: string, callback: Function) => void;
     sendBsv: (params: PaymentParams[]) => Promise<SendResponse>;
-    inscribe: (params: InscribeRequest[]) => Promise<SendResponse>;
+    inscribe: (params: InscriptionParams[]) => Promise<SendResponse>;
+    lock: (params: LockParams[]) => Promise<SendResponse>;
     getPaymentUtxos: () => Promise<Array<{
       satoshis: number;
       script: string;
@@ -52,13 +61,15 @@ declare module 'yours-wallet-provider' {
     }>>;
   }
 
-  export const useYoursWallet: () => YoursWallet | undefined;
-  export const YoursProvider: (props: { children: ReactNode }) => JSX.Element;
+  export interface WalletProvider {
+    useYoursWallet: () => YoursWallet | undefined;
+    YoursProvider: (props: { children: ReactNode }) => JSX.Element;
+  }
 }
 
 declare global {
   interface Window {
-    yours?: import('yours-wallet-provider').YoursWallet;
+    yours: import('yours-wallet-provider').YoursWallet | undefined;
   }
 }
 

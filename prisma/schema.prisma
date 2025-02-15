@@ -30,6 +30,7 @@ model Post {
   image_source   String?
   is_vote        Boolean      @default(false)
   vote_options   VoteOption[]
+  lock_likes     LockLike[]
 
   @@index([author_address])
   @@index([block_height])
@@ -55,4 +56,20 @@ model VoteOption {
 
   @@index([postId])
   @@index([post_txid])
+}
+
+model LockLike {
+  id          String   @id @default(cuid())
+  txid        String   @unique
+  postId      String
+  amount      Int
+  handle      String
+  lockPeriod  Int
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  post        Post     @relation(fields: [postId], references: [id])
+
+  @@index([postId])
+  @@index([handle])
+  @@index([created_at])
 }
