@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { useYoursWallet, YoursWallet } from 'yours-wallet-provider';
+import { useYoursWallet, YoursProviderType } from 'yours-wallet-provider';
 
 interface WalletContextType {
   connect: () => Promise<void>;
@@ -10,7 +10,7 @@ interface WalletContextType {
   bsvAddress: string | null;
   balance: { bsv: number; satoshis: number; usdInCents: number };
   isWalletDetected: boolean;
-  wallet: YoursWallet | undefined;
+  wallet: YoursProviderType | undefined;
   refreshBalance: () => Promise<void>;
 }
 
@@ -25,7 +25,7 @@ export const useWallet = () => {
 };
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const wallet = useYoursWallet();
+  const yoursWallet = useYoursWallet();
   const [publicKey, setPublicKey] = useState<string>();
   const [bsvAddress, setBsvAddress] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -35,6 +35,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     usdInCents: 0
   });
   const [isWalletDetected, setIsWalletDetected] = useState(false);
+  const [wallet, setWallet] = useState<YoursProviderType>();
 
   const refreshBalance = useCallback(async () => {
     if (wallet && isConnected) {
@@ -52,6 +53,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     }
   }, [wallet, isConnected]);
+
+  // Set wallet when yoursWallet changes
+  useEffect(() => {
+    if (yoursWallet) {
+      setWallet(yoursWallet);
+    }
+  }, [yoursWallet]);
 
   // Check if wallet is detected
   useEffect(() => {

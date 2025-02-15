@@ -1,30 +1,41 @@
-import express, { Request, Response, Router } from 'express';
+import express, { Request, Response, RequestHandler } from 'express';
 import { PrismaClient } from '@prisma/client';
 
-const router: Router = express.Router();
+const router = express.Router();
 const prisma = new PrismaClient();
 
 interface LockLikeRequest {
-  postId: string;
+  postTxid: string;  // The post's txid
   handle: string;
   amount: number;
   nLockTime: number;
-  txid: string;
+  txid: string;    // The lock transaction id
 }
 
-router.post('/', async (req: Request<{}, {}, LockLikeRequest>, res: Response) => {
+const handleLockLike: RequestHandler = async (req, res) => {
   try {
-    const { postId, handle, amount, nLockTime, txid } = req.body;
+    const { postTxid, handle, amount, nLockTime, txid } = req.body as LockLikeRequest;
 
-    if (!postId || !amount || !handle || !nLockTime || !txid) {
+    if (!postTxid || !amount || !handle || !nLockTime || !txid) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    // Create the lock like record
+    // First find the post by its txid
+    const post = await prisma.post.findUnique({
+      where: {
+        txid: postTxid
+      }
+    });
+
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    // Create the lock like record using the post's id
     const lockLike = await prisma.lockLike.create({
       data: {
         txid,
-        postId,
+        postId: post.id,  // Use the post's id, not txid
         amount,
         handle,
         lockPeriod: nLockTime,
@@ -34,7 +45,7 @@ router.post('/', async (req: Request<{}, {}, LockLikeRequest>, res: Response) =>
     // Update the post's total locked amount
     await prisma.post.update({
       where: {
-        id: postId
+        id: post.id
       },
       data: {
         amount: {
@@ -46,8 +57,13 @@ router.post('/', async (req: Request<{}, {}, LockLikeRequest>, res: Response) =>
     return res.json(lockLike);
   } catch (error) {
     console.error('Error creating lock like:', error);
-    return res.status(500).json({ message: 'Error creating lock like', error: error instanceof Error ? error.message : 'Unknown error' });
+    return res.status(500).json({ 
+      message: 'Error creating lock like', 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    });
   }
-});
+};
+
+router.post('/', handleLockLike);
 
 export default router; 

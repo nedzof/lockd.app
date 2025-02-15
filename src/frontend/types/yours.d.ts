@@ -49,7 +49,6 @@ declare module 'yours-wallet-provider' {
     getAddresses: () => Promise<{ bsvAddress: string; identityAddress: string }>;
     getBalance: () => Promise<{ bsv: number; satoshis: number; usdInCents: number }>;
     on: (event: string, callback: Function) => void;
-    off: (event: string, callback: Function) => void;
     sendBsv: (params: PaymentParams[]) => Promise<SendResponse>;
     inscribe: (params: InscriptionParams[]) => Promise<SendResponse>;
     lockBsv: (params: LockParams[]) => Promise<SendResponse>;
@@ -61,8 +60,10 @@ declare module 'yours-wallet-provider' {
     }>>;
   }
 
+  export type YoursProviderType = Omit<YoursWallet, 'off'>;
+
   export interface WalletProvider {
-    useYoursWallet: () => YoursWallet | undefined;
+    useYoursWallet: () => YoursProviderType;
     YoursProvider: (props: { children: ReactNode }) => JSX.Element;
   }
 }

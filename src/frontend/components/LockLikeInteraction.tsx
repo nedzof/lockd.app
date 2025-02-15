@@ -129,48 +129,30 @@ export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike 
       const nLockTime = currentBlockHeight + 1; // Lock for 1 block
 
       // Create the lock transaction
-      const locks = [{
+      const { txid } = await wallet.lockBsv([{
         address: addresses.identityAddress,
         blockHeight: nLockTime,
-        sats: Math.floor(parsedAmount * SATS_PER_BSV) // Convert BSV to satoshis
-      }];
+        sats: parsedAmount * SATS_PER_BSV,
+      }]);
 
-      // Get the Yours wallet instance from window
-      const yoursWallet = window.yours as YoursWallet;
-      if (!yoursWallet?.lockBsv) {
-        console.error('Yours wallet state:', {
-          exists: !!yoursWallet,
-          hasLockBsv: !!yoursWallet?.lockBsv,
-          methods: Object.keys(yoursWallet || {})
-        });
-        throw new Error('Yours Wallet lockBsv function not available. Please ensure you have the latest version of Yours Wallet installed.');
-      }
-
-      console.log('Attempting to lock with params:', {
-        locks,
-        hasLockFunction: !!yoursWallet.lockBsv
-      });
-
-      const { txid } = await yoursWallet.lockBsv(locks);
-
-      // Post the lock like to the backend
+      // Create the lock like record
       const response = await fetch('http://localhost:3001/api/lockLikes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          postId: postTxid || replyTxid,
+          postTxid: postTxid || replyTxid,
           handle: addresses.identityAddress,
-          amount: Math.floor(parsedAmount * SATS_PER_BSV),
+          amount: parsedAmount * SATS_PER_BSV,
           nLockTime,
-          txid
+          txid,
         }),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.message || 'Failed to save lock like');
+        throw new Error(error.message || 'Error creating lock like');
       }
 
       toast.success('Successfully locked BSV!');
