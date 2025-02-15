@@ -7,6 +7,7 @@ import { useWallet } from '../providers/WalletProvider';
 import { toast } from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
 import { createPortal } from 'react-dom';
+import type { YoursWallet } from 'yours-wallet-provider';
 
 interface LockLikeInteractionProps {
   postTxid?: string;
@@ -134,13 +135,23 @@ export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike 
         sats: Math.floor(parsedAmount * SATS_PER_BSV) // Convert BSV to satoshis
       }];
 
-      // Create the lock transaction using window.yours directly
-      const yoursWallet = window.yours;
-      if (!yoursWallet) {
-        throw new Error('Yours Wallet not found');
+      // Get the Yours wallet instance from window
+      const yoursWallet = window.yours as YoursWallet;
+      if (!yoursWallet?.lockBsv) {
+        console.error('Yours wallet state:', {
+          exists: !!yoursWallet,
+          hasLockBsv: !!yoursWallet?.lockBsv,
+          methods: Object.keys(yoursWallet || {})
+        });
+        throw new Error('Yours Wallet lockBsv function not available. Please ensure you have the latest version of Yours Wallet installed.');
       }
 
-      const { txid } = await yoursWallet.lock(locks);
+      console.log('Attempting to lock with params:', {
+        locks,
+        hasLockFunction: !!yoursWallet.lockBsv
+      });
+
+      const { txid } = await yoursWallet.lockBsv(locks);
 
       // Post the lock like to the backend
       const response = await fetch('http://localhost:3001/api/lockLikes', {

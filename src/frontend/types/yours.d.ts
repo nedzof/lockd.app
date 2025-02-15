@@ -52,7 +52,7 @@ declare module 'yours-wallet-provider' {
     off: (event: string, callback: Function) => void;
     sendBsv: (params: PaymentParams[]) => Promise<SendResponse>;
     inscribe: (params: InscriptionParams[]) => Promise<SendResponse>;
-    lock: (params: LockParams[]) => Promise<SendResponse>;
+    lockBsv: (params: LockParams[]) => Promise<SendResponse>;
     getPaymentUtxos: () => Promise<Array<{
       satoshis: number;
       script: string;

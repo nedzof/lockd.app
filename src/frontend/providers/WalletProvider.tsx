@@ -1,7 +1,6 @@
 import * as React from 'react';
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { useYoursWallet } from 'yours-wallet-provider';
-import type { YoursWallet } from 'yours-wallet-provider';
+import { useYoursWallet, YoursWallet } from 'yours-wallet-provider';
 
 interface WalletContextType {
   connect: () => Promise<void>;
@@ -11,7 +10,7 @@ interface WalletContextType {
   bsvAddress: string | null;
   balance: { bsv: number; satoshis: number; usdInCents: number };
   isWalletDetected: boolean;
-  wallet: ReturnType<typeof useYoursWallet>;
+  wallet: YoursWallet | undefined;
   refreshBalance: () => Promise<void>;
 }
 
