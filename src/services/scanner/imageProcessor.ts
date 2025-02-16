@@ -1,9 +1,17 @@
 import { Buffer } from 'buffer';
+import { Image, decode } from 'imagescript';
 
 export interface ImageOutput {
     mimeType: string;
     rawData: string;
     dataURL: string;
+}
+
+export interface ProcessedImage {
+    width: number;
+    height: number;
+    format: string;
+    data: Buffer;
 }
 
 export async function extractImageFromTransaction(tx: any): Promise<ImageOutput | null> {
@@ -110,4 +118,283 @@ export function validateImageData(imageData: ImageOutput | null): boolean {
         console.error('Error validating image data:', error);
         return false;
     }
-} 
+}
+
+/**
+ * Check if data contains a JPEG signature
+ * @param data Buffer or base64 string to check
+ * @returns true if data contains JPEG signature
+ */
+export function hasJpegSignature(data: Buffer | string): boolean {
+    try {
+        let buffer: Buffer;
+        
+        // Convert input to buffer if it's a base64 string
+        if (typeof data === 'string') {
+            try {
+                // Remove data URL prefix if present
+                const base64Data = data.includes('base64,') 
+                    ? data.split('base64,')[1] 
+                    : data;
+                
+                buffer = Buffer.from(base64Data, 'base64');
+            } catch (e) {
+                return false;
+            }
+        } else {
+            buffer = data;
+        }
+
+        // Check for JPEG signature
+        return buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xD8;
+    } catch (error) {
+        return false;
+    }
+}
+
+/**
+ * Process image data using ImageScript
+ * @param imageData Raw image data as Buffer or base64 string
+ * @param contentType Content type of the image (e.g. 'image/jpeg')
+ * @returns Processed image data with metadata
+ */
+export async function processImage(imageData: Buffer | string, contentType: string): Promise<ProcessedImage | null> {
+    try {
+        let buffer: Buffer;
+        
+        // Convert input to buffer if it's a base64 string
+        if (typeof imageData === 'string') {
+            try {
+                // Remove data URL prefix if present
+                const base64Data = imageData.includes('base64,') 
+                    ? imageData.split('base64,')[1] 
+                    : imageData;
+                
+                buffer = Buffer.from(base64Data, 'base64');
+            } catch (e) {
+                console.error('Error decoding base64:', e);
+                return null;
+            }
+        } else {
+            buffer = imageData;
+        }
+
+        // Check for JPEG signature
+        if (contentType === 'image/jpeg' && !hasJpegSignature(buffer)) {
+            console.error('Invalid JPEG signature');
+            return null;
+        }
+
+        // Decode the image using ImageScript
+        const image = await decode(buffer);
+        
+        if (!image) {
+            console.error('Failed to decode image');
+            return null;
+        }
+
+        // Get image format from content type
+        const format = contentType.split('/')[1]?.toUpperCase() || 'UNKNOWN';
+
+        // Get image metadata
+        const width = image.width;
+        const height = image.height;
+
+        // Encode the image back to buffer
+        const processedData = await image.encode();
+
+        return {
+            width,
+            height,
+            format,
+            data: Buffer.from(processedData)
+        };
+    } catch (error) {
+        console.error('Error processing image:', error);
+        return null;
+    }
+}
+
+/**
+ * Check if a buffer contains valid image data
+ * @param buffer Buffer or base64 string to check
+ * @returns true if buffer contains valid image data
+ */
+export async function isValidImage(data: Buffer | string, contentType?: string): Promise<boolean> {
+    try {
+        let buffer: Buffer;
+        
+        // Convert input to buffer if it's a base64 string
+        if (typeof data === 'string') {
+            try {
+                // Remove data URL prefix if present
+                const base64Data = data.includes('base64,') 
+                    ? data.split('base64,')[1] 
+                    : data;
+                
+                buffer = Buffer.from(base64Data, 'base64');
+            } catch (e) {
+                console.error('Error decoding base64:', e);
+                return false;
+            }
+        } else {
+            buffer = data;
+        }
+
+        // Check for JPEG signature if content type is JPEG
+        if (contentType === 'image/jpeg' && !hasJpegSignature(buffer)) {
+            return false;
+        }
+
+        const image = await decode(buffer);
+        return !!image;
+    } catch (error) {
+        return false;
+    }
+}
+
+/**
+ * Get image dimensions
+ * @param buffer Image data as Buffer or base64 string
+ * @returns Image dimensions or null if invalid
+ */
+export async function getImageDimensions(data: Buffer | string, contentType?: string): Promise<{ width: number; height: number } | null> {
+    try {
+        let buffer: Buffer;
+        
+        // Convert input to buffer if it's a base64 string
+        if (typeof data === 'string') {
+            try {
+                // Remove data URL prefix if present
+                const base64Data = data.includes('base64,') 
+                    ? data.split('base64,')[1] 
+                    : data;
+                
+                buffer = Buffer.from(base64Data, 'base64');
+            } catch (e) {
+                console.error('Error decoding base64:', e);
+                return null;
+            }
+        } else {
+            buffer = data;
+        }
+
+        // Check for JPEG signature if content type is JPEG
+        if (contentType === 'image/jpeg' && !hasJpegSignature(buffer)) {
+            return null;
+        }
+
+        const image = await decode(buffer);
+        if (!image) return null;
+        
+        return {
+            width: image.width,
+            height: image.height
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+/**
+ * Resize an image while maintaining aspect ratio
+ * @param data Original image data as Buffer or base64 string
+ * @param maxWidth Maximum width
+ * @param maxHeight Maximum height
+ * @returns Resized image data or null if failed
+ */
+export async function resizeImage(data: Buffer | string, maxWidth: number, maxHeight: number, contentType?: string): Promise<Buffer | null> {
+    try {
+        let buffer: Buffer;
+        
+        // Convert input to buffer if it's a base64 string
+        if (typeof data === 'string') {
+            try {
+                // Remove data URL prefix if present
+                const base64Data = data.includes('base64,') 
+                    ? data.split('base64,')[1] 
+                    : data;
+                
+                buffer = Buffer.from(base64Data, 'base64');
+            } catch (e) {
+                console.error('Error decoding base64:', e);
+                return null;
+            }
+        } else {
+            buffer = data;
+        }
+
+        // Check for JPEG signature if content type is JPEG
+        if (contentType === 'image/jpeg' && !hasJpegSignature(buffer)) {
+            return null;
+        }
+
+        const image = await decode(buffer);
+        if (!image) return null;
+
+        // Calculate new dimensions
+        const aspectRatio = image.width / image.height;
+        let newWidth = maxWidth;
+        let newHeight = maxHeight;
+
+        if (maxWidth / maxHeight > aspectRatio) {
+            newWidth = Math.round(maxHeight * aspectRatio);
+        } else {
+            newHeight = Math.round(maxWidth / aspectRatio);
+        }
+
+        // Resize the image
+        image.resize(newWidth, newHeight);
+
+        // Encode and return
+        const resizedData = await image.encode();
+        return Buffer.from(resizedData);
+    } catch (error) {
+        console.error('Error resizing image:', error);
+        return null;
+    }
+}
+
+/**
+ * Convert image to a specific format
+ * @param data Original image data as Buffer or base64 string
+ * @param format Target format (e.g. 'JPEG', 'PNG')
+ * @returns Converted image data or null if failed
+ */
+export async function convertImage(data: Buffer | string, format: string, contentType?: string): Promise<Buffer | null> {
+    try {
+        let buffer: Buffer;
+        
+        // Convert input to buffer if it's a base64 string
+        if (typeof data === 'string') {
+            try {
+                // Remove data URL prefix if present
+                const base64Data = data.includes('base64,') 
+                    ? data.split('base64,')[1] 
+                    : data;
+                
+                buffer = Buffer.from(base64Data, 'base64');
+            } catch (e) {
+                console.error('Error decoding base64:', e);
+                return null;
+            }
+        } else {
+            buffer = data;
+        }
+
+        // Check for JPEG signature if content type is JPEG
+        if (contentType === 'image/jpeg' && !hasJpegSignature(buffer)) {
+            return null;
+        }
+
+        const image = await decode(buffer);
+        if (!image) return null;
+
+        // Encode to the target format
+        const convertedData = await image.encode(format);
+        return Buffer.from(convertedData);
+    } catch (error) {
+        console.error('Error converting image:', error);
+        return null;
+    }
+}

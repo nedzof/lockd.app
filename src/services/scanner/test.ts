@@ -1,192 +1,59 @@
-import { parseMapTransaction } from './mapTransactionParser';
+import { parseMapTransaction, extractImageFromTransaction, getAddressesFromTransaction, getAuthorFromTransaction } from './mapTransactionParser';
+import { processImage } from './imageProcessor';
 import { JungleBusTransaction } from './types';
 
-async function main() {
+async function testTransactionParsing() {
     console.log('Testing transaction parsing...\n');
 
-    // Test 1: Standalone vote option
-    const voteOptionTx: JungleBusTransaction = {
-        txid: 'vote_option_tx_123',
-        blockHash: 'abc123',
-        blockHeight: 123456,
-        timestamp: '2024-02-15T20:18:32.000Z',
-        addresses: ['1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR'],
-        inputs: [],
+    // Test transaction ID
+    const txId = '669b87e431c3c0338cdfd04a765eac9bfd52dd1326f1e6ba454d363fd0288751';
+    console.log('🔍 Testing image extraction from transaction:', txId);
+
+    // Create test transaction
+    const transaction = {
+        txid: txId,
+        inputs: [
+            {
+                address: '1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR',
+                script: 'app=lockd.app,type=image,contenttype=image/jpeg,encoding=base64,filename=scholz.jpeg,filesize=257219'
+            }
+        ],
         outputs: [
             {
-                outputScript: Buffer.from('006a6d01' + Buffer.from(JSON.stringify({
-                    app: 'lockd.app',
-                    type: 'vote_option',
-                    content: 'Option A',
-                    parentTxid: 'parent_vote_123',
-                    lockAmount: 1000,
-                    lockDuration: 720,
-                    lockPercentage: 25,
-                    optionIndex: 0
-                })).toString('hex'), 'hex'),
-                value: 0
+                value: 0,
+                address: '1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR',
+                script: '0063036f7264510a746578742f706c61696e001377656e207363686f6c7a2072fc6b747269743f6876a914e30cd4433ea6448e2ea518c9d8418e481ad3c53188ac6a223150755161374b36324d694b43747373534c4b79316b683536575755374d745552350353455403617070096c6f636b642e61707007636f6e74656e741477656e207363686f6c7a2072c3bc6b747269743f06706f73744964126d37347a716575362d62773367666d3731770873657175656e6365013004746167730c5b22506f6c6974696373225d0974696d657374616d7018323032352d30322d31345431363a33363a31302e3036305a047479706507636f6e74656e7407766572'
+            },
+            {
+                value: 0,
+                address: '1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR',
+                script: '0063036f726451106170706c69636174696f6e2f6a736f6e000c5b22506f6c6974696373225d6876a914e30cd4433ea6448e2ea518c9d8418e481ad3c53188ac6a223150755161374b36324d694b43747373534c4b79316b683536575755374d745552350353455403617070096c6f636b642e61707007636f6e74656e740005636f756e7401310e706172656e7453657175656e6365013006706f73744964126d37347a716575362d62773367666d3731770873657175656e6365013504746167730c5b22506f6c6974696963225d0974696d657374616d7018323032352d30322d31345431363a33363a31302e3838355a04747970650474616773077665'
+            },
+            {
+                value: 0,
+                address: '1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR',
+                script: '/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVigAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDABQODxIPDRQSEBIXFRQdHx4eHRoaHSQtJiEyPzQ/Pj4+QEBAQHxQQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQED/2wBDAR/9k='
             }
         ]
     };
 
-    console.log('🔍 Test 1: Parsing standalone vote option');
-    const parsedVoteOption = await parseMapTransaction(voteOptionTx);
-    console.log('Parsed vote option:', parsedVoteOption);
+    // Test image extraction
+    console.log('🔍 Parsing MAP transaction:', txId);
+    console.log('🏷️ Transaction addresses:', getAddressesFromTransaction(transaction));
+    console.log('👤 Author address:', getAuthorFromTransaction(transaction));
 
-    // Test 2: Post with embedded vote options (JSON array)
-    const votePostTx: JungleBusTransaction = {
-        txid: 'vote_post_with_options_123',
-        blockHash: 'def456',
-        blockHeight: 123457,
-        timestamp: '2024-02-15T20:18:33.000Z',
-        addresses: ['1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR'],
-        inputs: [],
-        outputs: [
-            {
-                outputScript: Buffer.from('006a6d01' + Buffer.from(JSON.stringify({
-                    app: 'lockd.app',
-                    type: 'vote_question',
-                    content: 'Which option do you prefer?',
-                    options: [
-                        {
-                            text: 'Option 1',
-                            description: 'First choice with description',
-                            lockAmount: 1000,
-                            lockDuration: 720,
-                            lockPercentage: 30,
-                            optionIndex: 0
-                        },
-                        {
-                            text: 'Option 2',
-                            description: 'Second choice with description',
-                            lockAmount: 2000,
-                            lockDuration: 1440,
-                            lockPercentage: 70,
-                            optionIndex: 1
-                        }
-                    ]
-                })).toString('hex'), 'hex'),
-                value: 0
-            }
-        ]
-    };
-
-    console.log('\n🔍 Test 2: Parsing post with embedded vote options (JSON array)');
-    const parsedVotePost = await parseMapTransaction(votePostTx);
-    console.log('Parsed vote post:', parsedVotePost);
-
-    // Test 3: Post with comma-separated options
-    const commaSeparatedTx: JungleBusTransaction = {
-        txid: 'vote_post_comma_sep_123',
-        blockHash: 'ghi789',
-        blockHeight: 123458,
-        timestamp: '2024-02-15T20:18:34.000Z',
-        addresses: ['1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR'],
-        inputs: [],
-        outputs: [
-            {
-                outputScript: Buffer.from('006a6d01' + Buffer.from(JSON.stringify({
-                    app: 'lockd.app',
-                    type: 'vote_question',
-                    content: 'Choose a day:',
-                    options: 'heute, morgen, übermorgen'
-                })).toString('hex'), 'hex'),
-                value: 0
-            }
-        ]
-    };
-
-    console.log('\n🔍 Test 3: Parsing post with comma-separated options');
-    const parsedCommaSep = await parseMapTransaction(commaSeparatedTx);
-    console.log('Parsed comma-separated options:', parsedCommaSep);
-
-    // Test 4: Post with whitespace-separated options
-    const whitespaceSepTx: JungleBusTransaction = {
-        txid: 'vote_post_whitespace_sep_123',
-        blockHash: 'jkl012',
-        blockHeight: 123459,
-        timestamp: '2024-02-15T20:18:35.000Z',
-        addresses: ['1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR'],
-        inputs: [],
-        outputs: [
-            {
-                outputScript: Buffer.from('006a6d01' + Buffer.from(JSON.stringify({
-                    app: 'lockd.app',
-                    type: 'vote_question',
-                    content: 'Choose a color:',
-                    options: 'red blue green'
-                })).toString('hex'), 'hex'),
-                value: 0
-            }
-        ]
-    };
-
-    console.log('\n🔍 Test 4: Parsing post with whitespace-separated options');
-    const parsedWhitespaceSep = await parseMapTransaction(whitespaceSepTx);
-    console.log('Parsed whitespace-separated options:', parsedWhitespaceSep);
-
-    // Test 5: Post with mixed format options
-    const mixedFormatTx: JungleBusTransaction = {
-        txid: 'vote_post_mixed_format_123',
-        blockHash: 'mno345',
-        blockHeight: 123460,
-        timestamp: '2024-02-15T20:18:36.000Z',
-        addresses: ['1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR'],
-        inputs: [],
-        outputs: [
-            {
-                outputScript: Buffer.from('006a6d01' + Buffer.from(JSON.stringify({
-                    app: 'lockd.app',
-                    type: 'vote_question',
-                    content: 'Mixed format test:',
-                    options: [
-                        { text: 'Option 1', lockAmount: '1000' },
-                        'Simple Option 2',
-                        { label: 'Option 3', description: 'Using label instead of text' },
-                        { content: 'Option 4', lockPercentage: '50' }
-                    ]
-                })).toString('hex'), 'hex'),
-                value: 0
-            }
-        ]
-    };
-
-    console.log('\n🔍 Test 5: Parsing post with mixed format options');
-    const parsedMixedFormat = await parseMapTransaction(mixedFormatTx);
-    console.log('Parsed mixed format options:', parsedMixedFormat);
-
-    // Test 6: Edge cases
-    const edgeCasesTx: JungleBusTransaction = {
-        txid: 'vote_post_edge_cases_123',
-        blockHash: 'pqr678',
-        blockHeight: 123461,
-        timestamp: '2024-02-15T20:18:37.000Z',
-        addresses: ['1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR'],
-        inputs: [],
-        outputs: [
-            {
-                outputScript: Buffer.from('006a6d01' + Buffer.from(JSON.stringify({
-                    app: 'lockd.app',
-                    type: 'vote_question',
-                    content: 'Edge cases test:',
-                    options: [
-                        '',  // Empty option
-                        { },  // Empty object
-                        { text: '' },  // Empty text
-                        { text: '  ' },  // Whitespace text
-                        { text: 'Valid Option' },  // Valid option
-                        null,  // Null option
-                        { text: 'Invalid Numbers', lockAmount: 'abc', lockDuration: -1 }  // Invalid numbers
-                    ]
-                })).toString('hex'), 'hex'),
-                value: 0
-            }
-        ]
-    };
-
-    console.log('\n🔍 Test 6: Parsing post with edge cases');
-    const parsedEdgeCases = await parseMapTransaction(edgeCasesTx);
-    console.log('Parsed edge cases:', parsedEdgeCases);
+    const result = await extractImageFromTransaction(transaction);
+    if (result) {
+        console.log('✅ Successfully extracted image:', {
+            width: result.width,
+            height: result.height,
+            format: result.format,
+            size: result.data.length
+        });
+    } else {
+        console.log('❌ Failed to extract image');
+    }
 }
 
-main().catch(console.error);
+// Run tests
+testTransactionParsing().catch(console.error);
