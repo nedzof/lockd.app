@@ -44,6 +44,7 @@ model VoteOption {
   postId          String
   post_txid       String
   content         String
+  description     String     @default("")
   author_address  String
   created_at      DateTime
   lock_amount     Int
@@ -51,6 +52,7 @@ model VoteOption {
   unlock_height   Int
   current_height  Int
   lock_percentage Float
+  option_index    Int       @default(0)
   tags            String[]
   post            Post       @relation(fields: [post_txid], references: [txid])
   lock_likes      LockLike[] @relation("VoteOptionLockLikes")

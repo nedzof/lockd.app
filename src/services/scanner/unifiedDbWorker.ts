@@ -91,7 +91,7 @@ function convertMetadataToJson(metadata: any): Record<string, any> {
 }
 
 // Process a transaction
-async function processTransaction(post: ParsedPost) {
+export async function processTransaction(post: ParsedPost) {
     try {
         console.log('\n💾 Processing transaction for database:', post.txid);
 
@@ -113,11 +113,22 @@ async function processTransaction(post: ParsedPost) {
         const metadata = post.metadata || {};
         const postId = metadata.postId || post.txid;
         const isVoteOption = metadata.type === 'vote_option' || metadata.isVoteOption;
-        const isVoteQuestion = metadata.type === 'vote_question';
-        const hasVoteOptions = Array.isArray(metadata.voteOptions) && metadata.voteOptions.length > 0;
+        const isVoteQuestion = metadata.type === 'vote_question' || metadata.isVoteQuestion;
+        const voteOptions = metadata.voteOptions || metadata.vote_options || metadata.options;
+        const hasVoteOptions = (Array.isArray(voteOptions) && voteOptions.length > 0) || 
+                             (typeof voteOptions === 'string' && voteOptions.length > 0);
         const lockDuration = metadata.lock?.duration;
         const unlockHeight = metadata.lock?.unlockHeight;
         const isLocked = !!metadata.lock?.isLocked;
+
+        // Log metadata for debugging
+        console.log('🔍 Processing metadata:', {
+            isVoteOption,
+            isVoteQuestion,
+            hasVoteOptions,
+            voteOptions,
+            metadata
+        });
 
         // If this is a vote option, only create the vote option record
         if (isVoteOption) {
@@ -128,17 +139,38 @@ async function processTransaction(post: ParsedPost) {
                 lockAmount: metadata.lockAmount,
                 lockDuration: metadata.lockDuration,
                 parentTxid: metadata.parentTxid,
-                optionIndex: metadata.optionIndex
+                optionIndex: metadata.optionIndex,
+                lockPercentage: metadata.lockPercentage
             });
 
+            // First ensure the parent post exists
+            const parentTxid = metadata.parentTxid || post.txid;
+            const parentPost = await prisma.post.upsert({
+                where: { txid: parentTxid },
+                create: {
+                    id: parentTxid,
+                    txid: parentTxid,
+                    postId: postId,
+                    content: '',  // Will be updated when we process the actual vote question
+                    author_address: post.author || '',
+                    created_at: new Date(post.timestamp),
+                    metadata: {},
+                    tags: [],
+                    is_vote: true
+                },
+                update: {} // No update needed, we'll update when processing the vote question
+            });
+
+            // Now create/update the vote option
             const voteOption = await prisma.voteOption.upsert({
                 where: { txid: post.txid },
                 create: {
                     id: post.txid,
                     txid: post.txid,
                     postId: postId,
-                    post_txid: metadata.parentTxid || post.txid,
+                    post_txid: parentTxid,
                     content: post.content?.text || '',
+                    description: metadata.description || '',
                     author_address: post.author || '',
                     created_at: new Date(post.timestamp),
                     lock_amount: metadata.lockAmount || 0,
@@ -151,6 +183,7 @@ async function processTransaction(post: ParsedPost) {
                 },
                 update: {
                     content: post.content?.text || '',
+                    description: metadata.description || '',
                     author_address: post.author || '',
                     created_at: new Date(post.timestamp),
                     lock_amount: metadata.lockAmount || 0,
@@ -168,67 +201,140 @@ async function processTransaction(post: ParsedPost) {
                 txid: voteOption.txid,
                 postId: voteOption.postId,
                 content: voteOption.content,
+                description: voteOption.description,
                 lockAmount: voteOption.lock_amount,
                 lockDuration: voteOption.lock_duration,
                 parentTxid: voteOption.post_txid,
-                optionIndex: voteOption.option_index
+                optionIndex: voteOption.option_index,
+                lockPercentage: voteOption.lock_percentage
             });
             return;
         }
 
         // If this post has embedded vote options, create them first
-        if (hasVoteOptions) {
-            console.log('📦 Creating vote options from post:', {
+        if (hasVoteOptions || isVoteQuestion) {
+            console.log('📦 Creating vote question and options:', {
                 postTxid: post.txid,
-                optionCount: metadata.voteOptions.length
+                optionCount: typeof voteOptions === 'string' ? voteOptions.split(/[,;\s]+/).length : voteOptions.length,
+                isVoteQuestion,
+                hasVoteOptions
             });
 
-            // Create vote options
-            for (const option of metadata.voteOptions) {
-                const voteOption = await prisma.voteOption.upsert({
-                    where: { 
-                        txid: `${post.txid}_${option.optionIndex}` 
-                    },
-                    create: {
-                        id: `${post.txid}_${option.optionIndex}`,
-                        txid: `${post.txid}_${option.optionIndex}`,
-                        postId: postId,
-                        post_txid: post.txid,
-                        content: option.content || '',
-                        author_address: post.author || '',
-                        created_at: new Date(post.timestamp),
-                        lock_amount: option.lockAmount || 0,
-                        lock_duration: option.lockDuration || 0,
-                        current_height: post.blockHeight,
-                        lock_percentage: option.lockPercentage || 0,
-                        option_index: option.optionIndex || 0,
-                        tags: post.tags || []
-                    },
-                    update: {
-                        content: option.content || '',
-                        author_address: post.author || '',
-                        created_at: new Date(post.timestamp),
-                        lock_amount: option.lockAmount || 0,
-                        lock_duration: option.lockDuration || 0,
-                        current_height: post.blockHeight,
-                        lock_percentage: option.lockPercentage || 0,
-                        option_index: option.optionIndex || 0,
-                        tags: post.tags || []
-                    }
+            // Create the vote question post first
+            const questionPost = await prisma.post.upsert({
+                where: { txid: post.txid },
+                create: {
+                    id: post.txid,
+                    txid: post.txid,
+                    postId: postId,
+                    content: post.content?.text || '',
+                    author_address: post.author || '',
+                    created_at: new Date(post.timestamp),
+                    metadata: metadata,
+                    tags: post.tags || [],
+                    is_vote: true,
+                    is_locked: isLocked,
+                    lock_duration: lockDuration,
+                    unlock_height: unlockHeight,
+                    current_height: post.blockHeight,
+                    image_data: imageData,
+                    media_type: mediaType
+                },
+                update: {
+                    content: post.content?.text || '',
+                    author_address: post.author || '',
+                    created_at: new Date(post.timestamp),
+                    metadata: metadata,
+                    tags: post.tags || [],
+                    is_vote: true,
+                    is_locked: isLocked,
+                    lock_duration: lockDuration,
+                    unlock_height: unlockHeight,
+                    current_height: post.blockHeight,
+                    image_data: imageData,
+                    media_type: mediaType
+                }
+            });
+
+            // Process vote options if present
+            if (hasVoteOptions) {
+                console.log('📊 Processing vote options:', {
+                    questionTxid: post.txid,
+                    optionCount: typeof voteOptions === 'string' ? voteOptions.split(/[,;\s]+/).length : voteOptions.length,
+                    options: voteOptions
                 });
 
-                console.log('✅ Created vote option from post:', {
-                    id: voteOption.id,
-                    txid: voteOption.txid,
-                    postId: voteOption.postId,
-                    content: voteOption.content,
-                    lockAmount: voteOption.lock_amount,
-                    lockDuration: voteOption.lock_duration,
-                    optionIndex: voteOption.option_index
+                // Parse options if they're in string format
+                const parsedOptions = typeof voteOptions === 'string'
+                    ? voteOptions.split(/[,;\s]+/).map(text => ({ text: text.trim() }))
+                    : Array.isArray(voteOptions) ? voteOptions : [voteOptions];
+
+                // Create vote options
+                const savedOptions = await Promise.all(parsedOptions.map(async (option: any, index: number) => {
+                    // Generate a deterministic txid for embedded options
+                    const optionTxid = `${post.txid}_option_${index}`;
+                    
+                    // Extract option data
+                    const optionData = typeof option === 'string' 
+                        ? { text: option } 
+                        : option;
+
+                    console.log('Creating vote option:', {
+                        optionTxid,
+                        optionData,
+                        index
+                    });
+                    
+                    return prisma.voteOption.upsert({
+                        where: { txid: optionTxid },
+                        create: {
+                            id: optionTxid,
+                            txid: optionTxid,
+                            postId: postId,
+                            post_txid: post.txid,
+                            content: optionData.text || optionData.content || optionData.label || '',
+                            description: optionData.description || '',
+                            author_address: post.author || '',
+                            created_at: new Date(post.timestamp),
+                            lock_amount: parseInt(optionData.lockAmount) || 0,
+                            lock_duration: parseInt(optionData.lockDuration) || 0,
+                            unlock_height: parseInt(optionData.unlockHeight) || 0,
+                            current_height: post.blockHeight,
+                            lock_percentage: parseInt(optionData.lockPercentage) || 0,
+                            option_index: parseInt(optionData.optionIndex) || index,
+                            tags: post.tags || []
+                        },
+                        update: {
+                            content: optionData.text || optionData.content || optionData.label || '',
+                            description: optionData.description || '',
+                            author_address: post.author || '',
+                            created_at: new Date(post.timestamp),
+                            lock_amount: parseInt(optionData.lockAmount) || 0,
+                            lock_duration: parseInt(optionData.lockDuration) || 0,
+                            unlock_height: parseInt(optionData.unlockHeight) || 0,
+                            current_height: post.blockHeight,
+                            lock_percentage: parseInt(optionData.lockPercentage) || 0,
+                            option_index: parseInt(optionData.optionIndex) || index,
+                            tags: post.tags || []
+                        }
+                    });
+                }));
+
+                console.log('✅ Created vote options:', {
+                    questionTxid: questionPost.txid,
+                    optionCount: savedOptions.length,
+                    options: savedOptions.map(opt => ({
+                        txid: opt.txid,
+                        content: opt.content,
+                        description: opt.description,
+                        lockAmount: opt.lock_amount,
+                        lockDuration: opt.lock_duration,
+                        optionIndex: opt.option_index,
+                        lockPercentage: opt.lock_percentage
+                    }))
                 });
             }
 
-            // Don't create a post record, since this is a vote with options
             return;
         }
 

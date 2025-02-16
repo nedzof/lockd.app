@@ -16,104 +16,76 @@ type Post = Prisma.PostGetPayload<{
 async function testSimplePost() {
   console.log('\nTesting simple post creation...');
   const tx: JungleBusTransaction = {
-    id: 'test_simple_post',
-    transaction: '',
+    txid: 'test_simple_post',
+    blockHash: 'test_block_hash',
+    blockHeight: 1000,
+    timestamp: '2025-02-16T05:37:14.259Z',
     addresses: ['test_address'],
-    block_height: 1000,
-    block_time: Date.now() / 1000,
+    inputs: [],
     outputs: [
       {
-        script: {
-          asm: 'MAP_TYPE=content|MAP_POST_ID=test123|MAP_SEQUENCE=0|MAP_CONTENT=Test post content|MAP_TAGS=["test","simple"]',
-          hex: Buffer.from('Test post content').toString('hex')
-        }
+        outputScript: Buffer.from('006a6d01' + Buffer.from(JSON.stringify({
+          app: 'lockd.app',
+          type: 'post',
+          content: 'Test post content',
+          tags: ['test', 'simple']
+        })).toString('hex'), 'hex'),
+        value: 0
       }
     ]
   };
 
-  const parsed = parseMapTransaction(tx);
+  const parsed = await parseMapTransaction(tx);
   if (!parsed) {
     throw new Error('Failed to parse simple post');
   }
   console.log('Parsed simple post:', JSON.stringify(parsed, null, 2));
-  await processTransaction(prisma, parsed);
-}
-
-async function testImagePost() {
-  console.log('\nTesting image post creation...');
-  const imageData = 'data:image/jpeg;base64,/9j/4AAQSkZJRg...'; // Add sample base64 image
-  const tx: JungleBusTransaction = {
-    id: 'test_image_post',
-    transaction: '',
-    addresses: ['test_address'],
-    block_height: 1000,
-    block_time: Date.now() / 1000,
-    outputs: [
-      {
-        script: {
-          asm: 'MAP_TYPE=content|MAP_POST_ID=test456|MAP_SEQUENCE=0|MAP_CONTENT=Test image post',
-          hex: Buffer.from('Test image post').toString('hex')
-        }
-      },
-      {
-        script: {
-          asm: 'MAP_TYPE=image|MAP_POST_ID=test456|MAP_SEQUENCE=1|MAP_PARENT_SEQUENCE=0|MAP_CONTENT_TYPE=image/jpeg',
-          hex: Buffer.from(imageData).toString('hex')
-        }
-      }
-    ]
-  };
-
-  const parsed = parseMapTransaction(tx);
-  if (!parsed) {
-    throw new Error('Failed to parse image post');
-  }
-  console.log('Parsed image post:', JSON.stringify(parsed, null, 2));
-  await processTransaction(prisma, parsed);
+  await processTransaction(parsed);
 }
 
 async function testVotePost() {
   console.log('\nTesting vote post creation...');
   const tx: JungleBusTransaction = {
-    id: 'test_vote_post',
-    transaction: '',
+    txid: 'test_vote_post',
+    blockHash: 'test_block_hash',
+    blockHeight: 1000,
+    timestamp: '2025-02-16T05:37:14.259Z',
     addresses: ['test_address'],
-    block_height: 1000,
-    block_time: Date.now() / 1000,
+    inputs: [],
     outputs: [
       {
-        script: {
-          asm: 'MAP_TYPE=content|MAP_POST_ID=test789|MAP_SEQUENCE=0|MAP_CONTENT=Test vote post',
-          hex: Buffer.from('Test vote post').toString('hex')
-        }
-      },
-      {
-        script: {
-          asm: 'MAP_TYPE=vote_question|MAP_POST_ID=test789|MAP_SEQUENCE=1|MAP_PARENT_SEQUENCE=0|MAP_CONTENT=Which option?|MAP_TOTAL_OPTIONS=2',
-          hex: Buffer.from('Which option?').toString('hex')
-        }
-      },
-      {
-        script: {
-          asm: 'MAP_TYPE=vote_option|MAP_POST_ID=test789|MAP_SEQUENCE=2|MAP_PARENT_SEQUENCE=1|MAP_CONTENT=Option 1|MAP_OPTION_INDEX=0|MAP_LOCK_AMOUNT=1000|MAP_LOCK_DURATION=144',
-          hex: Buffer.from('Option 1').toString('hex')
-        }
-      },
-      {
-        script: {
-          asm: 'MAP_TYPE=vote_option|MAP_POST_ID=test789|MAP_SEQUENCE=3|MAP_PARENT_SEQUENCE=1|MAP_CONTENT=Option 2|MAP_OPTION_INDEX=1|MAP_LOCK_AMOUNT=2000|MAP_LOCK_DURATION=144',
-          hex: Buffer.from('Option 2').toString('hex')
-        }
+        outputScript: Buffer.from('006a6d01' + Buffer.from(JSON.stringify({
+          app: 'lockd.app',
+          type: 'vote_question',
+          content: 'Which option do you prefer?',
+          voteOptions: [
+            {
+              text: 'Option 1',
+              lockAmount: 1000,
+              lockDuration: 720,
+              lockPercentage: 30,
+              optionIndex: 0
+            },
+            {
+              text: 'Option 2',
+              lockAmount: 2000,
+              lockDuration: 1440,
+              lockPercentage: 70,
+              optionIndex: 1
+            }
+          ]
+        })).toString('hex'), 'hex'),
+        value: 0
       }
     ]
   };
 
-  const parsed = parseMapTransaction(tx);
+  const parsed = await parseMapTransaction(tx);
   if (!parsed) {
     throw new Error('Failed to parse vote post');
   }
   console.log('Parsed vote post:', JSON.stringify(parsed, null, 2));
-  await processTransaction(prisma, parsed);
+  await processTransaction(parsed);
 }
 
 async function verifyDatabase() {
@@ -123,7 +95,7 @@ async function verifyDatabase() {
   const posts = await prisma.post.findMany({
     where: {
       txid: {
-        in: ['test_simple_post', 'test_image_post', 'test_vote_post']
+        in: ['test_simple_post', 'test_vote_post']
       }
     },
     include: {
@@ -145,12 +117,20 @@ async function verifyDatabase() {
       console.log('Vote options:', post.vote_options);
     }
   });
+
+  // Check vote options
+  const voteOptions = await prisma.voteOption.findMany({
+    where: {
+      post_txid: 'test_vote_post'
+    }
+  });
+
+  console.log('\nVote options:', voteOptions);
 }
 
 async function runTests() {
   try {
     await testSimplePost();
-    await testImagePost();
     await testVotePost();
     await verifyDatabase();
   } catch (error) {
@@ -160,4 +140,4 @@ async function runTests() {
   }
 }
 
-runTests(); 
+runTests();

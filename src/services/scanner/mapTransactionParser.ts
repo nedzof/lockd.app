@@ -294,36 +294,90 @@ export async function parseMapTransaction(tx: JungleBusTransaction): Promise<Par
                         break;
                     case 'type':
                         post.metadata.type = value;
-                        // Skip content validation for vote options
+                        // Skip content validation for vote options and vote questions
                         if (value === 'vote_option') {
                             post.metadata.isVoteOption = true;
+                        } else if (value === 'vote_question') {
+                            post.metadata.isVoteQuestion = true;
                         }
                         break;
                     case 'options':
+                    case 'voteoptions':
+                    case 'vote_options':
                         try {
                             // Parse vote options if they're included in the post
+                            let optionsArray;
                             if (typeof value === 'string') {
-                                const options = JSON.parse(value);
-                                if (Array.isArray(options)) {
-                                    post.metadata.voteOptions = options.map(option => ({
-                                        content: option.text || option.content || '',
-                                        lockAmount: parseInt(option.lockAmount) || 0,
-                                        lockDuration: parseInt(option.lockDuration) || 0,
-                                        lockPercentage: parseInt(option.lockPercentage) || 0,
-                                        optionIndex: parseInt(option.optionIndex) || 0
-                                    }));
+                                // Try to parse as JSON first
+                                try {
+                                    const parsed = JSON.parse(value);
+                                    optionsArray = Array.isArray(parsed) ? parsed : [parsed];
+                                } catch (e) {
+                                    // If not JSON, try various string splitting methods
+                                    // First try comma or semicolon
+                                    let splitOptions = value.split(/[,;]/).map(s => s.trim());
+                                    
+                                    // If we only got one option, try splitting by whitespace
+                                    if (splitOptions.length === 1 && value.includes(' ')) {
+                                        splitOptions = value.split(/\s+/).map(s => s.trim());
+                                    }
+                                    
+                                    // Filter out empty options
+                                    optionsArray = splitOptions.filter(opt => opt.length > 0);
                                 }
                             } else if (Array.isArray(value)) {
-                                post.metadata.voteOptions = value.map(option => ({
-                                    content: option.text || option.content || '',
-                                    lockAmount: parseInt(option.lockAmount) || 0,
-                                    lockDuration: parseInt(option.lockDuration) || 0,
-                                    lockPercentage: parseInt(option.lockPercentage) || 0,
-                                    optionIndex: parseInt(option.optionIndex) || 0
-                                }));
+                                optionsArray = value;
+                            } else if (typeof value === 'object' && value !== null) {
+                                optionsArray = [value];
+                            }
+
+                            if (Array.isArray(optionsArray) && optionsArray.length > 0) {
+                                post.metadata.voteOptions = optionsArray.map((option, index) => {
+                                    // Handle both string and object options
+                                    const optionObj = typeof option === 'string' ? { text: option } : option;
+                                    
+                                    // Ensure text is always a string
+                                    const text = String(optionObj.text || optionObj.content || optionObj.label || '').trim();
+                                    
+                                    // Parse numeric values safely
+                                    const safeParseInt = (val: any) => {
+                                        if (typeof val === 'number') return Math.floor(val);
+                                        if (typeof val === 'string') {
+                                            const parsed = parseInt(val);
+                                            return isNaN(parsed) ? 0 : parsed;
+                                        }
+                                        return 0;
+                                    };
+
+                                    const voteOption = {
+                                        text,
+                                        description: optionObj.description || '',
+                                        lockAmount: safeParseInt(optionObj.lockAmount),
+                                        lockDuration: safeParseInt(optionObj.lockDuration),
+                                        lockPercentage: safeParseInt(optionObj.lockPercentage),
+                                        optionIndex: safeParseInt(optionObj.optionIndex) || index
+                                    };
+
+                                    // Log warning if required text is missing
+                                    if (!text) {
+                                        console.warn(`⚠️ Vote option ${index} is missing required text:`, optionObj);
+                                    }
+
+                                    return voteOption;
+                                }).filter(opt => opt.text.length > 0); // Filter out options with no text
+
+                                if (post.metadata.voteOptions.length > 0) {
+                                    console.log('📊 Found vote options:', post.metadata.voteOptions);
+                                } else {
+                                    console.warn('⚠️ No valid vote options found after parsing');
+                                }
                             }
                         } catch (e) {
-                            console.warn('⚠️ Error parsing vote options:', e);
+                            console.warn('⚠️ Error parsing vote options:', {
+                                error: e.message,
+                                rawValue: value,
+                                valueType: typeof value
+                            });
                         }
                         break;
                     case 'app':
@@ -414,36 +468,90 @@ export async function parseMapTransaction(tx: JungleBusTransaction): Promise<Par
                                 break;
                             case 'type':
                                 post.metadata.type = value;
-                                // Skip content validation for vote options
+                                // Skip content validation for vote options and vote questions
                                 if (value === 'vote_option') {
                                     post.metadata.isVoteOption = true;
+                                } else if (value === 'vote_question') {
+                                    post.metadata.isVoteQuestion = true;
                                 }
                                 break;
                             case 'options':
+                            case 'voteoptions':
+                            case 'vote_options':
                                 try {
                                     // Parse vote options if they're included in the post
+                                    let optionsArray;
                                     if (typeof value === 'string') {
-                                        const options = JSON.parse(value);
-                                        if (Array.isArray(options)) {
-                                            post.metadata.voteOptions = options.map(option => ({
-                                                content: option.text || option.content || '',
-                                                lockAmount: parseInt(option.lockAmount) || 0,
-                                                lockDuration: parseInt(option.lockDuration) || 0,
-                                                lockPercentage: parseInt(option.lockPercentage) || 0,
-                                                optionIndex: parseInt(option.optionIndex) || 0
-                                            }));
+                                        // Try to parse as JSON first
+                                        try {
+                                            const parsed = JSON.parse(value);
+                                            optionsArray = Array.isArray(parsed) ? parsed : [parsed];
+                                        } catch (e) {
+                                            // If not JSON, try various string splitting methods
+                                            // First try comma or semicolon
+                                            let splitOptions = value.split(/[,;]/).map(s => s.trim());
+                                            
+                                            // If we only got one option, try splitting by whitespace
+                                            if (splitOptions.length === 1 && value.includes(' ')) {
+                                                splitOptions = value.split(/\s+/).map(s => s.trim());
+                                            }
+                                            
+                                            // Filter out empty options
+                                            optionsArray = splitOptions.filter(opt => opt.length > 0);
                                         }
                                     } else if (Array.isArray(value)) {
-                                        post.metadata.voteOptions = value.map(option => ({
-                                            content: option.text || option.content || '',
-                                            lockAmount: parseInt(option.lockAmount) || 0,
-                                            lockDuration: parseInt(option.lockDuration) || 0,
-                                            lockPercentage: parseInt(option.lockPercentage) || 0,
-                                            optionIndex: parseInt(option.optionIndex) || 0
-                                        }));
+                                        optionsArray = value;
+                                    } else if (typeof value === 'object' && value !== null) {
+                                        optionsArray = [value];
+                                    }
+
+                                    if (Array.isArray(optionsArray) && optionsArray.length > 0) {
+                                        post.metadata.voteOptions = optionsArray.map((option, index) => {
+                                            // Handle both string and object options
+                                            const optionObj = typeof option === 'string' ? { text: option } : option;
+                                            
+                                            // Ensure text is always a string
+                                            const text = String(optionObj.text || optionObj.content || optionObj.label || '').trim();
+                                            
+                                            // Parse numeric values safely
+                                            const safeParseInt = (val: any) => {
+                                                if (typeof val === 'number') return Math.floor(val);
+                                                if (typeof val === 'string') {
+                                                    const parsed = parseInt(val);
+                                                    return isNaN(parsed) ? 0 : parsed;
+                                                }
+                                                return 0;
+                                            };
+
+                                            const voteOption = {
+                                                text,
+                                                description: optionObj.description || '',
+                                                lockAmount: safeParseInt(optionObj.lockAmount),
+                                                lockDuration: safeParseInt(optionObj.lockDuration),
+                                                lockPercentage: safeParseInt(optionObj.lockPercentage),
+                                                optionIndex: safeParseInt(optionObj.optionIndex) || index
+                                            };
+
+                                            // Log warning if required text is missing
+                                            if (!text) {
+                                                console.warn(`⚠️ Vote option ${index} is missing required text:`, optionObj);
+                                            }
+
+                                            return voteOption;
+                                        }).filter(opt => opt.text.length > 0); // Filter out options with no text
+
+                                        if (post.metadata.voteOptions.length > 0) {
+                                            console.log('📊 Found vote options:', post.metadata.voteOptions);
+                                        } else {
+                                            console.warn('⚠️ No valid vote options found after parsing');
+                                        }
                                     }
                                 } catch (e) {
-                                    console.warn('⚠️ Error parsing vote options:', e);
+                                    console.warn('⚠️ Error parsing vote options:', {
+                                        error: e.message,
+                                        rawValue: value,
+                                        valueType: typeof value
+                                    });
                                 }
                                 break;
                             case 'app':
@@ -497,8 +605,8 @@ export async function parseMapTransaction(tx: JungleBusTransaction): Promise<Par
             }
         }
 
-        // Validate required fields - skip validation for vote options
-        if (!post.metadata.isVoteOption && !post.content?.text && (!post.images || post.images.length === 0)) {
+        // Validate required fields - skip validation for vote options and vote questions
+        if (!post.metadata.isVoteOption && !post.metadata.isVoteQuestion && !post.content?.text && (!post.images || post.images.length === 0)) {
             console.log('❌ No content or images found in transaction');
             return null;
         }
