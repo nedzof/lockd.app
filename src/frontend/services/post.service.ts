@@ -601,7 +601,7 @@ async function createDirectPost(postData: PostCreationData, imageFile?: File): P
     console.error('Error creating direct post:', error);
     throw error;
   }
-}
+};
 
 export const createPost = async (
   content: string,
@@ -896,3 +896,433 @@ export const fetchPosts = async (filters: PostFilters = {}): Promise<Post[]> => 
     return [];
   }
 }; 
+
+export interface VoteOption {
+  text: string;
+  lockAmount: number;
+  lockDuration: number;
+  optionIndex: number;
+}
+
+export interface VoteData {
+  isVoteQuestion: boolean;
+  question?: string;
+  options?: VoteOption[];
+  totalOptions?: number;
+  optionsHash?: string;
+  selectedOption?: VoteOption;
+}
+
+export interface ImageData {
+  file: File;
+  contentType: string;
+  base64Data: string;
+  description?: string;
+  metadata?: {
+    width: number;
+    height: number;
+    format: string;
+    size: number;
+  };
+}
+
+export interface PostMetadata {
+  app: string;
+  type: string;
+  content: string;
+  timestamp: string;
+  version: string;
+  tags: string[];
+  sequence: number;
+  parentSequence?: number;
+  postId: string;
+  vote?: VoteData;
+  image?: ImageData;
+}
+
+// Update createMapData to use structured metadata
+function createMapData(metadata: PostMetadata): MAP {
+  const mapData: Record<string, string> = {
+    app: metadata.app,
+    type: metadata.type,
+    content: metadata.content,
+    timestamp: metadata.timestamp,
+    version: metadata.version,
+    tags: JSON.stringify(metadata.tags),
+    sequence: metadata.sequence.toString(),
+  };
+
+  if (metadata.parentSequence !== undefined) {
+    mapData.parentSequence = metadata.parentSequence.toString();
+  }
+
+  if (metadata.postId) {
+    mapData.postId = metadata.postId;
+  }
+
+  if (metadata.vote) {
+    if (metadata.vote.isVoteQuestion) {
+      mapData.type = 'vote_question';
+      mapData.totalOptions = metadata.vote.totalOptions?.toString() || '0';
+      if (metadata.vote.optionsHash) {
+        mapData.optionsHash = metadata.vote.optionsHash;
+      }
+    } else if (metadata.vote.selectedOption) {
+      mapData.type = 'vote_option';
+      mapData.optionIndex = metadata.vote.selectedOption.optionIndex.toString();
+      mapData.lockAmount = metadata.vote.selectedOption.lockAmount.toString();
+      mapData.lockDuration = metadata.vote.selectedOption.lockDuration.toString();
+    }
+  }
+
+  if (metadata.image) {
+    mapData.contentType = metadata.image.contentType;
+    mapData.fileSize = metadata.image.metadata?.size.toString() || '0';
+    if (metadata.image.description) {
+      mapData.description = metadata.image.description;
+    }
+  }
+
+  return mapData as MAP;
+}
+
+// Update createImageComponent to use structured data
+async function createImageComponent(
+  imageData: ImageData,
+  postId: string,
+  sequence: number,
+  parentSequence: number,
+  address: string
+): Promise<InscribeRequest> {
+  const metadata: PostMetadata = {
+    app: 'lockd.app',
+    type: 'image',
+    content: imageData.description || '',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+    tags: [],
+    sequence,
+    parentSequence,
+    postId,
+    image: imageData
+  };
+
+  const map = createMapData(metadata);
+  const satoshis = await calculateOutputSatoshis(imageData.base64Data.length);
+
+  return createInscriptionRequest(
+    address,
+    imageData.base64Data,
+    map,
+    satoshis,
+    imageData.contentType
+  );
+}
+
+// Update createVoteQuestionComponent to use structured data
+async function createVoteQuestionComponent(
+  question: string,
+  options: VoteOption[],
+  postId: string,
+  sequence: number,
+  parentSequence: number,
+  address: string
+): Promise<InscribeRequest> {
+  const optionsHash = await hashContent(JSON.stringify(options));
+  
+  const metadata: PostMetadata = {
+    app: 'lockd.app',
+    type: 'vote_question',
+    content: question,
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+    tags: [],
+    sequence,
+    parentSequence,
+    postId,
+    vote: {
+      isVoteQuestion: true,
+      question,
+      options,
+      totalOptions: options.length,
+      optionsHash
+    }
+  };
+
+  const map = createMapData(metadata);
+  const satoshis = await calculateOutputSatoshis(question.length);
+
+  return createInscriptionRequest(address, question, map, satoshis);
+}
+
+// Update createVoteOptionComponent to use structured data
+function createVoteOptionComponent(
+  option: VoteOption,
+  postId: string,
+  sequence: number,
+  parentSequence: number,
+  address: string
+): InscribeRequest {
+  const metadata: PostMetadata = {
+    app: 'lockd.app',
+    type: 'vote_option',
+    content: option.text,
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+    tags: [],
+    sequence,
+    parentSequence,
+    postId,
+    vote: {
+      isVoteQuestion: false,
+      selectedOption: option
+    }
+  };
+
+  const map = createMapData(metadata);
+  return createInscriptionRequest(address, option.text, map, 1000);
+}
+
+// Database-aligned interfaces
+export interface DbPost {
+  id: string;
+  txid: string;
+  postId: string;
+  content: string;
+  author_address: string;
+  media_type?: string;
+  block_height?: number;
+  amount?: number;
+  unlock_height?: number;
+  description?: string;
+  created_at: Date;
+  tags: string[];
+  metadata?: Record<string, any>;
+  is_locked: boolean;
+  lock_duration?: number;
+  raw_image_data?: Buffer;
+  image_format?: string;
+  image_source?: string;
+  is_vote: boolean;
+  vote_options?: DbVoteOption[];
+}
+
+export interface DbVoteOption {
+  id: string;
+  txid: string;
+  postId: string;
+  post_txid: string;
+  content: string;
+  description: string;
+  author_address: string;
+  created_at: Date;
+  lock_amount: number;
+  lock_duration: number;
+  unlock_height: number;
+  current_height: number;
+  lock_percentage: number;
+  option_index: number;
+  tags: string[];
+}
+
+// Update PostMetadata to include all necessary fields for database
+export interface PostMetadata {
+  app: string;
+  type: string;
+  content: string;
+  timestamp: string;
+  version: string;
+  tags: string[];
+  sequence: number;
+  parentSequence?: number;
+  postId: string;
+  block_height?: number;
+  amount?: number;
+  unlock_height?: number;
+  is_locked: boolean;
+  lock_duration?: number;
+  is_vote: boolean;
+  vote?: {
+    isVoteQuestion: boolean;
+    question?: string;
+    options?: Array<{
+      text: string;
+      lockAmount: number;
+      lockDuration: number;
+      optionIndex: number;
+      unlockHeight?: number;
+      currentHeight?: number;
+      lockPercentage?: number;
+    }>;
+    totalOptions?: number;
+    optionsHash?: string;
+  };
+  image?: {
+    file: File;
+    contentType: string;
+    base64Data: string;
+    format: string;
+    source?: string;
+    description?: string;
+    metadata?: {
+      width: number;
+      height: number;
+      format: string;
+      size: number;
+    };
+  };
+}
+
+// Helper function to convert PostMetadata to database Post object
+export function createDbPost(metadata: PostMetadata, txid: string): DbPost {
+  const post: DbPost = {
+    id: metadata.postId, // Using postId as the primary id
+    txid,
+    postId: metadata.postId,
+    content: metadata.content,
+    author_address: '', // This will be set by the caller
+    created_at: new Date(metadata.timestamp),
+    tags: metadata.tags,
+    is_locked: metadata.is_locked,
+    lock_duration: metadata.lock_duration,
+    is_vote: metadata.is_vote,
+    metadata: {
+      app: metadata.app,
+      type: metadata.type,
+      version: metadata.version,
+      sequence: metadata.sequence,
+      parentSequence: metadata.parentSequence
+    }
+  };
+
+  if (metadata.block_height) {
+    post.block_height = metadata.block_height;
+  }
+
+  if (metadata.amount) {
+    post.amount = metadata.amount;
+  }
+
+  if (metadata.unlock_height) {
+    post.unlock_height = metadata.unlock_height;
+  }
+
+  if (metadata.image) {
+    post.media_type = metadata.image.contentType;
+    post.image_format = metadata.image.format;
+    post.image_source = metadata.image.source;
+    post.description = metadata.image.description;
+    if (metadata.image.base64Data) {
+      post.raw_image_data = Buffer.from(metadata.image.base64Data, 'base64');
+    }
+  }
+
+  return post;
+}
+
+// Helper function to convert PostMetadata to database VoteOption objects
+export function createDbVoteOptions(metadata: PostMetadata, post_txid: string): DbVoteOption[] {
+  if (!metadata.vote?.options) {
+    return [];
+  }
+
+  return metadata.vote.options.map((option, index) => ({
+    id: `${metadata.postId}-option-${index}`,
+    txid: '', // This will be set when the transaction is created
+    postId: metadata.postId,
+    post_txid,
+    content: option.text,
+    description: '',
+    author_address: '', // This will be set by the caller
+    created_at: new Date(metadata.timestamp),
+    lock_amount: option.lockAmount,
+    lock_duration: option.lockDuration,
+    unlock_height: option.unlockHeight || 0,
+    current_height: option.currentHeight || 0,
+    lock_percentage: option.lockPercentage || 0,
+    option_index: option.optionIndex,
+    tags: metadata.tags
+  }));
+}
+
+// Update createMapData to include all necessary fields
+function createMapData(metadata: PostMetadata): MAP {
+  const mapData: Record<string, string> = {
+    app: metadata.app,
+    type: metadata.type,
+    content: metadata.content,
+    timestamp: metadata.timestamp,
+    version: metadata.version,
+    tags: JSON.stringify(metadata.tags),
+    sequence: metadata.sequence.toString(),
+    is_locked: metadata.is_locked.toString(),
+    is_vote: metadata.is_vote.toString()
+  };
+
+  if (metadata.parentSequence !== undefined) {
+    mapData.parentSequence = metadata.parentSequence.toString();
+  }
+
+  if (metadata.postId) {
+    mapData.postId = metadata.postId;
+  }
+
+  if (metadata.block_height) {
+    mapData.block_height = metadata.block_height.toString();
+  }
+
+  if (metadata.amount) {
+    mapData.amount = metadata.amount.toString();
+  }
+
+  if (metadata.unlock_height) {
+    mapData.unlock_height = metadata.unlock_height.toString();
+  }
+
+  if (metadata.lock_duration) {
+    mapData.lock_duration = metadata.lock_duration.toString();
+  }
+
+  if (metadata.vote) {
+    if (metadata.vote.isVoteQuestion) {
+      mapData.type = 'vote_question';
+      mapData.totalOptions = metadata.vote.totalOptions?.toString() || '0';
+      if (metadata.vote.optionsHash) {
+        mapData.optionsHash = metadata.vote.optionsHash;
+      }
+    } else if (metadata.vote.options?.[0]) {
+      const option = metadata.vote.options[0];
+      mapData.type = 'vote_option';
+      mapData.optionIndex = option.optionIndex.toString();
+      mapData.lockAmount = option.lockAmount.toString();
+      mapData.lockDuration = option.lockDuration.toString();
+      if (option.unlockHeight) {
+        mapData.unlockHeight = option.unlockHeight.toString();
+      }
+      if (option.currentHeight) {
+        mapData.currentHeight = option.currentHeight.toString();
+      }
+      if (option.lockPercentage) {
+        mapData.lockPercentage = option.lockPercentage.toString();
+      }
+    }
+  }
+
+  if (metadata.image) {
+    mapData.contentType = metadata.image.contentType;
+    mapData.format = metadata.image.format;
+    if (metadata.image.source) {
+      mapData.imageSource = metadata.image.source;
+    }
+    if (metadata.image.metadata) {
+      mapData.imageWidth = metadata.image.metadata.width.toString();
+      mapData.imageHeight = metadata.image.metadata.height.toString();
+      mapData.imageSize = metadata.image.metadata.size.toString();
+    }
+    if (metadata.image.description) {
+      mapData.description = metadata.image.description;
+    }
+  }
+
+  return mapData as MAP;
+}

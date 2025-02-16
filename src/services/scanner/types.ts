@@ -14,17 +14,17 @@ export interface JungleBusTransaction {
     vout?: number;
     script?: string;
   }[];
-  outputs?: string[];
+  outputs?: JungleBusOutput[];
   output_types?: string[];
   contexts?: string[];
   sub_contexts?: string[];
+  transaction?: string;
 }
 
 export interface JungleBusOutput {
-  script?: {
-    asm?: string;
-    hex?: string;
-  };
+  script?: string;
+  value?: number;
+  n?: number;
 }
 
 export interface ControlMessage {
@@ -147,6 +147,16 @@ export interface MediaContent {
   type: string;
 }
 
+export interface ImageMetadata {
+  format?: string;
+  contentType?: string;
+  width?: number;
+  height?: number;
+  encoding?: 'base64' | 'hex';
+  filename?: string;
+  filesize?: number;
+}
+
 // Constants
 export const TRANSACTION_TYPES = {
   IMAGE_TYPES: ['image/'],
@@ -250,6 +260,22 @@ export type MapMetadata =
   | VoteQuestionMapMetadata 
   | VoteOptionMapMetadata 
   | TagsMapMetadata;
+
+export interface MapPost {
+  txid: string;
+  blockHeight: number;
+  timestamp: string;
+  transaction: string;
+  outputs: JungleBusOutput[];
+  addresses?: string[];
+  data?: string[];
+}
+
+export interface ImageData {
+  data: Buffer;
+  contentType: string;
+  metadata: { [key: string]: any };
+}
 
 export interface ParsedPost {
   txid: string;
