@@ -287,7 +287,7 @@ async function initializeScanner(): Promise<void> {
         // Subscribe to MAP protocol transactions
         await client.Subscribe(
             "2dfb47cb42e93df9c8bbccec89425417f4e5a094c9c7d6fcda9dab12e845fd09",
-            883800,
+            884200,
             async (tx: JungleBusTransaction) => {
                 try {
                     console.log("\n📥 Received transaction:", tx.id);

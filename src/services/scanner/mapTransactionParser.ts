@@ -39,6 +39,7 @@ interface ParsedMapData {
     };
     tags?: string[];
     version: string;
+    is_vote?: boolean;
 }
 
 // Function to parse MAP fields from a script
@@ -71,6 +72,8 @@ async function parseMapFields(scriptData: string): Promise<ParsedMapData> {
                             break;
                         case 'type':
                             fields.type = value.trim();
+                            // Set is_vote flag based on type
+                            fields.is_vote = value.trim().toLowerCase() === 'vote';
                             break;
                         case 'app':
                             fields.app = value.trim();
@@ -88,11 +91,13 @@ async function parseMapFields(scriptData: string): Promise<ParsedMapData> {
                             if (!fields.vote) fields.vote = {};
                             if (!fields.vote.question) fields.vote.question = {};
                             fields.vote.question.totalOptions = parseInt(value.trim(), 10);
+                            fields.is_vote = true; // Set is_vote flag when vote metadata is present
                             break;
                         case 'optionindex':
                             if (!fields.vote) fields.vote = {};
                             if (!fields.vote.option) fields.vote.option = {};
                             fields.vote.option.optionIndex = parseInt(value.trim(), 10);
+                            fields.is_vote = true; // Set is_vote flag when vote metadata is present
                             break;
                         case 'lockamount':
                             if (!fields.vote) fields.vote = {};
@@ -147,7 +152,8 @@ async function parseMapFields(scriptData: string): Promise<ParsedMapData> {
             vote: fields.vote,
             image: fields.image,
             tags: fields.tags || [],
-            version: fields.version || '1.0.0'
+            version: fields.version || '1.0.0',
+            is_vote: fields.is_vote || false // Include is_vote flag in returned data
         };
     } catch (error) {
         console.error('Error parsing MAP fields:', error);
@@ -307,76 +313,88 @@ function getImageContentType(buffer: Buffer): string {
 // Main function to parse a MAP transaction
 export async function parseMapTransaction(tx: JungleBusTransaction): Promise<ParsedPost | null> {
     try {
-        console.log('Parsing MAP transaction...');
-        
-        // Initialize post object
+        if (!tx.outputs || tx.outputs.length === 0) {
+            console.log('No outputs in transaction');
+            return null;
+        }
+
+        let mapData: ParsedMapData | null = null;
+        let imageData: Buffer | null = null;
+
+        // First pass: Look for MAP data
+        for (const output of tx.outputs) {
+            if (!output.script?.asm) continue;
+
+            try {
+                mapData = await parseMapFields(output.script.asm);
+                if (mapData) break;
+            } catch (error) {
+                console.error('Error parsing MAP data:', error);
+            }
+        }
+
+        if (!mapData) {
+            console.log('No valid MAP data found in transaction');
+            return null;
+        }
+
+        // Second pass: Look for image data if needed
+        if (mapData.image) {
+            imageData = await extractImageFromTransaction(tx);
+        }
+
+        const author = getAuthorFromTransaction(tx);
+        if (!author) {
+            console.error('Could not determine author from transaction');
+            return null;
+        }
+
+        // Construct the parsed post
         const post: ParsedPost = {
-            title: '',
-            content: '',
-            images: [],
-            metadata: {}
+            txid: tx.txid,
+            content: mapData.content,
+            author_address: author,
+            block_height: tx.blockHeight || 0,
+            timestamp: new Date(mapData.timestamp),
+            tags: mapData.tags || [],
+            metadata: {
+                app: mapData.app,
+                type: mapData.type,
+                version: mapData.version,
+                sequence: mapData.sequence,
+                parentSequence: mapData.parentSequence
+            },
+            is_vote: mapData.is_vote || false // Include vote flag from MAP data
         };
 
-        // Extract metadata from tx.data
-        const metadata: { [key: string]: any } = {};
-        if (tx.data && Array.isArray(tx.data)) {
-            for (const item of tx.data) {
-                if (typeof item === 'string' && item.includes('=')) {
-                    const [key, value] = item.split('=');
-                    metadata[key] = value;
-                }
+        // Handle vote metadata
+        if (mapData.vote) {
+            if (mapData.vote.question) {
+                post.vote_question = {
+                    text: mapData.content,
+                    totalOptions: mapData.vote.question.totalOptions,
+                    optionsHash: mapData.vote.question.optionsHash,
+                    sequence: mapData.vote.question.sequence
+                };
+            } else if (mapData.vote.option) {
+                post.vote_option = {
+                    text: mapData.content,
+                    lockAmount: mapData.vote.option.lockAmount,
+                    lockDuration: mapData.vote.option.lockDuration,
+                    optionIndex: mapData.vote.option.optionIndex,
+                    sequence: mapData.vote.option.sequence
+                };
             }
         }
 
-        // Try to extract image first
-        const imageResult = await extractImageFromTransaction(tx);
-        if (imageResult) {
-            post.images.push({
-                data: imageResult,
-                contentType: getImageContentType(imageResult),
-                metadata: {}
-            });
-            console.log('Found image:', {
-                contentType: getImageContentType(imageResult),
-                size: imageResult.length
-            });
+        // Handle image data if present
+        if (imageData && mapData.image) {
+            post.media_type = mapData.image.contentType;
+            post.raw_image_data = imageData.toString('base64');
+            post.image_format = mapData.image.contentType.split('/')[1];
         }
-
-        // Extract content from outputs
-        if (tx.outputs && tx.outputs.length > 0) {
-            for (const output of tx.outputs) {
-                if (!output.script) continue;
-
-                try {
-                    const scriptBuffer = Buffer.from(output.script, 'hex');
-                    const text = scriptBuffer.toString('utf8');
-
-                    // Look for content in text
-                    if (text.includes('content=')) {
-                        const contentStart = text.indexOf('content=') + 8;
-                        let contentEnd = text.indexOf('&', contentStart);
-                        if (contentEnd === -1) contentEnd = text.length;
-                        post.content = text.substring(contentStart, contentEnd);
-                    }
-
-                    // Look for title
-                    if (text.includes('title=')) {
-                        const titleStart = text.indexOf('title=') + 6;
-                        let titleEnd = text.indexOf('&', titleStart);
-                        if (titleEnd === -1) titleEnd = text.length;
-                        post.title = text.substring(titleStart, titleEnd);
-                    }
-                } catch (error) {
-                    console.log('Error processing output for content:', error);
-                }
-            }
-        }
-
-        // Add metadata
-        post.metadata = metadata;
 
         return post;
-
     } catch (error) {
         console.error('Error parsing MAP transaction:', error);
         return null;
