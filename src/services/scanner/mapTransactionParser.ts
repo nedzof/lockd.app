@@ -128,6 +128,79 @@ function parseMapFields(scriptData: string): Record<string, any> {
     }
 }
 
+// Helper function to check if a buffer is an image
+function isImageBuffer(buffer: Buffer): boolean {
+    if (buffer.length < 12) return false;  // Need at least 12 bytes for reliable detection
+
+    // JPEG: FF D8 FF
+    const isJPEG = buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF;
+
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    const isPNG = buffer[0] === 0x89 && 
+                 buffer[1] === 0x50 && 
+                 buffer[2] === 0x4E && 
+                 buffer[3] === 0x47 && 
+                 buffer[4] === 0x0D && 
+                 buffer[5] === 0x0A && 
+                 buffer[6] === 0x1A && 
+                 buffer[7] === 0x0A;
+
+    // GIF: 47 49 46 38 (followed by either 37a or 39a)
+    const isGIF = buffer[0] === 0x47 && 
+                 buffer[1] === 0x49 && 
+                 buffer[2] === 0x46 && 
+                 buffer[3] === 0x38 && 
+                 (buffer[4] === 0x37 || buffer[4] === 0x39) && 
+                 buffer[5] === 0x61;
+
+    // WebP: 52 49 46 46 xx xx xx xx 57 45 42 50
+    const isWebP = buffer[0] === 0x52 && 
+                  buffer[1] === 0x49 && 
+                  buffer[2] === 0x46 && 
+                  buffer[3] === 0x46 && 
+                  buffer[8] === 0x57 && 
+                  buffer[9] === 0x45 && 
+                  buffer[10] === 0x42 && 
+                  buffer[11] === 0x50;
+
+    // BMP: 42 4D
+    const isBMP = buffer[0] === 0x42 && buffer[1] === 0x4D;
+
+    return isJPEG || isPNG || isGIF || isWebP || isBMP;
+}
+
+// Helper function to get content type from image buffer
+function getImageContentType(buffer: Buffer): string {
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+        return 'image/jpeg';
+    } else if (buffer[0] === 0x89 && buffer[1] === 0x50) {
+        return 'image/png';
+    } else if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
+        return 'image/gif';
+    } else if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) {
+        return 'image/webp';
+    } else if (buffer[0] === 0x42 && buffer[1] === 0x4D) {
+        return 'image/bmp';
+    }
+    return 'application/octet-stream';
+}
+
+// Helper function to normalize base64 data
+function normalizeBase64(data: string): string {
+    // Remove any whitespace
+    data = data.replace(/\s/g, '');
+    
+    // Handle URL-safe base64
+    data = data.replace(/-/g, '+').replace(/_/g, '/');
+    
+    // Add padding if needed
+    while (data.length % 4) {
+        data += '=';
+    }
+    
+    return data;
+}
+
 // Function to extract image data from a transaction
 async function extractImageFromTransaction(tx: JungleBusTransaction): Promise<{ data: Buffer | null; contentType: string | null }> {
     try {
@@ -157,29 +230,33 @@ async function extractImageFromTransaction(tx: JungleBusTransaction): Promise<{ 
                         const contentType = header.split(';')[0].split(':')[1];
                         
                         if (base64Data) {
-                            const buffer = Buffer.from(base64Data, 'base64');
-                            if (buffer.length > 100) {
-                                console.log(' Found base64 image:', {
-                                    size: buffer.length,
-                                    contentType
-                                });
-                                return { data: buffer, contentType };
+                            try {
+                                const normalizedBase64 = normalizeBase64(base64Data);
+                                const buffer = Buffer.from(normalizedBase64, 'base64');
+                                if (buffer.length > 12 && isImageBuffer(buffer)) {
+                                    console.log(' Found data URL image:', {
+                                        size: buffer.length,
+                                        contentType
+                                    });
+                                    return { data: buffer, contentType };
+                                }
+                            } catch (e) {
+                                console.error(' Error decoding data URL:', e);
                             }
                         }
                     }
                     
                     // Try direct base64 decode
                     try {
-                        const buffer = Buffer.from(text, 'base64');
-                        if (buffer.length > 100 && isImageBuffer(buffer)) {
+                        const normalizedText = normalizeBase64(text);
+                        const buffer = Buffer.from(normalizedText, 'base64');
+                        if (buffer.length > 12 && isImageBuffer(buffer)) {
+                            const contentType = getImageContentType(buffer);
                             console.log(' Found base64 image data:', {
                                 size: buffer.length,
-                                contentType: getImageContentType(buffer)
+                                contentType
                             });
-                            return { 
-                                data: buffer, 
-                                contentType: getImageContentType(buffer) 
-                            };
+                            return { data: buffer, contentType };
                         }
                     } catch (e) {
                         // Not valid base64
@@ -187,15 +264,13 @@ async function extractImageFromTransaction(tx: JungleBusTransaction): Promise<{ 
 
                     // Try direct hex decode
                     const buffer = Buffer.from(hex, 'hex');
-                    if (buffer.length > 100 && isImageBuffer(buffer)) {
+                    if (buffer.length > 12 && isImageBuffer(buffer)) {
+                        const contentType = getImageContentType(buffer);
                         console.log(' Found hex image data:', {
                             size: buffer.length,
-                            contentType: getImageContentType(buffer)
+                            contentType
                         });
-                        return { 
-                            data: buffer, 
-                            contentType: getImageContentType(buffer) 
-                        };
+                        return { data: buffer, contentType };
                     }
                 } catch (e) {
                     // Skip invalid data
@@ -209,16 +284,15 @@ async function extractImageFromTransaction(tx: JungleBusTransaction): Promise<{ 
             for (const map of tx.MAP) {
                 if (map.type === 'image' && map.data) {
                     try {
-                        const buffer = Buffer.from(map.data, 'base64');
-                        if (buffer.length > 100 && isImageBuffer(buffer)) {
+                        const normalizedData = normalizeBase64(map.data);
+                        const buffer = Buffer.from(normalizedData, 'base64');
+                        if (buffer.length > 12 && isImageBuffer(buffer)) {
+                            const contentType = getImageContentType(buffer);
                             console.log(' Found MAP image data:', {
                                 size: buffer.length,
-                                contentType: getImageContentType(buffer)
+                                contentType
                             });
-                            return { 
-                                data: buffer, 
-                                contentType: getImageContentType(buffer) 
-                            };
+                            return { data: buffer, contentType };
                         }
                     } catch (e) {
                         console.error(' Error decoding MAP image data:', e);
@@ -232,27 +306,6 @@ async function extractImageFromTransaction(tx: JungleBusTransaction): Promise<{ 
         console.error(' Error extracting image:', error);
         return { data: null, contentType: null };
     }
-}
-
-// Helper function to check if a buffer is an image
-function isImageBuffer(buffer: Buffer): boolean {
-    if (buffer.length < 100) return false;
-
-    // Check for JPEG or PNG magic numbers
-    const isJPEG = buffer[0] === 0xFF && buffer[1] === 0xD8;
-    const isPNG = buffer[0] === 0x89 && buffer[1] === 0x50;
-
-    return isJPEG || isPNG;
-}
-
-// Helper function to get content type from image buffer
-function getImageContentType(buffer: Buffer): string {
-    if (buffer[0] === 0xFF && buffer[1] === 0xD8) {
-        return 'image/jpeg';
-    } else if (buffer[0] === 0x89 && buffer[1] === 0x50) {
-        return 'image/png';
-    }
-    return 'application/octet-stream';
 }
 
 // Main function to parse a MAP transaction
@@ -599,9 +652,6 @@ export async function parseMapTransaction(tx: JungleBusTransaction): Promise<Par
                 } catch (e) {
                     console.error(' Error parsing JSON data:', e);
                 }
-            } catch (error) {
-                console.warn('⚠️ Error parsing output:', error);
-                continue;
             }
         }
 
