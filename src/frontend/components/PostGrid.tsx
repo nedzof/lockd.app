@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2, FiExternalLink } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
@@ -106,51 +106,85 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   const imageRefs = useRef<{ [key: string]: HTMLImageElement }>({});
   const wallet = useYoursWallet();
 
-  const formatImageUrl = async (imageData: string | undefined) => {
-    if (!imageData) return null;
-    
-    // Debug logging
-    console.log('Processing image data:', {
-      length: imageData.length,
-      startsWith: imageData.substring(0, 50),
-      type: imageData.startsWith('data:image/') ? 'data-url' : 
-            imageData.startsWith('http') ? 'url' :
-            imageData.startsWith('/') && !imageData.startsWith('/9j/') ? 'path' : 
-            imageData.startsWith('/9j/') ? 'raw-jpeg' : 'unknown',
-      containsInvalidChars: /[^A-Za-z0-9+/=]/.test(imageData.split(',')[1] || imageData)
-    });
-
+  const formatImageUrl = async (imageData: any): Promise<string | null> => {
     try {
-      // If it's already a data URL, return as is
-      if (imageData.startsWith('data:image/')) {
-        return imageData;
+      // Log the structure of the image data
+      console.log('Processing image data:', {
+        type: typeof imageData,
+        isArray: Array.isArray(imageData),
+        length: imageData ? Object.keys(imageData).length : 0,
+        firstBytes: imageData ? Object.values(imageData).slice(0, 4) : []
+      });
+
+      // Handle different data formats
+      if (!imageData) return null;
+
+      // Convert array-like object to Uint8Array
+      if (typeof imageData === 'object' && !Array.isArray(imageData) && Object.keys(imageData).length > 0) {
+        // Check if it looks like a JPEG (starts with FF D8 FF)
+        const firstBytes = Object.values(imageData).slice(0, 3);
+        if (firstBytes[0] === 255 && firstBytes[1] === 216 && firstBytes[2] === 255) {
+          // Convert object to Uint8Array
+          const byteArray = new Uint8Array(Object.values(imageData));
+          const base64 = btoa(String.fromCharCode.apply(null, byteArray));
+          return `data:image/jpeg;base64,${base64}`;
+        }
       }
 
-      // If it's a URL or path (but not a raw JPEG), return as is
-      if ((imageData.startsWith('http') || imageData.startsWith('/')) && !imageData.startsWith('/9j/')) {
-        return imageData;
+      // If it's a media URL, use it directly
+      if (imageData.media_url) {
+        return imageData.media_url;
       }
 
-      // For raw base64 data (like JPEG starting with /9j/), convert to data URL
-      if (imageData.startsWith('/9j/')) {
-        return `data:image/jpeg;base64,${imageData}`;
+      // If it has raw_image_data, process it
+      if (imageData.raw_image_data) {
+        const rawData = imageData.raw_image_data;
+
+        // If it's already a string (base64/URL), use it
+        if (typeof rawData === 'string') {
+          if (rawData.startsWith('data:') || rawData.startsWith('http')) {
+            return rawData;
+          }
+          // Add appropriate data URL prefix based on format
+          if (rawData.startsWith('/9j/')) {
+            return `data:image/jpeg;base64,${rawData}`;
+          }
+          if (rawData.startsWith('iVBOR')) {
+            return `data:image/png;base64,${rawData}`;
+          }
+          if (rawData.startsWith('R0lGOD')) {
+            return `data:image/gif;base64,${rawData}`;
+          }
+          if (rawData.startsWith('UklGR')) {
+            return `data:image/webp;base64,${rawData}`;
+          }
+          // Assume JPEG if no specific format detected
+          return `data:image/jpeg;base64,${rawData}`;
+        }
+
+        // If it's a Buffer/Uint8Array
+        if (rawData instanceof Uint8Array) {
+          const base64 = btoa(String.fromCharCode.apply(null, rawData));
+          return `data:image/jpeg;base64,${base64}`;
+        }
+
+        // If it's an object with buffer/data property
+        if (rawData?.buffer instanceof Uint8Array) {
+          const base64 = btoa(String.fromCharCode.apply(null, rawData.buffer));
+          return `data:image/jpeg;base64,${base64}`;
+        }
+        if (rawData?.data instanceof Uint8Array) {
+          const base64 = btoa(String.fromCharCode.apply(null, rawData.data));
+          return `data:image/jpeg;base64,${base64}`;
+        }
       }
 
-      // For other base64 data, try to determine format and create data URL
-      const isJPEG = imageData.startsWith('/9j/');
-      const isPNG = imageData.startsWith('iVBORw0KGgo');
-      
-      if (isJPEG) {
-        return `data:image/jpeg;base64,${imageData}`;
-      } else if (isPNG) {
-        return `data:image/png;base64,${imageData}`;
-      } else {
-        // Default to JPEG if format can't be determined
-        return `data:image/jpeg;base64,${imageData}`;
-      }
+      // Fallback to placeholder
+      console.warn('Unable to process image data:', imageData);
+      return `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('Image not available')}`;
     } catch (error) {
-      console.error('Error formatting image URL:', error);
-      return null;
+      console.error('Error processing image:', error);
+      return `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('Error loading image')}`;
     }
   };
 
@@ -319,24 +353,33 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       }));
 
       // Apply ranking filters
-      submissionsWithStats.sort((a: ExtendedMemeSubmission, b: ExtendedMemeSubmission) => {
-        // First sort by total locked amount
-        const amountDiff = b.totalLocked - a.totalLocked;
-        if (amountDiff !== 0) return amountDiff;
-        
-        // If amounts are equal, sort by most recent
-        return b.createdAt.getTime() - a.createdAt.getTime();
-      });
+      const sortedSubmissions = useMemo(() => {
+        if (!submissionsWithStats) return [];
+
+        return [...submissionsWithStats].sort((a, b) => {
+          // Ensure we have valid timestamps
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          
+          // If both timestamps are 0 (invalid), sort by ID to maintain stable order
+          if (timeA === 0 && timeB === 0) {
+            return a.id.localeCompare(b.id);
+          }
+          
+          // Sort by timestamp, fallback to ID if one timestamp is invalid
+          return timeB - timeA || a.id.localeCompare(b.id);
+        });
+      }, [submissionsWithStats]);
 
       // Apply limit based on filter
-      let filteredSubmissions = submissionsWithStats;
+      let filteredSubmissions = sortedSubmissions;
       if (rankingFilter) {
         if (rankingFilter === 'top1') {
-          filteredSubmissions = submissionsWithStats.slice(0, 1);
+          filteredSubmissions = sortedSubmissions.slice(0, 1);
         } else if (rankingFilter === 'top3') {
-          filteredSubmissions = submissionsWithStats.slice(0, 3);
+          filteredSubmissions = sortedSubmissions.slice(0, 3);
         } else if (rankingFilter === 'top10') {
-          filteredSubmissions = submissionsWithStats.slice(0, 10);
+          filteredSubmissions = sortedSubmissions.slice(0, 10);
         }
       }
 
@@ -370,7 +413,13 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           selectedTags: JSON.stringify(selectedTags),
           tagFilterType: 'or',
           userId: userId || 'anon'
-        })}`);
+        })}`, {
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        });
+
         const postsData = await postsResponse.json();
         console.log('Fetched posts:', postsData);
 
@@ -382,68 +431,59 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
             if (post.raw_image_data) {
               console.log('Processing post image:', {
                 id: post.id,
-                hasImageData: true,
-                imageDataLength: post.raw_image_data.length,
-                mediaType: post.media_type
+                hasImageData: !!post.raw_image_data,
+                imageDataLength: post.raw_image_data?.length,
+                mediaType: post.media_type || 'unknown'
               });
-              
+
               const formattedUrl = await formatImageUrl(post.raw_image_data);
               if (formattedUrl) {
-                console.log('Successfully formatted image URL:', {
-                  id: post.id,
-                  urlLength: formattedUrl.length,
-                  urlPreview: formattedUrl.substring(0, 50) + '...'
-                });
                 imageUrl = formattedUrl;
-              } else {
-                console.warn(`Failed to format image for post ${post.id}`);
-                toast.error('Failed to load some images');
               }
+            } else if (post.media_url) {
+              imageUrl = post.media_url;
             }
           } catch (error) {
             console.error('Error processing image:', error);
-            toast.error('Error loading some images');
           }
 
           return {
             id: post.id,
-            creator: post.author_address || 'Anonymous',
-            title: `Post by ${post.author_address || 'Anonymous'}`,
-            description: post.description || post.content || '',
-            prompt: '',
-            style: 'viral',
-            duration: 30,
-            format: post.media_type || 'text/plain',
-            fileUrl: imageUrl,
-            thumbnailUrl: imageUrl,
-            txId: post.txid,
-            locks: post.amount || 0,
-            status: 'minted' as const,
+            txid: post.txid,
+            author: post.author_address,
+            imageUrl,
+            description: post.description || '',
+            content: post.content,
+            timestamp: post.created_at,
             tags: post.tags || [],
-            createdAt: new Date(post.created_at),
-            updatedAt: new Date(post.created_at),
-            totalLocked: post.amount || 0,
-            threshold: 1000000000,
-            isTop10Percent: (post.amount || 0) > 1000000000,
-            isTop3: (post.amount || 0) > 2000000000,
-            locklikes: [],
-            content: post.content || '',
-            unlock_height: post.unlock_height,
-            block_height: post.block_height,
-            is_vote: post.is_vote || false,
-            vote_options: post.vote_options || []
+            isLocked: post.is_locked,
+            lockDuration: post.lock_duration,
+            unlockHeight: post.unlock_height,
+            blockHeight: post.block_height,
+            amount: post.amount,
+            isVote: post.is_vote,
+            vote: post.vote,
+            sequence: post.sequence,
+            parentSequence: post.parent_sequence,
+            postId: post.post_id,
+            mediaType: post.media_type,
+            mediaUrl: post.media_url
           };
         }));
 
-        // No need to fetch votes separately anymore since they're included in posts
-        setSubmissions(processedPosts);
-        setVotes([]); // Clear votes since we're not using them separately anymore
-
         console.log('Processed posts:', processedPosts);
-
+        setSubmissions(processedPosts);
+        
+        if (onStatsUpdate) {
+          onStatsUpdate({
+            totalPosts: processedPosts.length,
+            lockedPosts: processedPosts.filter(post => post.isLocked).length,
+            votePosts: processedPosts.filter(post => post.isVote).length
+          });
+        }
       } catch (error) {
         console.error('Error fetching data:', error);
-        setError('Failed to fetch data');
+        setError('Failed to fetch posts');
       } finally {
         setIsLoading(false);
       }
@@ -470,7 +510,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       hasContent: !!submission.content,
       fileUrl: submission.fileUrl,
       format: submission.format,
-      isPlaceholder: submission.fileUrl.includes('placehold.co'),
+      isPlaceholder: submission.fileUrl?.includes('placehold.co'),
       isVote: submission.is_vote,
       hasVoteOptions: !!submission.vote_options
     });
@@ -478,7 +518,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     return (
       <div className="w-full">
         {/* Image section */}
-        {submission.fileUrl && !submission.fileUrl.includes('placehold.co') && (
+        {submission.fileUrl && !submission.fileUrl?.includes('placehold.co') && (
           <div className="relative w-full group/image">
             {/* Top right stats */}
             <div className="absolute top-3 right-3 flex items-center space-x-2 z-10">
@@ -728,7 +768,19 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         <div className="flex justify-center">
           <div className="grid grid-cols-1 gap-8 justify-items-center" style={{ maxWidth: '800px' }}>
             {submissions
-              .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+              .sort((a, b) => {
+                // Ensure we have valid timestamps
+                const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                
+                // If both timestamps are 0 (invalid), sort by ID to maintain stable order
+                if (timeA === 0 && timeB === 0) {
+                  return a.id.localeCompare(b.id);
+                }
+                
+                // Sort by timestamp, fallback to ID if one timestamp is invalid
+                return timeB - timeA || a.id.localeCompare(b.id);
+              })
               .map((submission) => (
                 <div key={`${submission.txId}-${submission.id}`} className="w-full">
                   <div className="group relative overflow-hidden rounded-xl backdrop-blur-sm border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-500 hover:shadow-[0_0_40px_rgba(0,255,163,0.03)] bg-[#1A1B23]/20 w-full max-w-md flex flex-col">
