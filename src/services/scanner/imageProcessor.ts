@@ -7,12 +7,43 @@ export interface ImageOutput {
     dataURL: string;
 }
 
-export interface ProcessedImage {
+export interface ImageMetadata {
     width: number;
     height: number;
     format: string;
-    data: Buffer;
+    mimeType: string;
+    size: number;
+    originalName?: string;
 }
+
+export interface ProcessedImage {
+    metadata: ImageMetadata;
+    data: Buffer;
+    dataUrl?: string;
+}
+
+const SUPPORTED_FORMATS = {
+    JPEG: {
+        mimeType: 'image/jpeg',
+        signatures: [[0xFF, 0xD8, 0xFF]],
+        extensions: ['.jpg', '.jpeg']
+    },
+    PNG: {
+        mimeType: 'image/png',
+        signatures: [[0x89, 0x50, 0x4E, 0x47]],
+        extensions: ['.png']
+    },
+    GIF: {
+        mimeType: 'image/gif',
+        signatures: [[0x47, 0x49, 0x46, 0x38]],
+        extensions: ['.gif']
+    },
+    WEBP: {
+        mimeType: 'image/webp',
+        signatures: [[0x52, 0x49, 0x46, 0x46]],
+        extensions: ['.webp']
+    }
+};
 
 export async function extractImageFromTransaction(tx: any): Promise<ImageOutput | null> {
     try {
@@ -84,36 +115,68 @@ export async function extractImageFromTransaction(tx: any): Promise<ImageOutput 
     }
 }
 
-export function validateImageData(imageData: ImageOutput | null): boolean {
+export async function validateImageData(imageData: Buffer | string | null): Promise<boolean> {
     if (!imageData) return false;
     
     try {
-        // Check if the base64 data is valid
-        const buffer = Buffer.from(imageData.rawData, 'base64');
+        // Convert string to buffer if needed
+        const buffer = typeof imageData === 'string' ? Buffer.from(imageData, 'binary') : imageData;
         
-        // Check for minimum size (at least 100 bytes)
-        if (buffer.length < 100) {
-            console.log('Image data too small:', buffer.length);
+        // Check for minimum size
+        if (buffer.length < 50) {
+            console.log('Image data too small:', buffer.length, 'bytes');
             return false;
         }
         
-        // Check for valid MIME type
-        if (!imageData.mimeType.startsWith('image/')) {
-            console.log('Invalid MIME type:', imageData.mimeType);
-            return false;
+        // Check for JPEG signature (FF D8 FF)
+        if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+            // Scan for JPEG end marker (FF D9)
+            let hasEndMarker = false;
+            for (let i = buffer.length - 2; i >= 0; i--) {
+                if (buffer[i] === 0xFF && buffer[i + 1] === 0xD9) {
+                    hasEndMarker = true;
+                    break;
+                }
+            }
+            if (!hasEndMarker) {
+                console.log('JPEG end marker not found, data may be truncated');
+            }
+            return true; // Still return true as some valid JPEGs might have truncated end markers
         }
         
-        // Check for common image headers
-        const firstBytes = buffer.slice(0, 4);
-        const isJPEG = firstBytes[0] === 0xFF && firstBytes[1] === 0xD8;
-        const isPNG = firstBytes[0] === 0x89 && firstBytes[1] === 0x50 && firstBytes[2] === 0x4E && firstBytes[3] === 0x47;
-        
-        if (!isJPEG && !isPNG) {
-            console.log('No valid image headers found');
-            return false;
+        // Check for PNG signature (89 50 4E 47 0D 0A 1A 0A)
+        if (buffer[0] === 0x89 && 
+            buffer[1] === 0x50 && 
+            buffer[2] === 0x4E && 
+            buffer[3] === 0x47 && 
+            buffer[4] === 0x0D && 
+            buffer[5] === 0x0A && 
+            buffer[6] === 0x1A && 
+            buffer[7] === 0x0A) {
+            return true;
         }
         
-        return true;
+        // Check for WebP signature (52 49 46 46 XX XX XX XX 57 45 42 50)
+        if (buffer.length >= 12 &&
+            buffer[0] === 0x52 && // R
+            buffer[1] === 0x49 && // I
+            buffer[2] === 0x46 && // F
+            buffer[3] === 0x46 && // F
+            buffer[8] === 0x57 && // W
+            buffer[9] === 0x45 && // E
+            buffer[10] === 0x42 && // B
+            buffer[11] === 0x50) { // P
+            return true;
+        }
+
+        // Try to decode with ImageScript as a last resort
+        try {
+            await decode(buffer);
+            return true;
+        } catch (e) {
+            console.log('ImageScript decode failed:', e.message);
+            return false;
+        }
     } catch (error) {
         console.error('Error validating image data:', error);
         return false;
@@ -152,67 +215,60 @@ export function hasJpegSignature(data: Buffer | string): boolean {
     }
 }
 
-/**
- * Process image data using ImageScript
- * @param imageData Raw image data as Buffer or base64 string
- * @param contentType Content type of the image (e.g. 'image/jpeg')
- * @returns Processed image data with metadata
- */
-export async function processImage(imageData: Buffer | string, contentType: string): Promise<ProcessedImage | null> {
+export async function processImage(imageData: Buffer | string, metadata: Partial<ImageMetadata> = {}): Promise<ProcessedImage | null> {
     try {
-        let buffer: Buffer;
+        const buffer = Buffer.isBuffer(imageData) ? imageData : Buffer.from(imageData, 'base64');
         
-        // Convert input to buffer if it's a base64 string
-        if (typeof imageData === 'string') {
-            try {
-                // Remove data URL prefix if present
-                const base64Data = imageData.includes('base64,') 
-                    ? imageData.split('base64,')[1] 
-                    : imageData;
-                
-                buffer = Buffer.from(base64Data, 'base64');
-            } catch (e) {
-                console.error('Error decoding base64:', e);
-                return null;
-            }
-        } else {
-            buffer = imageData;
-        }
-
-        // Check for JPEG signature
-        if (contentType === 'image/jpeg' && !hasJpegSignature(buffer)) {
-            console.error('Invalid JPEG signature');
+        // Detect format and validate image
+        const detectedFormat = await detectImageFormat(buffer);
+        if (!detectedFormat) {
+            console.error('Invalid or unsupported image format');
             return null;
         }
 
-        // Decode the image using ImageScript
+        // Decode image using ImageScript
         const image = await decode(buffer);
-        
         if (!image) {
             console.error('Failed to decode image');
             return null;
         }
 
-        // Get image format from content type
-        const format = contentType.split('/')[1]?.toUpperCase() || 'UNKNOWN';
-
-        // Get image metadata
-        const width = image.width;
-        const height = image.height;
-
-        // Encode the image back to buffer
-        const processedData = await image.encode();
+        const processedMetadata: ImageMetadata = {
+            width: image.width,
+            height: image.height,
+            format: detectedFormat.format,
+            mimeType: detectedFormat.mimeType,
+            size: buffer.length,
+            ...metadata
+        };
 
         return {
-            width,
-            height,
-            format,
-            data: Buffer.from(processedData)
+            metadata: processedMetadata,
+            data: buffer,
+            dataUrl: `data:${processedMetadata.mimeType};base64,${buffer.toString('base64')}`
         };
     } catch (error) {
         console.error('Error processing image:', error);
         return null;
     }
+}
+
+export async function detectImageFormat(buffer: Buffer): Promise<{ format: string; mimeType: string } | null> {
+    for (const [format, info] of Object.entries(SUPPORTED_FORMATS)) {
+        for (const signature of info.signatures) {
+            let matches = true;
+            for (let i = 0; i < signature.length; i++) {
+                if (buffer[i] !== signature[i]) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                return { format, mimeType: info.mimeType };
+            }
+        }
+    }
+    return null;
 }
 
 /**
@@ -241,14 +297,77 @@ export async function isValidImage(data: Buffer | string, contentType?: string):
             buffer = data;
         }
 
-        // Check for JPEG signature if content type is JPEG
-        if (contentType === 'image/jpeg' && !hasJpegSignature(buffer)) {
+        // Basic size check
+        if (buffer.length < 50) {
+            console.log('Buffer too small to be a valid image');
             return false;
         }
 
-        const image = await decode(buffer);
-        return !!image;
+        // For JPEG images
+        if (contentType === 'image/jpeg' || !contentType) {
+            // Check for JPEG start marker (FF D8)
+            const startMarker = buffer.indexOf(Buffer.from([0xFF, 0xD8]));
+            if (startMarker !== -1) {
+                // Look for JPEG end marker (FF D9)
+                const endMarker = buffer.indexOf(Buffer.from([0xFF, 0xD9]), startMarker);
+                if (endMarker !== -1) {
+                    // Extract the actual JPEG data
+                    const jpegData = buffer.slice(startMarker, endMarker + 2);
+                    
+                    // Try to decode with ImageScript
+                    try {
+                        const image = await decode(jpegData);
+                        if (image) {
+                            console.log('Valid JPEG structure detected');
+                            return true;
+                        }
+                    } catch (error) {
+                        console.log('Failed to decode JPEG with ImageScript');
+                    }
+                }
+            }
+            
+            if (contentType === 'image/jpeg') {
+                console.log('No valid JPEG structure');
+                return false;
+            }
+        }
+
+        // For PNG images
+        if (contentType === 'image/png' || !contentType) {
+            const pngSignature = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+            if (buffer.length >= 8 && buffer.slice(0, 8).equals(pngSignature)) {
+                try {
+                    const image = await decode(buffer);
+                    if (image) {
+                        console.log('Valid PNG structure detected');
+                        return true;
+                    }
+                } catch (error) {
+                    console.log('Failed to decode PNG with ImageScript');
+                }
+            }
+            
+            if (contentType === 'image/png') {
+                console.log('No valid PNG structure');
+                return false;
+            }
+        }
+
+        // If no content type specified, try decoding with ImageScript as last resort
+        if (!contentType) {
+            try {
+                const image = await decode(buffer);
+                return !!image;
+            } catch (error) {
+                console.log('Failed to decode image with ImageScript');
+                return false;
+            }
+        }
+
+        return false;
     } catch (error) {
+        console.error('Error validating image:', error);
         return false;
     }
 }

@@ -29,11 +29,18 @@ export default function Layout({
     return formatAddress(bsvAddress);
   }, [connected, bsvAddress]);
 
-  const handleWalletAction = () => {
+  const handleWalletAction = async () => {
     if (!isWalletDetected) {
+      console.log('Wallet not detected, opening yours.org');
       window.open('https://yours.org', '_blank');
-    } else {
-      onConnect();
+      return;
+    }
+    
+    try {
+      console.log('Attempting wallet connection...');
+      await onConnect();
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
     }
   };
 

@@ -67,6 +67,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // If wallet is ready and connected, fetch balance
     const checkAndFetchBalance = async () => {
       if (wallet?.isReady && wallet.isConnected && await wallet.isConnected()) {
+        setIsConnected(true);
         refreshBalance();
       }
     };
@@ -156,7 +157,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const isConnected = await wallet.isConnected();
           if (isConnected) {
             setIsConnected(true);
-            await refreshBalance();
+            const addresses = await wallet.getAddresses();
+            if (addresses?.bsvAddress) {
+              setBsvAddress(addresses.bsvAddress);
+              await refreshBalance();
+            }
           } else {
             resetState();
           }
@@ -166,7 +171,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
     };
-    
+
     checkConnection();
 
     // Set up periodic balance refresh
@@ -198,4 +203,4 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       {children}
     </WalletContext.Provider>
   );
-}; 
+};
