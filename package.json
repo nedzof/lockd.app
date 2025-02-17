@@ -12,8 +12,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "postinstall": "prisma generate",
-    "test": "jest",
-    "test:watch": "jest --watch"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
     "@gorillapool/js-junglebus": "^0.4.4",

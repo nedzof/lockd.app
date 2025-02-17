@@ -1,62 +1,97 @@
 import { PrismaClient } from '@prisma/client';
 import { ParsedPost } from '../parser/types';
 
-const prisma = new PrismaClient();
-
 export class TransactionProcessor {
+    private prisma: PrismaClient;
+
+    constructor() {
+        this.prisma = new PrismaClient();
+    }
+
     async processBatch(posts: ParsedPost[]): Promise<void> {
-        for (const post of posts) {
-            await this.processTransaction(post);
+        try {
+            for (const post of posts) {
+                await this.processPost(post);
+            }
+        } catch (error) {
+            console.error('Error processing batch:', error);
+            if (error instanceof Error) {
+                console.error('Error stack:', error.stack);
+            }
+            throw error;
         }
     }
 
-    async processTransaction(post: ParsedPost): Promise<void> {
+    private async processPost(post: ParsedPost): Promise<void> {
         try {
-            const currentTime = new Date();
-            const currentHeight = 0; // TODO: Get from blockchain
-
-            // Create post
-            const createdPost = await prisma.post.create({
-                data: {
-                    id: post.txid || '',
-                    txid: post.txid || '',
+            // Create or update the post
+            const upsertedPost = await this.prisma.post.upsert({
+                where: { postId: post.postId },
+                create: {
                     postId: post.postId,
+                    type: post.type,
                     content: post.content,
-                    author_address: '',  // TODO: Get from transaction
-                    block_height: post.blockHeight || 0,
-                    created_at: currentTime,
-                    tags: post.tags,
-                    is_vote: post.type === 'vote_question'
+                    timestamp: new Date(post.timestamp),
+                    sequence: post.sequence,
+                    parentSequence: post.parentSequence
+                },
+                update: {
+                    type: post.type,
+                    content: post.content,
+                    timestamp: new Date(post.timestamp),
+                    sequence: post.sequence,
+                    parentSequence: post.parentSequence
                 }
             });
 
-            // Create vote options if this is a vote post
+            // If this is a vote question, create or update the voting data
             if (post.votingData) {
-                const voteOptions = post.votingData.options.map(option => ({
-                    id: `${post.txid}-${option.index}`,
-                    txid: post.txid || '',
-                    postId: post.postId,
-                    content: option.content,
-                    author_address: '',  // TODO: Get from transaction
-                    created_at: currentTime,
-                    lock_amount: option.lockAmount,
-                    lock_duration: option.lockDuration,
-                    unlock_height: currentHeight + option.lockDuration,
-                    current_height: currentHeight,
-                    lock_percentage: 100,  // Default to 100%
-                    option_index: option.index,
-                    tags: []
-                }));
-
-                // Create vote options
-                await prisma.voteOption.createMany({
-                    data: voteOptions
+                await this.prisma.voteQuestion.upsert({
+                    where: { postId: post.postId },
+                    create: {
+                        postId: post.postId,
+                        question: post.votingData.question,
+                        totalOptions: post.votingData.metadata.totalOptions,
+                        optionsHash: post.votingData.metadata.optionsHash,
+                        protocol: post.votingData.metadata.protocol
+                    },
+                    update: {
+                        question: post.votingData.question,
+                        totalOptions: post.votingData.metadata.totalOptions,
+                        optionsHash: post.votingData.metadata.optionsHash,
+                        protocol: post.votingData.metadata.protocol
+                    }
                 });
-            }
 
-            console.log('Created post:', createdPost);
+                // Create or update vote options if they exist
+                for (const option of post.votingData.options) {
+                    await this.prisma.voteOption.upsert({
+                        where: {
+                            postId_index: {
+                                postId: post.postId,
+                                index: option.index
+                            }
+                        },
+                        create: {
+                            postId: post.postId,
+                            index: option.index,
+                            content: option.content,
+                            lockAmount: option.lockAmount,
+                            lockDuration: option.lockDuration
+                        },
+                        update: {
+                            content: option.content,
+                            lockAmount: option.lockAmount,
+                            lockDuration: option.lockDuration
+                        }
+                    });
+                }
+            }
         } catch (error) {
-            console.error('Failed to process transaction:', error);
+            console.error('Error processing post:', error);
+            if (error instanceof Error) {
+                console.error('Error stack:', error.stack);
+            }
             throw error;
         }
     }

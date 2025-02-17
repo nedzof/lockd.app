@@ -1,163 +1,102 @@
-import fetch from 'node-fetch';
-import { BitcoinTransaction, DecodedTransaction, TransactionOutput, OpReturnData } from './types';
-import { PROTOCOLS, SCRIPT_TYPES } from './constants';
+import { JungleBusTransaction, TransactionOutput, OpReturnData, VoteOption } from './types';
 
 export class TransactionDecoder {
-  constructor(private readonly jungleBusUrl: string = 'https://junglebus.gorillapool.io/v1/transaction/get/') {}
+    decodeTransaction(tx: JungleBusTransaction): OpReturnData[] {
+        const decodedOutputs: OpReturnData[] = [];
 
-  async decodeFullTransaction(txid: string): Promise<DecodedTransaction> {
-    const response = await fetch(`${this.jungleBusUrl}${txid}`);
-    const txData = await response.json();
-
-    // Base transaction structure
-    const decodedTx: DecodedTransaction = {
-      transaction: {
-        txid,
-        version: txData.version,
-        inputs: txData.inputs.map((input: any) => ({
-          txid: input.txid,
-          vout: input.vout,
-          scriptSig: input.scriptSig.hex,
-          sequence: input.sequence,
-          witness: input.witness
-        })),
-        outputs: [],
-        locktime: txData.locktime,
-        blockHash: txData.block_hash,
-        blockHeight: txData.block_height,
-        timestamp: new Date(txData.block_time * 1000).toISOString()
-      },
-      votingData: {
-        question: '',
-        options: [],
-        metadata: {
-          postId: '',
-          totalOptions: 0,
-          optionsHash: ''
+        if (!tx.outputs) {
+            console.log('No outputs found in transaction');
+            return decodedOutputs;
         }
-      }
-    };
 
-    // Process outputs
-    let currentVoteOption: any = null;
-    decodedTx.transaction.outputs = txData.outputs.map((output: any, index: number) => {
-      const decodedOutput: TransactionOutput = {
-        value: output.value,
-        scriptPubKey: output.scriptPubKey.hex,
-        addresses: output.scriptPubKey.addresses || [],
-        type: output.scriptPubKey.type
-      };
+        for (const output of tx.outputs) {
+            try {
+                const decodedOutput = this.decodeOutput(output);
+                if (decodedOutput) {
+                    decodedOutputs.push(decodedOutput);
+                }
+            } catch (error) {
+                console.error('Error decoding output:', error);
+                if (error instanceof Error) {
+                    console.error('Error stack:', error.stack);
+                }
+            }
+        }
 
-      // Detect and decode OP_RETURN data
-      if (output.scriptPubKey.type === SCRIPT_TYPES.NULLDATA) {
-        decodedOutput.opReturn = this.decodeOpReturn(output.scriptPubKey.asm);
-        
-        if (decodedOutput.opReturn) {
-          // Extract vote data
-          if (decodedOutput.opReturn.metadata?.type === 'vote_question') {
-            decodedTx.votingData.metadata.totalOptions = parseInt(decodedOutput.opReturn.metadata.totalOptions || '0', 10);
-            decodedTx.votingData.metadata.optionsHash = decodedOutput.opReturn.metadata.optionsHash || '';
-            decodedTx.votingData.question = decodedOutput.opReturn.content || '';
-          } else if (decodedOutput.opReturn.metadata?.type === 'vote_option') {
-            currentVoteOption = {
-              index: parseInt(decodedOutput.opReturn.metadata.optionIndex || '0', 10),
-              content: decodedOutput.opReturn.content || '',
-              lockAmount: parseInt(decodedOutput.opReturn.metadata.lockAmount || '0', 10),
-              lockDuration: parseInt(decodedOutput.opReturn.metadata.lockDuration || '0', 10)
+        return decodedOutputs;
+    }
+
+    private decodeOutput(output: TransactionOutput): OpReturnData | undefined {
+        try {
+            // Decode the script
+            const script = output.script;
+            if (!script) {
+                console.log('No script found in output');
+                return undefined;
+            }
+
+            // Check if this is an OP_RETURN output
+            const scriptBuffer = Buffer.from(script, 'hex');
+            if (scriptBuffer[0] !== 0x6a) { // OP_RETURN opcode
+                console.log('Not an OP_RETURN output');
+                return undefined;
+            }
+
+            // Skip OP_RETURN and data length bytes
+            const dataBuffer = scriptBuffer.slice(2);
+            const scriptString = dataBuffer.toString('utf8');
+            console.log('Decoded script:', scriptString);
+
+            // Parse key-value pairs
+            const pairs = scriptString.split('&');
+            const result: OpReturnData = {
+                protocols: [],
+                content: '',
+                metadata: {}
             };
-            decodedTx.votingData.options.push(currentVoteOption);
-          }
 
-          // Extract general metadata
-          if (decodedOutput.opReturn.metadata?.postId) {
-            decodedTx.votingData.metadata.postId = decodedOutput.opReturn.metadata.postId;
-          }
+            for (const pair of pairs) {
+                const [key, value] = pair.split('=');
+                if (!key || !value) continue;
+
+                const decodedValue = decodeURIComponent(value);
+
+                if (key === 'app' && value === 'lockd.app') {
+                    result.protocols.push('MAP');
+                    result.protocols.push('ORD');
+                } else if (key === 'type') {
+                    result.metadata.type = decodedValue;
+                } else if (key === 'content') {
+                    result.content = decodedValue;
+                } else if (key === 'totalOptions') {
+                    result.metadata.totalOptions = parseInt(decodedValue, 10);
+                } else if (key === 'optionsHash') {
+                    result.metadata.optionsHash = decodedValue;
+                } else if (key === 'postId') {
+                    result.metadata.postId = decodedValue;
+                } else if (key === 'optionIndex') {
+                    result.metadata.optionIndex = parseInt(decodedValue, 10);
+                } else if (key === 'lockAmount') {
+                    result.metadata.lockAmount = parseInt(decodedValue, 10);
+                } else if (key === 'lockDuration') {
+                    result.metadata.lockDuration = parseInt(decodedValue, 10);
+                } else {
+                    result.metadata[key] = decodedValue;
+                }
+            }
+
+            // Add protocol for vote questions
+            if (result.metadata.type === 'vote_question') {
+                result.metadata.protocol = 'MAP';
+            }
+
+            return result;
+        } catch (error) {
+            console.error('Error decoding output:', error);
+            if (error instanceof Error) {
+                console.error('Error stack:', error.stack);
+            }
+            return undefined;
         }
-      }
-
-      return decodedOutput;
-    });
-
-    // Sort options by index
-    decodedTx.votingData.options.sort((a, b) => a.index - b.index);
-
-    return decodedTx;
-  }
-
-  decodeTransaction(tx: BitcoinTransaction): OpReturnData[] {
-    const decodedOutputs: OpReturnData[] = [];
-
-    for (const output of tx.outputs) {
-      const decodedOutput = this.decodeOutput(output);
-      if (decodedOutput?.opReturn) {
-        decodedOutputs.push(decodedOutput.opReturn);
-      }
     }
-
-    return decodedOutputs;
-  }
-
-  private decodeOutput(output: TransactionOutput): { opReturn?: OpReturnData } {
-    const decodedOutput: { opReturn?: OpReturnData } = {};
-
-    if (!output.scriptPubKey?.asm?.startsWith('OP_RETURN')) {
-      return decodedOutput;
-    }
-
-    try {
-      decodedOutput.opReturn = this.decodeOpReturn(output.scriptPubKey.asm);
-    } catch (error) {
-      console.error('Failed to decode OP_RETURN:', error);
-    }
-
-    return decodedOutput;
-  }
-
-  private decodeOpReturn(asm: string): OpReturnData | undefined {
-    if (!asm) return undefined;
-
-    const parts = asm.split(' ');
-    if (parts.length < 2) return undefined;
-
-    // Remove OP_RETURN
-    parts.shift();
-
-    let protocols: string[] = [];
-    let content = '';
-    let metadata: Record<string, string> = {};
-
-    try {
-      // Try to decode the data
-      const decodedData = Buffer.from(parts[0], 'hex').toString('utf8');
-      
-      // Check for MAP protocol
-      if (decodedData.includes('MAP')) {
-        protocols.push('MAP');
-        content = decodedData.split('content=')[1]?.split('&')[0] || '';
-        
-        // Extract metadata
-        const metadataPairs = decodedData.split('&');
-        for (const pair of metadataPairs) {
-          const [key, value] = pair.split('=');
-          if (key && value) {
-            metadata[key] = value;
-          }
-        }
-      }
-      
-      // Check for ORD protocol
-      if (decodedData.includes('ORD')) {
-        protocols.push('ORD');
-      }
-
-      return {
-        protocols,
-        content,
-        metadata
-      };
-    } catch (error) {
-      console.error('Failed to decode OP_RETURN data:', error);
-      return undefined;
-    }
-  }
 }

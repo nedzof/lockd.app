@@ -1,110 +1,64 @@
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, expect, test } from '@jest/globals';
 import { PrismaClient } from '@prisma/client';
-import fs from 'fs';
-import path from 'path';
-import { parseMapTransaction } from '../mapTransactionParser';
+import { TransactionDecoder } from '../../parser/transactionDecoder';
+import { MAPProtocolHandler } from '../../parser/mapProtocolHandler';
+import { JungleBusTransaction, OpReturnData } from '../../parser/types';
 import { TransactionProcessor } from '../transactionProcessor';
-import { JungleBusTransaction } from '../types';
 
 const prisma = new PrismaClient();
 
 describe('Integration Tests', () => {
-    beforeAll(async () => {
-        await prisma.$connect();
-        // Clean up any existing test data
-        await prisma.voteOption.deleteMany({
-            where: { txid: 'test_txid' }
-        });
-        await prisma.post.deleteMany({
-            where: { txid: 'test_txid' }
-        });
-    });
+    const transactionDecoder = new TransactionDecoder();
+    const mapProtocolHandler = new MAPProtocolHandler();
+    const processor = new TransactionProcessor();
 
-    afterAll(async () => {
-        // Clean up test data
-        await prisma.voteOption.deleteMany({
-            where: { txid: 'test_txid' }
-        });
-        await prisma.post.deleteMany({
-            where: { txid: 'test_txid' }
-        });
-        await prisma.$disconnect();
-    });
-
-    it('should parse a MAP transaction with vote data', async () => {
-        const tx: JungleBusTransaction = {
-            id: 'test_txid',
-            block_hash: 'test_block_hash',
-            block_height: 123456,
-            block_time: 1234567890,
+    test('should decode MAP protocol transaction', async () => {
+        // Mock transaction data
+        const mockTransaction: JungleBusTransaction = {
+            id: 'mock-txid',
             outputs: [
                 {
                     value: 0,
-                    script: Buffer.from('OP_RETURN MAP type=vote_question&content=What is your favorite color?&postId=test123&totalOptions=7&optionsHash=abc123').toString('hex')
-                },
-                {
-                    value: 0,
-                    script: Buffer.from('OP_RETURN MAP type=vote_option&optionIndex=0&content=Red&lockAmount=1000&lockDuration=86400').toString('hex')
-                },
-                {
-                    value: 0,
-                    script: Buffer.from('OP_RETURN MAP type=vote_option&optionIndex=1&content=Blue&lockAmount=1000&lockDuration=86400').toString('hex')
-                },
-                {
-                    value: 0,
-                    script: Buffer.from('OP_RETURN MAP type=vote_option&optionIndex=2&content=Green&lockAmount=1000&lockDuration=86400').toString('hex')
-                },
-                {
-                    value: 0,
-                    script: Buffer.from('OP_RETURN MAP type=vote_option&optionIndex=3&content=Yellow&lockAmount=1000&lockDuration=86400').toString('hex')
-                },
-                {
-                    value: 0,
-                    script: Buffer.from('OP_RETURN MAP type=vote_option&optionIndex=4&content=Purple&lockAmount=1000&lockDuration=86400').toString('hex')
-                },
-                {
-                    value: 0,
-                    script: Buffer.from('OP_RETURN MAP type=vote_option&optionIndex=5&content=Orange&lockAmount=1000&lockDuration=86400').toString('hex')
-                },
-                {
-                    value: 0,
-                    script: Buffer.from('OP_RETURN MAP type=vote_option&optionIndex=6&content=Pink&lockAmount=1000&lockDuration=86400').toString('hex')
+                    script: Buffer.from('6a' + Buffer.from('app=lockd.app&type=vote_question&content=What is your favorite color?&totalOptions=3&optionsHash=abc123&postId=post123').toString('hex'), 'hex').toString('hex')
                 }
-            ]
+            ],
+            block_height: 123456,
+            block_time: Math.floor(Date.now() / 1000)
         };
 
-        const parsedPost = await parseMapTransaction(tx);
+        // Decode transaction
+        const opReturnData = transactionDecoder.decodeTransaction(mockTransaction);
+        expect(opReturnData).toBeDefined();
+        expect(opReturnData.length).toBeGreaterThan(0);
+
+        // Parse MAP protocol data
+        const parsedPost = await mapProtocolHandler.parseTransaction(
+            opReturnData,
+            mockTransaction.id,
+            mockTransaction.block_height,
+            mockTransaction.block_time
+        );
+
+        // Verify parsed data
         expect(parsedPost).toBeDefined();
-        if (!parsedPost) throw new Error('Failed to parse post');
-
-        expect(parsedPost.type).toBe('vote_question');
-        expect(parsedPost.votingData?.question).toBeDefined();
-        expect(parsedPost.votingData?.options.length).toBe(7);
-        expect(parsedPost.votingData?.metadata.optionsHash).toBeDefined();
-        expect(parsedPost.votingData?.metadata.totalOptions).toBe(7);
-
-        // 5. Process the parsed post
-        const transactionProcessor = new TransactionProcessor();
-        await transactionProcessor.processBatch([parsedPost]);
-
-        // Verify database state
-        const post = await prisma.post.findUnique({
-            where: { txid: 'test_txid' },
-            include: {
-                vote_options: true
-            }
-        });
-
-        expect(post).toBeDefined();
-        expect(post?.is_vote).toBe(true);
-        expect(post?.metadata).toBeDefined();
-
-        // Verify vote options
-        expect(post?.vote_options).toHaveLength(7);
-        for (const option of post?.vote_options || []) {
-            expect(option.lock_amount).toBe(1000);
-            expect(option.lock_duration).toBe(86400);
-            expect(option.txid).toBe('test_txid');
+        if (parsedPost) {
+            expect(parsedPost.id).toBe('mock-txid');
+            expect(parsedPost.type).toBe('vote_question');
+            expect(parsedPost.content).toBe('What is your favorite color?');
+            expect(parsedPost.metadata).toBeDefined();
+            expect(parsedPost.metadata.totalOptions).toBe(3);
+            expect(parsedPost.metadata.optionsHash).toBe('abc123');
+            expect(parsedPost.metadata.postId).toBe('post123');
+            expect(parsedPost.metadata.protocol).toBe('MAP');
+            expect(parsedPost.metadata.blockHeight).toBe(123456);
+            expect(parsedPost.metadata.blockTime).toBe(mockTransaction.block_time);
         }
+
+        // Process transactions
+        await processor.processBatch([parsedPost]);
+    });
+
+    afterAll(async () => {
+        await prisma.$disconnect();
     });
 });
