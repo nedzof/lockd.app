@@ -1,5 +1,4 @@
-import { OpReturnData, ParsedPost, BasePost, BaseTransaction, TransactionOutput } from './types';
-import { JungleBusTransaction } from '../scanner/types';
+import { BasePost, BaseTransaction, TransactionOutput } from '../common/types';
 
 export interface ProtocolHandler {
   canHandle(outputs: TransactionOutput[]): boolean;

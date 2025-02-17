@@ -1,4 +1,6 @@
-import { BaseTransaction, TransactionInput, TransactionOutput } from '../common/types';
+import { BaseTransaction, TransactionInput, TransactionOutput, TransactionEvent, TransactionError } from '../common/types';
+
+export { BaseTransaction, TransactionInput, TransactionOutput, TransactionEvent, TransactionError };
 
 export interface ScannerConfig {
     jungleBusUrl: string;

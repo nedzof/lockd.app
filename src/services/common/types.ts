@@ -5,6 +5,7 @@ export interface BaseTransaction {
     blockHeight?: number;
     blockTime?: number;
     transaction?: string;
+    data?: string[];
 }
 
 export interface TransactionOutput {
@@ -13,11 +14,12 @@ export interface TransactionOutput {
 }
 
 export interface TransactionInput {
-    txid: string;
-    vout: number;
+    script: string;
     scriptSig: string;
     sequence: number;
     witness: string[];
+    txid?: string;
+    vout?: number;
 }
 
 export interface BaseMetadata {
@@ -48,14 +50,9 @@ export interface VoteOption {
 export interface VotingData {
     question: string;
     options: VoteOption[];
-    metadata: {
-        totalOptions: number;
-        optionsHash: string;
-        postId: string;
-        protocol: string;
-        blockHeight?: number;
-        blockTime?: number;
-    };
+    totalOptions: number;
+    optionsHash: string;
+    protocol: string;
 }
 
 export interface VotePost extends BasePost {
@@ -87,9 +84,48 @@ export interface DBConfig {
 }
 
 // Event interfaces
+export interface ScannedTransactionData {
+    transaction: BaseTransaction;
+    inputs: TransactionInput[];
+    outputs: TransactionOutput[];
+}
+
+export interface ParsedTransactionData {
+    post: BasePost | VotePost;
+    rawTransaction: BaseTransaction;
+}
+
+export interface SavedTransactionData {
+    post: {
+        id: string;
+        postId: string;
+        type: string;
+        content: string;
+        timestamp: Date;
+        sequence: number;
+        parentSequence: number;
+        createdAt: Date;
+        updatedAt: Date;
+        voteQuestion?: {
+            id: string;
+            question: string;
+            totalOptions: number;
+            optionsHash: string;
+            protocol: string;
+            voteOptions: Array<{
+                id: string;
+                index: number;
+                content: string;
+                lockAmount: number;
+                lockDuration: number;
+            }>;
+        };
+    };
+}
+
 export interface TransactionEvent {
     type: 'TRANSACTION_SCANNED' | 'TRANSACTION_PARSED' | 'TRANSACTION_SAVED';
-    data: BaseTransaction | BasePost | null;
+    data: ScannedTransactionData | ParsedTransactionData | SavedTransactionData | null;
     error?: Error;
     timestamp: Date;
 }

@@ -1,7 +1,6 @@
 import { EventEmitter } from 'events';
 import { PrismaClient } from '@prisma/client';
-import { BasePost, VotePost, TransactionEvent, DBError } from '../common/types';
-import { DBPost, DBVotePost } from './dbTypes';
+import { BasePost, VotePost, TransactionEvent, SavedTransactionData, DBError } from '../common/types';
 
 export class DBTransactionProcessor extends EventEmitter {
     private prisma: PrismaClient;
@@ -18,7 +17,7 @@ export class DBTransactionProcessor extends EventEmitter {
                     const result = await this.processPost(post);
                     this.emit('transaction', {
                         type: 'TRANSACTION_SAVED',
-                        data: result,
+                        data: { post: result },
                         timestamp: new Date()
                     } as TransactionEvent);
                 } catch (error) {
@@ -28,7 +27,7 @@ export class DBTransactionProcessor extends EventEmitter {
         });
     }
 
-    async processPost(post: BasePost): Promise<DBPost> {
+    async processPost(post: BasePost): Promise<any> {
         try {
             // Handle vote posts
             if ('votingData' in post) {
@@ -38,10 +37,12 @@ export class DBTransactionProcessor extends EventEmitter {
             // Handle regular posts
             return await this.prisma.post.create({
                 data: {
-                    id: post.id,
+                    postId: post.id,
                     type: post.type,
                     content: post.content,
-                    metadata: post.metadata
+                    timestamp: new Date(post.metadata.timestamp || Date.now()),
+                    sequence: parseInt(post.metadata.sequence || '0'),
+                    parentSequence: parseInt(post.metadata.parentSequence || '0')
                 }
             });
         } catch (error) {
@@ -56,28 +57,45 @@ export class DBTransactionProcessor extends EventEmitter {
         }
     }
 
-    private async processVotePost(post: VotePost): Promise<DBVotePost> {
+    private async processVotePost(post: VotePost): Promise<any> {
         try {
-            return await this.prisma.votePost.create({
+            // Create the base post first
+            const result = await this.prisma.post.create({
                 data: {
-                    id: post.id,
+                    postId: post.id,
                     type: post.type,
                     content: post.content,
-                    metadata: post.metadata,
-                    question: post.votingData.question,
-                    options: {
-                        create: post.votingData.options.map(option => ({
-                            index: option.index,
-                            content: option.content,
-                            lockAmount: option.lockAmount,
-                            lockDuration: option.lockDuration
-                        }))
+                    timestamp: new Date(post.metadata.timestamp || Date.now()),
+                    sequence: parseInt(post.metadata.sequence || '0'),
+                    parentSequence: parseInt(post.metadata.parentSequence || '0'),
+                    voteQuestion: {
+                        create: {
+                            question: post.votingData.question,
+                            totalOptions: post.votingData.options.length,
+                            optionsHash: post.metadata.optionsHash || '',
+                            protocol: post.metadata.protocol || 'MAP',
+                            voteOptions: {
+                                create: post.votingData.options.map(option => ({
+                                    index: option.index,
+                                    content: option.content,
+                                    lockAmount: option.lockAmount,
+                                    lockDuration: option.lockDuration,
+                                    postId: post.id
+                                }))
+                            }
+                        }
                     }
                 },
                 include: {
-                    options: true
+                    voteQuestion: {
+                        include: {
+                            voteOptions: true
+                        }
+                    }
                 }
             });
+
+            return result;
         } catch (error) {
             const dbError = new DBError(
                 'Error processing vote post',
@@ -90,8 +108,8 @@ export class DBTransactionProcessor extends EventEmitter {
         }
     }
 
-    async processBatch(posts: BasePost[]): Promise<(DBPost | DBVotePost)[]> {
-        const results: (DBPost | DBVotePost)[] = [];
+    async processBatch(posts: BasePost[]): Promise<(any)[]> {
+        const results: (any)[] = [];
 
         for (const post of posts) {
             try {

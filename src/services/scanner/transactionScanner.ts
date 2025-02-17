@@ -1,23 +1,45 @@
-import fetch from 'node-fetch';
 import { EventEmitter } from 'events';
+import { JungleBusClient } from "@gorillapool/js-junglebus";
 import { 
-    BaseTransaction, 
-    ScannerConfig, 
-    TransactionEvent, 
-    TransactionError, 
-    TransactionInput, 
-    TransactionOutput, 
-    RawTransaction, 
+    ScannerConfig,
+    RawTransaction,
     ScannerStats 
 } from './scannerTypes';
+import {
+    BaseTransaction,
+    TransactionEvent,
+    TransactionError,
+    TransactionInput,
+    TransactionOutput,
+    BasePost
+} from '../common/types';
 import { TransactionParser } from '../parser/transactionParser';
 import { DBTransactionProcessor } from '../dbworker/transactionProcessor';
+
+interface JungleBusTransaction {
+    id: string;
+    block_hash?: string;
+    block_height?: number;
+    block_time?: number;
+    hex?: string;
+    data?: string[];
+    inputs?: Array<{
+        script?: string;
+        scriptSig?: { hex: string };
+    }>;
+    outputs?: Array<{
+        scriptPubKey?: { hex: string };
+        script?: string;
+    }>;
+    merkle_proof?: any;
+}
 
 export class TransactionScanner extends EventEmitter {
     private config: ScannerConfig;
     private parser: TransactionParser;
     private dbProcessor: DBTransactionProcessor;
     private stats: ScannerStats;
+    private client: JungleBusClient;
 
     constructor(config: ScannerConfig) {
         super();
@@ -34,21 +56,35 @@ export class TransactionScanner extends EventEmitter {
             startTime: new Date(),
             lastUpdateTime: new Date()
         };
+        
+        this.client = new JungleBusClient("junglebus.gorillapool.io", {
+            useSSL: true,
+            protocol: "json",
+            onConnected(ctx) {
+                console.log("CONNECTED", ctx);
+            },
+            onConnecting(ctx) {
+                console.log("CONNECTING", ctx);
+            },
+            onDisconnected(ctx) {
+                console.log("DISCONNECTED", ctx);
+            },
+            onError(ctx) {
+                console.error(ctx);
+            },
+        });
     }
 
-    async scanTransaction(txid: string): Promise<void> {
+    async scanTransaction(txid: string): Promise<BasePost | null> {
         try {
-            // Fetch transaction
-            const response = await fetch(`${this.config.jungleBusUrl}${txid}`);
+            // Fetch transaction using the correct endpoint
+            const response = await fetch(`https://junglebus.gorillapool.io/v1/transaction/get/${txid}`);
             if (!response.ok) {
-                throw new TransactionError(
-                    `Failed to fetch transaction: ${response.statusText}`,
-                    txid,
-                    'FETCH_ERROR'
-                );
+                throw new Error(`Failed to fetch transaction: ${response.statusText}`);
             }
 
-            const txData = await response.json();
+            const txData = await response.json() as JungleBusTransaction;
+            console.log('Transaction data:', txData);
 
             // Convert to base transaction
             const transaction: BaseTransaction = {
@@ -56,92 +92,52 @@ export class TransactionScanner extends EventEmitter {
                 blockHash: txData.block_hash,
                 blockHeight: txData.block_height,
                 blockTime: txData.block_time,
-                transaction: txData.hex
+                transaction: txData.hex,
+                data: txData.data
             };
 
             // Convert inputs and outputs
-            const inputs: TransactionInput[] = txData.inputs.map((input: any) => ({
-                txid: input.txid,
-                vout: input.vout,
+            const inputs: TransactionInput[] = txData.inputs?.map(input => ({
+                script: input.script || '',
                 scriptSig: input.scriptSig?.hex || '',
-                sequence: input.sequence,
-                witness: input.witness || []
-            }));
+                sequence: 0,
+                witness: []
+            })) || [];
 
-            const outputs: TransactionOutput[] = txData.outputs.map((output: any) => ({
-                value: output.value,
-                script: output.scriptPubKey?.hex || output.script || ''
-            }));
+            const outputs: TransactionOutput[] = txData.outputs?.map(output => {
+                const script = output.script || output.scriptPubKey?.hex || '';
+                console.log('Raw output script:', script);
+                return {
+                    value: 0,
+                    script: Buffer.from(script, 'hex').toString()
+                };
+            }) || [];
 
             // Emit scanned transaction event
-            this.emit('transaction', {
-                type: 'TRANSACTION_SCANNED',
-                data: {
-                    transaction,
-                    inputs,
-                    outputs
-                },
-                timestamp: new Date()
-            } as TransactionEvent);
+            this.emit('TRANSACTION_SCANNED', {
+                transaction,
+                inputs,
+                outputs
+            });
 
-            // Parse transaction
-            const rawTx: RawTransaction = {
-                id: txid,
-                blockHash: txData.block_hash,
-                blockHeight: txData.block_height,
-                blockTime: txData.block_time,
-                inputs: txData.inputs.map((input: any) => ({
-                    txid: input.txid,
-                    vout: input.vout,
-                    scriptSig: input.scriptSig?.hex || '',
-                    sequence: input.sequence,
-                    witness: input.witness || []
-                })),
-                outputs: txData.outputs.map((output: any) => ({
-                    value: output.value,
-                    script: output.scriptPubKey?.hex || output.script || ''
-                }))
-            };
-
-            const parsedPost = await this.parser.parseTransaction(rawTx, rawTx.outputs);
-            if (parsedPost) {
-                // Process in database
-                await this.dbProcessor.processPost(parsedPost);
+            // Parse transaction using available protocol handlers
+            const parsedTransaction = await this.parser.parseTransaction(transaction, outputs);
+            if (parsedTransaction) {
+                this.emit('POST_PARSED', parsedTransaction);
+                await this.dbProcessor.processPost(parsedTransaction);
             }
 
             this.stats.processedTransactions++;
+            return parsedTransaction;
         } catch (error) {
             this.stats.failedTransactions++;
-            
-            const txError = error instanceof TransactionError 
-                ? error 
-                : new TransactionError(
-                    'Failed to scan transaction',
-                    txid,
-                    'SCAN_ERROR',
-                    error instanceof Error ? error : undefined
-                );
-
-            this.emit('error', txError);
-            throw txError;
-        } finally {
-            this.stats.lastUpdateTime = new Date();
+            console.error('Error scanning transaction:', error);
+            return null;
         }
-    }
-
-    async scanBatch(txids: string[]): Promise<void> {
-        const batchSize = this.config.batchSize || 100;
-        for (let i = 0; i < txids.length; i += batchSize) {
-            const batch = txids.slice(i, i + batchSize);
-            await Promise.all(batch.map(txid => this.scanTransaction(txid)));
-        }
-    }
-
-    getStats(): ScannerStats {
-        return { ...this.stats };
     }
 
     async disconnect(): Promise<void> {
+        // JungleBus client doesn't need explicit cleanup
         await this.dbProcessor.disconnect();
     }
 }
