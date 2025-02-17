@@ -43,6 +43,10 @@ export class TransactionParser extends EventEmitter {
         });
     }
 
+    addProtocolHandler(handler: ProtocolHandler): void {
+        this.protocolHandlers.push(handler);
+    }
+
     async parseTransaction(
         transaction: BaseTransaction,
         outputs: TransactionOutput[]
@@ -51,9 +55,13 @@ export class TransactionParser extends EventEmitter {
             // Find a handler that can process this transaction
             for (const handler of this.protocolHandlers) {
                 if (handler.canHandle(outputs)) {
-                    const result = await handler.parseTransaction(transaction, outputs);
-                    if (result) {
-                        return result;
+                    try {
+                        const result = await handler.parseTransaction(transaction, outputs);
+                        if (result) {
+                            return result;
+                        }
+                    } catch (error) {
+                        console.error('Error in protocol handler:', error);
                     }
                 }
             }

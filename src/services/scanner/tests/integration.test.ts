@@ -121,6 +121,7 @@ describe('Integration Tests', () => {
     });
 
     beforeEach(() => {
+        // Create and configure components
         mapHandler = new MAPProtocolHandler();
         parser = new TransactionParser();
         parser.addProtocolHandler(mapHandler);

@@ -36,8 +36,8 @@ interface JungleBusTransaction {
 
 export class TransactionScanner extends EventEmitter {
     private config: ScannerConfig;
-    private parser: TransactionParser;
-    private dbProcessor: DBTransactionProcessor;
+    private parser!: TransactionParser;
+    private dbProcessor!: DBTransactionProcessor;
     private stats: ScannerStats;
     private client: JungleBusClient;
 
@@ -47,8 +47,6 @@ export class TransactionScanner extends EventEmitter {
             batchSize: 100,
             ...config
         };
-        this.parser = new TransactionParser();
-        this.dbProcessor = new DBTransactionProcessor();
         this.stats = {
             processedTransactions: 0,
             failedTransactions: 0,
@@ -73,6 +71,14 @@ export class TransactionScanner extends EventEmitter {
                 console.error(ctx);
             },
         });
+    }
+
+    setParser(parser: TransactionParser): void {
+        this.parser = parser;
+    }
+
+    setDBProcessor(processor: DBTransactionProcessor): void {
+        this.dbProcessor = processor;
     }
 
     async scanTransaction(txid: string): Promise<BasePost | null> {
