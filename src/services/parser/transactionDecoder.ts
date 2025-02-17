@@ -39,110 +39,125 @@ export class TransactionDecoder {
     };
 
     // Process outputs
+    let currentVoteOption: any = null;
     decodedTx.transaction.outputs = txData.outputs.map((output: any, index: number) => {
       const decodedOutput: TransactionOutput = {
         value: output.value,
         scriptPubKey: output.scriptPubKey.hex,
-        addresses: output.addresses,
-        type: output.type
+        addresses: output.scriptPubKey.addresses || [],
+        type: output.scriptPubKey.type
       };
 
       // Detect and decode OP_RETURN data
-      if (output.type === SCRIPT_TYPES.NULLDATA) {
+      if (output.scriptPubKey.type === SCRIPT_TYPES.NULLDATA) {
         decodedOutput.opReturn = this.decodeOpReturn(output.scriptPubKey.asm);
         
-        // Extract voting data from first valid OP_RETURN
-        if (index === 0 && decodedOutput.opReturn) {
-          decodedTx.votingData = this.extractVotingData(decodedOutput.opReturn);
+        if (decodedOutput.opReturn) {
+          // Extract vote data
+          if (decodedOutput.opReturn.metadata?.type === 'vote_question') {
+            decodedTx.votingData.metadata.totalOptions = parseInt(decodedOutput.opReturn.metadata.totalOptions || '0', 10);
+            decodedTx.votingData.metadata.optionsHash = decodedOutput.opReturn.metadata.optionsHash || '';
+            decodedTx.votingData.question = decodedOutput.opReturn.content || '';
+          } else if (decodedOutput.opReturn.metadata?.type === 'vote_option') {
+            currentVoteOption = {
+              index: parseInt(decodedOutput.opReturn.metadata.optionIndex || '0', 10),
+              content: decodedOutput.opReturn.content || '',
+              lockAmount: parseInt(decodedOutput.opReturn.metadata.lockAmount || '0', 10),
+              lockDuration: parseInt(decodedOutput.opReturn.metadata.lockDuration || '0', 10)
+            };
+            decodedTx.votingData.options.push(currentVoteOption);
+          }
+
+          // Extract general metadata
+          if (decodedOutput.opReturn.metadata?.postId) {
+            decodedTx.votingData.metadata.postId = decodedOutput.opReturn.metadata.postId;
+          }
         }
       }
 
       return decodedOutput;
     });
 
+    // Sort options by index
+    decodedTx.votingData.options.sort((a, b) => a.index - b.index);
+
     return decodedTx;
   }
 
-  private decodeOpReturn(asm: string): OpReturnData | null {
-    const chunks = asm.split(' ');
-    if (chunks[0] !== 'OP_RETURN') return null;
+  decodeTransaction(tx: BitcoinTransaction): OpReturnData[] {
+    const decodedOutputs: OpReturnData[] = [];
 
-    const opReturn: OpReturnData = {
-      protocols: [],
-      metadata: {}
-    };
-
-    let currentProtocol = '';
-    let buffer = '';
-
-    for (let i = 1; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      
-      // Detect protocol identifiers
-      if (chunk === PROTOCOLS.ORD) {
-        currentProtocol = 'ORD';
-        opReturn.protocols.push('ORD');
-      } else if (chunk === PROTOCOLS.MAP) {
-        currentProtocol = 'MAP';
-        opReturn.protocols.push('MAP');
-      } else if (chunk === PROTOCOLS.BITCOM) {
-        currentProtocol = 'BITCOM';
-        opReturn.protocols.push('BITCOM');
-      } else {
-        // Decode data based on current protocol
-        const decoded = Buffer.from(chunk, 'hex').toString('utf-8');
-        
-        switch(currentProtocol) {
-          case 'ORD':
-            if (decoded.startsWith('text/plain')) {
-              opReturn.contentType = 'text/plain';
-            } else if (opReturn.contentType) {
-              opReturn.content = decoded;
-            }
-            break;
-
-          case 'MAP':
-            const [key, value] = decoded.split('=');
-            if (key && value) {
-              opReturn.metadata![key] = value;
-            }
-            break;
-
-          case 'BITCOM':
-            buffer += decoded;
-            if (decoded.endsWith(']')) {
-              const match = buffer.match(/\[(.*?)\]/);
-              if (match) {
-                opReturn.metadata![match[1]] = true;
-              }
-              buffer = '';
-            }
-            break;
-        }
+    for (const output of tx.outputs) {
+      const decodedOutput = this.decodeOutput(output);
+      if (decodedOutput?.opReturn) {
+        decodedOutputs.push(decodedOutput.opReturn);
       }
     }
 
-    return opReturn;
+    return decodedOutputs;
   }
 
-  private extractVotingData(opReturn: OpReturnData): DecodedTransaction['votingData'] {
-    const votingData: DecodedTransaction['votingData'] = {
-      question: '',
-      options: [],
-      metadata: {
-        postId: '',
-        totalOptions: 0,
-        optionsHash: ''
-      }
-    };
+  private decodeOutput(output: TransactionOutput): { opReturn?: OpReturnData } {
+    const decodedOutput: { opReturn?: OpReturnData } = {};
 
-    if (opReturn.metadata) {
-      votingData.question = opReturn.content || '';
-      votingData.metadata.postId = opReturn.metadata.postId || '';
-      votingData.metadata.totalOptions = parseInt(opReturn.metadata.totalOptions || '0', 10);
-      votingData.metadata.optionsHash = opReturn.metadata.optionsHash || '';
+    if (!output.scriptPubKey?.asm?.startsWith('OP_RETURN')) {
+      return decodedOutput;
     }
 
-    return votingData;
+    try {
+      decodedOutput.opReturn = this.decodeOpReturn(output.scriptPubKey.asm);
+    } catch (error) {
+      console.error('Failed to decode OP_RETURN:', error);
+    }
+
+    return decodedOutput;
+  }
+
+  private decodeOpReturn(asm: string): OpReturnData | undefined {
+    if (!asm) return undefined;
+
+    const parts = asm.split(' ');
+    if (parts.length < 2) return undefined;
+
+    // Remove OP_RETURN
+    parts.shift();
+
+    let protocols: string[] = [];
+    let content = '';
+    let metadata: Record<string, string> = {};
+
+    try {
+      // Try to decode the data
+      const decodedData = Buffer.from(parts[0], 'hex').toString('utf8');
+      
+      // Check for MAP protocol
+      if (decodedData.includes('MAP')) {
+        protocols.push('MAP');
+        content = decodedData.split('content=')[1]?.split('&')[0] || '';
+        
+        // Extract metadata
+        const metadataPairs = decodedData.split('&');
+        for (const pair of metadataPairs) {
+          const [key, value] = pair.split('=');
+          if (key && value) {
+            metadata[key] = value;
+          }
+        }
+      }
+      
+      // Check for ORD protocol
+      if (decodedData.includes('ORD')) {
+        protocols.push('ORD');
+      }
+
+      return {
+        protocols,
+        content,
+        metadata
+      };
+    } catch (error) {
+      console.error('Failed to decode OP_RETURN data:', error);
+      return undefined;
+    }
   }
 }

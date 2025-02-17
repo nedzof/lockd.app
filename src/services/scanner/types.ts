@@ -1,24 +1,20 @@
 import { Prisma } from '@prisma/client';
+import { ParsedPost as ParserParsedPost } from '../parser/types';
+
+// Re-export the parser types
+export type ParsedPost = ParserParsedPost;
 
 // JungleBus Types
 export interface JungleBusTransaction {
   id: string;
+  transaction?: string;
   block_hash?: string;
   block_height?: number;
   block_time?: number;
-  block_index?: number;
-  data?: string[];
-  addresses?: string[];
-  inputs?: {
-    txid?: string;
-    vout?: number;
-    script?: string;
-  }[];
-  outputs?: JungleBusOutput[];
-  output_types?: string[];
-  contexts?: string[];
-  sub_contexts?: string[];
-  transaction?: string;
+  outputs?: Array<{
+    value: number;
+    script: string;
+  }>;
 }
 
 export interface JungleBusOutput {
@@ -231,10 +227,8 @@ export type PostCreateInput = {
 
 export enum MAP_TYPES {
   CONTENT = 'content',
-  IMAGE = 'image',
   VOTE_QUESTION = 'vote_question',
-  VOTE_OPTION = 'vote_option',
-  TAGS = 'tags'
+  VOTE_OPTION = 'vote_option'
 }
 
 export interface BaseMapMetadata {
@@ -265,7 +259,7 @@ export interface ContentMapMetadata extends BaseMapMetadata {
 }
 
 export interface ImageMapMetadata extends BaseMapMetadata {
-  type: MAP_TYPES.IMAGE;
+  type: MAP_TYPES.VOTE_QUESTION;
   contentType: string;
   encoding: 'base64' | 'hex';
 }
@@ -284,16 +278,24 @@ export interface VoteOptionMapMetadata extends BaseMapMetadata {
   lockDuration?: number;
 }
 
-export interface TagsMapMetadata extends BaseMapMetadata {
-  type: MAP_TYPES.TAGS;
+export interface ProcessedImage {
+  data: Buffer | null;
+  metadata: {
+    mimeType: string;
+    width?: number;
+    height?: number;
+  };
+  dataUrl?: string | null;
+}
+
+export interface ImageProcessingError extends Error {
+  code: string;
 }
 
 export type MapMetadata = 
   | ContentMapMetadata 
-  | ImageMapMetadata 
   | VoteQuestionMapMetadata 
-  | VoteOptionMapMetadata 
-  | TagsMapMetadata;
+  | VoteOptionMapMetadata;
 
 export interface MapPost {
   txid: string;
@@ -309,33 +311,6 @@ export interface ImageData {
   data: Buffer;
   contentType: string;
   metadata: { [key: string]: any };
-}
-
-export interface ParsedPost {
-  txid: string;
-  postId: string;
-  author: string;
-  blockHeight: number;
-  blockTime?: number;
-  timestamp: number;
-  content: {
-    text: string;
-    title?: string;
-    description?: string;
-  };
-  metadata: BaseMapMetadata;
-  images: {
-    data: Buffer | null;
-    contentType: string;
-    dataURL: string | null;
-  }[];
-  tags: string[];
-  vote?: {
-    options: Array<{
-      optionIndex: number;
-      content: string;
-    }>;
-  };
 }
 
 export interface ContentOutput {
@@ -354,7 +329,7 @@ export interface ContentOutput {
 }
 
 export interface ImageOutput {
-  type: MAP_TYPES.IMAGE;
+  type: MAP_TYPES.VOTE_QUESTION;
   fileName: string;
   fileSize: number;
   imageUrl?: string;
@@ -389,7 +364,7 @@ export interface VoteOptionLockOutput {
 }
 
 export interface TagsOutput {
-  type: MAP_TYPES.TAGS;
+  type: MAP_TYPES.CONTENT;
   tags: string[];
   tagsCount: number;
   metadata: BaseMapMetadata;

@@ -1,11 +1,14 @@
-import { ParsedPost } from './types';
+import { OpReturnData, ParsedPost } from './types';
 import { JungleBusTransaction } from '../scanner/types';
 
 export interface ProtocolHandler {
-  name: string;
-  version: string;
-  detect: (script: string) => boolean;
-  parse: (tx: JungleBusTransaction) => Promise<ParsedPost>;
+  canHandle(protocols: string[]): boolean;
+  parseTransaction(
+    opReturnData: OpReturnData[], 
+    txid?: string, 
+    blockHeight?: number, 
+    blockTime?: number
+  ): Promise<ParsedPost | null>;
 }
 
 export const MAP_PROTOCOL_MARKERS = {

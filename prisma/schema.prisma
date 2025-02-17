@@ -40,9 +40,8 @@ model Post {
 
 model VoteOption {
   id              String     @id
-  txid            String     @unique
+  txid            String
   postId          String
-  post_txid       String
   content         String
   description     String     @default("")
   author_address  String
@@ -54,11 +53,11 @@ model VoteOption {
   lock_percentage Float
   option_index    Int       @default(0)
   tags            String[]
-  post            Post       @relation(fields: [post_txid], references: [txid])
+  post            Post       @relation(fields: [txid], references: [txid])
   lock_likes      LockLike[] @relation("VoteOptionLockLikes")
 
   @@index([postId])
-  @@index([post_txid])
+  @@index([txid])
 }
 
 model LockLike {

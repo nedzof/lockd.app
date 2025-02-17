@@ -3,12 +3,20 @@ export default {
   preset: 'ts-jest',
   testEnvironment: 'node',
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', {
-      useESM: true,
-    }],
-  },
-  moduleNameMapper: {
-    '^(\\.{1,2}/.*)\\.js$': '$1',
-  },
-  extensionsToTreatAsEsm: ['.ts', '.tsx'],
-}; 
+    '^.+\\.tsx?$': [
+      'ts-jest',
+      {
+        tsconfig: {
+          esModuleInterop: true,
+          allowJs: true,
+          noEmit: true,
+          strict: true,
+          module: 'esnext',
+          target: 'es2020',
+          lib: ['es2020'],
+          moduleResolution: 'node'
+        }
+      }
+    ]
+  }
+};

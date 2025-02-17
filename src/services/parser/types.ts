@@ -6,10 +6,10 @@ export interface VoteQuestion {
 }
 
 export interface VoteOption {
-  optionindex: number;
+  index: number;
   content: string;
-  lockamount: string;
-  lockduration: string;
+  lockAmount: number;
+  lockDuration: number;
 }
 
 export interface TransactionMetadata {
@@ -23,43 +23,43 @@ export interface TransactionMetadata {
 }
 
 export interface ParsedPost {
-  txid: string;
-  postId: string;
-  author: string;
-  blockHeight: number;
-  blockTime: number;
+  type: string;
+  content: string;
   timestamp: number;
-  content: {
-    text: string;
-    title?: string;
-    description?: string;
-  };
-  metadata: {
-    app: string;
-    version: string;
-    type: string;
-    postId: string;
-    sequence: number;
-    timestamp: string;
-    voteOptions?: VoteOption[];
-    optionsHash?: string;
-    lockAmount?: string;
-    lockDuration?: string;
-    optionIndex?: number;
-    parentSequence?: number;
+  postId: string;
+  sequence: number;
+  parentSequence: number;
+  tags: string[];
+  app: string;
+  version: string;
+  txid?: string;
+  blockHeight?: number;
+  blockTime?: number;
+  votingData?: {
+    question: string;
+    options: Array<{
+      index: number;
+      content: string;
+      lockAmount: number;
+      lockDuration: number;
+    }>;
+    metadata: {
+      totalOptions: number;
+      optionsHash: string;
+      postId: string;
+    };
   };
   images: Array<{
     data: Buffer | null;
     contentType: string;
     dataURL: string | null;
   }>;
-  tags: string[];
 }
 
 export interface BitcoinTransaction {
   txid: string;
   version: number;
-  inputs: TransactionInput[];
+  inputs: any[];
   outputs: TransactionOutput[];
   locktime: number;
   blockHash: string;
@@ -77,7 +77,12 @@ export interface TransactionInput {
 
 export interface TransactionOutput {
   value: number;
-  scriptPubKey: string;
+  scriptPubKey: {
+    asm: string;
+    hex: string;
+    type: string;
+    addresses?: string[];
+  };
   addresses: string[];
   type: string;
   opReturn?: OpReturnData;
@@ -85,20 +90,21 @@ export interface TransactionOutput {
 
 export interface OpReturnData {
   protocols: string[];
-  contentType?: string;
-  content?: string;
-  metadata?: Record<string, any>;
+  content: string;
+  metadata: Record<string, any>;
+}
+
+export interface VotingData {
+  question: string;
+  options: VoteOption[];
+  metadata: {
+    totalOptions: number;
+    optionsHash: string;
+    postId: string;
+  };
 }
 
 export interface DecodedTransaction {
   transaction: BitcoinTransaction;
-  votingData: {
-    question: string;
-    options: VoteOption[];
-    metadata: {
-      postId: string;
-      totalOptions: number;
-      optionsHash: string;
-    };
-  };
+  votingData: VotingData;
 }
