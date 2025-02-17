@@ -8,6 +8,7 @@ import type { JungleBusTransaction } from './types';
 import fs from 'fs';
 import axios from 'axios';
 import { PrismaClient } from '@prisma/client';
+import { UnifiedScanner } from './unifiedScanner';
 
 // Load environment variables
 dotenv.config();
@@ -323,7 +324,17 @@ async function initializeScanner(): Promise<void> {
 }
 
 // Start the scanner
-initializeScanner().catch(error => {
+const scanner = new UnifiedScanner();
+scanner.on('transaction', async ({ post, prisma }) => {
+    try {
+        await prisma.post.create({
+            data: post
+        });
+    } catch (error) {
+        console.error('Error creating post:', error);
+    }
+});
+scanner.start().catch(error => {
     console.error('❌ Fatal error:', error);
     process.exit(1);
 });

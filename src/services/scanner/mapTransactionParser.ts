@@ -1,366 +1,601 @@
-import type { JungleBusTransaction, JungleBusOutput, ParsedPost, MAP_TYPES } from './types';
-import { isValidImage, processImage } from './imageProcessor';
+import { JungleBusTransaction, JungleBusOutput, ParsedPost, MAP_TYPES, TransactionOutput } from './types';
+import { processImage, ProcessedImage } from './imageProcessor';
 import { LRUCache } from 'lru-cache';
 import { AsyncQueue } from 'async-queue';
+import { ImageProcessor, ImageProcessingError, cachedImageProcessing, imageProcessor } from './imageProcessor';
 
-// Constants and Types
+// Constants
 const MAP_PROTOCOL_MARKERS = {
-    V1: '6d01',
-    V2: '6d02',
-    B: '621a'
+    MAP_PREFIX: '1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5',
+    APP: 'lockd.app',
+    TYPE: 'post'
 } as const;
 
-type MapProtocolVersion = 'v1' | 'v2' | 'b';
-type MapFieldHandlers = Record<string, (value: string, post: ParsedPost) => void>;
-
-interface ImageExtractionResult {
-    data: Buffer | null;
-    contentType: string | null;
-    metadata?: Record<string, unknown>;
+// Protocol Handlers
+interface ProtocolHandler {
+    name: string;
+    version: string;
+    detect: (script: string) => boolean;
+    parse: (tx: JungleBusTransaction) => Promise<ParsedPost>;
 }
 
-// Cache Configuration
-const IMAGE_CACHE = new LRUCache<string, ImageExtractionResult>({
-    max: 100,
-    ttl: 60_000 // 1 minute TTL
-});
-
-// Custom Error Class
-class ParserError extends Error {
-    constructor(
-        public readonly code: string,
-        message: string,
-        public readonly context?: Record<string, unknown>,
-        public readonly recoverable: boolean = true
-    ) {
-        super(message);
-        this.name = 'ParserError';
+// Protocol Parsers
+async function parseMAPv1(tx: JungleBusTransaction): Promise<ParsedPost> {
+    if (!tx.transaction) {
+        throw new Error('No transaction data found');
     }
+
+    // Parse the raw transaction data
+    const txData = Buffer.from(tx.transaction, 'hex');
+    const outputs = parseTransactionOutputs(txData);
+
+    const mapOutput = outputs.find(o => o.script && o.script.includes(MAP_PROTOCOL_MARKERS.MAP_PREFIX));
+    if (!mapOutput || !mapOutput.script) {
+        throw new Error('No valid MAP output found');
+    }
+
+    const data = parseMapData(mapOutput.script);
+    const timestamp = Math.floor(new Date(data.timestamp || Date.now()).getTime() / 1000);
+    
+    return {
+        txid: tx.id,
+        postId: data.postId || tx.id,
+        author: data.author || '',
+        blockHeight: 0, // Will be filled in by the scanner
+        blockTime: timestamp,
+        timestamp,
+        content: {
+            text: data.content || '',
+            title: data.title,
+            description: data.description
+        },
+        metadata: {
+            app: data.app || MAP_PROTOCOL_MARKERS.APP,
+            version: data.version || '1.0',
+            type: data.type || MAP_TYPES.CONTENT,
+            postId: data.postId || tx.id,
+            sequence: data.sequence || 0,
+            timestamp: new Date(timestamp * 1000).toISOString(),
+            voteOptions: data.voteOptions || [],
+            optionsHash: data.optionsHash,
+            lockAmount: data.lockAmount,
+            lockDuration: data.lockDuration,
+            optionIndex: data.optionIndex,
+            parentSequence: data.parentSequence
+        },
+        images: [],
+        tags: data.tags || []
+    };
 }
 
-// Protocol Version Detection
-function detectProtocolVersion(scriptHex: string): MapProtocolVersion {
-    if (!scriptHex) {
-        throw new ParserError('INVALID_SCRIPT', 'Script hex is empty or undefined', { scriptHex });
-    }
+async function parseMAPv2(tx: JungleBusTransaction): Promise<ParsedPost> {
+    const basePost = await parseMAPv1(tx);
     
-    const version = Object.entries(MAP_PROTOCOL_MARKERS).find(([_, marker]) => 
-        scriptHex.startsWith(marker)
-    );
-    
-    if (!version) {
-        throw new ParserError('UNKNOWN_PROTOCOL', 'Unknown MAP protocol version', 
-            { scriptHex: scriptHex.substring(0, 10) },
-            false
-        );
-    }
-    
-    return version[0].toLowerCase() as MapProtocolVersion;
-}
+    // Add v2 specific parsing
+    const imageOutputs = tx.outputs?.filter(o => 
+        o && o.script && (
+            o.script.includes('image:') ||
+            o.script.includes('data:image/')
+        )
+    ) || [];
 
-// Field Processing
-const CONTENT_KEYS = new Set(['content', 'text', 'body', 'description']);
-const NUMERIC_KEYS = new Set(['lockamount', 'lockduration', 'optionindex', 'totaloptions']);
-
-const createFieldProcessor = (): MapFieldHandlers => ({
-    content: (value, post) => {
-        if (typeof value !== 'string') {
-            throw new ParserError('INVALID_CONTENT', 'Content must be a string', { value });
-        }
-        post.content.text = sanitizeContent(value);
-    },
-    text: (value, post) => {
-        if (typeof value !== 'string') {
-            throw new ParserError('INVALID_CONTENT', 'Content must be a string', { value });
-        }
-        post.content.text = sanitizeContent(value);
-    },
-    type: (value, post) => {
-        const validTypes = new Set(['vote_option', 'vote_question', 'standard']);
-        if (!validTypes.has(value)) {
-            throw new ParserError('INVALID_TYPE', 'Invalid post type', { value });
-        }
-        post.metadata.type = value;
-        post.metadata.isVoteOption = value === 'vote_option';
-        post.metadata.isVoteQuestion = value === 'vote_question';
-    },
-    options: (value, post) => {
+    if (imageOutputs.length > 0) {
         try {
-            post.metadata.voteOptions = parseVoteOptions(value);
-        } catch (error) {
-            throw new ParserError('INVALID_OPTIONS', 'Failed to parse vote options', 
-                { value, error: error instanceof Error ? error.message : String(error) }
-            );
-        }
-    },
-    app: (value, post) => post.metadata.app = value,
-    postid: (value, post) => post.metadata.postId = value,
-    parenttxid: (value, post) => post.metadata.parentTxid = value,
-    tags: (value, post) => {
-        post.tags = tryParseJSON(value) ?? value.split(',').map(t => t.trim());
-    }
-});
-
-// Content Processing
-function sanitizeContent(content: string): string {
-    if (content.length > 5000) {
-        console.warn('Content exceeds maximum length, truncating', { length: content.length });
-    }
-    
-    return content
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-        .replace(/[\u200B-\u200D\uFEFF]/g, '')
-        .replace(/[^\x20-\x7E\n\r\t]/g, '') // Remove non-printable characters
-        .substring(0, 5000)
-        .trim();
-}
-
-// Image Processing
-async function extractImageData(tx: JungleBusTransaction): Promise<ImageExtractionResult> {
-    const cacheKey = tx.txid + '_images';
-    const cached = IMAGE_CACHE.get(cacheKey);
-    if (cached) {
-        console.debug('Image cache hit', { txid: tx.txid });
-        return cached;
-    }
-
-    const startTime = Date.now();
-    try {
-        const extractionMethods = [
-            extractInlineImages,
-            extractHexEncodedImages,
-            extractBase64Images,
-            extractFragmentedImages,
-            extractProtocolImages
-        ];
-
-        for (const method of extractionMethods) {
-            const result = await method(tx);
-            if (result.data) {
-                if (!isValidImage(result.data)) {
-                    throw new ParserError('INVALID_IMAGE', 'Invalid image data detected', 
-                        { contentType: result.contentType }
-                    );
-                }
+            const processedImages = await Promise.all(imageOutputs.map(async (output) => {
+                if (!output || !output.script) return {
+                    data: null,
+                    contentType: '',
+                    dataURL: null
+                };
                 
-                IMAGE_CACHE.set(cacheKey, result);
-                console.debug('Image extracted successfully', {
-                    txid: tx.txid,
-                    method: method.name,
-                    duration: Date.now() - startTime
-                });
-                return result;
-            }
-        }
-    } catch (error) {
-        console.error('Image extraction failed', {
-            txid: tx.txid,
-            error: error instanceof Error ? error.message : String(error)
-        });
-    }
-
-    return { data: null, contentType: null };
-}
-
-// Vote Option Processing
-function parseVoteOptions(input: unknown): any[] {
-    const options = Array.isArray(input) ? input : [input];
-    return options.map(opt => {
-        const option = typeof opt === 'string' ? { text: opt } : opt;
-        return {
-            text: String(option.text || '').trim(),
-            index: safeParseInt(option.index),
-            lockAmount: safeParseInt(option.lockAmount),
-            lockDuration: safeParseInt(option.lockDuration),
-            unlockHeight: safeParseInt(option.unlockHeight),
-            lockPercentage: safeParseInt(option.lockPercentage)
-        };
-    }).filter(opt => opt.text.length > 0);
-}
-
-// Validation
-function validateParsedPost(post: ParsedPost): string[] {
-    const errors: string[] = [];
-    
-    if (!post.txid || !/^[a-f0-9]{64}$/i.test(post.txid)) {
-        errors.push('Invalid TXID format');
-    }
-
-    if (!post.metadata.isVoteOption && !post.metadata.isVoteQuestion) {
-        if (!post.content?.text && !post.images?.length) {
-            errors.push('Missing content or images');
+                try {
+                    const processed = await imageProcessor.processImage(Buffer.from(output.script, 'hex'));
+                    return {
+                        data: processed.data,
+                        contentType: processed.metadata.mimeType,
+                        dataURL: processed.dataUrl || null
+                    };
+                } catch (error) {
+                    console.error('Failed to process image:', error);
+                    return {
+                        data: null,
+                        contentType: '',
+                        dataURL: null
+                    };
+                }
+            }));
+            
+            basePost.images = processedImages;
+        } catch (error) {
+            console.error('Error processing images:', error);
+            basePost.images = [];
         }
     }
 
-    if (post.metadata.voteOptions) {
-        const indexes = new Set<number>();
-        post.metadata.voteOptions.forEach(opt => {
-            if (indexes.has(opt.index)) {
-                errors.push(`Duplicate option index: ${opt.index}`);
-            }
-            indexes.add(opt.index);
+    return basePost;
+}
+
+async function parseBitcom(tx: JungleBusTransaction): Promise<ParsedPost> {
+    // Implement Bitcom protocol parsing
+    throw new Error('Bitcom protocol parsing not implemented');
+}
+
+function parseTransactionOutputs(txData: Buffer): TransactionOutput[] {
+    // Skip version (4 bytes), input count (1-9 bytes), inputs
+    let offset = 4;
+    const outputs: TransactionOutput[] = [];
+
+    // Parse outputs
+    const outputCount = txData.readUInt8(offset++);
+    for (let i = 0; i < outputCount; i++) {
+        // Read value (8 bytes)
+        const value = txData.readBigUInt64LE(offset);
+        offset += 8;
+
+        // Read script length (1-9 bytes)
+        const scriptLength = txData.readUInt8(offset++);
+
+        // Read script
+        const script = txData.slice(offset, offset + scriptLength).toString('utf8');
+        offset += scriptLength;
+
+        outputs.push({
+            value: Number(value),
+            script
         });
     }
 
-    return errors;
+    return outputs;
 }
+
+// Protocol Registry
+const PROTOCOL_REGISTRY: ProtocolHandler[] = [
+    {
+        name: 'MAP',
+        version: '1.0',
+        detect: (script: string) => script.includes(MAP_PROTOCOL_MARKERS.MAP_PREFIX),
+        parse: parseMAPv1
+    },
+    {
+        name: 'MAP',
+        version: '2.0',
+        detect: (script: string) => script.includes(MAP_PROTOCOL_MARKERS.MAP_PREFIX),
+        parse: parseMAPv2
+    },
+    {
+        name: 'Bitcom',
+        version: '1.0',
+        detect: (script: string) => script.includes('1BitcoinOrg'),
+        parse: parseBitcom
+    }
+];
 
 // Helper Functions
-const safeParseInt = (value: unknown): number => 
-    Math.abs(Number.parseInt(String(value || 0), 10)) || 0;
-
-const tryParseJSON = (str: string): unknown => {
+function parseMapData(script: string): any {
     try {
-        return JSON.parse(str);
-    } catch {
-        return null;
+        // Parse the script into parts
+        const parts = script.split(' ');
+        const mapPrefix = parts.find(p => p === MAP_PROTOCOL_MARKERS.MAP_PREFIX);
+        if (!mapPrefix) {
+            throw new Error('Invalid MAP prefix');
+        }
+
+        // Extract the data parts
+        const dataParts = parts.slice(parts.indexOf(mapPrefix) + 1);
+        const data: any = {};
+
+        // Parse each part
+        for (let i = 0; i < dataParts.length; i++) {
+            const part = dataParts[i];
+            
+            if (part === 'SET') {
+                // Next part should be the key
+                const key = dataParts[++i];
+                if (!key) continue;
+
+                // Next part should be the value
+                const value = dataParts[++i];
+                if (!value) continue;
+
+                // Parse the value based on the key
+                switch (key) {
+                    case 'app':
+                        data.app = value;
+                        break;
+                    case 'type':
+                        data.type = value;
+                        break;
+                    case 'content':
+                        data.content = value;
+                        break;
+                    case 'postId':
+                        data.postId = value;
+                        break;
+                    case 'sequence':
+                        data.sequence = parseInt(value, 10);
+                        break;
+                    case 'timestamp':
+                        data.timestamp = value;
+                        break;
+                    case 'tags':
+                        try {
+                            data.tags = JSON.parse(value);
+                        } catch {
+                            data.tags = [];
+                        }
+                        break;
+                    case 'optionsHash':
+                        data.optionsHash = value;
+                        break;
+                    case 'lockAmount':
+                        data.lockAmount = parseInt(value, 10);
+                        break;
+                    case 'lockDuration':
+                        data.lockDuration = parseInt(value, 10);
+                        break;
+                    case 'optionIndex':
+                        data.optionIndex = parseInt(value, 10);
+                        break;
+                    case 'parentSequence':
+                        data.parentSequence = parseInt(value, 10);
+                        break;
+                    default:
+                        data[key] = value;
+                }
+            }
+        }
+
+        return data;
+    } catch (error) {
+        console.error('Error parsing MAP data:', error);
+        return {};
     }
-};
+}
 
 // Main Parser
-export async function parseMapTransaction(tx: JungleBusTransaction): Promise<ParsedPost | null> {
-    const post: ParsedPost = {
-        txid: tx.txid,
-        blockHeight: tx.blockHeight,
-        timestamp: tx.timestamp,
-        content: { text: '' },
-        author: tx.addresses?.[0] || '',
-        metadata: {},
-        tags: [],
-        images: []
-    };
-
+async function parseMapTransaction(tx: JungleBusTransaction): Promise<ParsedPost | null> {
     try {
-        await processTransactionContent(tx, post);
-        
-        const errors = validateParsedPost(post);
-        if (errors.length > 0) {
-            console.error('Validation failed:', errors);
+        // Parse the raw transaction data
+        const outputs = tx.outputs || [];
+
+        console.log('Total outputs:', outputs.length);
+        console.log('Outputs:', outputs);
+
+        // Find MAP outputs
+        const mapOutputs = outputs.filter(o => {
+            if (!o || !o.script) return false;
+            try {
+                const script = o.script;
+                let decodedScript = script;
+
+                // First try to decode as hex
+                try {
+                    const hexBuffer = Buffer.from(script, 'hex');
+                    const hexStr = hexBuffer.toString();
+                    
+                    // Check if it contains the ord protocol markers
+                    if (hexStr.includes('ord') && hexStr.includes('text/plain')) {
+                        return true;
+                    }
+                } catch (e) {
+                    // If hex decode fails, try base64
+                    try {
+                        const base64Buffer = Buffer.from(script, 'base64');
+                        const base64Str = base64Buffer.toString();
+                        if (base64Str.includes('ord') && base64Str.includes('text/plain')) {
+                            return true;
+                        }
+                    } catch (error) {
+                        // If both decodings fail, return false
+                        return false;
+                    }
+                }
+                return false;
+            } catch (error) {
+                console.error('Error processing script:', error);
+                return false;
+            }
+        });
+
+        if (mapOutputs.length === 0) {
+            console.log('No MAP outputs found');
             return null;
         }
 
-        return post;
-    } catch (error) {
-        if (error instanceof ParserError) {
-            console.error(`Parser Error [${error.code}]:`, error.message, error.context);
-        } else {
-            console.error('Unexpected processing error:', error);
+        // Parse each MAP output
+        const postData: any = {};
+        for (const output of mapOutputs) {
+            try {
+                let decodedScript = output.script!;
+                let data;
+
+                // First try to decode as hex
+                try {
+                    const hexBuffer = Buffer.from(decodedScript, 'hex');
+                    data = hexBuffer.toString();
+                } catch (e) {
+                    // If hex decode fails, try base64
+                    try {
+                        const base64Buffer = Buffer.from(decodedScript, 'base64');
+                        data = base64Buffer.toString();
+                    } catch (error) {
+                        console.error('Failed to decode script:', error);
+                        continue;
+                    }
+                }
+
+                // Extract the content after text/plain
+                const textPlainIndex = data.indexOf('text/plain');
+                if (textPlainIndex !== -1) {
+                    // Skip past text/plain and any null bytes
+                    let contentStart = textPlainIndex + 10;
+                    while (contentStart < data.length && data.charCodeAt(contentStart) === 0) {
+                        contentStart++;
+                    }
+                    data = data.substring(contentStart);
+                }
+
+                // Parse the SET data
+                const setIndex = data.indexOf('SET');
+                if (setIndex === -1) continue;
+
+                // Extract key-value pairs
+                const parts = data.split(' ');
+                const setPartIndex = parts.indexOf('SET');
+                if (setPartIndex === -1) continue;
+
+                // Parse SET key-value pairs
+                for (let i = setPartIndex + 1; i < parts.length - 1; i += 2) {
+                    const key = parts[i];
+                    const value = parts[i + 1];
+                    if (!key || !value) continue;
+
+                    // Parse the value based on the key
+                    switch (key) {
+                        case 'app':
+                            postData.app = value;
+                            break;
+                        case 'type':
+                            postData.type = value;
+                            break;
+                        case 'content':
+                            postData.content = value;
+                            break;
+                        case 'postId':
+                            postData.postId = value;
+                            break;
+                        case 'sequence':
+                            postData.sequence = parseInt(value, 10);
+                            break;
+                        case 'timestamp':
+                            postData.timestamp = value;
+                            break;
+                        case 'tags':
+                            try {
+                                postData.tags = JSON.parse(value);
+                            } catch {
+                                postData.tags = [];
+                            }
+                            break;
+                        case 'optionsHash':
+                            postData.optionsHash = value;
+                            break;
+                        case 'lockAmount':
+                            postData.lockAmount = parseInt(value, 10);
+                            break;
+                        case 'lockDuration':
+                            postData.lockDuration = parseInt(value, 10);
+                            break;
+                        case 'optionIndex':
+                            postData.optionIndex = parseInt(value, 10);
+                            break;
+                        case 'parentSequence':
+                            postData.parentSequence = parseInt(value, 10);
+                            break;
+                        case 'totalOptions':
+                            postData.totalOptions = parseInt(value, 10);
+                            break;
+                        default:
+                            postData[key] = value;
+                    }
+                }
+            } catch (error) {
+                console.error('Error parsing output:', error);
+            }
         }
+
+        // Process vote options if present
+        if (postData.type === 'vote_question') {
+            const voteOptionOutputs = outputs.filter(o => {
+                if (!o || !o.script) return false;
+                try {
+                    const script = o.script;
+                    let data;
+
+                    // First try to decode as hex
+                    try {
+                        const hexBuffer = Buffer.from(script, 'hex');
+                        data = hexBuffer.toString();
+                    } catch (e) {
+                        // If hex decode fails, try base64
+                        try {
+                            const base64Buffer = Buffer.from(script, 'base64');
+                            data = base64Buffer.toString();
+                        } catch (error) {
+                            return false;
+                        }
+                    }
+
+                    // Extract the content after text/plain
+                    const textPlainIndex = data.indexOf('text/plain');
+                    if (textPlainIndex !== -1) {
+                        // Skip past text/plain and any null bytes
+                        let contentStart = textPlainIndex + 10;
+                        while (contentStart < data.length && data.charCodeAt(contentStart) === 0) {
+                            contentStart++;
+                        }
+                        data = data.substring(contentStart);
+                    }
+
+                    return data.includes('SET') && data.includes('type') && data.includes('vote_option');
+                } catch (error) {
+                    console.error('Error processing vote option script:', error);
+                    return false;
+                }
+            });
+
+            // Sort vote options by optionIndex
+            const voteOptions = voteOptionOutputs
+                .map(o => {
+                    try {
+                        const script = o.script!;
+                        let data;
+
+                        // First try to decode as hex
+                        try {
+                            const hexBuffer = Buffer.from(script, 'hex');
+                            data = hexBuffer.toString();
+                        } catch (e) {
+                            // If hex decode fails, try base64
+                            try {
+                                const base64Buffer = Buffer.from(script, 'base64');
+                                data = base64Buffer.toString();
+                            } catch (error) {
+                                console.error('Failed to decode script:', error);
+                                return null;
+                            }
+                        }
+
+                        // Extract the content after text/plain
+                        const textPlainIndex = data.indexOf('text/plain');
+                        if (textPlainIndex !== -1) {
+                            // Skip past text/plain and any null bytes
+                            let contentStart = textPlainIndex + 10;
+                            while (contentStart < data.length && data.charCodeAt(contentStart) === 0) {
+                                contentStart++;
+                            }
+                            data = data.substring(contentStart);
+                        }
+
+                        const parts = data.split(' ');
+                        const setIndex = parts.indexOf('SET');
+                        if (setIndex === -1) return null;
+
+                        const option: any = {};
+                        for (let i = setIndex + 1; i < parts.length - 1; i += 2) {
+                            const key = parts[i];
+                            const value = parts[i + 1];
+                            if (!key || !value) continue;
+
+                            switch (key) {
+                                case 'content':
+                                    option.text = value;
+                                    break;
+                                case 'optionIndex':
+                                    option.index = parseInt(value, 10);
+                                    break;
+                                case 'lockAmount':
+                                    option.lockAmount = parseInt(value, 10);
+                                    break;
+                                case 'lockDuration':
+                                    option.lockDuration = parseInt(value, 10);
+                                    break;
+                            }
+                        }
+                        return option;
+                    } catch (error) {
+                        console.error('Error parsing vote option:', error);
+                        return null;
+                    }
+                })
+                .filter(o => o !== null)
+                .sort((a, b) => a!.index - b!.index);
+
+            postData.voteOptions = voteOptions;
+        }
+
+        // Create parsed post
+        const timestamp = Math.floor(new Date(postData.timestamp || Date.now()).getTime() / 1000);
+        const parsedPost: ParsedPost = {
+            txid: tx.id,
+            postId: postData.postId || tx.id,
+            author: postData.author || '',
+            blockHeight: 0,
+            blockTime: timestamp,
+            timestamp,
+            content: {
+                text: postData.content || '',
+                title: postData.title,
+                description: postData.description
+            },
+            metadata: {
+                app: postData.app || MAP_PROTOCOL_MARKERS.APP,
+                version: postData.version || '1.0',
+                type: postData.type || MAP_TYPES.CONTENT,
+                postId: postData.postId || tx.id,
+                sequence: postData.sequence || 0,
+                timestamp: new Date(timestamp * 1000).toISOString(),
+                voteOptions: postData.voteOptions || [],
+                optionsHash: postData.optionsHash,
+                lockAmount: postData.lockAmount,
+                lockDuration: postData.lockDuration,
+                optionIndex: postData.optionIndex,
+                parentSequence: postData.parentSequence,
+                totalOptions: postData.totalOptions
+            },
+            images: [],
+            tags: postData.tags || []
+        };
+
+        // Process images if present
+        const imageOutputs = outputs.filter(o => {
+            if (!o || !o.script) return false;
+            const script = Buffer.from(o.script, 'hex').toString('utf8');
+            return script.includes('image:') || script.includes('data:image/');
+        });
+
+        if (imageOutputs.length > 0) {
+            const processedImages = await Promise.all(imageOutputs.map(async (img) => {
+                if (!img || !img.script) return {
+                    data: null,
+                    contentType: '',
+                    dataURL: null
+                };
+
+                try {
+                    const script = Buffer.from(img.script, 'hex').toString('utf8');
+                    const processed = await imageProcessor.processImage(Buffer.from(script, 'hex'));
+                    return {
+                        data: processed.data,
+                        contentType: processed.metadata.mimeType,
+                        dataURL: processed.dataUrl || null
+                    };
+                } catch (error) {
+                    console.error('Failed to process image:', error);
+                    return {
+                        data: null,
+                        contentType: '',
+                        dataURL: null
+                    };
+                }
+            }));
+
+            parsedPost.images = processedImages;
+        }
+
+        return parsedPost;
+    } catch (error) {
+        console.error('Error parsing MAP transaction:', error);
         return null;
     }
 }
 
-// Transaction Processing
-async function processTransactionContent(tx: JungleBusTransaction, post: ParsedPost): Promise<void> {
-    const contentSources = [
-        tx.data?.flatMap(parseKeyValuePairs),
-        tx.outputs?.flatMap(o => parseProtocolOutput(o.script))
-    ];
-
-    const fieldProcessor = createFieldProcessor();
-
-    for (const items of contentSources) {
-        if (!items) continue;
-        for (const [key, value] of items) {
-            const handler = fieldProcessor[key.toLowerCase()];
-            if (handler) {
-                handler(value, post);
-            }
-        }
-    }
-
-    // Image processing
-    const imageResult = await extractImageData(tx);
-    if (imageResult.data) {
-        post.images.push({
-            data: imageResult.data,
-            contentType: imageResult.contentType || 'image/jpeg',
-            metadata: imageResult.metadata
-        });
-    }
-}
-
-// Stream Processing
-export class TransactionStreamProcessor {
-    private queue: AsyncQueue<JungleBusTransaction>;
-    private workers: Worker[];
-
-    constructor(concurrency = 4) {
-        this.queue = new AsyncQueue();
-        this.workers = Array.from({ length: concurrency }, () => 
-            new Worker('./unifiedDbWorker.ts')
-        );
-    }
-
-    async process(transactions: AsyncIterable<JungleBusTransaction>) {
-        for await (const tx of transactions) {
-            await this.queue.enqueue(tx);
-        }
-    }
-}
-
-// Helper functions for image processing
-async function validateAndProcessImage(buffer: Buffer, contentType: string): Promise<ImageExtractionResult> {
-    if (!isValidImage(buffer)) {
-        return { data: null, contentType: null };
-    }
-
-    const processedImage = await processImage(buffer);
-    return {
-        data: processedImage,
-        contentType,
-        metadata: {
-            size: buffer.length,
-            processedSize: processedImage.length
-        }
-    };
-}
-
-function parseKeyValuePairs(data: string): [string, string][] {
-    const pairs: [string, string][] = [];
-    const parts = data.split('=');
-    
-    if (parts.length === 2) {
-        pairs.push([parts[0].toLowerCase(), parts[1]]);
-    }
-    
-    return pairs;
-}
-
-async function parseProtocolOutput(script?: { asm?: string; hex?: string }): Promise<[string, string][]> {
-    if (!script?.hex) return [];
-
-    const version = detectProtocolVersion(script.hex);
-    const pairs: [string, string][] = [];
-
-    try {
-        const text = Buffer.from(script.hex, 'hex').toString('utf8');
-        
-        if (text.startsWith('MAP_')) {
-            const match = text.match(/MAP_([A-Z_]+)=(.+)/i);
-            if (match) {
-                pairs.push([match[1].toLowerCase(), match[2]]);
-            }
-        } else if (text.startsWith('1Map')) {
-            const data = tryParseJSON(text.substring(4));
-            if (data && typeof data === 'object') {
-                Object.entries(data).forEach(([key, value]) => {
-                    if (typeof value === 'string') {
-                        pairs.push([key.toLowerCase(), value]);
-                    }
-                });
-            }
-        }
-    } catch (error) {
-        console.warn('Failed to parse protocol output:', error);
-    }
-
-    return pairs;
-}
-
-// Export additional utilities
-export {
-    validateParsedPost,
-    extractImageData,
-    ParserError
+// Export helpers for testing
+export const _test = {
+    parseMapData,
+    parseMAPv1,
+    parseMAPv2,
+    parseBitcom
 };
+
+export { parseMapTransaction };

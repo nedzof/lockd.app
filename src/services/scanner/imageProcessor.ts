@@ -109,8 +109,12 @@ export async function extractImageFromTransaction(tx: any): Promise<ImageOutput 
             dataURL
         };
 
-    } catch (error) {
-        console.error('Error extracting image:', error);
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            console.error('Error extracting image:', error.message);
+        } else {
+            console.error('Error extracting image with unknown error');
+        }
         return null;
     }
 }
@@ -173,12 +177,20 @@ export async function validateImageData(imageData: Buffer | string | null): Prom
         try {
             await decode(buffer);
             return true;
-        } catch (e) {
-            console.log('ImageScript decode failed:', e.message);
+        } catch (e: unknown) {
+            if (e instanceof Error) {
+                console.log('ImageScript decode failed:', e.message);
+            } else {
+                console.log('ImageScript decode failed with unknown error');
+            }
             return false;
         }
-    } catch (error) {
-        console.error('Error validating image data:', error);
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            console.error('Error validating image data:', error.message);
+        } else {
+            console.error('Error validating image data with unknown error');
+        }
         return false;
     }
 }
@@ -210,7 +222,12 @@ export function hasJpegSignature(data: Buffer | string): boolean {
 
         // Check for JPEG signature
         return buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xD8;
-    } catch (error) {
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            console.error('Error checking JPEG signature:', error.message);
+        } else {
+            console.error('Error checking JPEG signature with unknown error');
+        }
         return false;
     }
 }
@@ -247,9 +264,12 @@ export async function processImage(imageData: Buffer | string, metadata: Partial
             data: buffer,
             dataUrl: `data:${processedMetadata.mimeType};base64,${buffer.toString('base64')}`
         };
-    } catch (error) {
-        console.error('Error processing image:', error);
-        return null;
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            throw new ImageProcessingError(`Image processing failed: ${error.message}`);
+        } else {
+            throw new ImageProcessingError('Image processing failed with unknown error');
+        }
     }
 }
 
@@ -278,96 +298,15 @@ export async function detectImageFormat(buffer: Buffer): Promise<{ format: strin
  */
 export async function isValidImage(data: Buffer | string, contentType?: string): Promise<boolean> {
     try {
-        let buffer: Buffer;
-        
-        // Convert input to buffer if it's a base64 string
-        if (typeof data === 'string') {
-            try {
-                // Remove data URL prefix if present
-                const base64Data = data.includes('base64,') 
-                    ? data.split('base64,')[1] 
-                    : data;
-                
-                buffer = Buffer.from(base64Data, 'base64');
-            } catch (e) {
-                console.error('Error decoding base64:', e);
-                return false;
-            }
+        const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data, 'base64');
+        await decode(buffer);
+        return true;
+    } catch (e: unknown) {
+        if (e instanceof Error) {
+            console.log('ImageScript decode failed:', e.message);
         } else {
-            buffer = data;
+            console.log('ImageScript decode failed with unknown error');
         }
-
-        // Basic size check
-        if (buffer.length < 50) {
-            console.log('Buffer too small to be a valid image');
-            return false;
-        }
-
-        // For JPEG images
-        if (contentType === 'image/jpeg' || !contentType) {
-            // Check for JPEG start marker (FF D8)
-            const startMarker = buffer.indexOf(Buffer.from([0xFF, 0xD8]));
-            if (startMarker !== -1) {
-                // Look for JPEG end marker (FF D9)
-                const endMarker = buffer.indexOf(Buffer.from([0xFF, 0xD9]), startMarker);
-                if (endMarker !== -1) {
-                    // Extract the actual JPEG data
-                    const jpegData = buffer.slice(startMarker, endMarker + 2);
-                    
-                    // Try to decode with ImageScript
-                    try {
-                        const image = await decode(jpegData);
-                        if (image) {
-                            console.log('Valid JPEG structure detected');
-                            return true;
-                        }
-                    } catch (error) {
-                        console.log('Failed to decode JPEG with ImageScript');
-                    }
-                }
-            }
-            
-            if (contentType === 'image/jpeg') {
-                console.log('No valid JPEG structure');
-                return false;
-            }
-        }
-
-        // For PNG images
-        if (contentType === 'image/png' || !contentType) {
-            const pngSignature = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-            if (buffer.length >= 8 && buffer.slice(0, 8).equals(pngSignature)) {
-                try {
-                    const image = await decode(buffer);
-                    if (image) {
-                        console.log('Valid PNG structure detected');
-                        return true;
-                    }
-                } catch (error) {
-                    console.log('Failed to decode PNG with ImageScript');
-                }
-            }
-            
-            if (contentType === 'image/png') {
-                console.log('No valid PNG structure');
-                return false;
-            }
-        }
-
-        // If no content type specified, try decoding with ImageScript as last resort
-        if (!contentType) {
-            try {
-                const image = await decode(buffer);
-                return !!image;
-            } catch (error) {
-                console.log('Failed to decode image with ImageScript');
-                return false;
-            }
-        }
-
-        return false;
-    } catch (error) {
-        console.error('Error validating image:', error);
         return false;
     }
 }
@@ -379,25 +318,8 @@ export async function isValidImage(data: Buffer | string, contentType?: string):
  */
 export async function getImageDimensions(data: Buffer | string, contentType?: string): Promise<{ width: number; height: number } | null> {
     try {
-        let buffer: Buffer;
+        const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data, 'base64');
         
-        // Convert input to buffer if it's a base64 string
-        if (typeof data === 'string') {
-            try {
-                // Remove data URL prefix if present
-                const base64Data = data.includes('base64,') 
-                    ? data.split('base64,')[1] 
-                    : data;
-                
-                buffer = Buffer.from(base64Data, 'base64');
-            } catch (e) {
-                console.error('Error decoding base64:', e);
-                return null;
-            }
-        } else {
-            buffer = data;
-        }
-
         // Check for JPEG signature if content type is JPEG
         if (contentType === 'image/jpeg' && !hasJpegSignature(buffer)) {
             return null;
@@ -410,7 +332,12 @@ export async function getImageDimensions(data: Buffer | string, contentType?: st
             width: image.width,
             height: image.height
         };
-    } catch (error) {
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            console.error('Error getting image dimensions:', error.message);
+        } else {
+            console.error('Error getting image dimensions with unknown error');
+        }
         return null;
     }
 }
@@ -424,25 +351,8 @@ export async function getImageDimensions(data: Buffer | string, contentType?: st
  */
 export async function resizeImage(data: Buffer | string, maxWidth: number, maxHeight: number, contentType?: string): Promise<Buffer | null> {
     try {
-        let buffer: Buffer;
+        const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data, 'base64');
         
-        // Convert input to buffer if it's a base64 string
-        if (typeof data === 'string') {
-            try {
-                // Remove data URL prefix if present
-                const base64Data = data.includes('base64,') 
-                    ? data.split('base64,')[1] 
-                    : data;
-                
-                buffer = Buffer.from(base64Data, 'base64');
-            } catch (e) {
-                console.error('Error decoding base64:', e);
-                return null;
-            }
-        } else {
-            buffer = data;
-        }
-
         // Check for JPEG signature if content type is JPEG
         if (contentType === 'image/jpeg' && !hasJpegSignature(buffer)) {
             return null;
@@ -468,8 +378,12 @@ export async function resizeImage(data: Buffer | string, maxWidth: number, maxHe
         // Encode and return
         const resizedData = await image.encode();
         return Buffer.from(resizedData);
-    } catch (error) {
-        console.error('Error resizing image:', error);
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            console.error('Error resizing image:', error.message);
+        } else {
+            console.error('Error resizing image with unknown error');
+        }
         return null;
     }
 }
@@ -482,38 +396,88 @@ export async function resizeImage(data: Buffer | string, maxWidth: number, maxHe
  */
 export async function convertImage(data: Buffer | string, format: string, contentType?: string): Promise<Buffer | null> {
     try {
-        let buffer: Buffer;
-        
-        // Convert input to buffer if it's a base64 string
-        if (typeof data === 'string') {
-            try {
-                // Remove data URL prefix if present
-                const base64Data = data.includes('base64,') 
-                    ? data.split('base64,')[1] 
-                    : data;
-                
-                buffer = Buffer.from(base64Data, 'base64');
-            } catch (e) {
-                console.error('Error decoding base64:', e);
-                return null;
-            }
-        } else {
-            buffer = data;
-        }
-
-        // Check for JPEG signature if content type is JPEG
-        if (contentType === 'image/jpeg' && !hasJpegSignature(buffer)) {
-            return null;
-        }
-
+        const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data, 'base64');
         const image = await decode(buffer);
-        if (!image) return null;
-
-        // Encode to the target format
-        const convertedData = await image.encode(format);
+        
+        // Convert format string to number for encode
+        const formatNum = format.toUpperCase() === 'JPEG' ? 1 : 0; // 0 for PNG, 1 for JPEG
+        const convertedData = await image.encode(formatNum);
         return Buffer.from(convertedData);
-    } catch (error) {
-        console.error('Error converting image:', error);
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            console.error('Failed to convert image:', error.message);
+        } else {
+            console.error('Failed to convert image with unknown error');
+        }
         return null;
     }
 }
+
+export class ImageProcessingError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'ImageProcessingError';
+    }
+}
+
+export class ImageProcessor {
+    private static instance: ImageProcessor;
+
+    private constructor() {}
+
+    static getInstance(): ImageProcessor {
+        if (!ImageProcessor.instance) {
+            ImageProcessor.instance = new ImageProcessor();
+        }
+        return ImageProcessor.instance;
+    }
+
+    async processImage(data: Buffer | string, metadata: Partial<ImageMetadata> = {}): Promise<ProcessedImage> {
+        try {
+            const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data, 'base64');
+            const result = await decode(buffer);
+            
+            // Check if result is Image type (not GIF)
+            if ('type' in result) {
+                return {
+                    data: buffer,
+                    metadata: {
+                        width: result.width,
+                        height: result.height,
+                        format: result.type === 1 ? 'JPEG' : 'PNG',
+                        mimeType: result.type === 1 ? 'image/jpeg' : 'image/png',
+                        size: buffer.length,
+                        ...metadata
+                    },
+                    dataUrl: `data:${result.type === 1 ? 'image/jpeg' : 'image/png'};base64,${buffer.toString('base64')}`
+                };
+            } else {
+                // Handle GIF type
+                return {
+                    data: buffer,
+                    metadata: {
+                        width: result.width,
+                        height: result.height,
+                        format: 'GIF',
+                        mimeType: 'image/gif',
+                        size: buffer.length,
+                        ...metadata
+                    },
+                    dataUrl: `data:image/gif;base64,${buffer.toString('base64')}`
+                };
+            }
+        } catch (error: unknown) {
+            if (error instanceof Error) {
+                throw new ImageProcessingError(`Image processing failed: ${error.message}`);
+            } else {
+                throw new ImageProcessingError('Image processing failed with unknown error');
+            }
+        }
+    }
+}
+
+export const imageProcessor = ImageProcessor.getInstance();
+
+export const cachedImageProcessing = async (data: Buffer | string, metadata: Partial<ImageMetadata> = {}): Promise<ProcessedImage> => {
+    return imageProcessor.processImage(data, metadata);
+};

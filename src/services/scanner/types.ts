@@ -63,13 +63,7 @@ export interface JungleBusClient {
 // Transaction Types
 export interface TransactionOutput {
   value: number;
-  n: number;
-  scriptPubKey: {
-    hex: string;
-    asm: string;
-    type: string;
-    addresses?: string[];
-  };
+  script: string;
 }
 
 export interface TransactionInput {
@@ -123,6 +117,35 @@ export interface VoteOptionData {
   lock_amount: number;
   lock_duration: number;
   tags: string[];
+}
+
+export interface VoteOptionInput {
+  txid: string;
+  post_txid: string;
+  content: string;
+  author_address: string;
+  created_at: Date;
+  lock_amount: number;
+  lock_duration: number;
+  tags: string[];
+}
+
+export interface Vote {
+  txid: string;
+  content: string;
+  author_address: string;
+  created_at: Date;
+  options: VoteOption[];
+  tags: string[];
+}
+
+export interface Lock {
+  txid: string;
+  amount: number;
+  duration: number;
+  type: string;
+  unlock_height: number;
+  created_at: Date;
 }
 
 export interface StructuredTransaction {
@@ -220,8 +243,19 @@ export interface BaseMapMetadata {
   type: MAP_TYPES;
   postId: string;
   sequence: number;
+  parentTxid?: string;
   parentSequence?: number;
   timestamp: string;
+  lockType?: string;
+  lockAmount?: number;
+  lockDuration?: number;
+  optionIndex?: number;
+  optionsHash?: string;
+  totalOptions?: number;
+  voteOptions?: Array<{
+    optionIndex: number;
+    content: string;
+  }>;
 }
 
 export interface ContentMapMetadata extends BaseMapMetadata {
@@ -281,24 +315,27 @@ export interface ParsedPost {
   txid: string;
   postId: string;
   author: string;
+  blockHeight: number;
+  blockTime?: number;
+  timestamp: number;
   content: {
     text: string;
     title?: string;
     description?: string;
   };
-  metadata: {
-    app: string;
-    version: string;
-    type?: string;
-  };
+  metadata: BaseMapMetadata;
   images: {
     data: Buffer | null;
     contentType: string;
     dataURL: string | null;
   }[];
-  timestamp: number;
-  blockHeight: number;
   tags: string[];
+  vote?: {
+    options: Array<{
+      optionIndex: number;
+      content: string;
+    }>;
+  };
 }
 
 export interface ContentOutput {

@@ -2,7 +2,8 @@ import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 import winston from 'winston';
 import { RateLimiter } from 'limiter';
-import { ParsedPost, VoteOptionInput, Vote, Lock } from './types';
+import crypto from 'crypto';
+import { ParsedPost, VoteOptionInput, Vote, Lock, BaseMapMetadata } from './types';
 
 // Load environment variables
 dotenv.config();
@@ -70,10 +71,10 @@ function validatePost(post: ParsedPost): { valid: boolean; errors: string[] } {
     if (post.vote?.options) {
         const indexes = new Set<number>();
         post.vote.options.forEach(option => {
-            if (indexes.has(option.index)) {
-                errors.push(`Duplicate option index: ${option.index}`);
+            if (indexes.has(option.optionIndex)) {
+                errors.push(`Duplicate option index: ${option.optionIndex}`);
             }
-            indexes.add(option.index);
+            indexes.add(option.optionIndex);
         });
     }
 
@@ -171,48 +172,263 @@ async function withRetry<T>(
     throw lastError;
 }
 
-// Enhanced transaction processing with validation and error handling
-async function processSingleTransaction(post: ParsedPost, tx: any): Promise<void> {
-    const startTime = Date.now();
-    
-    try {
-        const { valid, errors } = validatePost(post);
-        if (!valid) {
-            throw new ProcessingError('VALIDATION_FAILED', 'Post validation failed', 
-                { errors }, false);
+// Enhanced transaction processing with dependency tracking
+class TransactionProcessor {
+    private pendingVoteOptions = new Map<string, ParsedPost[]>();
+    private processedPosts = new Set<string>();
+    private readonly maxRetries = 3;
+
+    constructor(private prisma: PrismaClient) {}
+
+    async processBatch(batch: ParsedPost[]): Promise<void> {
+        return this.prisma.$transaction(async (tx) => {
+            // First pass: Process all non-dependent posts
+            for (const post of batch) {
+                if (!post.metadata.parentTxid) {
+                    await this.processSingleTransaction(post, tx);
+                } else {
+                    this.queueDependentPost(post);
+                }
+            }
+
+            // Second pass: Try to process pending vote options
+            await this.processPendingVoteOptions(tx);
+        }, {
+            isolationLevel: 'Serializable',
+            maxWait: 5000,
+            timeout: 10000
+        });
+    }
+
+    private queueDependentPost(post: ParsedPost): void {
+        const parentTxid = post.metadata.parentTxid!;
+        if (!this.pendingVoteOptions.has(parentTxid)) {
+            this.pendingVoteOptions.set(parentTxid, []);
+        }
+        this.pendingVoteOptions.get(parentTxid)!.push(post);
+    }
+
+    private async processPendingVoteOptions(tx: any): Promise<void> {
+        const processedThisRound = new Set<string>();
+
+        for (const [parentTxid, options] of this.pendingVoteOptions.entries()) {
+            if (this.processedPosts.has(parentTxid)) {
+                try {
+                    const parent = await this.getParentQuestion(parentTxid, tx);
+                    if (parent) {
+                        await Promise.all(
+                            options.map(option => this.processVoteOption(option, parent, tx))
+                        );
+                        processedThisRound.add(parentTxid);
+                    }
+                } catch (error) {
+                    logger.error('Failed to process vote options:', {
+                        parentTxid,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+            }
         }
 
-        const sanitizedPost = sanitizePostContent(post);
-        
-        await rateLimiter.removeTokens(1);
-        
-        switch (sanitizedPost.metadata.type) {
-            case 'vote_option':
-                await processVoteOption(sanitizedPost, tx);
-                break;
-            case 'vote_question':
-                await processVoteQuestion(sanitizedPost, tx);
-                break;
-            default:
-                await processStandardPost(sanitizedPost, tx);
+        // Clean up processed options
+        processedThisRound.forEach(txid => {
+            this.pendingVoteOptions.delete(txid);
+        });
+    }
+
+    private async getParentQuestion(txid: string, tx: any): Promise<any> {
+        return tx.post.findUnique({
+            where: { txid },
+            include: {
+                metadata: true,
+                voteOptions: true
+            }
+        });
+    }
+
+    private async processVoteOption(
+        option: ParsedPost,
+        parent: any,
+        tx: any
+    ): Promise<void> {
+        try {
+            this.validateVoteOption(option, parent);
+            await this.createVoteOption(option, tx);
+        } catch (error) {
+            logger.error('Vote option processing failed:', {
+                txid: option.txid,
+                parentTxid: option.metadata.parentTxid,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
         }
-        
-        processedTxids.add(post.txid);
-        
-        logger.info('Transaction processed successfully', {
-            txid: post.txid,
-            type: post.metadata.type,
-            duration: Date.now() - startTime
+    }
+
+    private validateVoteOption(option: ParsedPost, parent: any): void {
+        if (!option.metadata.lockAmount || option.metadata.lockAmount < 0) {
+            throw new ProcessingError(
+                'INVALID_LOCK_AMOUNT',
+                'Lock amount must be positive',
+                { amount: option.metadata.lockAmount }
+            );
+        }
+
+        if (!option.metadata.lockDuration || option.metadata.lockDuration < 0) {
+            throw new ProcessingError(
+                'INVALID_LOCK_DURATION',
+                'Lock duration must be positive',
+                { duration: option.metadata.lockDuration }
+            );
+        }
+
+        if (!option.metadata.optionIndex || option.metadata.optionIndex < 0) {
+            throw new ProcessingError(
+                'INVALID_OPTION_INDEX',
+                'Invalid option index',
+                { optionIndex: option.metadata.optionIndex },
+                false
+            );
+        }
+
+        if (parent.metadata.lockType !== option.metadata.lockType) {
+            throw new ProcessingError(
+                'LOCK_TYPE_MISMATCH',
+                'Lock type mismatch with parent question',
+                {
+                    expected: parent.metadata.lockType,
+                    received: option.metadata.lockType
+                },
+                false
+            );
+        }
+    }
+
+    private async createVoteOption(option: ParsedPost, tx: any): Promise<void> {
+        await this.prisma.post.create({
+            data: {
+                id: option.txid,
+                txid: option.txid,
+                postId: option.postId,
+                content: option.content.text,
+                author_address: option.author,
+                created_at: new Date(option.timestamp * 1000),
+                tags: option.tags,
+                metadata: JSON.stringify(option.metadata),
+                block_height: option.blockHeight,
+                is_vote: true
+            }
         });
-    } catch (error) {
-        logger.error('Transaction processing failed', {
-            txid: post.txid,
-            error: error instanceof Error ? error.message : String(error),
-            duration: Date.now() - startTime
+    }
+
+    private async processSingleTransaction(post: ParsedPost, tx: any): Promise<void> {
+        const startTime = Date.now();
+        
+        try {
+            const { valid, errors } = validatePost(post);
+            if (!valid) {
+                throw new ProcessingError(
+                    'VALIDATION_FAILED',
+                    'Post validation failed',
+                    { errors },
+                    false
+                );
+            }
+
+            const sanitizedPost = sanitizePostContent(post);
+            
+            switch (sanitizedPost.metadata.type) {
+                case 'vote_question':
+                    await this.processVoteQuestion(sanitizedPost, tx);
+                    break;
+                case 'vote_option':
+                    this.queueDependentPost(sanitizedPost);
+                    break;
+                default:
+                    await this.processStandardPost(sanitizedPost, tx);
+            }
+            
+            this.processedPosts.add(post.txid);
+            
+            logger.info('Transaction processed successfully', {
+                txid: post.txid,
+                type: post.metadata.type,
+                duration: Date.now() - startTime
+            });
+        } catch (error) {
+            logger.error('Transaction processing failed', {
+                txid: post.txid,
+                error: error instanceof Error ? error.message : String(error),
+                duration: Date.now() - startTime
+            });
+            throw error;
+        }
+    }
+
+    private async processStandardPost(post: ParsedPost, tx: any): Promise<void> {
+        // Create post record
+        await this.prisma.post.create({
+            data: {
+                id: post.txid,
+                txid: post.txid,
+                postId: post.postId,
+                content: post.content.text,
+                author_address: post.author,
+                block_height: post.blockHeight,
+                created_at: new Date(post.timestamp * 1000),
+                tags: post.tags,
+                metadata: JSON.stringify(post.metadata)
+            }
         });
-        throw error;
+    }
+
+    private async processVoteQuestion(post: ParsedPost, tx: any): Promise<void> {
+        // Verify vote options hash
+        await this.verifyOptionsHash(post);
+
+        // Create vote question
+        await this.prisma.post.create({
+            data: {
+                id: post.txid,
+                txid: post.txid,
+                postId: post.postId,
+                content: post.content.text,
+                author_address: post.author,
+                created_at: new Date(post.timestamp * 1000),
+                tags: post.tags,
+                metadata: JSON.stringify(post.metadata),
+                block_height: post.blockHeight,
+                is_vote: true
+            }
+        });
+    }
+
+    private async verifyOptionsHash(post: ParsedPost): Promise<void> {
+        const options = post.metadata.voteOptions || [];
+        const optionsHash = options
+            .sort((a: { optionIndex: number }, b: { optionIndex: number }) => a.optionIndex - b.optionIndex)
+            .map((opt: { optionIndex: number; content: string }) => `${opt.optionIndex}:${opt.content}`)
+            .join('|');
+
+        const calculatedHash = crypto
+            .createHash('sha256')
+            .update(optionsHash)
+            .digest('hex');
+
+        if (calculatedHash !== post.metadata.optionsHash) {
+            throw new ProcessingError(
+                'INVALID_OPTIONS_HASH',
+                'Vote options hash mismatch',
+                {
+                    expected: post.metadata.optionsHash,
+                    calculated: calculatedHash
+                }
+            );
+        }
     }
 }
+
+// Export the processor
+export const transactionProcessor = new TransactionProcessor(prisma);
 
 // Enhanced queue processing with batching and error recovery
 async function processQueue(): Promise<void> {
@@ -221,7 +437,7 @@ async function processQueue(): Promise<void> {
     const batch = transactionQueue.splice(0, BATCH_SIZE);
     const results = await Promise.allSettled(
         batch.map(post => withRetry(() => 
-            processSingleTransaction(post, null)
+            transactionProcessor.processBatch([post])
         ))
     );
     
@@ -241,233 +457,14 @@ async function processQueue(): Promise<void> {
     }
 }
 
-// Process vote option
-async function processVoteOption(post: ParsedPost, tx: any) {
-    // First ensure the parent post exists
-    const parentTxid = post.metadata.parentTxid || post.txid;
-    const parentPost = await prisma.post.upsert({
-        where: { txid: parentTxid },
-        create: {
-            id: parentTxid,
-            txid: parentTxid,
-            postId: post.metadata.postId,
-            content: '',  // Will be updated when we process the actual vote question
-            author_address: post.author || '',
-            created_at: new Date(post.timestamp),
-            metadata: {},
-            tags: [],
-            is_vote: true
-        },
-        update: {} // No update needed, we'll update when processing the vote question
-    });
-
-    // Now create/update the vote option
-    const voteOption = await prisma.voteOption.upsert({
-        where: { txid: post.txid },
-        create: {
-            id: post.txid,
-            txid: post.txid,
-            postId: post.metadata.postId,
-            post_txid: parentTxid,
-            content: post.content?.text || '',
-            description: post.metadata.description || '',
-            author_address: post.author || '',
-            created_at: new Date(post.timestamp),
-            lock_amount: post.metadata.lockAmount || 0,
-            lock_duration: post.metadata.lockDuration || 0,
-            unlock_height: post.metadata.unlockHeight || 0,
-            current_height: post.blockHeight,
-            lock_percentage: post.metadata.lockPercentage || 0,
-            option_index: post.metadata.optionIndex || 0,
-            tags: post.tags || []
-        },
-        update: {
-            content: post.content?.text || '',
-            description: post.metadata.description || '',
-            author_address: post.author || '',
-            created_at: new Date(post.timestamp),
-            lock_amount: post.metadata.lockAmount || 0,
-            lock_duration: post.metadata.lockDuration || 0,
-            unlock_height: post.metadata.unlockHeight || 0,
-            current_height: post.blockHeight,
-            lock_percentage: post.metadata.lockPercentage || 0,
-            option_index: post.metadata.optionIndex || 0,
-            tags: post.tags || []
-        }
-    });
-}
-
-// Process vote question
-async function processVoteQuestion(post: ParsedPost, tx: any) {
-    // Create the vote question post first
-    const questionPost = await prisma.post.upsert({
-        where: { txid: post.txid },
-        create: {
-            id: post.txid,
-            txid: post.txid,
-            postId: post.metadata.postId,
-            content: post.content?.text || '',
-            author_address: post.author || '',
-            created_at: new Date(post.timestamp),
-            metadata: post.metadata,
-            tags: post.tags || [],
-            is_vote: true,
-            is_locked: post.metadata.lock?.isLocked,
-            lock_duration: post.metadata.lock?.duration,
-            unlock_height: post.metadata.lock?.unlockHeight,
-            current_height: post.blockHeight,
-            image_data: post.images?.[0]?.data,
-            media_type: post.images?.[0]?.contentType
-        },
-        update: {
-            content: post.content?.text || '',
-            author_address: post.author || '',
-            created_at: new Date(post.timestamp),
-            metadata: post.metadata,
-            tags: post.tags || [],
-            is_vote: true,
-            is_locked: post.metadata.lock?.isLocked,
-            lock_duration: post.metadata.lock?.duration,
-            unlock_height: post.metadata.lock?.unlockHeight,
-            current_height: post.blockHeight,
-            image_data: post.images?.[0]?.data,
-            media_type: post.images?.[0]?.contentType
-        }
-    });
-
-    // Process vote options if present
-    if (post.metadata.voteOptions) {
-        // Parse options if they're in string format
-        const parsedOptions = typeof post.metadata.voteOptions === 'string'
-            ? post.metadata.voteOptions.split(/[,;\s]+/).map(text => ({ text: text.trim() }))
-            : Array.isArray(post.metadata.voteOptions) ? post.metadata.voteOptions : [post.metadata.voteOptions];
-
-        // Create vote options
-        const savedOptions = await Promise.all(parsedOptions.map(async (option: any, index: number) => {
-            // Generate a deterministic txid for embedded options
-            const optionTxid = `${post.txid}_option_${index}`;
-            
-            // Extract option data
-            const optionData = typeof option === 'string' 
-                ? { text: option } 
-                : option;
-
-            // Create vote option
-            const voteOption = await prisma.voteOption.upsert({
-                where: { txid: optionTxid },
-                create: {
-                    id: optionTxid,
-                    txid: optionTxid,
-                    postId: post.metadata.postId,
-                    post_txid: post.txid,
-                    content: optionData.text || optionData.content || optionData.label || '',
-                    description: optionData.description || '',
-                    author_address: post.author || '',
-                    created_at: new Date(post.timestamp),
-                    lock_amount: parseInt(optionData.lockAmount) || 0,
-                    lock_duration: parseInt(optionData.lockDuration) || 0,
-                    unlock_height: parseInt(optionData.unlockHeight) || 0,
-                    current_height: post.blockHeight,
-                    lock_percentage: parseInt(optionData.lockPercentage) || 0,
-                    option_index: parseInt(optionData.optionIndex) || index,
-                    tags: post.tags || []
-                },
-                update: {
-                    content: optionData.text || optionData.content || optionData.label || '',
-                    description: optionData.description || '',
-                    author_address: post.author || '',
-                    created_at: new Date(post.timestamp),
-                    lock_amount: parseInt(optionData.lockAmount) || 0,
-                    lock_duration: parseInt(optionData.lockDuration) || 0,
-                    unlock_height: parseInt(optionData.unlockHeight) || 0,
-                    current_height: post.blockHeight,
-                    lock_percentage: parseInt(optionData.lockPercentage) || 0,
-                    option_index: parseInt(optionData.optionIndex) || index,
-                    tags: post.tags || []
-                }
-            });
-
-            return voteOption;
-        }));
-
-        logger.info('Created vote options:', {
-            questionTxid: questionPost.txid,
-            optionCount: savedOptions.length,
-            options: savedOptions.map(opt => ({
-                txid: opt.txid,
-                content: opt.content,
-                description: opt.description,
-                lockAmount: opt.lock_amount,
-                lockDuration: opt.lock_duration,
-                optionIndex: opt.option_index,
-                lockPercentage: opt.lock_percentage
-            }))
-        });
-    }
-}
-
-// Process standard post
-async function processStandardPost(post: ParsedPost, tx: any) {
-    // Create or update post in database
-    const result = await prisma.post.upsert({
-        where: { txid: post.txid },
-        create: {
-            id: post.txid,
-            txid: post.txid,
-            postId: post.metadata.postId,
-            content: post.content?.text || '',
-            author_address: post.author || '',
-            media_type: post.images?.[0]?.contentType || 'none',
-            raw_image_data: post.images?.[0]?.data || null,
-            created_at: new Date(post.timestamp),
-            metadata: post.metadata,
-            tags: post.tags || [],
-            is_vote: false,
-            is_locked: post.metadata.lock?.isLocked,
-            lock_duration: post.metadata.lock?.duration,
-            unlock_height: post.metadata.lock?.unlockHeight,
-            block_height: post.blockHeight,
-            image_format: post.images?.[0]?.contentType?.split('/')?.[1] || null,
-            description: post.content?.description || null
-        },
-        update: {
-            content: post.content?.text || '',
-            author_address: post.author || '',
-            media_type: post.images?.[0]?.contentType || 'none',
-            raw_image_data: post.images?.[0]?.data || null,
-            created_at: new Date(post.timestamp),
-            metadata: post.metadata,
-            tags: post.tags || [],
-            is_vote: false,
-            is_locked: post.metadata.lock?.isLocked,
-            lock_duration: post.metadata.lock?.duration,
-            unlock_height: post.metadata.lock?.unlockHeight,
-            block_height: post.blockHeight,
-            image_format: post.images?.[0]?.contentType?.split('/')?.[1] || null,
-            description: post.content?.description || null
-        }
-    });
-
-    logger.info('Post processed:', {
-        txid: result.txid,
-        postId: result.postId,
-        contentLength: result.content?.length || 0,
-        mediaType: result.media_type,
-        imageSize: result.raw_image_data?.length || 0,
-        metadata: result.metadata,
-        isVoteQuestion: result.is_vote,
-        isLocked: result.is_locked
-    });
-}
-
 // Handle incoming messages
 process.on('message', async (message: any) => {
-    if (!message || !message.type) {
-        logger.error('Invalid message received');
-        return;
-    }
-
     try {
+        if (!message || !message.type) {
+            logger.error('Invalid message received');
+            return;
+        }
+
         switch (message.type) {
             case 'transaction':
                 if (!processedTxids.has(message.data.txid)) {
@@ -478,16 +475,17 @@ process.on('message', async (message: any) => {
                     );
                 }
                 break;
-            case 'healthcheck':
-                await checkDatabaseConnection();
-                process?.send?.({ type: 'health', status: 'ok' });
+            case 'error':
+                logger.error('Error received:', message.error);
                 break;
             default:
                 logger.warn('Unknown message type:', message.type);
         }
-    } catch (error) {
-        logger.error('Message handling error:', error);
-        process?.send?.({ type: 'error', error: error.message });
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            process?.send?.({ type: 'error', error: error.message });
+            logger.error('Error processing message:', error);
+        }
     }
 });
 
