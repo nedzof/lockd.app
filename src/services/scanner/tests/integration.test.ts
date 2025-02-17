@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 
 describe('Integration Tests', () => {
     const config: ScannerConfig = {
-        jungleBusUrl: 'https://junglebus.gorillapool.io/v1/transaction/get/',
+        jungleBusUrl: 'https://junglebus.gorillapool.io/v1/transaction/get/429ee4f826afe16269cfdcadec56bc82e49983660ec063a8235c981167f5e660',
         startHeight: 0,
         batchSize: 10
     };
