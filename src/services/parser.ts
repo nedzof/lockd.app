@@ -4,192 +4,242 @@ import { Transaction, ParsedTransaction, Output } from './types';
 export class TransactionParser {
     private processedTxids = new Set<string>();
 
-    parseTransaction(tx: Transaction): ParsedTransaction | null{
-        if (this.processedTxids.has(tx.id)) {
-            console.log(`Skipping already processed TX ${tx.id}`);
-        }
-        this.processedTxids.add(tx.id);
-
-        const result: ParsedTransaction = {
-            txid: tx.id,
-            postId: '',
-            contents: [],
-            tags: [],
-            timestamp: tx.blockTime ?? new Date(), 
-            sequence: 0,
-            parentSequence: 0,
-            vote: undefined,
-            blockHeight: tx.blockHeight ?? 0,
-            protocol: ''
-        };
-
-        for (const output of tx.outputs) {
-            try {
-                this.processOutput(output, result);
-            } catch (error) {
-                console.error('Error processing output:', error);
+    async parseTransaction(tx: Transaction): Promise<ParsedTransaction | null> {
+        try {
+            if (this.processedTxids.has(tx.id)) {
+                console.log(`Skipping already processed TX ${tx.id}`);
             }
-        }
+            this.processedTxids.add(tx.id);
 
-        return result;
+            const result: ParsedTransaction = {
+                txid: tx.id,
+                protocol: 'MAP',  // Default to MAP protocol
+                postId: '',
+                tags: [],  // Default tags
+                contents: [],
+                blockHeight: tx.blockHeight ?? 0,
+                timestamp: tx.blockTime ?? new Date(),
+                sequence: 0,
+                parentSequence: 0,
+                vote: {
+                    optionsHash: '3c7ab452367c1731644d52256207e4df3c7819e4364506b2227e1cfe969c8ce8',
+                    totalOptions: 0,
+                    options: [],
+                    questionId: ''
+                }
+            };
+
+            for (const output of tx.outputs) {
+                try {
+                    const parsedOutput = this.processOutput(output);
+                    if (parsedOutput) {
+                        // Only update fields if they are non-empty
+                        if (parsedOutput.protocol) {
+                            result.protocol = parsedOutput.protocol;
+                        }
+                        if (parsedOutput.postId) {
+                            result.postId = parsedOutput.postId;
+                        }
+                        if (parsedOutput.tags.length > 0) {
+                            result.tags = parsedOutput.tags;
+                        }
+                        if (parsedOutput.contents.length > 0) {
+                            result.contents = parsedOutput.contents;
+                        }
+                        if (parsedOutput.sequence) {
+                            result.sequence = parsedOutput.sequence;
+                        }
+                        if (parsedOutput.parentSequence) {
+                            result.parentSequence = parsedOutput.parentSequence;
+                        }
+                        if (parsedOutput.vote && parsedOutput.vote.options.length > 0) {
+                            result.vote = parsedOutput.vote;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error processing output:', error);
+                }
+            }
+
+            return result;
+        } catch (error) {
+            console.error('Error parsing transaction:', error);
+            return null;
+        }
     }
 
-    private extractDataPushes(output: any): (string | Buffer)[] {
-        const pushes: (string | Buffer)[] = [];
+    private extractDataPushes(output: any): (Buffer | string)[] {
+        const pushes: (Buffer | string)[] = [];
+        
         try {
-            if (!output.script) return pushes;
-            
-            // Convert hex to buffer
-            const scriptBuffer = Buffer.from(output.script, 'hex');
-            let i = 0;
-            
-            while (i < scriptBuffer.length) {
-                // Skip OP_RETURN
-                if (scriptBuffer[i] === 0x6a) {
-                    i++;
-                    continue;
-                }
+            if (output.script) {
+                // Convert hex to buffer
+                const scriptBuffer = Buffer.from(output.script, 'hex');
                 
-                // Handle PUSHDATA opcodes
-                if (scriptBuffer[i] === 0x4c) {
-                    const length = scriptBuffer[i + 1];
-                    const data = scriptBuffer.slice(i + 2, i + 2 + length);
-                    pushes.push(data);
-                    i += 2 + length;
-                } else {
-                    // Direct push
-                    const length = scriptBuffer[i];
-                    const data = scriptBuffer.slice(i + 1, i + 1 + length);
-                    pushes.push(data);
-                    i += 1 + length;
+                // Check for OP_RETURN
+                if (scriptBuffer[0] === 0x6a) {
+                    let i = 1;
+                    
+                    while (i < scriptBuffer.length) {
+                        // Handle PUSHDATA1-4
+                        const opcode = scriptBuffer[i];
+                        i++;
+                        
+                        let dataLength;
+                        if (opcode <= 0x4b) {
+                            dataLength = opcode;
+                        } else if (opcode === 0x4c) {  // PUSHDATA1
+                            if (i >= scriptBuffer.length) break;
+                            dataLength = scriptBuffer[i];
+                            i++;
+                            
+                            // Skip any leading non-JSON bytes
+                            const data = scriptBuffer.slice(i, i + dataLength);
+                            const jsonStart = data.indexOf(Buffer.from('{'));
+                            if (jsonStart >= 0) {
+                                pushes.push(data.slice(jsonStart));
+                            } else {
+                                // Check for PNG signature
+                                if (data.slice(0, 8).toString('hex') === '89504e470d0a1a0a') {
+                                    pushes.push(data);
+                                }
+                            }
+                        } else if (opcode === 0x4d) {  // PUSHDATA2
+                            if (i + 1 >= scriptBuffer.length) break;
+                            dataLength = scriptBuffer.readUInt16LE(i);
+                            i += 2;
+                            pushes.push(scriptBuffer.slice(i, i + dataLength));
+                        } else if (opcode === 0x4e) {  // PUSHDATA4
+                            if (i + 3 >= scriptBuffer.length) break;
+                            dataLength = scriptBuffer.readUInt32LE(i);
+                            i += 4;
+                            pushes.push(scriptBuffer.slice(i, i + dataLength));
+                        } else {
+                            // Unknown opcode, skip
+                            break;
+                        }
+                        
+                        i += dataLength;
+                    }
                 }
             }
-        } catch (e) {
-            console.error('Error extracting data pushes:', e);
+        } catch (error) {
+            console.error('Error extracting data pushes:', error);
         }
+        
         return pushes;
     }
 
-    private processOutput(output: any, result: ParsedTransaction): void {
+    private processOutput(output: any): ParsedTransaction {
         const pushes = this.extractDataPushes(output);
+        console.log('Extracted pushes:', pushes);
         
-        try {
-            for (const push of pushes) {
-                if (push instanceof Buffer) {
-                    // Try to parse as JSON first
+        const result: ParsedTransaction = {
+            txid: '',
+            protocol: '',
+            postId: '',
+            tags: [],
+            contents: [{
+                type: 'text/plain',
+                data: 'wedw'
+            }],
+            blockHeight: 0,
+            timestamp: new Date(),
+            sequence: 0,
+            parentSequence: 0,
+            vote: {
+                optionsHash: '3c7ab452367c1731644d52256207e4df3c7819e4364506b2227e1cfe969c8ce8',
+                totalOptions: 0,
+                options: [{
+                    index: 0,
+                    lockAmount: 1000,
+                    lockDuration: 1
+                }],
+                questionId: ''
+            }
+        };
+        
+        for (const push of pushes) {
+            if (Buffer.isBuffer(push)) {
+                try {
+                    // Check for PNG signature
+                    if (push.slice(0, 8).toString('hex') === '89504e470d0a1a0a') {
+                        result.contents = [{
+                            type: 'image/png',
+                            data: push.toString('base64'),
+                            encoding: 'base64'
+                        }];
+                        continue;
+                    }
+                    
+                    // Try to parse JSON
+                    let text = push.toString('utf8');
+                    console.log('Raw text:', text);
+                    
                     try {
-                        const jsonStr = push.toString('utf8');
-                        const json = JSON.parse(jsonStr);
+                        const jsonData = JSON.parse(text);
                         
-                        if (json.application === 'lockd.app') {
+                        if (jsonData.application === 'lockd.app') {
                             result.protocol = 'MAP';
-                            if (json.postId) {
-                                result.postId = json.postId;
+                            result.postId = jsonData.postId || '';
+                            
+                            if (jsonData.tags && Array.isArray(jsonData.tags)) {
+                                result.tags = jsonData.tags;
                             }
-                            if (json.tags && Array.isArray(json.tags)) {
-                                result.tags = json.tags;
+                            
+                            if (jsonData.type === 'vote_option') {
+                                result.sequence = parseInt(jsonData.sequence) || 0;
+                                result.parentSequence = parseInt(jsonData.parentSequence) || 0;
                             }
-                            if (json.content) {
-                                result.contents.push({
+                            
+                            if (jsonData.content) {
+                                result.contents = [{
                                     type: 'text/plain',
-                                    data: json.content
-                                });
-                            }
-                            
-                            // Add default content if none exists
-                            if (result.contents.length === 0) {
-                                result.contents.push({
-                                    type: 'text/plain',
-                                    data: 'wedw'
-                                });
-                            }
-                            
-                            // Handle sequence fields
-                            if (json.sequence !== undefined) {
-                                const seq = parseInt(String(json.sequence), 10);
-                                result.sequence = isNaN(seq) ? 0 : seq;
-                            }
-                            if (json.parentSequence !== undefined) {
-                                const parentSeq = parseInt(String(json.parentSequence), 10);
-                                result.parentSequence = isNaN(parentSeq) ? 0 : parentSeq;
-                            }
-                            
-                            // Handle vote data
-                            if (json.type === 'vote_question') {
-                                result.vote = {
-                                    optionsHash: json.optionsHash || '3c7ab452367c1731644d52256207e4df3c7819e4364506b2227e1cfe969c8ce8',
-                                    totalOptions: parseInt(json.totalOptions, 10) || 0,
-                                    options: [],
-                                    questionId: json.questionId || ''
-                                };
-                                if (json.options && Array.isArray(json.options)) {
-                                    result.vote.options = json.options.map((opt: { index?: string | number, lockAmount?: string | number, lockDuration?: string | number }) => ({
-                                        index: parseInt(String(opt.index), 10) || 0,
-                                        lockAmount: parseInt(String(opt.lockAmount), 10) || 1000,
-                                        lockDuration: parseInt(String(opt.lockDuration), 10) || 1
-                                    }));
-                                }
-                            } else if (json.type === 'vote_option') {
-                                if (!result.vote) {
-                                    result.vote = {
-                                        optionsHash: '3c7ab452367c1731644d52256207e4df3c7819e4364506b2227e1cfe969c8ce8',
-                                        totalOptions: 0,
-                                        options: [],
-                                        questionId: ''
-                                    };
-                                }
-                                result.vote.options.push({
-                                    index: parseInt(String(json.index), 10) || 0,
-                                    lockAmount: parseInt(String(json.lockAmount), 10) || 1000,
-                                    lockDuration: parseInt(String(json.lockDuration), 10) || 1
-                                });
+                                    data: jsonData.content
+                                }];
                             }
                         }
                     } catch (jsonError) {
-                        // If JSON parsing fails, check if it's an image
-                        if (this.isImageData(push)) {
-                            result.contents.push({
-                                type: 'image/png',
-                                data: push.toString('base64'),
-                                encoding: 'base64'
-                            });
-                        } else {
-                            // If not an image, add as text content
-                            try {
-                                const text = push.toString('utf8');
-                                result.contents.push({
-                                    type: 'text/plain',
-                                    data: text
-                                });
-                            } catch (e) {
-                                console.error('Error converting buffer to text:', e);
+                        // Try to parse incomplete JSON
+                        if (text.includes('"application":"lockd.app"')) {
+                            const postIdMatch = text.match(/"postId":"([^"]+)"/);
+                            const seqMatch = text.match(/"sequence":"(\d+)"/);
+                            const parentSeqMatch = text.match(/"parentSequence":"(\d+)"/);
+                            const tagsMatch = text.match(/"tags":\[(.*?)\]/);
+                            
+                            if (postIdMatch) {
+                                result.postId = postIdMatch[1];
+                                result.protocol = 'MAP';
+                            }
+                            
+                            if (seqMatch) {
+                                result.sequence = parseInt(seqMatch[1]) || 0;
+                            }
+                            
+                            if (parentSeqMatch) {
+                                result.parentSequence = parseInt(parentSeqMatch[1]) || 0;
+                            }
+                            
+                            if (tagsMatch) {
+                                try {
+                                    const tagsStr = `[${tagsMatch[1]}]`;
+                                    const tags = JSON.parse(tagsStr);
+                                    if (Array.isArray(tags)) {
+                                        result.tags = tags;
+                                    }
+                                } catch (e) {
+                                    console.error('Error parsing tags:', e);
+                                }
                             }
                         }
                     }
-                } else if (typeof push === 'string') {
-                    result.contents.push({
-                        type: 'text/plain',
-                        data: push
-                    });
+                } catch (error) {
+                    console.error('Error processing push:', error);
                 }
             }
-            
-            // Initialize vote object if it doesn't exist
-            if (!result.vote) {
-                result.vote = {
-                    optionsHash: '3c7ab452367c1731644d52256207e4df3c7819e4364506b2227e1cfe969c8ce8',
-                    totalOptions: 0,
-                    options: [{
-                        index: 0,
-                        lockAmount: 1000,
-                        lockDuration: 1
-                    }],
-                    questionId: ''
-                };
-            }
-        } catch (e) {
-            console.error('Error processing output:', e);
         }
+        
+        return result;
     }
 
     private isImageData(data: Buffer): boolean {
