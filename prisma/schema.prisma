@@ -11,7 +11,7 @@ model Post {
   id             String   @id @default(uuid())
   postId         String   @unique
   type           String
-  protocol       String
+  protocol       String @default("MAP")
   content        Json
   timestamp      DateTime
   sequence       Int
@@ -32,7 +32,7 @@ model VoteQuestion {
   question     String
   totalOptions Int
   optionsHash  String
-  protocol     String
+  protocol     String @default("MAP")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

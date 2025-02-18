@@ -26,9 +26,7 @@ export class DBClient {
                     timestamp: parsedTx.timestamp,
                     sequence: parsedTx.sequence,
                     parentSequence: parsedTx.parentSequence,
-                    protocol: 'MAP',
-                    blockHeight: parsedTx.blockHeight || 0,
-                    blockTime: parsedTx.timestamp || new Date()
+                    protocol: 'MAP'
                 },
                 create: {
                     postId: parsedTx.postId,
@@ -37,9 +35,7 @@ export class DBClient {
                     timestamp: parsedTx.timestamp,
                     sequence: parsedTx.sequence,
                     parentSequence: parsedTx.parentSequence,
-                    protocol: 'MAP',
-                    blockHeight: parsedTx.blockHeight || 0,
-                    blockTime: parsedTx.timestamp || new Date()
+                    protocol: 'MAP'
                 }
             });
 
@@ -58,8 +54,7 @@ export class DBClient {
                         question: this.extractQuestion(parsedTx),
                         totalOptions: parsedTx.vote.totalOptions,
                         optionsHash: parsedTx.vote.optionsHash,
-                        protocol: 'MAP',
-                        post: { connect: { postId: post.postId } }
+                        protocol: 'MAP'
                     }
                 });
 
@@ -73,17 +68,11 @@ export class DBClient {
                                     index: option.index
                                 }
                             },
-                            update: {
-                                content: this.findOptionContent(option.index, parsedTx),
-                                lockLikes: {
-                                    create: this.createLockLike(option, parsedTx)
-                                }
-                            },
                             create: {
                                 postId: post.postId,
                                 index: option.index,
                                 content: this.findOptionContent(option.index, parsedTx),
-                                voteQuestion: { connect: { postId: post.postId } },
+                                voteQuestionId: post.postId,
                                 lockLikes: {
                                     create: this.createLockLike(option, parsedTx)
                                 }
