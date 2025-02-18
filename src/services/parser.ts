@@ -1,136 +1,144 @@
 // src/parser.ts
-import { TransactionOutput } from "@gorillapool/js-junglebus";
-import { CONFIG } from "./config";
-import { ParsedContent, ParsedTransaction, ParsedVote } from "./types";
+import { Transaction, ParsedTransactionForProcessing, Output } from './types';
 
 export class TransactionParser {
-  parseTransaction(tx: any): ParsedTransaction {
-    const result: ParsedTransaction = {
-      txid: tx.id,
-      blockHeight: tx.block_height,
-      timestamp: new Date(tx.block_time * 1000),
-      postId: "",
-      sequence: 0,
-      parentSequence: 0,
-      contents: [],
-      tags: []
-    };
+    private processedTxids = new Set<string>();
 
-    this.processOutputs(tx.outputs, result);
-    this.extractMetadata(tx.data, result);
-    
-    return result;
-  }
+    async parseTransaction(tx: Transaction): Promise<ParsedTransactionForProcessing | null> {
+        console.log(`Processing TX ${tx.id}`, {
+            inputs: tx.inputs.length,
+            outputs: tx.outputs.length
+        });
 
-  private processOutputs(outputs: TransactionOutput[], result: ParsedTransaction) {
-    for (const output of outputs) {
-      try {
-        const script = output.script;
-        if (!script) continue;
+        // Skip if already processed
+        if (this.processedTxids.has(tx.id)) {
+            console.log(`Skipping already processed TX ${tx.id}`);
+            return null;
+        }
+        this.processedTxids.add(tx.id);
 
-        const scriptBuffer = Buffer.from(script, 'hex');
-        if (scriptBuffer[0] !== 0x6a) continue; // OP_RETURN
+        try {
+            for (const output of tx.outputs) {
+                const parsedOutput = this.parseOutput(output);
+                if (parsedOutput) {
+                    return {
+                        id: tx.id,
+                        ...parsedOutput
+                    };
+                }
+            }
+        } catch (error) {
+            console.error(`Error parsing transaction ${tx.id}:`, error);
+        }
 
-        const data = this.parseScriptData(scriptBuffer);
-        this.processDataPushes(data, result);
-      } catch (error) {
-        console.error('Error processing output:', error);
-      }
-    }
-  }
-
-  private parseScriptData(buffer: Buffer): string[] {
-    const pushes: string[] = [];
-    let offset = 1; // Skip OP_RETURN
-    
-    while (offset < buffer.length) {
-      const opcode = buffer[offset];
-      let length = 0;
-      
-      if (opcode <= 0x4b) {
-        length = opcode;
-        offset += 1;
-      } else if (opcode === 0x4c) {
-        length = buffer[offset + 1];
-        offset += 2;
-      } else {
-        break; // Skip unsupported opcodes
-      }
-
-      if (offset + length > buffer.length) break;
-      
-      const data = buffer.subarray(offset, offset + length);
-      pushes.push(data.toString('utf8'));
-      offset += length;
+        return null;
     }
 
-    return pushes;
-  }
+    private parseOutput(output: Output): Partial<ParsedTransactionForProcessing> | null {
+        const script = Buffer.from(output.script, 'hex');
+        
+        // Check for OP_RETURN
+        if (script[0] !== 0x6a) return null;
 
-  private processDataPushes(pushes: string[], result: ParsedTransaction) {
-    for (const item of pushes) {
-      if (item.startsWith('app=')) {
-        result.postId = item.split('=')[1];
-      } else if (item.startsWith('type=')) {
-        this.handleType(item, result);
-      } else if (item.startsWith('content=')) {
-        this.addContent(item, CONFIG.CONTENT_TYPES.PLAIN, result);
-      } else if (item.startsWith('filename=')) {
-        this.addFileMetadata(item, result);
-      } else if (item.startsWith('lockAmount=')) {
-        this.processLockParameters(item, result);
-      } else if (item.startsWith('optionsHash=')) {
-        this.processVoteParameters(item, result);
-      } else if (item.startsWith('tags=')) {
-        this.processTags(item, result);
-      }
+        const pushes = this.processDataPushes(script);
+        if (!pushes.length) return null;
+
+        // Early exit for non-MAP transactions
+        if (!pushes.some(p => p.startsWith('app='))) return null;
+
+        const result: Partial<ParsedTransactionForProcessing> = {
+            protocol: 'MAP',
+            type: 'post'
+        };
+
+        for (const push of pushes) {
+            if (push.startsWith('app=')) {
+                result.postId = push.split('=')[1];
+            } else if (push.startsWith('type=')) {
+                result.type = push.split('=')[1];
+            } else if (push.startsWith('content=')) {
+                result.content = push.split('=')[1];
+            } else if (push.startsWith('sequence=')) {
+                result.sequence = parseInt(push.split('=')[1], 10);
+            } else if (push.startsWith('parentSequence=')) {
+                result.parentSequence = parseInt(push.split('=')[1], 10);
+            } else if (push.startsWith('tags=')) {
+                try {
+                    result.tags = JSON.parse(push.split('=')[1]);
+                } catch (e) {
+                    console.error('Error parsing tags:', e);
+                }
+            } else if (push.startsWith('optionsHash=')) {
+                if (!result.vote) result.vote = {};
+                result.vote.optionsHash = push.split('=')[1];
+            } else if (push.startsWith('lockAmount=')) {
+                if (!result.lock) result.lock = { amount: 0, duration: 0 };
+                result.lock.amount = parseInt(push.split('=')[1], 10);
+            } else if (push.startsWith('lockDuration=')) {
+                if (!result.lock) result.lock = { amount: 0, duration: 0 };
+                result.lock.duration = parseInt(push.split('=')[1], 10);
+            }
+        }
+
+        this.validateTransaction(result);
+        return result;
     }
-  }
 
-  private handleType(item: string, result: ParsedTransaction) {
-    const type = item.split('=')[1];
-    if (type === 'vote_question') {
-      result.sequence = 0;
-    } else if (type === 'vote_option') {
-      result.parentSequence = result.sequence;
+    private processDataPushes(script: Buffer): string[] {
+        const pushes: string[] = [];
+        let offset = 1; // Skip OP_RETURN
+
+        while (offset < script.length) {
+            const opcode = script[offset++];
+            let length: number;
+
+            // Handle different PUSHDATA opcodes
+            if (opcode <= 0x4b) {
+                length = opcode;
+            } else if (opcode === 0x4c) { // OP_PUSHDATA1
+                length = script[offset++];
+            } else if (opcode === 0x4d) { // OP_PUSHDATA2
+                length = script.readUInt16LE(offset);
+                offset += 2;
+            } else if (opcode === 0x4e) { // OP_PUSHDATA4
+                length = script.readUInt32LE(offset);
+                offset += 4;
+            } else {
+                break;
+            }
+
+            const data = script.subarray(offset, offset + length);
+            
+            // Handle binary data (images) differently
+            if (this.isImageData(data)) {
+                pushes.push(`content_type=image/png`);
+                pushes.push(`data=${data.toString('base64')}`);
+            } else {
+                try {
+                    pushes.push(data.toString('utf8'));
+                } catch (e) {
+                    console.error('Error decoding push data:', e);
+                }
+            }
+            
+            offset += length;
+        }
+
+        return pushes;
     }
-  }
 
-  private addContent(item: string, contentType: string, result: ParsedTransaction) {
-    const content: ParsedContent = {
-      type: contentType,
-      data: decodeURIComponent(item.split('=')[1])
-    };
-    
-    if (contentType === CONFIG.CONTENT_TYPES.IMAGE) {
-      content.encoding = 'base64';
+    private isImageData(data: Buffer): boolean {
+        // Simple PNG signature check
+        const pngSignature = Buffer.from([0x89, 0x50, 0x4E, 0x47]);
+        return data.length >= 4 && data.subarray(0, 4).equals(pngSignature);
     }
-    
-    result.contents.push(content);
-  }
 
-  private addFileMetadata(item: string, result: ParsedTransaction) {
-    const filename = item.split('=')[1];
-    const content = result.contents[result.contents.length - 1];
-    if (content) {
-      content.filename = filename;
+    private validateTransaction(tx: Partial<ParsedTransactionForProcessing>) {
+        if (!tx.postId) {
+            throw new Error("Invalid transaction: Missing postId");
+        }
+        if (tx.vote && !tx.vote.optionsHash) {
+            throw new Error("Invalid vote: Missing optionsHash");
+        }
     }
-  }
-
-  private processLockParameters(item: string, result: ParsedTransaction) {
-    const amount = parseInt(item.split('=')[1], 10);
-    if (!result.vote) result.vote = { optionsHash: '', totalOptions: 0, questionId: '', options: [] };
-    result.vote.options[result.vote.options.length - 1].lockAmount = amount;
-  }
-
-  private processVoteParameters(item: string, result: ParsedTransaction) {
-    const optionsHash = item.split('=')[1];
-    if (!result.vote) result.vote = { optionsHash: '', totalOptions: 0, questionId: '', options: [] };
-    result.vote.optionsHash = optionsHash;
-  }
-
-  private processTags(item: string, result: ParsedTransaction) {
-    const tags = item.split('=')[1].replace(/[\[\]"]/g, '');
-    result.tags = tags.split(',').map(t => t.trim());
-  }
 }
