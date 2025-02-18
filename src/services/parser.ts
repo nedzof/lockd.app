@@ -4,10 +4,9 @@ import { Transaction, ParsedTransaction, Output } from './types';
 export class TransactionParser {
     private processedTxids = new Set<string>();
 
-    parseTransaction(tx: Transaction): ParsedTransaction {
+    parseTransaction(tx: Transaction): ParsedTransaction | null{
         if (this.processedTxids.has(tx.id)) {
             console.log(`Skipping already processed TX ${tx.id}`);
-            return null;
         }
         this.processedTxids.add(tx.id);
 
@@ -16,10 +15,11 @@ export class TransactionParser {
             postId: '',
             contents: [],
             tags: [],
-            timestamp: tx.blockTime,
+            timestamp: tx.blockTime ?? new Date(), 
             sequence: 0,
             parentSequence: 0,
-            vote: undefined
+            vote: undefined,
+            blockHeight: tx.blockHeight ?? 0 
         };
 
         for (const output of tx.outputs) {

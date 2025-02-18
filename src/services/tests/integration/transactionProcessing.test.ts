@@ -31,11 +31,12 @@ describe('Transaction Processing Integration Tests', () => {
             blockTime: new Date('2025-02-13T14:42:27.025Z')
         };
 
+
         const parsedTx = await parser.parseTransaction(tx);
-        expect(parsedTx).toBeTruthy();
         if (!parsedTx) {
             throw new Error('Failed to parse transaction');
-        }
+        };
+        expect(parsedTx).toBeTruthy();
         expect(parsedTx).toMatchObject({
             txid: tx.id,
             postId: 'm73g8bip-ceeh3n0x2',
