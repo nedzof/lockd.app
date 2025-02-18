@@ -47,14 +47,14 @@ export class DBClient {
                 const question = await tx.voteQuestion.upsert({
                     where: { postId: post.postId },
                     update: {
-                        question: this.extractQuestion(parsedTx),
+                        question: parsedTx.vote?.questionId || 'Unknown Question',
                         totalOptions: parsedTx.vote.totalOptions,
                         optionsHash: parsedTx.vote.optionsHash,
                         protocol: 'MAP'
                     },
                     create: {
                         postId: post.postId,
-                        question: this.extractQuestion(parsedTx),
+                        question: parsedTx.vote?.questionId || 'Unknown Question',
                         totalOptions: parsedTx.vote.totalOptions,
                         optionsHash: parsedTx.vote.optionsHash,
                         protocol: 'MAP'

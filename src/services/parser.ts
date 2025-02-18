@@ -4,7 +4,7 @@ import { Transaction, ParsedTransaction, Output } from './types';
 export class TransactionParser {
     private processedTxids = new Set<string>();
 
-    parseTransaction(tx: Transaction): ParsedTransaction | null {
+    parseTransaction(tx: Transaction): ParsedTransaction {
         if (this.processedTxids.has(tx.id)) {
             console.log(`Skipping already processed TX ${tx.id}`);
             return null;
@@ -13,13 +13,13 @@ export class TransactionParser {
 
         const result: ParsedTransaction = {
             txid: tx.id,
-            blockHeight: tx.blockHeight ?? 0,
-            timestamp: tx.blockTime ?? new Date(),
-            postId: "",
+            postId: '',
+            contents: [],
+            tags: [],
+            timestamp: tx.blockTime,
             sequence: 0,
             parentSequence: 0,
-            contents: [],
-            tags: []
+            vote: undefined
         };
 
         for (const output of tx.outputs) {
@@ -88,7 +88,6 @@ export class TransactionParser {
     }
 
     private processDataPushes(pushes: string[], result: ParsedTransaction): void {
-        // Validate protocol
         if (!pushes.some(p => p.includes('lockd.app'))) {
             throw new Error('Invalid protocol version');
         }
@@ -101,8 +100,16 @@ export class TransactionParser {
                         result.postId = json.postId;
                         result.tags = json.tags || [];
                         if (json.optionsHash) {
-                            result.vote = result.vote || { optionsHash: '', totalOptions: 0, options: [] };
-                            result.vote.optionsHash = json.optionsHash;
+                            if (result.vote) {
+                                result.vote.optionsHash = json.optionsHash;
+                            } else {
+                                result.vote = {
+                                    optionsHash: json.optionsHash,
+                                    totalOptions: 0,
+                                    options: [],
+                                    questionId: json.questionId || ''
+                                };
+                            }
                         }
                     }
                 } catch (e) {
@@ -111,7 +118,17 @@ export class TransactionParser {
                 continue;
             }
             
-            if (item.startsWith('app=')) {
+            if (item.startsWith('option=')) {
+                result.vote = result.vote || {
+                    optionsHash: '',
+                    totalOptions: 0,
+                    options: [],
+                    questionId: ''
+                };
+                if (result.vote) {
+                    result.vote.options.push(this.parseOption(item));
+                }
+            } else if (item.startsWith('app=')) {
                 result.postId = item.split('=')[1];
             } else if (item.startsWith('text=')) {
                 result.contents.push({
@@ -120,15 +137,6 @@ export class TransactionParser {
                 });
             } else if (item.startsWith('tag=')) {
                 result.tags.push(item.split('=')[1]);
-            } else if (item.startsWith('option=')) {
-                if (!result.vote) {
-                    result.vote = {
-                        optionsHash: '',
-                        totalOptions: 0,
-                        options: []
-                    };
-                }
-                result.vote.options.push(this.parseOption(item));
             }
         }
     }

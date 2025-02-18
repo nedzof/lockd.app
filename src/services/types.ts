@@ -9,7 +9,7 @@ export interface ParsedContent {
 }
 
 export interface ParsedVote {
-  questionId: string;
+  questionId?: string;
   optionsHash: string;
   totalOptions: number;
   options: {
