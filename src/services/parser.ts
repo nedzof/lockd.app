@@ -76,8 +76,12 @@ export class TransactionParser {
                 blockHeight: tx.blockHeight,
                 blockTime: tx.blockTime,
                 sequence,
-                parentSequence,
-                vote: {
+                parentSequence
+            };
+
+            // Add default vote object for backward compatibility
+            if (metadataJson.type !== 'vote_question' && metadataJson.type !== 'vote_option') {
+                parsedTx.vote = {
                     optionsHash: '3c7ab452367c1731644d52256207e4df3c7819e4364506b2227e1cfe969c8ce8',
                     totalOptions: 1,
                     options: [{
@@ -85,8 +89,8 @@ export class TransactionParser {
                         lockAmount: metadataJson.lockAmount || 1000,
                         lockDuration: metadataJson.lockDuration || 1
                     }]
-                }
-            };
+                };
+            }
 
             // Handle vote question
             if (metadataJson.type === 'vote_question' && metadataJson.question) {
@@ -95,14 +99,33 @@ export class TransactionParser {
                     totalOptions: metadataJson.totalOptions || 0,
                     optionsHash: metadataJson.optionsHash || ''
                 };
+                
+                // Add vote object for questions
+                parsedTx.vote = {
+                    optionsHash: metadataJson.optionsHash || '',
+                    totalOptions: metadataJson.totalOptions || 0,
+                    options: []
+                };
             }
 
             // Handle vote option
             if (metadataJson.type === 'vote_option') {
+                // Add vote option metadata
                 parsedTx.voteOption = {
                     questionId: metadataJson.questionId || parsedTx.postId,
                     index: sequence,
                     content: metadataJson.content || ''
+                };
+                
+                // Add vote object for options
+                parsedTx.vote = {
+                    optionsHash: metadataJson.optionsHash || '',
+                    totalOptions: metadataJson.totalOptions || 1,
+                    options: [{
+                        index: sequence,
+                        lockAmount: metadataJson.lockAmount || 1000,
+                        lockDuration: metadataJson.lockDuration || 1
+                    }]
                 };
             }
 
