@@ -11,7 +11,7 @@ model Post {
   id             String   @id @default(uuid())
   postId         String   @unique
   type           String
-  content        String
+  content        Json
   timestamp      DateTime
   sequence       Int
   parentSequence Int
@@ -20,6 +20,7 @@ model Post {
 
   voteQuestion VoteQuestion?
   voteOptions  VoteOption[] @relation("PostVoteOptions")
+  lockLikes    LockLike[]   @relation("PostLockLikes")
 
   @@index([postId])
 }
@@ -45,14 +46,31 @@ model VoteOption {
   postId       String
   index        Int
   content      String
-  lockAmount   Int
-  lockDuration Int
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   post         Post         @relation("PostVoteOptions", fields: [postId], references: [postId], map: "VoteOption_post_fkey")
   voteQuestion VoteQuestion @relation("VoteQuestionOptions", fields: [postId], references: [postId], map: "VoteOption_question_fkey")
+  lockLikes    LockLike[]   @relation("VoteOptionLockLikes")
 
   @@unique([postId, index])
   @@index([postId])
+}
+
+model LockLike {
+  id             String      @id @default(cuid())
+  txid           String      @unique
+  amount         Int
+  lockPeriod     Int
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  // Optional relations to either Post or VoteOption
+  postId         String?
+  voteOptionId   String?
+  post           Post?       @relation("PostLockLikes", fields: [postId], references: [id])
+  voteOption     VoteOption? @relation("VoteOptionLockLikes", fields: [voteOptionId], references: [id])
+
+  @@index([createdAt])
+  @@index([postId])
+  @@index([voteOptionId])
 }
