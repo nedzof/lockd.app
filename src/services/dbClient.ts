@@ -3,18 +3,21 @@ import { ParsedTransaction } from './types';
 
 export class DBClient {
     private prisma: PrismaClient;
-    private processedTxids = new Set<string>();
 
     constructor() {
         this.prisma = new PrismaClient();
     }
 
     async saveTransaction(parsedTx: ParsedTransaction) {
-        if (this.processedTxids.has(parsedTx.txid)) {
+        // Check if transaction was already processed
+        const processed = await this.prisma.processedTransaction.findUnique({
+            where: { txid: parsedTx.txid }
+        });
+
+        if (processed) {
             console.log(`Skipping already processed TX ${parsedTx.txid}`);
             return;
         }
-        this.processedTxids.add(parsedTx.txid);
 
         await this.prisma.$transaction(async (tx) => {
             // Save main post
@@ -41,7 +44,7 @@ export class DBClient {
 
             // Process vote data if exists
             if (parsedTx.vote) {
-                await tx.voteQuestion.upsert({
+                const question = await tx.voteQuestion.upsert({
                     where: { postId: post.postId },
                     update: {
                         question: this.extractQuestion(parsedTx),
@@ -63,19 +66,23 @@ export class DBClient {
                     for (const option of parsedTx.vote.options) {
                         await tx.voteOption.upsert({
                             where: {
-                                postId_index: {
-                                    postId: post.postId,
+                                voteQuestionId_index: {
+                                    voteQuestionId: question.id,
                                     index: option.index
                                 }
                             },
                             create: {
-                                postId: post.postId,
+                                voteQuestionId: question.id,
                                 index: option.index,
                                 content: this.findOptionContent(option.index, parsedTx),
-                                voteQuestionId: post.postId,
+                                protocol: 'MAP',
                                 lockLikes: {
                                     create: this.createLockLike(option, parsedTx)
                                 }
+                            },
+                            update: {
+                                content: this.findOptionContent(option.index, parsedTx),
+                                protocol: 'MAP'
                             }
                         });
                     }
@@ -89,10 +96,19 @@ export class DBClient {
                         txid: `${parsedTx.txid}-${Date.now()}`,
                         amount: this.getLockAmount(parsedTx),
                         lockPeriod: this.getLockDuration(parsedTx),
-                        post: { connect: { postId: post.postId } }
+                        isProcessed: true,
+                        post: { connect: { id: post.id } }
                     }
                 });
             }
+
+            // Mark transaction as processed
+            await tx.processedTransaction.create({
+                data: {
+                    txid: parsedTx.txid,
+                    timestamp: parsedTx.timestamp
+                }
+            });
         });
     }
 

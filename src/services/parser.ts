@@ -88,6 +88,11 @@ export class TransactionParser {
     }
 
     private processDataPushes(pushes: string[], result: ParsedTransaction): void {
+        // Validate protocol
+        if (!pushes.some(p => p.startsWith('app=m73g8bip'))) {
+          throw new Error('Invalid protocol version');
+        }
+        
         for (const item of pushes) {
             if (item.startsWith('app=')) {
                 result.postId = item.split('=')[1];
@@ -145,11 +150,43 @@ export class TransactionParser {
     }
 
     private isImageData(data: Buffer): boolean {
-        // Check for PNG signature
-        if (data.length < 8) return false;
-        return data[0] === 0x89 && 
-               data[1] === 0x50 && 
-               data[2] === 0x4E && 
-               data[3] === 0x47;
+        const signatures = {
+          'png': [0x89, 0x50, 0x4E, 0x47],
+          'jpeg': [0xFF, 0xD8, 0xFF]
+        };
+        return Object.entries(signatures).some(([type, sig]) => 
+          data.subarray(0, sig.length).equals(Buffer.from(sig))
+        );
+    }
+
+    private transformContent(parsedTx: ParsedTransaction): any {
+        try {
+          return {
+            text: parsedTx.contents.find(c => c.type === 'text/plain')?.data,
+            media: parsedTx.contents
+              .filter(c => c.type.startsWith('image/'))
+              .map(img => ({
+                type: img.type,
+                data: img.data,
+                encoding: img.encoding,
+                filename: img.filename
+              })),
+            metadata: parsedTx.contents
+              .filter(c => c.type === 'application/json')
+              .map(json => {
+                try {
+                  return JSON.parse(json.data as string);
+                } catch (e) {
+                  console.error('Invalid JSON content:', e);
+                  return null;
+                }
+              })
+              .filter(Boolean),
+            tags: parsedTx.tags
+          };
+        } catch (e) {
+          console.error('Error transforming content:', e);
+          throw new Error('Failed to transform content');
+        }
     }
 }

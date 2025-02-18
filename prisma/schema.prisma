@@ -20,7 +20,7 @@ model Post {
   updatedAt      DateTime @updatedAt
 
   voteQuestion VoteQuestion?
-  voteOptions  VoteOption[] @relation("PostVoteOptions")
+  voteOptions  VoteOption[] 
   lockLikes    LockLike[]   @relation("PostLockLikes")
 
   @@index([postId])
@@ -37,24 +37,27 @@ model VoteQuestion {
   updatedAt    DateTime @updatedAt
 
   post        Post         @relation(fields: [postId], references: [postId])
-  voteOptions VoteOption[] @relation("VoteQuestionOptions")
+  voteOptions VoteOption[] 
 
   @@index([postId])
 }
 
 model VoteOption {
-  id           String   @id @default(uuid())
-  postId       String
-  index        Int
-  content      String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String   @id @default(uuid())
+  postId          String
+  voteQuestionId  String
+  index           Int
+  content         String
+  protocol        String   @default("MAP")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  post         Post         @relation("PostVoteOptions", fields: [postId], references: [postId], map: "VoteOption_post_fkey")
-  voteQuestion VoteQuestion @relation("VoteQuestionOptions", fields: [postId], references: [postId], map: "VoteOption_question_fkey")
+  post         Post         @relation(fields: [postId], references: [postId])
+  voteQuestion VoteQuestion @relation(fields: [voteQuestionId], references: [id])
   lockLikes    LockLike[]   @relation("VoteOptionLockLikes")
 
-  @@unique([postId, index])
+  @@unique([voteQuestionId, index])
+  @@index([voteQuestionId])
   @@index([postId])
 }
 
@@ -63,9 +66,9 @@ model LockLike {
   txid           String      @unique
   amount         Int
   lockPeriod     Int
+  isProcessed    Boolean     @default(false)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
-  // Optional relations to either Post or VoteOption
   postId         String?
   voteOptionId   String?
   post           Post?       @relation("PostLockLikes", fields: [postId], references: [id])
@@ -74,4 +77,14 @@ model LockLike {
   @@index([createdAt])
   @@index([postId])
   @@index([voteOptionId])
+  @@index([isProcessed])
+}
+
+model ProcessedTransaction {
+  id        String   @id @default(uuid())
+  txid      String   @unique
+  timestamp DateTime @default(now())
+
+  @@index([txid])
+  @@index([timestamp])
 }
