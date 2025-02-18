@@ -89,43 +89,52 @@ export class TransactionParser {
 
     private processDataPushes(pushes: string[], result: ParsedTransaction): void {
         // Validate protocol
-        if (!pushes.some(p => p.startsWith('app=m73g8bip'))) {
-          throw new Error('Invalid protocol version');
+        if (!pushes.some(p => p.includes('lockd.app'))) {
+            throw new Error('Invalid protocol version');
         }
         
         for (const item of pushes) {
+            if (item.startsWith('{')) {
+                try {
+                    const json = JSON.parse(item);
+                    if (json.application === 'lockd.app') {
+                        result.postId = json.postId;
+                        result.tags = json.tags || [];
+                        if (json.optionsHash) {
+                            result.vote = result.vote || { optionsHash: '', totalOptions: 0, options: [] };
+                            result.vote.optionsHash = json.optionsHash;
+                        }
+                    }
+                } catch (e) {
+                    console.error('JSON parse error:', e);
+                }
+                continue;
+            }
+            
             if (item.startsWith('app=')) {
                 result.postId = item.split('=')[1];
-            } else if (item.startsWith('type=')) {
-                this.handleType(item, result);
-            } else if (item.startsWith('content=')) {
-                this.addContent(item, result);
-            } else if (item.startsWith('sequence=')) {
-                result.sequence = parseInt(item.split('=')[1], 10);
-            } else if (item.startsWith('parentSequence=')) {
-                result.parentSequence = parseInt(item.split('=')[1], 10);
-            } else if (item.startsWith('lockDuration=')) {
-                const duration = parseInt(item.split('=')[1], 10);
-                if (result.vote?.options?.length) {
-                    result.vote.options[result.vote.options.length - 1].lockDuration = duration;
-                }
-            } else if (item.startsWith('lockAmount=')) {
-                const amount = parseInt(item.split('=')[1], 10);
-                if (result.vote?.options?.length) {
-                    result.vote.options[result.vote.options.length - 1].lockAmount = amount;
-                }
-            } else if (item.startsWith('optionsHash=')) {
+            } else if (item.startsWith('text=')) {
+                result.contents.push({
+                    type: 'text/plain',
+                    data: item.split('=')[1]
+                });
+            } else if (item.startsWith('tag=')) {
+                result.tags.push(item.split('=')[1]);
+            } else if (item.startsWith('option=')) {
                 if (!result.vote) {
-                    result.vote = { optionsHash: '', totalOptions: 0, questionId: '', options: [] };
+                    result.vote = {
+                        optionsHash: '',
+                        totalOptions: 0,
+                        options: []
+                    };
                 }
-                result.vote.optionsHash = item.split('=')[1];
-            } else if (item.startsWith('content-type=')) {
-                const contentType = item.split('=')[1];
-                if (result.contents.length > 0) {
-                    result.contents[result.contents.length - 1].type = contentType;
-                }
+                result.vote.options.push(this.parseOption(item));
             }
         }
+    }
+
+    private parseOption(item: string): any {
+        // TO DO: implement option parsing logic
     }
 
     private handleType(item: string, result: ParsedTransaction): void {

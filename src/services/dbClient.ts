@@ -72,6 +72,7 @@ export class DBClient {
                                 }
                             },
                             create: {
+                                postId: post.postId,  
                                 voteQuestionId: question.id,
                                 index: option.index,
                                 content: this.findOptionContent(option.index, parsedTx),
