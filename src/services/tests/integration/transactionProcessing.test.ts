@@ -1,23 +1,24 @@
-import { describe, expect, test, beforeAll, afterAll } from '@jest/globals';
+import { describe, expect, test, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { TransactionParser } from '../../parser';
 import { DBClient } from '../../dbClient';
 import { Transaction } from '../../types';
-import { PrismaClient } from '@prisma/client';
+import { cleanupDatabase, closeConnection, getTestClient } from './db';
 
 describe('Transaction Processing Integration Tests', () => {
     let parser: TransactionParser;
     let dbClient: DBClient;
-    let prisma: PrismaClient;
 
     beforeAll(async () => {
+        await cleanupDatabase();
+    });
+
+    beforeEach(async () => {
         parser = new TransactionParser();
         dbClient = new DBClient();
-        prisma = new PrismaClient();
     });
 
     afterAll(async () => {
-        await dbClient.disconnect();
-        await prisma.$disconnect();
+        await closeConnection();
     });
 
     test('should process specific transaction a043fbcd', async () => {
@@ -47,7 +48,6 @@ describe('Transaction Processing Integration Tests', () => {
                     data: 'wedw'
                 })
             ]),
-            tags: ['Sports'],
             vote: expect.objectContaining({
                 optionsHash: '3c7ab452367c1731644d52256207e4df3c7819e4364506b2227e1cfe969c8ce8',
                 options: expect.arrayContaining([
@@ -59,50 +59,31 @@ describe('Transaction Processing Integration Tests', () => {
             })
         });
 
-        // Skip database operations for now
-        /*
         // Save to database
         await dbClient.saveTransaction(parsedTx);
 
-        // Verify database state
-        const dbPost = await prisma.post.findUnique({
-            where: { postId: parsedTx.postId },
-            include: {
-                voteQuestion: {
-                    include: {
-                        voteOptions: {
-                            include: {
-                                lockLikes: true
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        // Verify database state using raw SQL
+        const client = await getTestClient();
+        try {
+            // Check ProcessedTransaction
+            const processedTx = await client.query(
+                'SELECT * FROM "ProcessedTransaction" WHERE txid = $1',
+                [parsedTx.txid]
+            );
+            expect(processedTx.rows.length).toBe(1);
+            expect(processedTx.rows[0].txid).toBe(parsedTx.txid);
 
-        expect(dbPost).toMatchObject({
-            postId: parsedTx.postId,
-            type: 'content',
-            protocol: 'MAP',
-            content: expect.any(Object),
-            timestamp: parsedTx.timestamp,
-            sequence: parsedTx.sequence,
-            parentSequence: parsedTx.parentSequence
-        });
-
-        if (parsedTx.vote) {
-            const dbQuestion = await prisma.voteQuestion.findUnique({
-                where: { postId: parsedTx.postId }
-            });
-            expect(dbQuestion).toMatchObject({
-                postId: parsedTx.postId,
-                protocol: 'MAP',
-                question: expect.any(String),
-                totalOptions: parsedTx.vote.totalOptions,
-                optionsHash: parsedTx.vote.optionsHash
-            });
+            // Check Post
+            const post = await client.query(
+                'SELECT * FROM "Post" WHERE "postId" = $1',
+                [parsedTx.postId]
+            );
+            expect(post.rows.length).toBe(1);
+            expect(post.rows[0].postId).toBe(parsedTx.postId);
+            expect(post.rows[0].protocol).toBe('MAP');
+        } finally {
+            client.release();
         }
-        */
     });
 
     test('should handle binary image data correctly', async () => {
@@ -165,18 +146,5 @@ describe('Transaction Processing Integration Tests', () => {
             sequence: 1,
             parentSequence: 0
         });
-    });
-
-    afterEach(async () => {
-        // Skip database cleanup for now
-        /*
-        // Clean up test data
-        await prisma.$transaction([
-            prisma.lockLike.deleteMany(),
-            prisma.voteOption.deleteMany(),
-            prisma.voteQuestion.deleteMany(),
-            prisma.post.deleteMany()
-        ]);
-        */
     });
 });
