@@ -33,102 +33,63 @@ export class TransactionParser {
         return result;
     }
 
-    private processOutput(output: Output, result: ParsedTransaction): void {
-        const script = output.script;
-        if (!script) return;
+    private processOutput(output: any, result: ParsedTransaction): void {
+        const pushes = this.extractDataPushes(output);
+        if (pushes.length === 0) return;
 
-        const scriptBuffer = Buffer.from(script, 'hex');
-        if (scriptBuffer[0] !== 0x6a) return; // OP_RETURN
-
-        const pushes = this.parseScriptData(scriptBuffer);
-        this.processDataPushes(pushes, result);
-    }
-
-    private parseScriptData(buffer: Buffer): string[] {
-        const pushes: string[] = [];
-        let offset = 1; // Skip OP_RETURN
-
-        while (offset < buffer.length) {
-            const opcode = buffer[offset];
-            let length = 0;
-            offset++;
-
-            if (opcode <= 0x4b) {
-                length = opcode;
-            } else if (opcode === 0x4c) {
-                length = buffer[offset];
-                offset++;
-            } else if (opcode === 0x4d) {
-                length = buffer.readUInt16LE(offset);
-                offset += 2;
-            } else {
-                break;
-            }
-
-            if (offset + length > buffer.length) break;
-
-            const data = buffer.subarray(offset, offset + length);
+        // Try to parse the first push as JSON
+        try {
+            const firstPush = pushes[0];
+            const json = JSON.parse(firstPush);
             
-            // Handle binary data differently
-            if (this.isImageData(data)) {
-                pushes.push(`content=${data.toString('base64')}`);
-                pushes.push(`content-type=image/png`);
-            } else {
-                try {
-                    pushes.push(data.toString('utf8'));
-                } catch (e) {
-                    console.error('Error decoding push data:', e);
+            if (json.application === 'lockd.app') {
+                result.postId = json.postId;
+                result.tags = json.tags || [];
+                result.sequence = json.sequence || 0;
+                result.parentSequence = json.parentSequence || 0;
+                
+                if (json.type === 'vote_question') {
+                    result.vote = {
+                        optionsHash: json.optionsHash || '',
+                        totalOptions: json.totalOptions || 0,
+                        options: [],
+                        questionId: json.questionId || ''
+                    };
+                }
+                
+                // Handle content
+                if (json.content) {
+                    result.contents.push({
+                        type: 'text/plain',
+                        data: json.content
+                    });
                 }
             }
-
-            offset += length;
+        } catch (e) {
+            // If JSON parsing fails, try processing as regular pushes
+            this.processDataPushes(pushes, result);
         }
-
-        return pushes;
     }
 
     private processDataPushes(pushes: string[], result: ParsedTransaction): void {
-        if (!pushes.some(p => p.includes('lockd.app'))) {
+        // Check for protocol in either JSON or raw format
+        const hasProtocol = pushes.some(p => {
+            try {
+                const json = JSON.parse(p);
+                return json.application === 'lockd.app';
+            } catch {
+                return p.includes('lockd.app');
+            }
+        });
+
+        if (!hasProtocol) {
             throw new Error('Invalid protocol version');
         }
-        
+
         for (const item of pushes) {
-            if (item.startsWith('{')) {
-                try {
-                    const json = JSON.parse(item);
-                    if (json.application === 'lockd.app') {
-                        result.postId = json.postId;
-                        result.tags = json.tags || [];
-                        if (json.optionsHash) {
-                            if (result.vote) {
-                                result.vote.optionsHash = json.optionsHash;
-                            } else {
-                                result.vote = {
-                                    optionsHash: json.optionsHash,
-                                    totalOptions: 0,
-                                    options: [],
-                                    questionId: json.questionId || ''
-                                };
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.error('JSON parse error:', e);
-                }
-                continue;
-            }
+            if (item.startsWith('{')) continue; // Skip JSON items, already handled in processOutput
             
-            if (item.startsWith('option=')) {
-                result.vote = result.vote || {
-                    optionsHash: '',
-                    totalOptions: 0,
-                    options: [],
-                    questionId: ''
-                };
-                if (result.vote) {
-                    result.vote.options.push(this.parseOption(item));
-                }
-            } else if (item.startsWith('app=')) {
+            if (item.startsWith('app=')) {
                 result.postId = item.split('=')[1];
             } else if (item.startsWith('text=')) {
                 result.contents.push({
@@ -137,33 +98,50 @@ export class TransactionParser {
                 });
             } else if (item.startsWith('tag=')) {
                 result.tags.push(item.split('=')[1]);
+            } else if (item.startsWith('option=')) {
+                result.vote = result.vote || {
+                    optionsHash: '',
+                    totalOptions: 0,
+                    options: [],
+                    questionId: ''
+                };
+                const option = this.parseOption(item);
+                if (option) {
+                    result.vote.options.push(option);
+                }
             }
         }
     }
 
-    private parseOption(item: string): any {
-        // TO DO: implement option parsing logic
-    }
-
-    private handleType(item: string, result: ParsedTransaction): void {
-        const type = item.split('=')[1];
-        if (type === 'vote_question') {
-            result.sequence = 0;
-            if (!result.vote) {
-                result.vote = { optionsHash: '', totalOptions: 0, questionId: '', options: [] };
-            }
-        } else if (type === 'vote_option') {
-            result.parentSequence = result.sequence;
+    private parseOption(item: string): { index: number; lockAmount: number; lockDuration: number } | null {
+        try {
+            const [_, optionData] = item.split('=');
+            const parts = optionData.split(',');
+            
+            return {
+                index: parseInt(parts[0], 10) || 0,
+                lockAmount: parseInt(parts[1], 10) || 0,
+                lockDuration: parseInt(parts[2], 10) || 0
+            };
+        } catch (e) {
+            console.error('Error parsing option:', e);
+            return null;
         }
     }
 
-    private addContent(item: string, result: ParsedTransaction): void {
-        const content = {
-            type: 'text/plain',
-            data: item.split('=')[1],
-            encoding: 'utf8'
-        };
-        result.contents.push(content);
+    private extractDataPushes(output: any): string[] {
+        try {
+            const script = output.script || '';
+            // Convert hex to string if it's a hex string
+            if (script.startsWith('6a')) {
+                const hex = script.slice(4); // Remove OP_RETURN and length
+                return [Buffer.from(hex, 'hex').toString()];
+            }
+            return [];
+        } catch (e) {
+            console.error('Error extracting data pushes:', e);
+            return [];
+        }
     }
 
     private isImageData(data: Buffer): boolean {
