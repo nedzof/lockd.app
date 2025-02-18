@@ -19,7 +19,8 @@ export class TransactionParser {
             sequence: 0,
             parentSequence: 0,
             vote: undefined,
-            blockHeight: tx.blockHeight ?? 0 
+            blockHeight: tx.blockHeight ?? 0,
+            protocol: ''
         };
 
         for (const output of tx.outputs) {
@@ -35,59 +36,89 @@ export class TransactionParser {
 
     private processOutput(output: any, result: ParsedTransaction): void {
         const pushes = this.extractDataPushes(output);
-        if (pushes.length === 0) return;
-
-        // Try to parse the first push as JSON
+        
         try {
-            const firstPush = pushes[0];
-            const json = JSON.parse(firstPush);
-            
-            if (json.application === 'lockd.app') {
-                result.postId = json.postId;
-                result.tags = json.tags || [];
-                result.sequence = json.sequence || 0;
-                result.parentSequence = json.parentSequence || 0;
-                
-                if (json.type === 'vote_question') {
-                    result.vote = {
-                        optionsHash: json.optionsHash || '',
-                        totalOptions: json.totalOptions || 0,
-                        options: [],
-                        questionId: json.questionId || ''
-                    };
-                }
-                
-                // Handle content
-                if (json.content) {
-                    result.contents.push({
-                        type: 'text/plain',
-                        data: json.content
-                    });
+            // Try to parse as JSON first
+            for (const push of pushes) {
+                try {
+                    const json = JSON.parse(push);
+                    if (json.application === 'lockd.app') {
+                        result.protocol = 'MAP';
+                        if (json.postId) {
+                            result.postId = json.postId;
+                        }
+                        if (json.tags && Array.isArray(json.tags)) {
+                            result.tags = json.tags;
+                        }
+                        if (json.content) {
+                            result.contents.push({
+                                type: 'text/plain',
+                                data: json.content
+                            });
+                        }
+                        if (json.sequence !== undefined) {
+                            result.sequence = Number(json.sequence);
+                        }
+                        if (json.parentSequence !== undefined) {
+                            result.parentSequence = Number(json.parentSequence);
+                        }
+                        if (json.type === 'vote_question') {
+                            result.vote = {
+                                optionsHash: json.optionsHash || '',
+                                totalOptions: Number(json.totalOptions) || 0,
+                                options: [],
+                                questionId: json.questionId || ''
+                            };
+                            if (json.options && Array.isArray(json.options)) {
+                                result.vote.options = json.options.map(opt => ({
+                                    index: Number(opt.index) || 0,
+                                    lockAmount: Number(opt.lockAmount) || 0,
+                                    lockDuration: Number(opt.lockDuration) || 0
+                                }));
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // If JSON parsing fails for this push, continue to next
+                    continue;
                 }
             }
         } catch (e) {
-            // If JSON parsing fails, try processing as regular pushes
+            // If overall processing fails, try processing as regular pushes
             this.processDataPushes(pushes, result);
         }
     }
 
     private processDataPushes(pushes: string[], result: ParsedTransaction): void {
         // Check for protocol in either JSON or raw format
-        const hasProtocol = pushes.some(p => {
+        let foundProtocol = false;
+        for (const p of pushes) {
             try {
                 const json = JSON.parse(p);
-                return json.application === 'lockd.app';
+                if (json.application === 'lockd.app') {
+                    foundProtocol = true;
+                    result.protocol = 'MAP';
+                    if (json.postId) {
+                        result.postId = json.postId;
+                    }
+                    if (json.tags && Array.isArray(json.tags)) {
+                        result.tags = json.tags;
+                    }
+                }
             } catch {
-                return p.includes('lockd.app');
+                if (p.includes('lockd.app')) {
+                    foundProtocol = true;
+                    result.protocol = 'MAP';
+                }
             }
-        });
+        }
 
-        if (!hasProtocol) {
+        if (!foundProtocol) {
             throw new Error('Invalid protocol version');
         }
 
         for (const item of pushes) {
-            if (item.startsWith('{')) continue; // Skip JSON items, already handled in processOutput
+            if (item.startsWith('{')) continue; // Skip JSON items, already handled
             
             if (item.startsWith('app=')) {
                 result.postId = item.split('=')[1];
@@ -97,47 +128,36 @@ export class TransactionParser {
                     data: item.split('=')[1]
                 });
             } else if (item.startsWith('tag=')) {
-                result.tags.push(item.split('=')[1]);
-            } else if (item.startsWith('option=')) {
-                result.vote = result.vote || {
-                    optionsHash: '',
-                    totalOptions: 0,
-                    options: [],
-                    questionId: ''
-                };
-                const option = this.parseOption(item);
-                if (option) {
-                    result.vote.options.push(option);
+                const tag = item.split('=')[1];
+                if (tag) {
+                    result.tags.push(tag);
                 }
             }
         }
     }
 
-    private parseOption(item: string): { index: number; lockAmount: number; lockDuration: number } | null {
-        try {
-            const [_, optionData] = item.split('=');
-            const parts = optionData.split(',');
-            
-            return {
-                index: parseInt(parts[0], 10) || 0,
-                lockAmount: parseInt(parts[1], 10) || 0,
-                lockDuration: parseInt(parts[2], 10) || 0
-            };
-        } catch (e) {
-            console.error('Error parsing option:', e);
-            return null;
-        }
-    }
-
     private extractDataPushes(output: any): string[] {
+        if (!output || !output.script) return [];
+
         try {
-            const script = output.script || '';
-            // Convert hex to string if it's a hex string
-            if (script.startsWith('6a')) {
-                const hex = script.slice(4); // Remove OP_RETURN and length
-                return [Buffer.from(hex, 'hex').toString()];
+            // Remove the OP_RETURN prefix (6a) if present
+            let script = output.script.startsWith('6a') ? output.script.slice(2) : output.script;
+            
+            // Handle OP_PUSHDATA (4c) followed by length byte
+            if (script.startsWith('4c')) {
+                script = script.slice(4);  // Skip 4c and length byte
             }
-            return [];
+            
+            // Decode the hex string to a buffer
+            const buffer = Buffer.from(script, 'hex');
+            
+            // Convert to string and try to parse
+            const str = buffer.toString('utf8');
+            
+            // Remove any control characters
+            const cleanStr = str.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+            
+            return [cleanStr];
         } catch (e) {
             console.error('Error extracting data pushes:', e);
             return [];

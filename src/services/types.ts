@@ -29,6 +29,7 @@ export interface ParsedTransaction {
   contents: ParsedContent[];
   vote?: ParsedVote;
   tags: string[];
+  protocol: string;
 }
 
 export interface Transaction {
