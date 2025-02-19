@@ -4,12 +4,15 @@ import axios from 'axios';
 
 export class TransactionParser {
     private isLockdTransaction(map: any): boolean {
+        if (!map) return false;
+        
         const isLockd = map?.app === 'lockd.app';
         console.log('Checking if Lockd transaction:', {
             app: map?.app,
             isLockd,
-            mapKeys: map ? Object.keys(map) : [],
-            fullMap: JSON.stringify(map)
+            type: map?.type,
+            postId: map?.postId,
+            hasContent: !!map?.content
         });
         return isLockd;
     }
@@ -17,12 +20,10 @@ export class TransactionParser {
     async parseTransaction(tx: RawTransaction): Promise<ParsedTransaction[] | null> {
         try {
             console.log('Starting transaction parse', {
-                hasId: !!tx.tx?.h,
-                outputs: tx.out?.map(o => ({
-                    script: o.s?.slice(0, 32),
-                    length: o.s?.length,
-                    isOpReturn: o.s?.includes('OP_RETURN')
-                }))
+                txid: tx.tx?.h,
+                outputCount: tx.out?.length,
+                firstOutput: tx.out?.[0]?.s?.slice(0, 32),
+                addresses: tx.in?.map(input => input.e?.a)
             });
 
             if (!tx.out) {
@@ -58,177 +59,111 @@ export class TransactionParser {
             const parsedTransactions: ParsedTransaction[] = [];
 
             // Process each OP_RETURN output
-            for (const opReturnOutput of opReturnOutputs) {
-                // Parse the OP_RETURN data
-                let hexData = '';
+            for (const [index, opReturnOutput] of opReturnOutputs.entries()) {
                 try {
+                    let data = '';
+                    
+                    // Extract data based on format
                     if (opReturnOutput.s.includes('OP_FALSE OP_RETURN')) {
-                        // Handle OP_FALSE OP_RETURN format
                         const parts = opReturnOutput.s.split('OP_FALSE OP_RETURN ');
-                        if (parts.length !== 2) {
-                            console.log('Invalid OP_FALSE OP_RETURN format');
-                            continue;
-                        }
-                        hexData = parts[1].trim();
+                        data = parts[1]?.trim() || '';
                     } else if (opReturnOutput.s.includes('OP_RETURN')) {
-                        // Handle OP_RETURN format
                         const parts = opReturnOutput.s.split('OP_RETURN ');
-                        if (parts.length !== 2) {
-                            console.log('Invalid OP_RETURN format');
-                            continue;
-                        }
-                        hexData = parts[1].trim();
+                        data = parts[1]?.trim() || '';
                     } else if (opReturnOutput.s.startsWith('6a')) {
-                        // Handle raw hex format (6a prefix)
-                        hexData = opReturnOutput.s.slice(2); // Remove 6a prefix
-                    } else {
-                        console.log('Unrecognized output format:', opReturnOutput.s.slice(0, 32));
-                        continue;
+                        data = opReturnOutput.s.slice(2);
                     }
 
-                    // Clean up the hex data
-                    hexData = hexData.replace(/\s+/g, ''); // Remove any whitespace
-                    if (hexData.length % 2 !== 0) {
-                        console.log('Invalid hex data length:', hexData.length);
-                        continue;
-                    }
-
-                    console.log('Processing hex data:', {
-                        hexData: hexData.slice(0, 32),
-                        length: hexData.length,
-                        cleaned: true
-                    });
-
-                    // Try to decode the hex data
-                    const decoded = Buffer.from(hexData, 'hex').toString('utf8');
-                    console.log('Hex decoding details:', {
-                        hexData: hexData.slice(0, 32),
-                        decodedString: decoded.slice(0, 32),
-                        decodedLength: decoded.length,
-                        fullDecoded: decoded
-                    });
-
-                    // Try to parse the data as JSON
-                    try {
-                        // First try to find a SET command with lockd.app
-                        const lockdMatch = decoded.match(/SET\x03app\tlockd\.app/);
-                        if (lockdMatch) {
-                            // Parse the binary format
-                            const fields: Record<string, string> = {};
-                            let pos = 0;
-                            
-                            while (pos < decoded.length) {
-                                // Skip non-printable characters
-                                while (pos < decoded.length && decoded.charCodeAt(pos) < 32) {
-                                    pos++;
-                                }
-                                
-                                // Read field name
-                                let fieldName = '';
-                                while (pos < decoded.length && decoded.charCodeAt(pos) >= 32) {
-                                    fieldName += decoded[pos];
-                                    pos++;
-                                }
-                                
-                                // Skip separator
-                                pos++;
-                                
-                                // Read field value
-                                let fieldValue = '';
-                                while (pos < decoded.length && decoded.charCodeAt(pos) >= 32) {
-                                    fieldValue += decoded[pos];
-                                    pos++;
-                                }
-                                
-                                if (fieldName && fieldValue) {
-                                    fields[fieldName] = fieldValue;
-                                }
-                            }
-                            
-                            console.log('Parsed binary format:', fields);
-                            
-                            if (fields.app === 'lockd.app') {
-                                let content: any = {};
-                                if (fields.content) {
-                                    try {
-                                        content = JSON.parse(fields.content);
-                                    } catch (e) {
-                                        content = { text: fields.content };
-                                    }
-                                }
-                                
-                                let tags: string[] = [];
-                                if (fields.tags) {
-                                    try {
-                                        tags = JSON.parse(fields.tags);
-                                    } catch (e) {
-                                        console.warn('Failed to parse tags:', e);
-                                    }
-                                }
-                                
-                                parsedTransactions.push({
-                                    txid: tx.tx.h,
-                                    type: fields.type || 'content',
-                                    blockHeight: tx.blk?.i,
-                                    blockTime: tx.blk?.t,
-                                    metadata: {
-                                        application: fields.app,
-                                        postId: fields.postId,
-                                        type: fields.type,
-                                        content,
-                                        tags
-                                    }
-                                });
-                            }
-                        } else {
-                            // Try to find a JSON object in the decoded string
-                            const jsonMatch = decoded.match(/\{.*\}/);
-                            if (jsonMatch) {
-                                const jsonStr = jsonMatch[0];
-                                console.log('Found JSON object in decoded string:', jsonStr.slice(0, 100));
-                                
-                                const json = JSON.parse(jsonStr);
-                                console.log('Parsed JSON successfully:', {
-                                    json: JSON.stringify(json),
-                                    app: json.app,
-                                    type: json.type
-                                });
-
-                                if (this.isLockdTransaction(json)) {
-                                    parsedTransactions.push({
-                                        txid: tx.tx.h,
-                                        type: json.type || 'content',
-                                        blockHeight: tx.blk?.i,
-                                        blockTime: tx.blk?.t,
-                                        metadata: {
-                                            application: json.app,
-                                            postId: json.postId,
-                                            type: json.type,
-                                            content: json.content,
-                                            tags: json.tags || []
-                                        }
-                                    });
-                                }
-                            } else {
-                                console.log('No JSON object or lockd.app data found in decoded string');
-                            }
-                        }
-                    } catch (jsonError) {
-                        console.error('Failed to parse data:', {
-                            error: jsonError instanceof Error ? jsonError.message : 'Unknown error',
-                            data: decoded.slice(0, 100),
-                            hexData: hexData.slice(0, 100)
+                    if (!data) {
+                        console.log('No data found in output:', {
+                            index,
+                            script: opReturnOutput.s.slice(0, 32)
                         });
                         continue;
                     }
-                } catch (hexError) {
-                    console.error('Hex decoding failed:', {
-                        error: hexError instanceof Error ? hexError.message : 'Unknown hex error',
-                        rawScript: opReturnOutput.s.slice(0, 100),
-                        hexData: hexData.slice(0, 100)
+
+                    // Try to parse as JSON
+                    try {
+                        // If it's hex data, decode it first
+                        let jsonStr = '';
+                        try {
+                            const decoded = Buffer.from(data, 'hex').toString('utf8');
+                            console.log('Decoded hex data:', {
+                                index,
+                                preview: decoded.slice(0, 100),
+                                length: decoded.length
+                            });
+                            
+                            // Look for JSON object
+                            const jsonMatch = decoded.match(/\{.*\}/s);
+                            if (jsonMatch) {
+                                jsonStr = jsonMatch[0];
+                            } else {
+                                console.log('No JSON found in decoded data');
+                                continue;
+                            }
+                        } catch (e) {
+                            // If hex decoding fails, try direct JSON parsing
+                            jsonStr = data;
+                        }
+
+                        const parsedData = JSON.parse(jsonStr);
+                        console.log('Parsed JSON data:', {
+                            index,
+                            app: parsedData.app,
+                            type: parsedData.type,
+                            postId: parsedData.postId
+                        });
+
+                        if (this.isLockdTransaction(parsedData)) {
+                            parsedTransactions.push({
+                                txid: tx.tx.h,
+                                type: parsedData.type || 'content',
+                                blockHeight: tx.blk?.i,
+                                blockTime: tx.blk?.t,
+                                metadata: {
+                                    application: parsedData.app,
+                                    postId: parsedData.postId || `${tx.tx.h}_${index}`,
+                                    type: parsedData.type || 'content',
+                                    content: parsedData.content,
+                                    tags: parsedData.tags || []
+                                }
+                            });
+                            
+                            console.log('Added parsed transaction:', {
+                                index,
+                                txid: tx.tx.h,
+                                type: parsedData.type,
+                                postId: parsedData.postId
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Failed to parse data as JSON:', {
+                            error: e instanceof Error ? e.message : 'Unknown error',
+                            index,
+                            data: data.slice(0, 100)
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error processing output:', {
+                        error: error instanceof Error ? error.message : 'Unknown error',
+                        index,
+                        script: opReturnOutput.s.slice(0, 100)
                     });
-                    continue;
                 }
+            }
+
+            if (parsedTransactions.length > 0) {
+                console.log('Successfully parsed transactions:', {
+                    count: parsedTransactions.length,
+                    transactions: parsedTransactions.map(t => ({
+                        txid: t.txid,
+                        type: t.type,
+                        postId: t.metadata.postId
+                    }))
+                });
+            } else {
+                console.log('No Lockd transactions found in outputs');
             }
 
             return parsedTransactions.length > 0 ? parsedTransactions : null;
