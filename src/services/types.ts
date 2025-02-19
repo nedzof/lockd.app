@@ -1,81 +1,87 @@
 // src/services/types.ts
 import { JungleBusTransaction } from "@gorillapool/js-junglebus";
 
-export interface ParsedContent {
-  type: string;
-  data: string | Buffer;
-  encoding?: string;
-  filename?: string;
+export interface Output {
+  script: string;
+  value: number;
+  metadata?: Record<string, any>;
 }
 
-export interface ParsedVote {
-  questionId?: string;
+export interface Transaction {
+  id?: string;
+  outputs: Output[];
+  blockHeight?: number;
+  blockTime?: number;
+  metadata?: Record<string, any>;
+  type?: string;
+  voteOption?: Record<string, any>;
+}
+
+export interface ParsedContent {
+  type: string;
+  data: any;
+  encoding?: string;
+}
+
+export interface VoteOption {
+  questionId: string;
+  index: number;
+  content: string;
+}
+
+export interface VoteQuestion {
+  question: string;
+  totalOptions: number;
+  optionsHash: string;
+}
+
+export interface Vote {
   optionsHash: string;
   totalOptions: number;
-  options: {
+  options: Array<{
     index: number;
     lockAmount: number;
     lockDuration: number;
-  }[];
+  }>;
+}
+
+export interface LockLike {
+  lockAmount: number;
+  lockDuration: number;
 }
 
 export interface ParsedTransaction {
   txid: string;
-  blockHeight: number;
-  timestamp: Date;
+  protocol: string;
   postId: string;
+  type: string;
+  contents: ParsedContent[];
+  content: Record<string, any>;
+  blockHeight?: number;
+  blockTime?: number;
   sequence: number;
   parentSequence: number;
-  contents: ParsedContent[];
-  vote?: ParsedVote;
-  tags: string[];
-  protocol: string;
-}
-
-export interface Transaction {
-  id: string;
-  inputs: any[];
-  outputs: Output[];
-  blockHeight?: number;
-  blockTime?: Date;
-}
-
-export interface Output {
-  script: string;
-  value?: number;
+  vote?: Vote;
+  voteQuestion?: VoteQuestion;
+  voteOption?: VoteOption;
+  lockLike?: LockLike;
 }
 
 export interface ParsedTransactionForProcessing {
   id: string;
   protocol: string;
   type: string;
-  postId?: string;
-  content?: string;
-  contentType?: string;
-  data?: Buffer;
-  tags?: string[];
-  timestamp?: string;
-  sequence?: number;
-  parentSequence?: number;
-  vote?: {
-    optionsHash?: string;
-    options?: VoteOption[];
-  };
-  lock?: {
-    amount: number;
-    duration: number;
-  };
+  postId: string;
+  sequence: number;
+  parentSequence: number;
+  blockHeight: number;
+  blockTime: Date;
+  contents: ParsedContent[];
+  vote?: any;
+  tags: string[];
 }
 
-export interface VoteOption {
-  index: number;
-  text: string;
-  value: string;
-  lockAmount?: number;
-  lockDuration?: number;
-}
-
-export interface ProcessedTransaction extends ParsedTransactionForProcessing {
+export interface ProcessedTransaction {
   blockHeight?: number;
   blockTime?: Date;
   raw: Transaction;

@@ -1,6 +1,7 @@
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 generator client {
@@ -11,9 +12,8 @@ model Post {
   id             String   @id @default(uuid())
   postId         String   @unique
   type           String
-  protocol       String @default("MAP")
   content        Json
-  timestamp      DateTime
+  blockTime      DateTime
   sequence       Int
   parentSequence Int
   createdAt      DateTime @default(now())
@@ -32,7 +32,6 @@ model VoteQuestion {
   question     String
   totalOptions Int
   optionsHash  String
-  protocol     String @default("MAP")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -48,7 +47,6 @@ model VoteOption {
   voteQuestionId  String
   index           Int
   content         String
-  protocol        String   @default("MAP")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -64,8 +62,8 @@ model VoteOption {
 model LockLike {
   id             String      @id @default(cuid())
   txid           String      @unique
-  amount         Int
-  lockPeriod     Int
+  lockAmount     Int
+  lockDuration   Int
   isProcessed    Boolean     @default(false)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -78,13 +76,4 @@ model LockLike {
   @@index([postId])
   @@index([voteOptionId])
   @@index([isProcessed])
-}
-
-model ProcessedTransaction {
-  id        String   @id @default(uuid())
-  txid      String   @unique
-  timestamp DateTime @default(now())
-
-  @@index([txid])
-  @@index([timestamp])
 }

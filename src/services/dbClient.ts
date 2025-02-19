@@ -1,172 +1,201 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { ParsedTransaction } from './types';
+
+interface VoteQuestion {
+    id: string;
+    postId: string;
+    question: string;
+    totalOptions: number;
+    optionsHash: string;
+}
+
+interface VoteOption {
+    id: string;
+    postId: string;
+    voteQuestionId: string;
+    index: number;
+    content: string;
+}
+
+interface LockLike {
+    id: string;
+    txid: string;
+    postId: string;
+    voteOptionId: string;
+    lockAmount: number;
+    lockDuration: number;
+    isProcessed: boolean;
+}
+
+interface Post {
+    id: string;
+    postId: string;
+    type: string;
+    content: Prisma.JsonValue;
+    blockTime: Date;
+    sequence: number;
+    parentSequence: number;
+}
 
 export class DBClient {
     private prisma: PrismaClient;
-
+    private static instanceCount = 0;
+    private instanceId: number;
+    
     constructor() {
-        this.prisma = new PrismaClient();
+        DBClient.instanceCount++;
+        this.instanceId = DBClient.instanceCount;
+        console.log(`[DBClient ${this.instanceId}] Creating new instance`);
+        
+        this.prisma = new PrismaClient({
+            log: ['query', 'info', 'warn', 'error'],
+            datasourceUrl: process.env.DATABASE_URL + "?pgbouncer=true&connection_limit=1"
+        });
+        
+        console.log(`[DBClient ${this.instanceId}] PrismaClient initialized`);
     }
 
-    async saveTransaction(parsedTx: ParsedTransaction) {
-        // Check if transaction was already processed
-        const processed = await this.prisma.processedTransaction.findUnique({
-            where: { txid: parsedTx.txid }
-        });
-
-        if (processed) {
-            console.log(`Skipping already processed TX ${parsedTx.txid}`);
-            return;
+    async connect() {
+        console.log(`[DBClient ${this.instanceId}] Connecting to database`);
+        try {
+            await this.prisma.$connect();
+            console.log(`[DBClient ${this.instanceId}] Successfully connected`);
+            return true;
+        } catch (error) {
+            console.error(`[DBClient ${this.instanceId}] Failed to connect to database:`, error);
+            return false;
         }
+    }
 
-        await this.prisma.$transaction(async (tx) => {
-            // Save main post
-            const post = await tx.post.upsert({
-                where: { postId: parsedTx.postId },
-                update: {
-                    type: parsedTx.vote ? 'vote' : 'content',
-                    content: this.transformContent(parsedTx),
-                    timestamp: parsedTx.timestamp,
-                    sequence: parsedTx.sequence,
-                    parentSequence: parsedTx.parentSequence,
-                    protocol: 'MAP'
-                },
-                create: {
-                    postId: parsedTx.postId,
-                    type: parsedTx.vote ? 'vote' : 'content',
-                    content: this.transformContent(parsedTx),
-                    timestamp: parsedTx.timestamp,
-                    sequence: parsedTx.sequence,
-                    parentSequence: parsedTx.parentSequence,
-                    protocol: 'MAP'
-                }
-            });
+    async disconnect() {
+        console.log(`[DBClient ${this.instanceId}] Disconnecting Prisma client`);
+        try {
+            await this.prisma.$disconnect();
+            console.log(`[DBClient ${this.instanceId}] Successfully disconnected`);
+        } catch (error) {
+            console.error(`[DBClient ${this.instanceId}] Error disconnecting:`, error);
+            throw error;
+        }
+    }
 
-            // Process vote data if exists
-            if (parsedTx.vote) {
-                const question = await tx.voteQuestion.upsert({
-                    where: { postId: post.postId },
-                    update: {
-                        question: parsedTx.vote?.questionId || 'Unknown Question',
-                        totalOptions: parsedTx.vote.totalOptions,
-                        optionsHash: parsedTx.vote.optionsHash,
-                        protocol: 'MAP'
-                    },
-                    create: {
-                        postId: post.postId,
-                        question: parsedTx.vote?.questionId || 'Unknown Question',
-                        totalOptions: parsedTx.vote.totalOptions,
-                        optionsHash: parsedTx.vote.optionsHash,
-                        protocol: 'MAP'
+    async isConnected() {
+        console.log(`[DBClient ${this.instanceId}] Checking database connection`);
+        try {
+            await this.prisma.$queryRaw`SELECT 1`;
+            console.log(`[DBClient ${this.instanceId}] Database connection is active`);
+            return true;
+        } catch (error) {
+            console.log(`[DBClient ${this.instanceId}] Database connection is inactive`);
+            return false;
+        }
+    }
+
+    async saveTransaction(parsedTx: ParsedTransaction): Promise<void> {
+        try {
+            console.log(`[DBClient ${this.instanceId}] Starting saveTransaction for ${parsedTx.txid}`);
+            
+            console.log(`[DBClient ${this.instanceId}] Beginning database transaction`);
+            
+            // Use Prisma transaction
+            await this.prisma.$transaction(async (tx) => {
+                console.log(`[DBClient ${this.instanceId}] Creating post record`);
+                
+                // Create post
+                const post = await tx.post.create({
+                    data: {
+                        postId: parsedTx.postId,
+                        type: parsedTx.type,
+                        content: parsedTx.content,
+                        blockTime: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
+                        sequence: parsedTx.sequence,
+                        parentSequence: parsedTx.parentSequence
                     }
                 });
 
-                // Process vote options
-                if (parsedTx.vote.options) {
+                if (parsedTx.vote) {
+                    console.log(`[DBClient ${this.instanceId}] Creating vote question record`);
+                    
+                    // Create vote question
+                    const voteQuestion = await tx.voteQuestion.create({
+                        data: {
+                            postId: parsedTx.postId,
+                            question: parsedTx.content.question || '',
+                            totalOptions: parsedTx.vote.totalOptions,
+                            optionsHash: parsedTx.vote.optionsHash
+                        }
+                    });
+
+                    // Create vote options
                     for (const option of parsedTx.vote.options) {
-                        await tx.voteOption.upsert({
-                            where: {
-                                voteQuestionId_index: {
-                                    voteQuestionId: question.id,
-                                    index: option.index
-                                }
-                            },
-                            create: {
-                                postId: post.postId,  
-                                voteQuestionId: question.id,
+                        console.log(`[DBClient ${this.instanceId}] Creating vote option record`);
+                        
+                        const voteOption = await tx.voteOption.create({
+                            data: {
+                                postId: parsedTx.postId,
+                                voteQuestionId: voteQuestion.id,
                                 index: option.index,
-                                content: this.findOptionContent(option.index, parsedTx),
-                                protocol: 'MAP',
-                                lockLikes: {
-                                    create: this.createLockLike(option, parsedTx)
-                                }
-                            },
-                            update: {
-                                content: this.findOptionContent(option.index, parsedTx),
-                                protocol: 'MAP'
+                                content: ''
+                            }
+                        });
+
+                        console.log(`[DBClient ${this.instanceId}] Creating lock like record`);
+                        
+                        // Create lock like
+                        await tx.lockLike.create({
+                            data: {
+                                txid: parsedTx.txid,
+                                post: {
+                                    connect: {
+                                        id: post.id
+                                    }
+                                },
+                                voteOption: {
+                                    connect: {
+                                        id: voteOption.id
+                                    }
+                                },
+                                lockAmount: option.lockAmount,
+                                lockDuration: option.lockDuration,
+                                isProcessed: false
                             }
                         });
                     }
                 }
-            }
+            });
+            
+            console.log(`[DBClient ${this.instanceId}] Successfully saved transaction ${parsedTx.txid}`);
+        } catch (error) {
+            console.error(`[DBClient ${this.instanceId}] Error in saveTransaction:`, error);
+            throw error;
+        }
+    }
 
-            // Process lock likes for non-vote content
-            if (!parsedTx.vote && parsedTx.contents.some(c => c.type === 'lock')) {
-                await tx.lockLike.create({
-                    data: {
-                        txid: `${parsedTx.txid}-${Date.now()}`,
-                        amount: this.getLockAmount(parsedTx),
-                        lockPeriod: this.getLockDuration(parsedTx),
-                        isProcessed: true,
-                        post: { connect: { id: post.id } }
-                    }
-                });
-            }
-
-            // Mark transaction as processed
-            await tx.processedTransaction.create({
-                data: {
-                    txid: parsedTx.txid,
-                    timestamp: parsedTx.timestamp
+    async getPost(postId: string): Promise<Post | null> {
+        try {
+            return await this.prisma.post.findUnique({
+                where: {
+                    postId: postId
                 }
             });
-        });
+        } catch (error) {
+            console.error(`[DBClient ${this.instanceId}] Error in getPost:`, error);
+            throw error;
+        }
     }
 
-    private transformContent(parsedTx: ParsedTransaction): any {
-        return {
-            text: parsedTx.contents.find(c => c.type === 'text/plain')?.data,
-            media: parsedTx.contents
-                .filter(c => c.type.startsWith('image/'))
-                .map(img => ({
-                    type: img.type,
-                    data: img.data,
-                    encoding: img.encoding,
-                    filename: img.filename
-                })),
-            metadata: parsedTx.contents
-                .filter(c => c.type === 'application/json')
-                .map(json => JSON.parse(json.data as string)),
-            tags: parsedTx.tags
-        };
-    }
-
-    private extractQuestion(parsedTx: ParsedTransaction): string {
-        return parsedTx.contents.find(c => c.type === 'text/plain')?.data as string || '';
-    }
-
-    private findOptionContent(index: number, parsedTx: ParsedTransaction): string {
-        return parsedTx.contents
-            .find(c => c.type === 'application/json' && (JSON.parse(c.data as string)).optionIndex === index)
-            ?.data as string || '';
-    }
-
-    private createLockLike(option: any, parsedTx: ParsedTransaction) {
-        return {
-            txid: `${parsedTx.txid}-opt${option.index}-${Date.now()}`,
-            amount: option.lockAmount,
-            lockPeriod: option.lockDuration,
-            createdAt: parsedTx.timestamp
-        };
-    }
-
-    private getLockAmount(parsedTx: ParsedTransaction): number {
-        const lockContent = parsedTx.contents.find(c => c.type === 'lock')?.data;
-        if (!lockContent) return 0;
-        const content = Buffer.isBuffer(lockContent) ? lockContent.toString() : lockContent;
-        const match = content.match(/lockAmount=(\d+)/);
-        return match ? parseInt(match[1], 10) : 0;
-    }
-
-    private getLockDuration(parsedTx: ParsedTransaction): number {
-        const lockContent = parsedTx.contents.find(c => c.type === 'lock')?.data;
-        if (!lockContent) return 0;
-        const content = Buffer.isBuffer(lockContent) ? lockContent.toString() : lockContent;
-        const match = content.match(/lockDuration=(\d+)/);
-        return match ? parseInt(match[1], 10) : 0;
-    }
-
-    async disconnect() {
-        await this.prisma.$disconnect();
+    async updatePost(postId: string, content: string): Promise<Post> {
+        try {
+            return await this.prisma.post.update({
+                where: {
+                    postId: postId
+                },
+                data: {
+                    content: content
+                }
+            });
+        } catch (error) {
+            console.error(`[DBClient ${this.instanceId}] Error in updatePost:`, error);
+            throw error;
+        }
     }
 }
