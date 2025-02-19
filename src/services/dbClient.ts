@@ -49,17 +49,17 @@ export class DBClient {
     private prisma: PrismaClient;
     private static instanceCount = 0;
     private instanceId: number;
-    
+
     constructor() {
         DBClient.instanceCount++;
         this.instanceId = DBClient.instanceCount;
         logger.info(`Creating new DBClient instance`, { instanceId: this.instanceId });
-        
+
         this.prisma = new PrismaClient({
             log: ['query', 'info', 'warn', 'error'],
             datasourceUrl: process.env.DATABASE_URL + "?pgbouncer=true&connection_limit=1"
         });
-        
+
         logger.info(`PrismaClient initialized`, { instanceId: this.instanceId });
     }
 
@@ -112,7 +112,7 @@ export class DBClient {
     async processTransaction(tx: ParsedTransaction | ParsedTransaction[]): Promise<void> {
         try {
             const transactions = Array.isArray(tx) ? tx : [tx];
-            
+
             for (const transaction of transactions) {
                 switch (transaction.type) {
                     case 'content':
@@ -188,7 +188,7 @@ export class DBClient {
 
     async saveTransaction(transaction: ParsedTransaction): Promise<void> {
         const { txid, type, blockHeight, blockTime, metadata, senderAddress } = transaction;
-        
+
         try {
             // First check if we've already processed this transaction
             const existing = await this.prisma.processedTransaction.findUnique({
@@ -358,136 +358,70 @@ export class DBClient {
         }
     }
 
-    async insertTransactions(transactions: ParsedTransaction[]): Promise<void> {
-        const startTime = process.hrtime();
-        const txIds = transactions.map(tx => tx.txid);
-
-        logger.info('Starting batch transaction insert', {
-            instanceId: this.instanceId,
-            count: transactions.length,
-            txIds: txIds,
-            memoryUsage: process.memoryUsage()
-        });
-
-        try {
-            // First check which transactions are already processed
-            const existingTxs = await this.prisma.processedTransaction.findMany({
-                where: {
-                    txid: {
-                        in: txIds
-                    }
-                },
-                select: {
-                    txid: true
-                }
+    async insertTransactions(transactions: ParsedTransaction[]) {
+        return await this.prisma.$transaction(async (tx) => {
+            // Filter existing txids first
+            const txids = transactions.map(t => t.txid);
+            const existing = await tx.processedTransaction.findMany({
+                where: { txid: { in: txids } },
+                select: { txid: true }
             });
 
-            const existingTxIds = new Set(existingTxs.map(tx => tx.txid));
-            const newTransactions = transactions.filter(tx => !existingTxIds.has(tx.txid));
+            const newTxids = txids.filter(id => 
+                !existing.some(e => e.txid === id)
+            );
 
-            if (newTransactions.length === 0) {
+            if (newTxids.length === 0) {
                 logger.info('All transactions already processed', {
-                    instanceId: this.instanceId,
-                    originalCount: transactions.length
+                    count: transactions.length
                 });
                 return;
             }
 
-            logger.info('Processing new transactions', {
-                instanceId: this.instanceId,
-                newCount: newTransactions.length,
-                existingCount: existingTxIds.size
+            // Batch insert transactions with error handling
+            await tx.processedTransaction.createMany({
+                data: newTxids.map(txid => {
+                    const transaction = transactions.find(t => t.txid === txid)!;
+                    return {
+                        txid,
+                        blockHeight: transaction.blockHeight,
+                        blockTime: transaction.blockTime 
+                            ? new Date(transaction.blockTime * 1000)
+                            : new Date()
+                    };
+                }),
+                skipDuplicates: true
             });
 
-            // Start a transaction for atomic operations
-            const result = await this.prisma.$transaction(async (prisma) => {
-                const dbStartTime = process.hrtime();
-                const operations = [];
+            // Insert posts with upsert
+            for (const t of transactions) {
+                if (!newTxids.includes(t.txid)) continue;
 
-                for (const tx of newTransactions) {
-                    // Create ProcessedTransaction record
-                    operations.push(
-                        prisma.processedTransaction.create({
-                            data: {
-                                txid: tx.txid,
-                                blockHeight: tx.blockHeight,
-                                blockTime: new Date(tx.blockTime)
-                            }
-                        })
-                    );
-
-                    // Process posts if present
-                    if (tx.posts && tx.posts.length > 0) {
-                        operations.push(
-                            ...tx.posts.map(post =>
-                                prisma.post.create({
-                                    data: {
-                                        postId: post.postId,
-                                        type: post.type,
-                                        content: post.content,
-                                        blockTime: new Date(tx.blockTime),
-                                        sequence: post.sequence,
-                                        parentSequence: post.parentSequence || 0
-                                    }
-                                })
-                            )
-                        );
+                await tx.post.upsert({
+                    where: { postId: t.metadata.postId },
+                    update: {
+                        content: t.metadata.content,
+                        updatedAt: new Date()
+                    },
+                    create: {
+                        postId: t.metadata.postId,
+                        type: t.type,
+                        content: t.metadata.content,
+                        protocol: t.metadata.protocol || 'MAP',
+                        blockTime: t.blockTime 
+                            ? new Date(t.blockTime * 1000)
+                            : new Date(),
+                        sequence: 0,
+                        parentSequence: 0
                     }
-
-                    // Process locks if present
-                    if (tx.locks && tx.locks.length > 0) {
-                        operations.push(
-                            ...tx.locks.map(lock =>
-                                prisma.lockLike.create({
-                                    data: {
-                                        txid: tx.txid,
-                                        postId: lock.postId,
-                                        voteOptionId: lock.voteOptionId,
-                                        lockAmount: lock.lockAmount,
-                                        lockDuration: lock.lockDuration,
-                                        isProcessed: false
-                                    }
-                                })
-                            )
-                        );
-                    }
-                }
-
-                const results = await Promise.all(operations);
-                const [dbSeconds, dbNanos] = process.hrtime(dbStartTime);
-                
-                logger.info('Database operations complete', {
-                    instanceId: this.instanceId,
-                    operationCount: operations.length,
-                    dbTime: dbSeconds + dbNanos / 1e9,
-                    processedTxCount: results.filter(r => 'txid' in r).length,
-                    postCount: results.filter(r => 'postId' in r).length,
-                    lockCount: results.filter(r => 'lockAmount' in r).length
                 });
+            }
 
-                return results;
+            logger.info('Successfully inserted transactions and posts', {
+                newTransactions: newTxids.length,
+                totalTransactions: transactions.length
             });
-
-            const [totalSeconds, totalNanos] = process.hrtime(startTime);
-            logger.info('Batch insert complete', {
-                instanceId: this.instanceId,
-                totalTime: totalSeconds + totalNanos / 1e9,
-                processedCount: result.length,
-                memoryUsage: process.memoryUsage()
-            });
-
-        } catch (error) {
-            const [errorSeconds, errorNanos] = process.hrtime(startTime);
-            logger.error('Error in batch insert', {
-                instanceId: this.instanceId,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                failedAt: errorSeconds + errorNanos / 1e9,
-                txCount: transactions.length,
-                memoryUsage: process.memoryUsage()
-            });
-            throw error;
-        }
+        });
     }
 
     private chunk(arr: any[], size: number): any[][] {
