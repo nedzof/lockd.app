@@ -49,6 +49,8 @@ export class DBClient {
     private prisma: PrismaClient;
     private static instanceCount = 0;
     private instanceId: number;
+    private readonly MAX_RETRIES = 3;
+    private readonly RETRY_DELAY = 1000; // 1 second
 
     constructor() {
         DBClient.instanceCount++;
@@ -56,8 +58,19 @@ export class DBClient {
         logger.info(`Creating new DBClient instance`, { instanceId: this.instanceId });
 
         this.prisma = new PrismaClient({
-            log: ['query', 'info', 'warn', 'error'],
+            log: [
+                { level: 'warn', emit: 'event' },
+                { level: 'error', emit: 'event' }
+            ],
             datasourceUrl: process.env.DATABASE_URL + "?pgbouncer=true&connection_limit=1"
+        });
+
+        // Set up Prisma error logging
+        this.prisma.$on('error', (e) => {
+            logger.error('Prisma client error:', {
+                error: e.message,
+                target: e.target
+            });
         });
 
         logger.info(`PrismaClient initialized`, { instanceId: this.instanceId });
@@ -358,70 +371,102 @@ export class DBClient {
         }
     }
 
-    async insertTransactions(transactions: ParsedTransaction[]) {
-        return await this.prisma.$transaction(async (tx) => {
-            // Filter existing txids first
-            const txids = transactions.map(t => t.txid);
-            const existing = await tx.processedTransaction.findMany({
-                where: { txid: { in: txids } },
-                select: { txid: true }
+    async insertTransactions(transactions: ParsedTransaction[]): Promise<void> {
+        if (!transactions.length) return;
+
+        try {
+            // Use a transaction to ensure atomic batch insert
+            await this.prisma.$transaction(async (tx) => {
+                for (const transaction of transactions) {
+                    await this.insertSingleTransaction(tx, transaction);
+                }
             });
 
-            const newTxids = txids.filter(id => 
-                !existing.some(e => e.txid === id)
-            );
+            logger.info('Successfully inserted batch of transactions', {
+                count: transactions.length
+            });
+        } catch (error) {
+            logger.error('Failed to insert transaction batch', {
+                count: transactions.length,
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            throw error;
+        }
+    }
 
-            if (newTxids.length === 0) {
-                logger.info('All transactions already processed', {
-                    count: transactions.length
-                });
-                return;
-            }
-
-            // Batch insert transactions with error handling
-            await tx.processedTransaction.createMany({
-                data: newTxids.map(txid => {
-                    const transaction = transactions.find(t => t.txid === txid)!;
-                    return {
-                        txid,
-                        blockHeight: transaction.blockHeight,
-                        blockTime: transaction.blockTime 
-                            ? new Date(transaction.blockTime * 1000)
-                            : new Date()
-                    };
-                }),
-                skipDuplicates: true
+    private async insertSingleTransaction(
+        tx: any,
+        transaction: ParsedTransaction
+    ): Promise<void> {
+        try {
+            const result = await tx.processedTransaction.upsert({
+                where: {
+                    txid: transaction.txid
+                },
+                create: {
+                    txid: transaction.txid,
+                    blockHeight: transaction.blockHeight,
+                    blockTime: transaction.blockTime,
+                    senderAddress: transaction.senderAddress,
+                    postId: transaction.metadata.postId,
+                    content: transaction.metadata.content,
+                    protocol: transaction.metadata.protocol,
+                    createdAt: new Date(),
+                    updatedAt: new Date()
+                },
+                update: {
+                    // Only update if the block info was missing before
+                    blockHeight: transaction.blockHeight 
+                        ? { set: transaction.blockHeight }
+                        : undefined,
+                    blockTime: transaction.blockTime
+                        ? { set: transaction.blockTime }
+                        : undefined,
+                    updatedAt: new Date()
+                }
             });
 
-            // Insert posts with upsert
-            for (const t of transactions) {
-                if (!newTxids.includes(t.txid)) continue;
-
-                await tx.post.upsert({
-                    where: { postId: t.metadata.postId },
-                    update: {
-                        content: t.metadata.content,
-                        updatedAt: new Date()
-                    },
-                    create: {
-                        postId: t.metadata.postId,
-                        type: t.type,
-                        content: t.metadata.content,
-                        protocol: t.metadata.protocol || 'MAP',
-                        blockTime: t.blockTime 
-                            ? new Date(t.blockTime * 1000)
-                            : new Date(),
-                        sequence: 0,
-                        parentSequence: 0
-                    }
-                });
-            }
-
-            logger.info('Successfully inserted transactions and posts', {
-                newTransactions: newTxids.length,
-                totalTransactions: transactions.length
+            logger.debug('Transaction processed', {
+                txid: transaction.txid,
+                operation: result ? 'updated' : 'created'
             });
-        });
+        } catch (error) {
+            logger.error('Failed to process transaction', {
+                txid: transaction.txid,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            throw error;
+        }
+    }
+
+    async getTransaction(txid: string): Promise<ParsedTransaction | null> {
+        try {
+            const transaction = await this.prisma.processedTransaction.findUnique({
+                where: { txid }
+            });
+
+            if (!transaction) return null;
+
+            return {
+                txid: transaction.txid,
+                type: transaction.type,
+                blockHeight: transaction.blockHeight || undefined,
+                blockTime: transaction.blockTime || undefined,
+                senderAddress: transaction.senderAddress || undefined,
+                metadata: {
+                    postId: transaction.postId,
+                    content: transaction.content,
+                    protocol: transaction.protocol || undefined
+                }
+            };
+        } catch (error) {
+            logger.error('Failed to get transaction', {
+                txid,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            throw error;
+        }
     }
 
     private chunk(arr: any[], size: number): any[][] {
