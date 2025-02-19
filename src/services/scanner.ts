@@ -18,7 +18,8 @@ export class Scanner extends EventEmitter {
     private readonly RETRY_DELAY = 1000; // 1 second
     private readonly START_BLOCK = 882000;
     private readonly API_BASE_URL = 'https://junglebus.gorillapool.io/v1';
-    private readonly SUBSCRIPTION_ID = '75410af0011a938a019077a12a3fc2c8d587fb125b0a43de6b2298f6638edebc';
+    // Use an empty subscription ID to get all transactions
+    private readonly SUBSCRIPTION_ID = '';
 
     constructor() {
         super();
@@ -73,12 +74,31 @@ export class Scanner extends EventEmitter {
 
     private async handleTransaction(tx: Transaction): Promise<void> {
         try {
+            // Log raw transaction for debugging
+            logger.debug('Raw transaction received', {
+                id: tx.id,
+                hash: tx.transaction?.hash,
+                outputCount: tx.transaction?.outputs?.length,
+                blockHeight: tx.block?.height,
+                blockHash: tx.block?.hash,
+                timestamp: tx.block?.timestamp
+            });
+
             // Emit raw transaction
             this.emit('transaction', tx);
 
             // Parse transaction
             const parsedTx = await this.parser.parseTransaction(tx);
             if (parsedTx) {
+                // Log parsed transaction details
+                logger.debug('Transaction parsed', {
+                    txid: parsedTx.txid,
+                    type: parsedTx.type,
+                    blockHeight: parsedTx.blockHeight,
+                    timestamp: parsedTx.timestamp,
+                    dataKeys: Object.keys(parsedTx.data || {})
+                });
+
                 // Emit parsed transaction
                 this.emit('transaction:parsed', parsedTx);
 
@@ -90,12 +110,18 @@ export class Scanner extends EventEmitter {
                         throw error;
                     }
                 });
+            } else {
+                logger.debug('Transaction parsing failed or returned null', {
+                    id: tx.id,
+                    hash: tx.transaction?.hash
+                });
             }
         } catch (error) {
             this.emit('transaction:error', { tx, error: error as Error });
             logger.error('Error processing transaction', {
                 txid: tx.transaction?.hash || tx.id || 'unknown',
-                error: error instanceof Error ? error.message : 'Unknown error'
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
             });
         }
     }
@@ -145,11 +171,28 @@ export class Scanner extends EventEmitter {
                 }
             };
 
+            const onTransaction = async (msg: any) => {
+                logger.debug('Raw JungleBus message:', { msg });
+                try {
+                    const tx: Transaction = {
+                        id: msg.id,
+                        transaction: msg.transaction,
+                        block: msg.block
+                    };
+                    await this.handleTransaction(tx);
+                } catch (error) {
+                    logger.error('Error in onTransaction', {
+                        error: error instanceof Error ? error.message : 'Unknown error',
+                        stack: error instanceof Error ? error.stack : undefined
+                    });
+                }
+            };
+
             // Store subscription for cleanup
             const subscription = await this.jungleBus.Subscribe(
                 this.SUBSCRIPTION_ID,
                 this.START_BLOCK,
-                (tx: Transaction) => this.handleTransaction(tx),
+                onTransaction,
                 onStatus,
                 (error: Error) => this.handleError(error)
             );
