@@ -1,150 +1,128 @@
-import { describe, expect, test, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import { describe, expect, test, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
+import { Scanner } from '../../scanner';
 import { TransactionParser } from '../../parser';
-import { prisma } from '../setup';
 import { DBClient } from '../../dbClient';
+import { PrismaClient } from '@prisma/client';
+import bmap from 'bmapjs';
+import axios from 'axios';
 
 describe('Transaction Processing Integration Tests', () => {
-    let parser: TransactionParser;
-    let dbClient: DBClient;
+    let prisma: PrismaClient;
+    let scanner: Scanner;
 
     beforeAll(async () => {
-        // Clean database before all tests
-        await prisma.$queryRaw`TRUNCATE TABLE "Post" RESTART IDENTITY CASCADE`;
+        console.log('Test suite starting...');
     });
 
     beforeEach(async () => {
-        parser = new TransactionParser();
-        dbClient = new DBClient();
+        console.log('Creating Prisma client');
+        // Configure Prisma to use a new connection for each query
+        prisma = new PrismaClient({
+            log: ['query', 'error', 'warn'],
+            datasources: {
+                db: {
+                    url: process.env.DATABASE_URL + '?pgbouncer=true'
+                }
+            }
+        });
+        
+        try {
+            console.log('Clearing database...');
+            await prisma.$connect();
+            console.log('Database connection established');
+            
+            // Use individual queries instead of a transaction
+            await prisma.voteOption.deleteMany();
+            await prisma.voteQuestion.deleteMany();
+            await prisma.post.deleteMany();
+            console.log('Database cleanup completed');
+        } catch (error) {
+            console.error('Error during database cleanup:', error);
+            throw error;
+        }
+        
+        console.log('Creating scanner instance');
+        scanner = new Scanner();
+    });
+
+    afterEach(async () => {
+        console.log('Cleaning up Prisma client');
+        try {
+            await prisma.$disconnect();
+            console.log('Prisma client disconnected successfully');
+        } catch (error) {
+            console.error('Error disconnecting Prisma client:', error);
+        }
     });
 
     afterAll(async () => {
-        await prisma.$disconnect();
+        console.log('Test suite finished');
     });
 
-    test('should process and seed posts and votes', async () => {
-        const transactions = [
-            {
-                id: 'a043fbcdc79628136708f88fad1e33f367037aa3d1bb0bff4bfffe818ec4b598',
-                outputs: [{
-                    script: '6a4c8e7b226170706c69636174696f6e223a226c6f636b642e617070222c22706f73744964223a226d373367386269702d63656568336e307832222c2274616773223a5b2253706f727473225d7d',
-                    value: 0,
-                    metadata: {
-                        application: 'lockd.app',
-                        postId: 'm73g8bip-ceeh3n0x2',
-                        tags: ['Sports']
-                    }
-                }],
-                blockHeight: 123456,
-                blockTime: Math.floor(Date.now() / 1000),
-                metadata: {
-                    application: 'lockd.app',
-                    postId: 'm73g8bip-ceeh3n0x2',
-                    tags: ['Sports'],
-                    content: 'This is a sports-related post'
-                },
-                type: 'post',
-                voteOption: {
-                    questionId: 'm73g8bip-ceeh3n0x2',
-                    index: 0,
-                    content: 'Option 1'
-                }
+    test('should process a real transaction from GorillaPool', async () => {
+        console.log('Starting transaction processing test');
+        const txid = "a043fbcdc79628136708f88fad1e33f367037aa3d1bb0bff4bfffe818ec4b598";
+        
+        // Create transaction object with script
+        const metadata = {
+            app: "lockd.app",
+            type: "content",
+            postId: "m73g8bip",
+            content: { text: "test" },
+            tags: ["test"]
+        };
+        
+        // Format script for bmap
+        const hexData = Buffer.from(JSON.stringify(metadata)).toString('hex');
+        const script = `OP_FALSE OP_RETURN ${hexData}`; // Standard OP_RETURN format
+        console.log('Created script:', script);
+        
+        const realTx = {
+            tx: {
+                h: txid
             },
-            {
-                id: 'b154fbcdc79628136708f88fad1e33f367037aa3d1bb0bff4bfffe818ec4b599',
-                outputs: [{
-                    script: '6a4c8e7b226170706c69636174696f6e223a226c6f636b642e617070222c22706f73744964223a226e38396738626970222c2274616773223a5b22546563686e6f6c6f6779225d7d',
-                    value: 0,
-                    metadata: {
-                        application: 'lockd.app',
-                        postId: 'n89g8bip',
-                        tags: ['Technology']
-                    }
-                }],
-                blockHeight: 123457,
-                blockTime: Math.floor(Date.now() / 1000),
-                metadata: {
-                    application: 'lockd.app',
-                    postId: 'n89g8bip',
-                    tags: ['Technology'],
-                    content: 'This is a technology-related post'
-                },
-                type: 'post',
-                voteOption: {
-                    questionId: 'n89g8bip',
-                    index: 0,
-                    content: 'Yes'
+            in: [],  // BOB format requires 'in' array
+            out: [{
+                i: 0,  // Output index
+                s: script,
+                e: {   // BOB format extension data
+                    v: 0,  // Value in satoshis
+                    a: "1HrpGiZxAh9QMfuqM6PfqEzttPP1SFHhKx"  // Example address
                 }
+            }],
+            blk: {
+                i: 883850,
+                t: 1739458216
             }
-        ];
+        };
 
-        // Process and save each transaction
-        for (const tx of transactions) {
-            const parsedTx = await parser.parseTransaction(tx);
-            if (!parsedTx) {
-                throw new Error('Failed to parse transaction');
-            }
+        // Use the parser directly instead of the scanner
+        const parser = new TransactionParser();
+        const parsedTransaction = await parser.parseTransaction(realTx);
+        console.log('Parsed transaction:', parsedTransaction);
 
-            // Save post
-            await prisma.post.create({
-                data: {
-                    postId: parsedTx.postId,
-                    type: parsedTx.type || 'content',
-                    content: tx.metadata.content || '',
-                    blockTime: new Date(tx.blockTime * 1000),
-                    sequence: parsedTx.sequence || 0,
-                    parentSequence: parsedTx.parentSequence || 0
-                }
-            });
-
-            // Create vote question
-            const voteQuestion = await prisma.voteQuestion.create({
-                data: {
-                    postId: parsedTx.postId,
-                    totalOptions: 1,
-                    question: 'Do you agree?',
-                    optionsHash: ''
-                }
-            });
-
-            // Create vote option
-            await prisma.voteOption.create({
-                data: {
-                    postId: parsedTx.postId,
-                    voteQuestionId: voteQuestion.id,
-                    index: tx.voteOption.index,
-                    content: tx.voteOption.content
-                }
-            });
-
-            // Verify database state
-            const post = await prisma.post.findUnique({
-                where: {
-                    postId: parsedTx.postId
-                }
-            });
-            expect(post).toBeTruthy();
-            expect(post?.postId).toBe(parsedTx.postId);
-            expect(post?.type).toBe(parsedTx.type || 'content');
-            expect(post?.content).toBe(tx.metadata.content);
-
-            const voteQuestionResult = await prisma.voteQuestion.findUnique({
-                where: {
-                    postId: parsedTx.postId
-                }
-            });
-            expect(voteQuestionResult).toBeTruthy();
-            expect(voteQuestionResult?.postId).toBe(parsedTx.postId);
-
-            const voteOptions = await prisma.voteOption.findFirst({
-                where: {
-                    postId: parsedTx.postId
-                }
-            });
-            expect(voteOptions).toBeTruthy();
-            expect(voteOptions?.postId).toBe(parsedTx.postId);
-            expect(voteOptions?.voteQuestionId).toBe(voteQuestion.id);
-            expect(voteOptions?.index).toBe(tx.voteOption.index);
-            expect(voteOptions?.content).toBe(tx.voteOption.content);
+        // Process the transaction
+        if (parsedTransaction) {
+            const dbClient = new DBClient();
+            await dbClient.processTransaction(parsedTransaction);
+            await dbClient.disconnect();
+        } else {
+            console.error('Failed to parse transaction');
         }
+
+        // Wait for processing
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Verify database state
+        const post = await prisma.post.findUnique({
+            where: {
+                postId: metadata.postId
+            }
+        });
+        console.log('Found post:', post);
+
+        expect(post).toBeTruthy();
+        expect(post?.type).toBe('content');
+        expect((post?.content as any).text).toBe('test');
     });
 });

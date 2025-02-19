@@ -37,6 +37,13 @@ interface Post {
     parentSequence: number;
 }
 
+interface ProcessedTransaction {
+    id: string;
+    txid: string;
+    blockHeight: number;
+    blockTime: Date;
+}
+
 export class DBClient {
     private prisma: PrismaClient;
     private static instanceCount = 0;
@@ -90,82 +97,74 @@ export class DBClient {
         }
     }
 
-    async saveTransaction(parsedTx: ParsedTransaction): Promise<void> {
+    async processTransaction(tx: ParsedTransaction): Promise<void> {
         try {
-            console.log(`[DBClient ${this.instanceId}] Starting saveTransaction for ${parsedTx.txid}`);
-            
-            console.log(`[DBClient ${this.instanceId}] Beginning database transaction`);
-            
-            // Use Prisma transaction
-            await this.prisma.$transaction(async (tx) => {
-                console.log(`[DBClient ${this.instanceId}] Creating post record`);
-                
-                // Create post
-                const post = await tx.post.create({
-                    data: {
-                        postId: parsedTx.postId,
-                        type: parsedTx.type,
-                        content: parsedTx.content,
-                        blockTime: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
-                        sequence: parsedTx.sequence,
-                        parentSequence: parsedTx.parentSequence
-                    }
-                });
-
-                if (parsedTx.vote) {
-                    console.log(`[DBClient ${this.instanceId}] Creating vote question record`);
-                    
-                    // Create vote question
-                    const voteQuestion = await tx.voteQuestion.create({
+            switch (tx.type) {
+                case 'content':
+                    await this.prisma.post.create({
                         data: {
-                            postId: parsedTx.postId,
-                            question: parsedTx.content.question || '',
-                            totalOptions: parsedTx.vote.totalOptions,
-                            optionsHash: parsedTx.vote.optionsHash
+                            postId: tx.metadata.postId,
+                            type: tx.type,
+                            content: tx.metadata.content,
+                            blockTime: tx.blockTime ? new Date(tx.blockTime * 1000) : new Date(),
+                            sequence: tx.metadata.sequence || 0,
+                            parentSequence: tx.metadata.parentSequence || 0
+                        }
+                    });
+                    break;
+                case 'question':
+                    await this.prisma.voteQuestion.create({
+                        data: {
+                            postId: tx.metadata.postId,
+                            question: tx.metadata.content,
+                            totalOptions: 0,
+                            optionsHash: '',
+                            post: {
+                                connect: {
+                                    postId: tx.metadata.postId
+                                }
+                            }
+                        }
+                    });
+                    break;
+                case 'vote':
+                    // First find the question
+                    const question = await this.prisma.voteQuestion.findUnique({
+                        where: {
+                            postId: tx.metadata.postId
                         }
                     });
 
-                    // Create vote options
-                    for (const option of parsedTx.vote.options) {
-                        console.log(`[DBClient ${this.instanceId}] Creating vote option record`);
-                        
-                        const voteOption = await tx.voteOption.create({
-                            data: {
-                                postId: parsedTx.postId,
-                                voteQuestionId: voteQuestion.id,
-                                index: option.index,
-                                content: ''
-                            }
-                        });
-
-                        console.log(`[DBClient ${this.instanceId}] Creating lock like record`);
-                        
-                        // Create lock like
-                        await tx.lockLike.create({
-                            data: {
-                                txid: parsedTx.txid,
-                                post: {
-                                    connect: {
-                                        id: post.id
-                                    }
-                                },
-                                voteOption: {
-                                    connect: {
-                                        id: voteOption.id
-                                    }
-                                },
-                                lockAmount: option.lockAmount,
-                                lockDuration: option.lockDuration,
-                                isProcessed: false
-                            }
-                        });
+                    if (!question) {
+                        throw new Error('Vote question not found');
                     }
-                }
-            });
-            
-            console.log(`[DBClient ${this.instanceId}] Successfully saved transaction ${parsedTx.txid}`);
+
+                    await this.prisma.voteOption.create({
+                        data: {
+                            postId: tx.metadata.postId,
+                            content: tx.metadata.content,
+                            index: 0,
+                            post: {
+                                connect: {
+                                    postId: tx.metadata.postId
+                                }
+                            },
+                            voteQuestion: {
+                                connect: {
+                                    id: question.id
+                                }
+                            }
+                        }
+                    });
+                    break;
+                default:
+                    console.warn('Unknown transaction type', { type: tx.type });
+            }
         } catch (error) {
-            console.error(`[DBClient ${this.instanceId}] Error in saveTransaction:`, error);
+            console.error('Error processing transaction', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                txid: tx.txid
+            });
             throw error;
         }
     }
@@ -190,7 +189,7 @@ export class DBClient {
                     postId: postId
                 },
                 data: {
-                    content: content
+                    content: { text: content }
                 }
             });
         } catch (error) {

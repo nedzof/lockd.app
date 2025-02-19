@@ -1,26 +1,59 @@
 // src/services/types.ts
 import { JungleBusTransaction } from "@gorillapool/js-junglebus";
 
+export interface BmapTransaction {
+    tx: {
+        h: string;  // txid
+    };
+    in?: {
+        i: number;  // input index
+        e: {
+            h: string;  // previous txid
+            i: number;  // previous output index
+            a: string;  // address
+        };
+    }[];
+    out?: {
+        i?: number;  // output index
+        s: string;  // script
+        e?: {
+            v: number;  // value
+            i?: number;  // index (optional)
+            a: string;  // address
+        };
+    }[];
+    blk?: {
+        i: number;  // block height
+        t: number;  // block time
+    };
+}
+
 export interface Output {
   script: string;
   value: number;
   metadata?: Record<string, any>;
 }
 
-export interface Transaction {
-  id?: string;
-  outputs: Output[];
-  blockHeight?: number;
-  blockTime?: number;
-  metadata?: Record<string, any>;
-  type?: string;
-  voteOption?: Record<string, any>;
+export interface Transaction extends BmapTransaction {
+    metadata?: {
+        application: string;
+        postId: string;
+        tags: string[];
+        content: string;
+    };
+    type?: string;
+    voteOption?: {
+        questionId: string;
+        index: number;
+        content: string;
+    };
 }
+
+export type RawTransaction = Transaction;
 
 export interface ParsedContent {
   type: string;
   data: any;
-  encoding?: string;
 }
 
 export interface VoteOption {
@@ -38,11 +71,7 @@ export interface VoteQuestion {
 export interface Vote {
   optionsHash: string;
   totalOptions: number;
-  options: Array<{
-    index: number;
-    lockAmount: number;
-    lockDuration: number;
-  }>;
+  options: VoteOption[];
 }
 
 export interface LockLike {
@@ -52,33 +81,23 @@ export interface LockLike {
 
 export interface ParsedTransaction {
   txid: string;
-  protocol: string;
-  postId: string;
   type: string;
-  contents: ParsedContent[];
-  content: Record<string, any>;
   blockHeight?: number;
   blockTime?: number;
-  sequence: number;
-  parentSequence: number;
-  vote?: Vote;
-  voteQuestion?: VoteQuestion;
-  voteOption?: VoteOption;
-  lockLike?: LockLike;
+  metadata: any;
 }
 
 export interface ParsedTransactionForProcessing {
   id: string;
   protocol: string;
   type: string;
-  postId: string;
+  content: string;
   sequence: number;
   parentSequence: number;
-  blockHeight: number;
-  blockTime: Date;
-  contents: ParsedContent[];
-  vote?: any;
-  tags: string[];
+  vote?: Vote;
+  voteQuestion?: VoteQuestion;
+  voteOption?: VoteOption;
+  lockLike?: LockLike;
 }
 
 export interface ProcessedTransaction {
