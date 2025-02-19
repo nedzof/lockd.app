@@ -1,51 +1,21 @@
-import { PrismaClient, Prisma } from '@prisma/client';
-import { ParsedTransaction } from './types';
+import { PrismaClient } from '@prisma/client';
+import { ParsedTransaction, Post, DbError } from '../shared/types';
 import { logger } from '../utils/logger';
 
-interface VoteQuestion {
-    id: string;
-    postId: string;
-    question: string;
-    totalOptions: number;
-    optionsHash: string;
-}
-
-interface VoteOption {
-    id: string;
-    postId: string;
-    voteQuestionId: string;
-    index: number;
-    content: string;
-}
-
-interface LockLike {
-    id: string;
+interface ParsedTransaction {
     txid: string;
-    postId: string;
-    voteOptionId: string;
-    lockAmount: number;
-    lockDuration: number;
-    isProcessed: boolean;
-}
-
-interface Post {
-    id: string;
-    postId: string;
     type: string;
-    content: Prisma.JsonValue;
-    blockTime: Date;
-    sequence: number;
-    parentSequence: number;
+    blockHeight?: number;
+    blockTime?: number;
+    senderAddress?: string;
+    metadata: {
+        postId: string;
+        content: string;
+        protocol?: string;
+    };
 }
 
-interface ProcessedTransaction {
-    id: string;
-    txid: string;
-    blockHeight: number;
-    blockTime: Date;
-}
-
-export class DBClient {
+export class DbClient {
     private prisma: PrismaClient;
     private static instanceCount = 0;
     private instanceId: number;
@@ -53,9 +23,9 @@ export class DBClient {
     private readonly RETRY_DELAY = 1000; // 1 second
 
     constructor() {
-        DBClient.instanceCount++;
-        this.instanceId = DBClient.instanceCount;
-        logger.info(`Creating new DBClient instance`, { instanceId: this.instanceId });
+        DbClient.instanceCount++;
+        this.instanceId = DbClient.instanceCount;
+        logger.info(`Creating new DbClient instance`, { instanceId: this.instanceId });
 
         this.prisma = new PrismaClient({
             log: [
@@ -74,6 +44,35 @@ export class DBClient {
         });
 
         logger.info(`PrismaClient initialized`, { instanceId: this.instanceId });
+    }
+
+    private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
+        let lastError: Error | null = null;
+        for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
+            try {
+                return await operation();
+            } catch (error) {
+                lastError = error as Error;
+                if (this.shouldRetry(error)) {
+                    logger.warn('Database operation failed, retrying', {
+                        attempt,
+                        error: error instanceof Error ? error.message : 'Unknown error'
+                    });
+                    await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY * attempt));
+                    continue;
+                }
+                throw error;
+            }
+        }
+        throw lastError || new Error('Operation failed after retries');
+    }
+
+    private shouldRetry(error: unknown): boolean {
+        const dbError = error as DbError;
+        // Retry on connection errors or deadlocks
+        return dbError.code === '40001' || // serialization failure
+               dbError.code === '40P01' || // deadlock
+               dbError.code === '57P01';   // connection lost
     }
 
     async connect() {
@@ -200,138 +199,56 @@ export class DBClient {
     }
 
     async saveTransaction(transaction: ParsedTransaction): Promise<void> {
-        const { txid, type, blockHeight, blockTime, metadata, senderAddress } = transaction;
-
-        try {
-            // First check if we've already processed this transaction
-            const existing = await this.prisma.processedTransaction.findUnique({
-                where: { txid }
-            });
-
-            if (existing) {
-                logger.info('Transaction already processed, skipping', {
-                    txid,
-                    blockHeight,
-                    instanceId: this.instanceId
-                });
-                return;
-            }
-
-            logger.info('Starting transaction save', {
-                txid,
-                type,
-                blockHeight,
-                instanceId: this.instanceId
-            });
-
-            await this.prisma.$transaction(async (prisma) => {
-                // Create the processed transaction record
-                await prisma.processedTransaction.create({
-                    data: {
-                        txid,
-                        blockHeight,
-                        blockTime: blockTime ? new Date(blockTime * 1000) : new Date()
+        await this.withRetry(async () => {
+            try {
+                // Create or update post
+                await this.prisma.post.upsert({
+                    where: {
+                        id: transaction.metadata.postId
+                    },
+                    create: {
+                        id: transaction.metadata.postId,
+                        content: transaction.metadata.content,
+                        createdAt: transaction.blockTime ? new Date(transaction.blockTime * 1000) : new Date(),
+                        createdBy: transaction.senderAddress || 'unknown'
+                    },
+                    update: {
+                        content: transaction.metadata.content,
+                        createdAt: transaction.blockTime ? new Date(transaction.blockTime * 1000) : new Date(),
+                        createdBy: transaction.senderAddress || 'unknown'
                     }
                 });
 
-                logger.debug('Created processed transaction record', { txid });
-
-                // Create the post
-                const post = await prisma.post.create({
-                    data: {
-                        postId: metadata.postId,
-                        type: type,
-                        protocol: 'MAP',
-                        content: metadata.content,
-                        senderAddress: senderAddress,
-                        blockTime: blockTime ? new Date(blockTime * 1000) : new Date(),
-                        sequence: metadata.sequence || 0,
-                        parentSequence: metadata.parentSequence || 0
-                    }
-                });
-
-                logger.debug('Created post record', {
-                    txid,
-                    postId: metadata.postId,
-                    type
-                });
-
-                // Handle specific post types
-                switch (type) {
-                    case 'question':
-                        await prisma.voteQuestion.create({
-                            data: {
-                                postId: metadata.postId,
-                                question: metadata.content as string,
-                                totalOptions: 0,
-                                optionsHash: '',
-                                post: {
-                                    connect: {
-                                        postId: metadata.postId
-                                    }
-                                }
-                            }
-                        });
-                        logger.debug('Created vote question', {
-                            txid,
-                            postId: metadata.postId
-                        });
-                        break;
-
-                    case 'vote':
-                        const question = await prisma.voteQuestion.findUnique({
-                            where: {
-                                postId: metadata.postId
-                            }
-                        });
-
-                        if (!question) {
-                            throw new Error(`Vote question not found for postId: ${metadata.postId}`);
+                // Handle lock/unlock actions
+                if (transaction.type === 'lock') {
+                    await this.prisma.lockLike.create({
+                        data: {
+                            postId: transaction.metadata.postId,
+                            txid: transaction.txid,
+                            createdAt: transaction.blockTime ? new Date(transaction.blockTime * 1000) : new Date(),
+                            createdBy: transaction.senderAddress || 'unknown'
                         }
-
-                        await prisma.voteOption.create({
-                            data: {
-                                postId: metadata.postId,
-                                content: metadata.content as string,
-                                index: 0,
-                                post: {
-                                    connect: {
-                                        postId: metadata.postId
-                                    }
-                                },
-                                voteQuestion: {
-                                    connect: {
-                                        id: question.id
-                                    }
-                                }
+                    });
+                } else if (transaction.type === 'unlock') {
+                    await this.prisma.lockLike.delete({
+                        where: {
+                            postId_createdBy: {
+                                postId: transaction.metadata.postId,
+                                createdBy: transaction.senderAddress || 'unknown'
                             }
-                        });
-                        logger.debug('Created vote option', {
-                            txid,
-                            postId: metadata.postId,
-                            questionId: question.id
-                        });
-                        break;
+                        }
+                    });
                 }
-            });
 
-            logger.info('Successfully saved transaction', {
-                txid,
-                type,
-                blockHeight,
-                instanceId: this.instanceId
-            });
-        } catch (error) {
-            logger.error('Error saving transaction', {
-                txid,
-                type,
-                blockHeight,
-                instanceId: this.instanceId,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined
-            });
-            throw error;
-        }
+                logger.debug('Transaction saved successfully', { txid: transaction.txid });
+            } catch (error) {
+                if ((error as DbError).code === '23505') { // Unique violation
+                    logger.warn('Duplicate transaction detected', { txid: transaction.txid });
+                    return; // Skip duplicates silently
+                }
+                throw error;
+            }
+        });
     }
 
     async getPost(postId: string): Promise<Post | null> {

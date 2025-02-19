@@ -1,224 +1,254 @@
 import { JungleBusClient, ControlMessageStatusCode } from '@gorillapool/js-junglebus';
+import { DbClient } from './dbClient';
 import { TransactionParser } from './parser';
-import { DBClient } from './dbClient';
+import { Transaction, JungleBusTransaction, ParsedTransaction, ScannerEvents } from './types';
 import { logger } from '../utils/logger';
+import { fileURLToPath } from 'url';
 import { EventEmitter } from 'events';
-
-// Log import verification
-console.log('=== Import Verification ===');
-console.log('JungleBusClient imported:', !!JungleBusClient);
-console.log('ControlMessageStatusCode imported:', !!ControlMessageStatusCode);
-
-interface Block {
-    height: number;
-    timestamp: string;
-    tx: any[];
-}
-
-interface Transaction {
-    tx: {
-        h: string;
-        raw: string;
-        blk?: {
-            i: number;
-            t: number;
-        };
-    };
-}
-
-interface ParsedTransaction {
-    txid: string;
-    type: string;
-    blockHeight?: number;
-    blockTime?: number;
-    senderAddress?: string;
-    metadata: {
-        postId: string;
-        content: string;
-        protocol?: string;
-    };
-}
+import fetch from 'node-fetch';
 
 export class Scanner extends EventEmitter {
-    private jungleBus: JungleBusClient;
+    private jungleBus: JungleBusClient | null = null;
+    private dbClient: DbClient;
     private parser: TransactionParser;
-    private dbClient: DBClient;
-    private readonly BATCH_SIZE = 50;
+    private isConnected: boolean = false;
+    private retryCount: number = 0;
+    private subscription: any = null;
     private readonly MAX_RETRIES = 3;
-    private transactionBatch: any[] = [];
+    private readonly RETRY_DELAY = 1000; // 1 second
+    private readonly START_BLOCK = 882000;
+    private readonly API_BASE_URL = 'https://junglebus.gorillapool.io/v1';
+    private readonly SUBSCRIPTION_ID = '75410af0011a938a019077a12a3fc2c8d587fb125b0a43de6b2298f6638edebc';
 
-    constructor(
-        jungleBus: JungleBusClient,
-        parser: TransactionParser,
-        dbClient: DBClient
-    ) {
+    constructor() {
         super();
-        this.jungleBus = jungleBus;
-        this.parser = parser;
-        this.dbClient = dbClient;
+        this.dbClient = new DbClient();
+        this.parser = new TransactionParser();
 
-        // Set up error handling for the emitter
+        // Set up error handling for uncaught events
         this.on('error', (error) => {
-            logger.error('Scanner error:', {
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined
+            logger.error('Unhandled scanner error', {
+                error: error instanceof Error ? error.message : 'Unknown error'
             });
+        });
+
+        logger.info('Scanner initialized', {
+            startBlock: this.START_BLOCK,
+            maxRetries: this.MAX_RETRIES,
+            retryDelay: this.RETRY_DELAY,
+            subscriptionId: this.SUBSCRIPTION_ID
+        });
+    }
+
+    private createJungleBusClient(): void {
+        logger.debug('Creating new JungleBus client');
+        
+        this.jungleBus = new JungleBusClient('junglebus.gorillapool.io', {
+            useSSL: true,
+            onConnected: (ctx) => {
+                logger.info('Connected to JungleBus', { context: ctx });
+                this.isConnected = true;
+                this.retryCount = 0;
+            },
+            onConnecting: (ctx) => {
+                logger.info('Connecting to JungleBus', { context: ctx });
+            },
+            onDisconnected: (ctx) => {
+                logger.warn('Disconnected from JungleBus', { context: ctx });
+                this.isConnected = false;
+            },
+            onError: (error) => {
+                logger.error('JungleBus connection error', {
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    context: error
+                });
+                this.handleError(error);
+            }
+        });
+
+        logger.debug('JungleBus client created', {
+            clientState: this.jungleBus ? 'initialized' : 'failed'
         });
     }
 
     private async handleTransaction(tx: Transaction): Promise<void> {
         try {
+            // Emit raw transaction
+            this.emit('transaction', tx);
+
+            // Parse transaction
             const parsedTx = await this.parser.parseTransaction(tx);
-            this.emit('transaction', parsedTx);
-            
-            this.transactionBatch.push(parsedTx);
-            if (this.transactionBatch.length >= this.BATCH_SIZE) {
-                await this.processBatch();
+            if (parsedTx) {
+                // Emit parsed transaction
+                this.emit('transaction:parsed', parsedTx);
+
+                // Save to database with retry logic
+                await this.dbClient.saveTransaction(parsedTx).catch(async (error) => {
+                    if (error.code === '23505') { // Unique violation
+                        logger.warn('Duplicate transaction detected', { txid: parsedTx.txid });
+                    } else {
+                        throw error;
+                    }
+                });
             }
         } catch (error) {
-            this.emit('error', { tx, error });
-            logger.error('Error handling transaction:', {
-                txid: tx.tx?.h,
+            this.emit('transaction:error', { tx, error: error as Error });
+            logger.error('Error processing transaction', {
+                txid: tx.transaction?.hash || tx.id || 'unknown',
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
         }
     }
 
-    private async processBatch(): Promise<void> {
-        if (this.transactionBatch.length === 0) return;
+    private async handleError(error: unknown): Promise<void> {
+        logger.debug('Handling error', {
+            retryCount: this.retryCount,
+            maxRetries: this.MAX_RETRIES,
+            isConnected: this.isConnected,
+            hasSubscription: !!this.subscription
+        });
 
-        let retries = 0;
-        while (retries < this.MAX_RETRIES) {
-            try {
-                await this.dbClient.insertTransactions(this.transactionBatch);
-                this.transactionBatch = [];
-                break;
-            } catch (error) {
-                retries++;
-                if (retries === this.MAX_RETRIES) {
-                    this.emit('error', { 
-                        type: 'BATCH_PROCESSING_FAILED', 
-                        batchSize: this.transactionBatch.length,
-                        error 
-                    });
-                    this.transactionBatch = []; // Clear failed batch
-                }
-                await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+        this.emit('scanner:error', error instanceof Error ? error : new Error('Unknown error'));
+
+        if (this.retryCount < this.MAX_RETRIES) {
+            this.retryCount++;
+            logger.info('Retrying connection', { attempt: this.retryCount });
+            await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY * this.retryCount));
+            await this.start();
+        } else {
+            throw new Error('Max retries exceeded');
+        }
+    }
+
+    private async subscribe(): Promise<void> {
+        try {
+            if (!this.jungleBus) {
+                throw new Error('JungleBus client not initialized');
             }
+
+            logger.debug('Attempting to subscribe', {
+                subscriptionId: this.SUBSCRIPTION_ID,
+                startBlock: this.START_BLOCK
+            });
+
+            const onStatus = (message: any) => {
+                if (message.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
+                    logger.info('Block processing complete', { block: message.block });
+                    this.emit('block:complete', message.block);
+                } else if (message.statusCode === ControlMessageStatusCode.WAITING) {
+                    logger.info('Waiting for new block', { message });
+                } else if (message.statusCode === ControlMessageStatusCode.REORG) {
+                    logger.warn('Reorg triggered', { message });
+                } else if (message.statusCode === ControlMessageStatusCode.ERROR) {
+                    logger.error('Status error', { message });
+                    this.handleError(new Error(message.message || 'Unknown status error'));
+                }
+            };
+
+            // Store subscription for cleanup
+            const subscription = await this.jungleBus.Subscribe(
+                this.SUBSCRIPTION_ID,
+                this.START_BLOCK,
+                (tx: Transaction) => this.handleTransaction(tx),
+                onStatus,
+                (error: Error) => this.handleError(error)
+            );
+
+            this.subscription = subscription;
+
+            logger.info('Subscribed to JungleBus', {
+                subscriptionId: this.SUBSCRIPTION_ID,
+                fromBlock: this.START_BLOCK
+            });
+        } catch (error) {
+            logger.error('Failed to subscribe', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            throw error;
         }
     }
 
     public async start(): Promise<void> {
-        logger.info('Starting scanner with config', {
-            batchSize: this.BATCH_SIZE,
-            maxRetries: this.MAX_RETRIES,
-            startBlock: 882000
-        });
-
         try {
-            const onPublish = async (tx: Transaction) => {
-                await this.handleTransaction(tx);
-            };
+            logger.debug('Starting scanner', {
+                isConnected: this.isConnected,
+                hasClient: !!this.jungleBus,
+                hasSubscription: !!this.subscription
+            });
 
-            const onStatus = (message: any) => {
-                if (message.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
-                    this.emit('blockDone', message.block);
-                    this.processBatch().catch(error => this.emit('error', error));
-                } else if (message.statusCode === ControlMessageStatusCode.WAITING) {
-                    this.emit('waiting', message);
-                } else if (message.statusCode === ControlMessageStatusCode.REORG) {
-                    this.emit('reorg', message);
-                } else if (message.statusCode === ControlMessageStatusCode.ERROR) {
-                    this.emit('error', message);
-                }
-            };
-
-            const onError = (error: Error) => {
-                this.emit('error', error);
-            };
-
-            const onMempool = async (tx: Transaction) => {
-                await this.handleTransaction(tx);
-            };
-
-            await this.jungleBus.Subscribe(
-                "2177e79197422e0d162a685bb6fcc77c67f55a1920869d7c7685b0642043eb9c",
-                882000,
-                onPublish,
-                onStatus,
-                onError,
-                onMempool
-            );
+            // Ensure clean state before starting
+            await this.stop();
+            
+            // Create new JungleBus client
+            this.createJungleBusClient();
+            
+            await this.subscribe();
         } catch (error) {
-            this.emit('error', error);
+            logger.error('Failed to start scanner', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
             throw error;
         }
     }
 
     public async stop(): Promise<void> {
         try {
-            await this.processBatch(); // Process any remaining transactions
-            // Additional cleanup if needed
+            logger.debug('Stopping scanner', {
+                isConnected: this.isConnected,
+                hasClient: !!this.jungleBus,
+                hasSubscription: !!this.subscription
+            });
+
+            if (this.jungleBus) {
+                try {
+                    await this.jungleBus.Disconnect();
+                    logger.debug('JungleBus disconnected');
+                } catch (error) {
+                    logger.error('Error disconnecting from JungleBus', {
+                        error: error instanceof Error ? error.message : 'Unknown error'
+                    });
+                }
+                this.jungleBus = null;
+                this.subscription = null;
+            }
+            if (this.isConnected) {
+                await this.dbClient.disconnect();
+                this.isConnected = false;
+                logger.info('Scanner stopped');
+            }
         } catch (error) {
-            this.emit('error', error);
+            logger.error('Error stopping scanner', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
             throw error;
         }
     }
 }
 
-// Only start the scanner if this file is run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-    process.on('unhandledRejection', (reason, promise) => {
-        console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+// Check if this file is being run directly
+const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
+if (process.env.NODE_ENV !== 'test' && isMainModule) {
+    const scanner = new Scanner();
+    
+    // Handle cleanup on exit
+    process.on('SIGINT', async () => {
+        logger.info('Received SIGINT. Cleaning up...');
+        await scanner.stop();
+        process.exit(0);
     });
 
-    process.on('uncaughtException', (error) => {
-        console.error('Uncaught Exception:', error);
+    process.on('SIGTERM', async () => {
+        logger.info('Received SIGTERM. Cleaning up...');
+        await scanner.stop();
+        process.exit(0);
     });
 
-    try {
-        console.log('=== Creating JungleBus Client ===');
-        const jungleBus = new JungleBusClient("junglebus.gorillapool.io", {
-            useSSL: true,
-            onConnected(ctx) {
-                console.log("CONNECTED", ctx);
-            },
-            onConnecting(ctx) {
-                console.log("CONNECTING", ctx);
-            },
-            onDisconnected(ctx) {
-                console.log("DISCONNECTED", ctx);
-            },
-            onError(ctx) {
-                console.error("ERROR", ctx);
-            },
-        });
-
-        console.log('=== JungleBus Client Created ===');
-        console.log('Client:', {
-            type: typeof jungleBus,
-            constructor: jungleBus.constructor.name,
-            methods: Object.getOwnPropertyNames(Object.getPrototypeOf(jungleBus))
-        });
-
-        const parser = new TransactionParser();
-        const dbClient = new DBClient();
-
-        const scanner = new Scanner(jungleBus, parser, dbClient);
-        console.log('Scanner instance created');
-        
-        scanner.start().catch(error => {
-            console.error('Error starting scanner:', error);
-            process.exit(1);
-        });
-    } catch (error) {
-        console.error('=== Initialization Error ===');
-        console.error('Error details:', {
-            name: error.name,
-            message: error.message,
-            stack: error.stack,
-            constructor: error.constructor?.name
+    scanner.start().catch(error => {
+        logger.error('Scanner failed to start', {
+            error: error instanceof Error ? error.message : 'Unknown error'
         });
         process.exit(1);
-    }
+    });
 }

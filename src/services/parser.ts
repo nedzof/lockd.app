@@ -1,111 +1,74 @@
-import { parseTx } from 'bmapjs';
+import { BMAP, TransformTx } from 'bmapjs';
+import { Transaction, ParsedTransaction } from './types';
 import { logger } from '../utils/logger';
 
-interface Transaction {
-    tx: {
-        h: string;
-        raw: string;
-        blk?: {
-            i: number;
-            t: number;
-        };
-    };
-}
-
-interface ParsedTransaction {
-    txid: string;
-    type: string;
-    blockHeight?: number;
-    blockTime?: number;
-    senderAddress?: string;
-    metadata: {
-        postId: string;
-        content: string;
-        protocol?: string;
-    };
-}
-
 export class TransactionParser {
+    private bmap: BMAP;
+
     constructor() {
-        // Initialize any parser-specific configuration
+        this.bmap = new BMAP();
+        const bmapExports = Object.keys(BMAP);
+        logger.info('TransactionParser initialized', {
+            bmapAvailable: !!this.bmap,
+            bmapExports,
+            bmapVersion: this.bmap.version || 'unknown'
+        });
     }
 
     public async parseTransaction(tx: Transaction): Promise<ParsedTransaction | null> {
         try {
-            // Use BMAP to parse the transaction
-            const bmapTx = await parseTx(tx.tx.raw);
-            
-            // Check if this is a relevant transaction for our app
-            if (!this.isRelevantTransaction(bmapTx)) {
+            const txid = tx.transaction?.hash || tx.id;
+            if (!txid) {
+                logger.warn('Transaction has no id', { tx: JSON.stringify(tx) });
                 return null;
             }
 
-            // Extract the relevant data using BMAP parsed structure
+            // Extract basic transaction data
             const parsedTx: ParsedTransaction = {
-                txid: tx.tx.h,
-                type: this.determineTransactionType(bmapTx),
-                blockHeight: tx.tx.blk?.i,
-                blockTime: tx.tx.blk?.t,
-                senderAddress: bmapTx.in[0]?.e?.a, // First input's address
-                metadata: {
-                    postId: this.extractPostId(bmapTx),
-                    content: this.extractContent(bmapTx),
-                    protocol: bmapTx.MAP?.app || 'unknown'
-                }
+                txid,
+                type: 'unknown',
+                blockHeight: tx.block?.height,
+                timestamp: tx.block?.timestamp,
+                data: {}
             };
 
-            logger.debug('Successfully parsed transaction', {
-                txid: parsedTx.txid,
-                type: parsedTx.type
-            });
+            // Try to parse outputs for B protocol data
+            if (tx.transaction?.outputs) {
+                for (const output of tx.transaction.outputs) {
+                    try {
+                        const bData = await this.bmap.transformTx({
+                            tx: {
+                                h: txid,
+                                out: [{
+                                    s: output.outputScript,
+                                    i: 0  // Index doesn't matter for our purposes
+                                }]
+                            }
+                        });
+
+                        if (bData && bData.length > 0) {
+                            // Found B protocol data
+                            parsedTx.type = 'B';
+                            parsedTx.data = bData[0];
+                            break;
+                        }
+                    } catch (error) {
+                        // Continue to next output if this one fails
+                        logger.debug('Failed to parse output script', {
+                            txid,
+                            error: error instanceof Error ? error.message : 'Unknown error'
+                        });
+                    }
+                }
+            }
 
             return parsedTx;
         } catch (error) {
             logger.error('Failed to parse transaction', {
-                txid: tx.tx.h,
                 error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined
+                tx: JSON.stringify(tx)
             });
-            throw error;
+            return null;
         }
-    }
-
-    private isRelevantTransaction(bmapTx: any): boolean {
-        // Check if this transaction is relevant for our application
-        // For example, check if it uses our protocol or has specific OP_RETURN data
-        return bmapTx.MAP?.app === 'lockd' || 
-               bmapTx.out.some((output: any) => 
-                   output.s?.includes('lockd') || 
-                   output.s?.includes('LOCK')
-               );
-    }
-
-    private determineTransactionType(bmapTx: any): string {
-        // Determine the type of transaction based on the BMAP data
-        if (bmapTx.out.some((output: any) => output.s?.includes('LOCK'))) {
-            return 'lock';
-        }
-        if (bmapTx.out.some((output: any) => output.s?.includes('UNLOCK'))) {
-            return 'unlock';
-        }
-        return 'unknown';
-    }
-
-    private extractPostId(bmapTx: any): string {
-        // Extract post ID from the transaction
-        // This is application-specific logic
-        const postOutput = bmapTx.out.find((output: any) => 
-            output.s?.includes('postId=')
-        );
-        return postOutput?.s?.split('postId=')[1] || '';
-    }
-
-    private extractContent(bmapTx: any): string {
-        // Extract content from the transaction
-        // This is application-specific logic
-        const contentOutput = bmapTx.out.find((output: any) => 
-            output.s?.includes('content=')
-        );
-        return contentOutput?.s?.split('content=')[1] || '';
     }
 }

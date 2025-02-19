@@ -1,56 +1,13 @@
 // src/services/types.ts
 import { JungleBusTransaction } from "@gorillapool/js-junglebus";
-
-export interface BmapTransaction {
-    tx: {
-        h: string;  // txid
-    };
-    in?: {
-        i: number;  // input index
-        e: {
-            h: string;  // previous txid
-            i: number;  // previous output index
-            a: string;  // address
-        };
-    }[];
-    out?: {
-        i?: number;  // output index
-        s: string;  // script
-        e?: {
-            v: number;  // value
-            i?: number;  // index (optional)
-            a: string;  // address
-        };
-    }[];
-    blk?: {
-        i: number;  // block height
-        t: number;  // block time
-    };
-}
+import { Prisma } from "@prisma/client";
+import { JsonValue } from "@prisma/client/runtime/library";
 
 export interface Output {
   script: string;
   value: number;
   metadata?: Record<string, any>;
 }
-
-export interface Transaction extends BmapTransaction {
-    metadata?: {
-        application?: string;
-        postId: string;
-        tags?: string[];
-        content: string;
-        type: string;
-    };
-    type?: string;
-    voteOption?: {
-        questionId: string;
-        index: number;
-        content: string;
-    };
-}
-
-export type RawTransaction = Transaction;
 
 export interface ParsedContent {
   type: string;
@@ -80,15 +37,6 @@ export interface LockLike {
   lockDuration: number;
 }
 
-export interface ParsedTransaction {
-  txid: string;
-  type: string;
-  blockHeight?: number;
-  blockTime?: number;
-  senderAddress?: string;
-  metadata: any;
-}
-
 export interface ParsedTransactionForProcessing {
   id: string;
   protocol: string;
@@ -106,4 +54,118 @@ export interface ProcessedTransaction {
   blockHeight?: number;
   blockTime?: Date;
   raw: Transaction;
+}
+
+export interface JungleBusTransaction {
+    id: string;
+    transaction?: {
+        hash: string;
+        version: number;
+        inputs: Array<{
+            prevTxId: string;
+            outputIndex: number;
+            inputScript: string;
+            outputScript: string;
+            sequence: number;
+        }>;
+        outputs: Array<{
+            value: number;
+            outputScript: string;
+        }>;
+        locktime: number;
+    };
+    block?: {
+        height: number;
+        hash: string;
+        timestamp: string;
+    };
+}
+
+export interface JungleBusAddressInfo {
+    address: string;
+    transactions: number;
+    balance: number;
+}
+
+export interface JungleBusBlockHeader {
+    height: number;
+    hash: string;
+    prevHash: string;
+    merkleRoot: string;
+    timestamp: string;
+    bits: string;
+    nonce: number;
+}
+
+export interface ParsedTransaction {
+    txid: string;
+    type: string;
+    blockHeight?: number;
+    timestamp?: string;
+    data?: any;
+}
+
+export type Transaction = JungleBusTransaction;
+
+export interface Post {
+    id: string;
+    content: string;
+    createdAt: Date;
+    createdBy: string;
+    updatedAt?: Date;
+    updatedBy?: string;
+}
+
+export interface VoteQuestion {
+    id: string;
+    postId: string;
+    question: string;
+    totalOptions: number;
+    optionsHash: string;
+    createdAt: Date;
+    updatedAt?: Date;
+}
+
+export interface VoteOption {
+    id: string;
+    postId: string;
+    content: string;
+    index: number;
+    createdAt: Date;
+    updatedAt?: Date;
+}
+
+export interface ProcessedTransaction {
+    id: string;
+    txid: string;
+    blockHeight: number;
+    blockTime: Date;
+}
+
+export interface ScannerEvents {
+    'transaction': (tx: Transaction) => void;
+    'transaction:parsed': (tx: ParsedTransaction) => void;
+    'transaction:error': (error: { tx: Transaction; error: Error }) => void;
+    'block:complete': (height: number) => void;
+    'scanner:error': (error: Error) => void;
+}
+
+export interface DbError extends Error {
+    code?: string;
+    constraint?: string;
+}
+
+export const SCANNER_EVENTS = {
+    TRANSACTION_RECEIVED: 'transactionReceived',
+    TRANSACTION_PARSED: 'transactionParsed',
+    TRANSACTION_SAVED: 'transactionSaved',
+    ERROR: 'error'
+} as const;
+
+export interface ScannerConfig {
+    startBlock: number;
+    fromBlock?: number;
+    toBlock?: number;
+    batchSize?: number;
+    maxRetries?: number;
 }
