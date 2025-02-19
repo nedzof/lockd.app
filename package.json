@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"tsx watch src/server.ts\"",
     "start": "tsx src/server.ts",
-    "scanner": "tsx src/services/scanner/unifiedScanner.ts",
+    "scanner": "ts-node src/scripts/startScanner.ts",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
@@ -26,6 +26,7 @@
     "async-queue": "^0.1.0",
     "bmapjs": "^0.4.0-beta.63",
     "bsv": "^2.0.10",
+    "centrifuge": "^5.3.2",
     "chart.js": "^4.4.7",
     "clsx": "^2.0.0",
     "cors": "^2.8.5",
