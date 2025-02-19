@@ -85,6 +85,7 @@ export interface ParsedTransaction {
   type: string;
   blockHeight?: number;
   blockTime?: number;
+  senderAddress?: string;
   metadata: any;
 }
 

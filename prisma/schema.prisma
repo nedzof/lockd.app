@@ -14,6 +14,7 @@ model Post {
   type           String
   protocol       String        @default("MAP")
   content        Json
+  senderAddress  String?      // Making it optional in case some old transactions don't have it
   blockTime      DateTime
   sequence       Int
   parentSequence Int
@@ -24,6 +25,7 @@ model Post {
   voteQuestion   VoteQuestion?
 
   @@index([postId])
+  @@index([senderAddress])
 }
 
 model VoteQuestion {

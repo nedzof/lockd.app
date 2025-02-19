@@ -310,4 +310,160 @@ describe('Transaction Processing Integration Tests', () => {
         expect(posts.length).toBeGreaterThan(1);
         expect(posts.some(p => p.type === 'content')).toBe(true);
     });
+
+    it('should scan, parse and store multiple transactions with different formats', async () => {
+        // Mock the scanner's fetch function to return our test transactions
+        const lockdJson1 = JSON.stringify({
+            app: "lockd.app",
+            type: "content",
+            content: "test message 1"
+        });
+        const lockdJson2 = JSON.stringify({
+            app: "lockd.app",
+            type: "content",
+            content: "test message 2"
+        });
+
+        // Convert JSON to hex
+        const lockdHex1 = Buffer.from(lockdJson1).toString('hex');
+        const lockdHex2 = Buffer.from(lockdJson2).toString('hex');
+
+        const mockTransactions = [
+            // Transaction 1: Raw format with OP_RETURN
+            {
+                tx: {
+                    h: "tx1"
+                },
+                in: [
+                    {
+                        i: 0,
+                        e: {
+                            h: "prev_tx1",
+                            i: 0,
+                            a: "1sender1address111111111111111111111"
+                        }
+                    }
+                ],
+                out: [
+                    {
+                        s: "006a" + lockdHex1, // OP_FALSE OP_RETURN Lockd JSON
+                        e: { v: 0 }
+                    }
+                ],
+                blk: { i: 123456, t: new Date("2025-02-19T17:34:58.000Z").getTime() / 1000 }
+            },
+            // Transaction 2: Parsed format with OP_FALSE OP_RETURN
+            {
+                tx: {
+                    h: "tx2"
+                },
+                in: [
+                    {
+                        i: 0,
+                        e: {
+                            h: "prev_tx2",
+                            i: 0,
+                            a: "1sender2address222222222222222222222"
+                        }
+                    }
+                ],
+                out: [
+                    {
+                        s: "006a" + lockdHex1, // OP_FALSE OP_RETURN Lockd JSON
+                        e: { v: 0 }
+                    },
+                    {
+                        s: "76a914123456789abcdef123456789abcdef123456789088ac",
+                        e: { v: 10000 }
+                    }
+                ],
+                blk: { i: 123457, t: new Date("2025-02-19T17:35:58.000Z").getTime() / 1000 }
+            },
+            // Transaction 3: Parsed format with 6a OP_RETURN
+            {
+                tx: {
+                    h: "tx3"
+                },
+                in: [
+                    {
+                        i: 0,
+                        e: {
+                            h: "prev_tx3",
+                            i: 0,
+                            a: "1sender3address333333333333333333333"
+                        }
+                    }
+                ],
+                out: [
+                    {
+                        s: "6a" + lockdHex2, // 6a OP_RETURN Lockd JSON
+                        e: { v: 0 }
+                    }
+                ],
+                blk: { i: 123458, t: new Date("2025-02-19T17:36:58.000Z").getTime() / 1000 }
+            }
+        ];
+
+        // Create scanner instance and inject dependencies
+        const scanner = new Scanner();
+
+        // Mock the handleTransaction method
+        for (const tx of mockTransactions) {
+            await scanner['handleTransaction'](tx);
+        }
+
+        // Verify database entries
+        const posts = await prisma.post.findMany({
+            orderBy: { createdAt: 'asc' }
+        });
+
+        console.log('Found posts:', posts);
+
+        // Verify the correct number of posts were created
+        expect(posts.length).toBe(3);
+
+        // Verify post content and metadata
+        posts.forEach(post => {
+            expect(post).toHaveProperty('id');
+            expect(post).toHaveProperty('postId');
+            expect(post).toHaveProperty('type');
+            expect(post).toHaveProperty('protocol');
+            expect(post).toHaveProperty('content');
+            expect(post).toHaveProperty('blockTime');
+            expect(post.blockTime instanceof Date).toBe(true);
+            expect(post.type).toBe('content');
+            expect(post.protocol).toBe('MAP');
+        });
+
+        // Verify specific transaction data
+        const tx1Posts = posts.filter(p => p.postId.startsWith('tx1'));
+        const tx2Posts = posts.filter(p => p.postId.startsWith('tx2'));
+        const tx3Posts = posts.filter(p => p.postId.startsWith('tx3'));
+
+        expect(tx1Posts.length + tx2Posts.length + tx3Posts.length).toBe(posts.length);
+
+        // Verify timestamps and content match
+        tx1Posts.forEach(post => {
+            expect(post.blockTime.getTime()).toBe(new Date("2025-02-19T17:34:58.000Z").getTime());
+            expect(post.content).toBe('test message 1');
+            expect(post.senderAddress).toBe('1sender1address111111111111111111111');
+        });
+
+        tx2Posts.forEach(post => {
+            expect(post.blockTime.getTime()).toBe(new Date("2025-02-19T17:35:58.000Z").getTime());
+            expect(post.content).toBe('test message 1');
+            expect(post.senderAddress).toBe('1sender2address222222222222222222222');
+        });
+
+        tx3Posts.forEach(post => {
+            expect(post.blockTime.getTime()).toBe(new Date("2025-02-19T17:36:58.000Z").getTime());
+            expect(post.content).toBe('test message 2');
+            expect(post.senderAddress).toBe('1sender3address333333333333333333333');
+        });
+
+        // Verify content
+        const allContent = posts.map(p => p.content);
+        expect(allContent).toContain('test message 1');
+        expect(allContent).toContain('test message 2');
+    });
 });

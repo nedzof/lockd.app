@@ -19,6 +19,6 @@
     "esm": true,
     "experimentalSpecifiers": true
   },
-  "include": ["scripts/**/*", "src/**/*"],
+  "include": ["scripts/**/*", "src/**/*", "jest.config.js"],
   "exclude": ["node_modules", "src/frontend/**/*"]
 } 
