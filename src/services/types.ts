@@ -36,10 +36,11 @@ export interface Output {
 
 export interface Transaction extends BmapTransaction {
     metadata?: {
-        application: string;
+        application?: string;
         postId: string;
-        tags: string[];
+        tags?: string[];
         content: string;
+        type: string;
     };
     type?: string;
     voteOption?: {
