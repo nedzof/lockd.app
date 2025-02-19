@@ -125,4 +125,99 @@ describe('Transaction Processing Integration Tests', () => {
         expect(post?.type).toBe('content');
         expect((post?.content as any).text).toBe('test');
     });
+
+    test('should process multiple outputs from the same transaction', async () => {
+        console.log('Starting multiple outputs test');
+        const txid = "a043fbcdc79628136708f88fad1e33f367037aa3d1bb0bff4bfffe818ec4b598";
+        
+        // Create multiple metadata objects
+        const metadata1 = {
+            app: "lockd.app",
+            type: "content",
+            postId: "m73g8bip",
+            content: { text: "test content 1" },
+            tags: ["test", "multiple"]
+        };
+        
+        const metadata2 = {
+            app: "lockd.app",
+            type: "content",
+            postId: "n84h9cjq",
+            content: { text: "test content 2" },
+            tags: ["test", "multiple"]
+        };
+        
+        // Format scripts for bmap
+        const script1 = `OP_FALSE OP_RETURN ${Buffer.from(JSON.stringify(metadata1)).toString('hex')}`;
+        const script2 = `OP_FALSE OP_RETURN ${Buffer.from(JSON.stringify(metadata2)).toString('hex')}`;
+        console.log('Created scripts:', { script1, script2 });
+        
+        const realTx = {
+            tx: {
+                h: txid
+            },
+            in: [],
+            out: [
+                {
+                    i: 0,
+                    s: script1,
+                    e: {
+                        v: 0,
+                        a: "1HrpGiZxAh9QMfuqM6PfqEzttPP1SFHhKx"
+                    }
+                },
+                {
+                    i: 1,
+                    s: script2,
+                    e: {
+                        v: 0,
+                        a: "1HrpGiZxAh9QMfuqM6PfqEzttPP1SFHhKx"
+                    }
+                }
+            ],
+            blk: {
+                i: 883850,
+                t: 1739458216
+            }
+        };
+
+        // Use the parser directly
+        const parser = new TransactionParser();
+        const parsedTransactions = await parser.parseTransaction(realTx);
+        console.log('Parsed transactions:', parsedTransactions);
+
+        // Process each parsed transaction
+        if (parsedTransactions) {
+            const dbClient = new DBClient();
+            await dbClient.processTransaction(parsedTransactions);
+            await dbClient.disconnect();
+        } else {
+            console.error('Failed to parse transactions');
+        }
+
+        // Verify database state for both posts
+        const post1 = await prisma.post.findUnique({
+            where: {
+                postId: metadata1.postId
+            }
+        });
+        console.log('Found post 1:', post1);
+
+        const post2 = await prisma.post.findUnique({
+            where: {
+                postId: metadata2.postId
+            }
+        });
+        console.log('Found post 2:', post2);
+
+        expect(post1).toBeTruthy();
+        expect(post1?.type).toBe('content');
+        expect((post1?.content as any).text).toBe('test content 1');
+        expect(post1?.blockTime).toEqual(new Date(realTx.blk.t * 1000));
+
+        expect(post2).toBeTruthy();
+        expect(post2?.type).toBe('content');
+        expect((post2?.content as any).text).toBe('test content 2');
+        expect(post2?.blockTime).toEqual(new Date(realTx.blk.t * 1000));
+    });
 });

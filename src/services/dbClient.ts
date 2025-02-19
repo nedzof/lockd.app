@@ -97,73 +97,78 @@ export class DBClient {
         }
     }
 
-    async processTransaction(tx: ParsedTransaction): Promise<void> {
+    async processTransaction(tx: ParsedTransaction | ParsedTransaction[]): Promise<void> {
         try {
-            switch (tx.type) {
-                case 'content':
-                    await this.prisma.post.create({
-                        data: {
-                            postId: tx.metadata.postId,
-                            type: tx.type,
-                            content: tx.metadata.content,
-                            blockTime: tx.blockTime ? new Date(tx.blockTime * 1000) : new Date(),
-                            sequence: tx.metadata.sequence || 0,
-                            parentSequence: tx.metadata.parentSequence || 0
-                        }
-                    });
-                    break;
-                case 'question':
-                    await this.prisma.voteQuestion.create({
-                        data: {
-                            postId: tx.metadata.postId,
-                            question: tx.metadata.content,
-                            totalOptions: 0,
-                            optionsHash: '',
-                            post: {
-                                connect: {
-                                    postId: tx.metadata.postId
+            const transactions = Array.isArray(tx) ? tx : [tx];
+            
+            for (const transaction of transactions) {
+                switch (transaction.type) {
+                    case 'content':
+                        await this.prisma.post.create({
+                            data: {
+                                postId: transaction.metadata.postId,
+                                type: transaction.type,
+                                content: transaction.metadata.content,
+                                blockTime: transaction.blockTime ? new Date(transaction.blockTime * 1000) : new Date(),
+                                sequence: transaction.metadata.sequence || 0,
+                                parentSequence: transaction.metadata.parentSequence || 0
+                            }
+                        });
+                        break;
+                    case 'question':
+                        await this.prisma.voteQuestion.create({
+                            data: {
+                                postId: transaction.metadata.postId,
+                                question: transaction.metadata.content,
+                                totalOptions: 0,
+                                optionsHash: '',
+                                post: {
+                                    connect: {
+                                        postId: transaction.metadata.postId
+                                    }
                                 }
                             }
-                        }
-                    });
-                    break;
-                case 'vote':
-                    // First find the question
-                    const question = await this.prisma.voteQuestion.findUnique({
-                        where: {
-                            postId: tx.metadata.postId
-                        }
-                    });
+                        });
+                        break;
+                    case 'vote':
+                        // First find the question
+                        const question = await this.prisma.voteQuestion.findUnique({
+                            where: {
+                                postId: transaction.metadata.postId
+                            }
+                        });
 
-                    if (!question) {
-                        throw new Error('Vote question not found');
-                    }
+                        if (!question) {
+                            throw new Error('Vote question not found');
+                        }
 
-                    await this.prisma.voteOption.create({
-                        data: {
-                            postId: tx.metadata.postId,
-                            content: tx.metadata.content,
-                            index: 0,
-                            post: {
-                                connect: {
-                                    postId: tx.metadata.postId
-                                }
-                            },
-                            voteQuestion: {
-                                connect: {
-                                    id: question.id
+                        await this.prisma.voteOption.create({
+                            data: {
+                                postId: transaction.metadata.postId,
+                                content: transaction.metadata.content,
+                                index: 0,
+                                post: {
+                                    connect: {
+                                        postId: transaction.metadata.postId
+                                    }
+                                },
+                                voteQuestion: {
+                                    connect: {
+                                        id: question.id
+                                    }
                                 }
                             }
-                        }
-                    });
-                    break;
-                default:
-                    console.warn('Unknown transaction type', { type: tx.type });
+                        });
+                        break;
+                    default:
+                        console.warn('Unknown transaction type', { type: transaction.type });
+                }
             }
         } catch (error) {
             console.error('Error processing transaction', {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                txid: tx.txid
+                errorType: error?.constructor?.name,
+                txid: Array.isArray(tx) ? tx[0]?.txid : tx.txid
             });
             throw error;
         }
