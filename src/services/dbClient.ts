@@ -12,6 +12,8 @@ interface ParsedTransaction {
         postId: string;
         content: string;
         protocol?: string;
+        lockAmount?: number;
+        lockDuration?: number;
     };
 }
 
@@ -345,46 +347,72 @@ export class DbClient {
     async saveTransaction(transaction: ParsedTransaction): Promise<void> {
         await this.withRetry(async () => {
             try {
+                // Convert blockTime to Date, handling both seconds and milliseconds
+                let blockTime = new Date();
+                if (transaction.blockTime) {
+                    // If blockTime is in seconds (less than year 2000), multiply by 1000
+                    const timestamp = transaction.blockTime < 946684800000 
+                        ? transaction.blockTime * 1000 
+                        : transaction.blockTime;
+                    blockTime = new Date(timestamp);
+                }
+
                 // Create or update post
-                await this.prisma.post.upsert({
+                const post = await this.prisma.post.upsert({
                     where: {
-                        id: transaction.metadata.postId
+                        postId: transaction.metadata.postId
                     },
                     create: {
-                        id: transaction.metadata.postId,
+                        postId: transaction.metadata.postId,
+                        type: transaction.type || 'unknown',
                         content: transaction.metadata.content,
-                        createdAt: transaction.blockTime ? new Date(transaction.blockTime * 1000) : new Date(),
-                        createdBy: transaction.senderAddress || 'unknown'
+                        blockTime,
+                        sequence: 0,
+                        parentSequence: 0,
+                        protocol: transaction.protocol || 'MAP',
+                        senderAddress: transaction.senderAddress || 'unknown',
+                        blockHeight: transaction.blockHeight || null,
+                        txid: transaction.txid
                     },
                     update: {
                         content: transaction.metadata.content,
-                        createdAt: transaction.blockTime ? new Date(transaction.blockTime * 1000) : new Date(),
-                        createdBy: transaction.senderAddress || 'unknown'
+                        blockTime,
+                        protocol: transaction.protocol || 'MAP',
+                        senderAddress: transaction.senderAddress || 'unknown',
+                        blockHeight: transaction.blockHeight || null,
+                        txid: transaction.txid
                     }
                 });
 
                 // Handle lock/unlock actions
                 if (transaction.type === 'lock') {
+                    const lockAmount = transaction.metadata.lockAmount || 0;
+                    const lockDuration = transaction.metadata.lockDuration || 0;
+
                     await this.prisma.lockLike.create({
                         data: {
-                            postId: transaction.metadata.postId,
+                            postId: post.id,
                             txid: transaction.txid,
-                            createdAt: transaction.blockTime ? new Date(transaction.blockTime * 1000) : new Date(),
-                            createdBy: transaction.senderAddress || 'unknown'
-                        }
-                    });
-                } else if (transaction.type === 'unlock') {
-                    await this.prisma.lockLike.delete({
-                        where: {
-                            postId_createdBy: {
-                                postId: transaction.metadata.postId,
-                                createdBy: transaction.senderAddress || 'unknown'
-                            }
+                            lockAmount,
+                            lockDuration,
+                            createdAt: blockTime
                         }
                     });
                 }
 
-                logger.debug('Transaction saved successfully', { txid: transaction.txid });
+                // Record processed transaction
+                await this.prisma.processedTransaction.create({
+                    data: {
+                        txid: transaction.txid,
+                        blockHeight: transaction.blockHeight || 0,
+                        blockTime,
+                        protocol: transaction.protocol || 'MAP',
+                        type: transaction.type || 'unknown',
+                        content: transaction.metadata.content,
+                        lockAmount: transaction.metadata.lockAmount || null,
+                        lockDuration: transaction.metadata.lockDuration || null
+                    }
+                });
             } catch (error) {
                 if ((error as DbError).code === '23505') { // Unique violation
                     logger.warn('Duplicate transaction detected', { txid: transaction.txid });

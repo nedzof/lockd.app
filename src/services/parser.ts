@@ -9,7 +9,42 @@ export class TransactionParser {
 
     constructor() {
         this.bmap = new BMAP();
+
+        // Register core protocol handlers
+        this.registerProtocolHandlers();
+
+        // Log BMAP instance details
+        logger.info('BMAP instance details', {
+            hasTransformTx: typeof this.bmap.transformTx === 'function',
+            hasAddProtocolHandler: typeof this.bmap.addProtocolHandler === 'function',
+            protocolHandlers: Object.keys(this.bmap).filter(key => key.includes('Protocol')),
+            bmapProperties: Object.getOwnPropertyNames(Object.getPrototypeOf(this.bmap)),
+            bmapVersion: this.bmap.version || 'unknown'
+        });
+
+        // Try to access and log protocol handlers
+        try {
+            // @ts-ignore - Accessing internal property for diagnosis
+            const handlers = this.bmap._handlers || [];
+            logger.info('BMAP protocol handlers', {
+                handlersCount: handlers.length,
+                handlerNames: handlers.map((h: any) => h.name),
+                handlerAddresses: handlers.map((h: any) => h.address)
+            });
+        } catch (error) {
+            logger.warn('Could not access BMAP handlers', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+
+        // Log available BMAP exports
         const bmapExports = Object.keys(BMAP);
+        logger.info('BMAP exports and protocols', {
+            bmapExports,
+            hasDefaultProtocols: 'protocols' in BMAP,
+            exportTypes: bmapExports.map(key => typeof (BMAP as any)[key])
+        });
+
         logger.info('TransactionParser initialized', {
             bmapAvailable: !!this.bmap,
             bmapExports,
@@ -17,198 +52,320 @@ export class TransactionParser {
         });
     }
 
+    private registerProtocolHandlers() {
+        try {
+            // Register custom LOCK/UNLOCK protocol handlers
+            this.bmap.addProtocolHandler({
+                name: this.LOCK_PROTOCOL,
+                address: '1LockXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+                opReturnSchema: [
+                    { name: 'protocol', type: 'string' },
+                    { name: 'data', type: 'string' }
+                ],
+                handler: ({ dataObj, cell }) => {
+                    if (cell.s?.includes(this.LOCK_PROTOCOL)) {
+                        dataObj[this.LOCK_PROTOCOL] = [{
+                            type: 'lock',
+                            data: cell.s
+                        }];
+                    }
+                }
+            });
+
+            this.bmap.addProtocolHandler({
+                name: this.UNLOCK_PROTOCOL,
+                address: '1UnlockXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+                opReturnSchema: [
+                    { name: 'protocol', type: 'string' },
+                    { name: 'data', type: 'string' }
+                ],
+                handler: ({ dataObj, cell }) => {
+                    if (cell.s?.includes(this.UNLOCK_PROTOCOL)) {
+                        dataObj[this.UNLOCK_PROTOCOL] = [{
+                            type: 'unlock',
+                            data: cell.s
+                        }];
+                    }
+                }
+            });
+
+            // Add basic MAP protocol handler
+            this.bmap.addProtocolHandler({
+                name: 'MAP',
+                address: '1MapXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+                opReturnSchema: [
+                    { name: 'protocol', type: 'string' },
+                    { name: 'key', type: 'string' },
+                    { name: 'value', type: 'string' }
+                ],
+                handler: ({ dataObj, cell }) => {
+                    if (cell.s?.startsWith('OP_RETURN')) {
+                        const parts = cell.s.split(' ');
+                        if (parts.length >= 4 && parts[1] === 'MAP') {
+                            dataObj.MAP = dataObj.MAP || [];
+                            dataObj.MAP.push({
+                                key: parts[2],
+                                value: parts[3]
+                            });
+                        }
+                    }
+                }
+            });
+
+            logger.info('Protocol handlers registered successfully', {
+                protocols: [
+                    'MAP',
+                    this.LOCK_PROTOCOL,
+                    this.UNLOCK_PROTOCOL
+                ]
+            });
+        } catch (error) {
+            logger.error('Failed to register protocol handlers', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            throw error;
+        }
+    }
+
+    private transformToValidBOB(tx: Transaction): any {
+        try {
+            if (tx.tx && tx.blk) {
+                // Already in BOB format, just ensure the structure is correct
+                return {
+                    tx: {
+                        h: tx.tx.h,
+                        out: tx.tx.out.map((out: any) => ({
+                            i: out.i,
+                            s: out.s,
+                            e: out.e || { v: 0 }
+                        })),
+                        in: tx.tx.in.map((input: any) => ({
+                            i: input.i,
+                            s: input.s,
+                            e: input.e || {}
+                        }))
+                    },
+                    blk: {
+                        i: tx.blk.i,
+                        h: tx.blk.h,
+                        t: tx.blk.t
+                    }
+                };
+            }
+
+            // Transform standard format to BOB
+            const bobTx = {
+                tx: {
+                    h: tx.transaction?.hash,
+                    out: tx.transaction?.outputs?.map((out, i) => {
+                        // Parse OP_RETURN data if present
+                        const script = out.outputScript || '';
+                        return {
+                            i,
+                            s: script,
+                            b: script.startsWith('OP_RETURN') ? script.split(' ').slice(1).join(' ') : undefined,
+                            e: {
+                                v: out.value || 0,
+                                a: out.address
+                            }
+                        };
+                    }) || [],
+                    in: tx.transaction?.inputs?.map((input, i) => ({
+                        i,
+                        s: input.inputScript || '',
+                        e: {
+                            a: input.address,
+                            h: input.previousTransactionHash,
+                            i: input.previousTransactionOutputIndex
+                        }
+                    })) || []
+                },
+                blk: tx.block ? {
+                    i: tx.block.height,
+                    h: tx.block.hash || 'unknown',
+                    t: tx.block.timestamp
+                } : undefined
+            };
+
+            logger.debug('Transformed transaction to BOB format', {
+                txid: bobTx.tx.h,
+                outputCount: bobTx.tx.out.length,
+                inputCount: bobTx.tx.in.length,
+                hasBlock: !!bobTx.blk,
+                sample: {
+                    firstOutput: bobTx.tx.out[0],
+                    firstInput: bobTx.tx.in[0]
+                }
+            });
+
+            return bobTx;
+        } catch (error) {
+            logger.error('Failed to transform transaction to BOB format', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined,
+                tx: JSON.stringify(tx)
+            });
+            throw error;
+        }
+    }
+
+    private async processBMAPTransaction(tx: any): Promise<any> {
+        try {
+            const bmapData = await this.bmap.transformTx(tx);
+            if (!bmapData) {
+                logger.debug('No BMAP data found in transaction', {
+                    txid: tx.tx.h,
+                    outputs: tx.tx.out.map((o: any) => ({
+                        script: o.s?.substring(0, 50),
+                        hasB: !!o.b,
+                        hasE: !!o.e
+                    }))
+                });
+                return null;
+            }
+
+            return bmapData;
+        } catch (error) {
+            logger.error('BMAP processing error', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined,
+                txid: tx.tx.h
+            });
+            return null;
+        }
+    }
+
     public async parseTransaction(tx: Transaction): Promise<ParsedTransaction | null> {
         try {
-            const txid = tx.transaction?.hash || tx.id;
+            // Handle both standard and BOB format
+            const txid = tx.transaction?.hash || tx.tx?.h || tx.id;
             if (!txid) {
                 logger.warn('Transaction has no id', { tx: JSON.stringify(tx) });
                 return null;
             }
 
-            logger.debug('Starting transaction parse', { 
+            const blockHeight = tx.block?.height || tx.blk?.i;
+            const blockTime = tx.block?.timestamp || tx.blk?.t;
+            
+            logger.debug('Starting transaction parse', {
                 txid,
-                hasTransaction: !!tx.transaction,
-                hasBlock: !!tx.block,
-                inputCount: tx.transaction?.inputs?.length || 0,
-                outputCount: tx.transaction?.outputs?.length || 0,
-                blockHeight: tx.block?.height,
-                blockTime: tx.block?.timestamp
+                blockHeight,
+                blockTime,
+                hasTransaction: !!(tx.transaction || tx.tx),
+                hasBlock: !!(tx.block || tx.blk),
+                inputCount: tx.transaction?.inputs?.length || tx.tx?.in?.length,
+                outputCount: tx.transaction?.outputs?.length || tx.tx?.out?.length
             });
 
-            // Extract basic transaction data
-            const parsedTx: ParsedTransaction = {
+            // Extract initial transaction data
+            const initialData: ParsedTransaction = {
                 txid,
+                blockHeight,
+                blockTime: blockTime ? new Date(blockTime) : undefined,
                 type: 'unknown',
-                protocol: 'MAP',  // Default protocol
-                content: {},
-                senderAddress: tx.transaction?.inputs?.[0]?.outputScript,
-                blockHeight: tx.block?.height,
-                blockTime: tx.block?.timestamp ? new Date(tx.block.timestamp) : undefined,
-                sequence: tx.transaction?.sequence || 0,
-                parentSequence: 0  // Default to 0 for now
+                protocol: 'MAP',
+                metadata: {},
+                senderAddress: tx.transaction?.inputs?.[0]?.address || tx.tx?.in?.[0]?.e?.a
             };
 
             logger.debug('Initial transaction data extracted', {
-                txid,
-                type: parsedTx.type,
-                protocol: parsedTx.protocol,
-                blockHeight: parsedTx.blockHeight,
-                blockTime: parsedTx.blockTime,
-                senderAddress: parsedTx.senderAddress?.substring(0, 50) + '...'
+                ...initialData,
+                blockTime: initialData.blockTime?.toISOString(),
+                senderAddress: initialData.senderAddress + '...'
             });
 
-            // Try to parse outputs for protocol data
-            if (tx.transaction?.outputs) {
-                for (const [index, output] of tx.transaction.outputs.entries()) {
-                    try {
-                        logger.debug('Processing output', {
-                            txid,
-                            outputIndex: index,
-                            outputValue: output.value,
-                            scriptLength: output.outputScript?.length || 0,
-                            scriptPreview: output.outputScript?.substring(0, 50) + '...'
-                        });
+            // Transform to BOB format for BMAP processing
+            const bobTx = this.transformToValidBOB(tx);
+            const bmapData = await this.processBMAPTransaction(bobTx);
 
-                        // First try to identify LOCK/UNLOCK protocols directly
-                        if (output.outputScript?.includes(this.LOCK_PROTOCOL)) {
-                            logger.info('LOCK protocol detected', { 
-                                txid,
-                                outputIndex: index,
-                                outputValue: output.value,
-                                scriptPreview: output.outputScript?.substring(0, 50) + '...'
-                            });
-                            parsedTx.type = 'lock';
-                            parsedTx.protocol = this.LOCK_PROTOCOL;
-                            parsedTx.content = {
-                                outputScript: output.outputScript,
-                                outputIndex: index,
-                                value: output.value
-                            };
-                            break;
-                        } else if (output.outputScript?.includes(this.UNLOCK_PROTOCOL)) {
-                            logger.info('UNLOCK protocol detected', {
-                                txid,
-                                outputIndex: index,
-                                outputValue: output.value,
-                                scriptPreview: output.outputScript?.substring(0, 50) + '...'
-                            });
-                            parsedTx.type = 'unlock';
-                            parsedTx.protocol = this.UNLOCK_PROTOCOL;
-                            parsedTx.content = {
-                                outputScript: output.outputScript,
-                                outputIndex: index,
-                                value: output.value
-                            };
-                            break;
+            if (bmapData) {
+                logger.debug('BMAP data found', {
+                    txid,
+                    protocols: Object.keys(bmapData),
+                    dataSize: JSON.stringify(bmapData).length
+                });
+
+                return {
+                    ...initialData,
+                    type: 'map',
+                    protocol: 'MAP',
+                    metadata: bmapData
+                };
+            }
+
+            // Process outputs for other protocols
+            for (const output of tx.transaction?.outputs || tx.tx?.out || []) {
+                const outputScript = output.outputScript || output.s;
+                const outputValue = output.value || output.e?.v || 0;
+                const outputIndex = output.i || 0;
+
+                if (!outputScript) continue;
+
+                logger.debug('Processing output', {
+                    outputIndex,
+                    outputValue,
+                    scriptLength: outputScript.length,
+                    scriptPreview: outputScript?.substring(0, 50) + '...'
+                });
+
+                // Check for LOCK protocol
+                if (outputScript.includes(this.LOCK_PROTOCOL)) {
+                    logger.info('LOCK protocol detected', {
+                        txid,
+                        outputIndex,
+                        outputValue,
+                        scriptPreview: outputScript?.substring(0, 50) + '...'
+                    });
+
+                    return {
+                        ...initialData,
+                        type: 'lock',
+                        protocol: this.LOCK_PROTOCOL,
+                        metadata: {
+                            protocol: this.LOCK_PROTOCOL,
+                            postId: txid,
+                            content: outputScript
                         }
-
-                        // Then try BMAP parsing
-                        logger.debug('Attempting BMAP parsing', {
-                            txid,
-                            outputIndex: index,
-                            scriptLength: output.outputScript?.length || 0,
-                            scriptPreview: output.outputScript?.substring(0, 50) + '...'
-                        });
-
-                        // Transform transaction data into BMAP format
-                        const bmapTx: TransformTx = {
-                            tx: {
-                                h: txid,
-                                out: tx.transaction?.outputs?.map((out, i) => ({
-                                    i,  // output index
-                                    s: out.outputScript || '',  // output script
-                                    e: {  // extra data
-                                        v: out.value || 0,  // value in satoshis
-                                        a: out.address || ''  // output address if available
-                                    }
-                                })) || []
-                            },
-                            // Add input data if available
-                            in: tx.transaction?.inputs?.map((input, i) => ({
-                                i,  // input index
-                                s: input.inputScript || '',  // input script
-                                e: {  // extra data
-                                    a: input.address || '',  // input address if available
-                                    h: input.previousTransactionHash || '',  // previous tx hash
-                                    i: input.previousTransactionOutputIndex || 0  // previous tx output index
-                                }
-                            })) || []
-                        };
-
-                        logger.debug('Transformed transaction for BMAP', {
-                            txid,
-                            outputCount: bmapTx.tx.out.length,
-                            inputCount: bmapTx.in?.length || 0,
-                            hasScripts: bmapTx.tx.out.some(o => o.s?.length > 0)
-                        });
-
-                        const bmapData = await this.bmap.transformTx(bmapTx);
-
-                        if (bmapData && bmapData.length > 0) {
-                            const bData = bmapData[0];
-                            logger.info('BMAP data parsed successfully', { 
-                                txid, 
-                                outputIndex: index,
-                                dataType: bData.type || 'unknown',
-                                keys: Object.keys(bData),
-                                hasVote: !!bData.vote,
-                                hasVoteQuestion: !!bData.voteQuestion,
-                                contentLength: JSON.stringify(bData).length
-                            });
-
-                            // Transform BMAP data to our format
-                            parsedTx.type = bData.type || 'B';
-                            parsedTx.protocol = 'B';
-                            parsedTx.content = bData;
-                            break;
-                        } else {
-                            logger.debug('No BMAP data found in output', {
-                                txid,
-                                outputIndex: index
-                            });
-                        }
-                    } catch (error) {
-                        logger.error('Failed to parse output script', {
-                            txid,
-                            outputIndex: index,
-                            error: error instanceof Error ? error.message : 'Unknown error',
-                            stack: error instanceof Error ? error.stack : undefined,
-                            scriptPreview: output.outputScript?.substring(0, 50) + '...'
-                        });
-                    }
+                    };
                 }
-            } else {
-                logger.debug('No outputs found in transaction', { txid });
+
+                // Check for UNLOCK protocol
+                if (outputScript.includes(this.UNLOCK_PROTOCOL)) {
+                    logger.info('UNLOCK protocol detected', {
+                        txid,
+                        outputIndex,
+                        outputValue,
+                        scriptPreview: outputScript?.substring(0, 50) + '...'
+                    });
+
+                    return {
+                        ...initialData,
+                        type: 'unlock',
+                        protocol: this.UNLOCK_PROTOCOL,
+                        metadata: {
+                            protocol: this.UNLOCK_PROTOCOL,
+                            postId: txid,
+                            content: outputScript
+                        }
+                    };
+                }
             }
 
-            // Log final parsed transaction state
-            if (parsedTx.type !== 'unknown') {
-                logger.info('Successfully parsed transaction', {
-                    txid,
-                    type: parsedTx.type,
-                    protocol: parsedTx.protocol,
-                    hasContent: Object.keys(parsedTx.content || {}).length > 0,
-                    contentKeys: Object.keys(parsedTx.content || {}),
-                    blockHeight: parsedTx.blockHeight,
-                    blockTime: parsedTx.blockTime
-                });
-                return parsedTx;
-            } else {
-                logger.debug('No recognized protocols found in transaction', { 
-                    txid,
-                    blockHeight: parsedTx.blockHeight,
-                    blockTime: parsedTx.blockTime
-                });
-                return null;
-            }
+            logger.debug('No recognized protocols found in transaction', {
+                txid,
+                blockHeight,
+                blockTime: blockTime ? new Date(blockTime).toISOString() : undefined
+            });
+
+            return null;
         } catch (error) {
             logger.error('Failed to parse transaction', {
                 error: error instanceof Error ? error.message : 'Unknown error',
                 stack: error instanceof Error ? error.stack : undefined,
-                txid: tx.transaction?.hash || tx.id,
-                blockHeight: tx.block?.height
+                tx: JSON.stringify(tx)
             });
-            return null;
+            throw error;
         }
     }
 }
