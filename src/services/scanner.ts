@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { EventEmitter } from 'events';
 import fetch from 'node-fetch';
 import { CONFIG } from './config';
+import { randomUUID } from 'crypto';
 
 export class Scanner extends EventEmitter {
     private jungleBus: JungleBusClient | null = null;
@@ -14,7 +15,7 @@ export class Scanner extends EventEmitter {
     private parser: TransactionParser;
     private isConnected: boolean = false;
     private retryCount: number = 0;
-    private subscription: any = null;
+    private subscriptions: Map<string, any> = new Map();
     private readonly MAX_RETRIES = 3;
     private readonly RETRY_DELAY = 1000; // 1 second
     private readonly START_BLOCK = 883850;
@@ -117,13 +118,92 @@ export class Scanner extends EventEmitter {
         }
     }
 
+    private async subscribe(fromBlock: number = this.START_BLOCK): Promise<void> {
+        if (!this.isConnected) {
+            throw new Error('Not connected to JungleBus');
+        }
+
+        try {
+            logger.info('Subscribing to JungleBus', {
+                fromBlock,
+                subscriptionId: this.SUBSCRIPTION_ID
+            });
+
+            const subscription = await this.jungleBus.Subscribe({
+                fromBlock,
+                onStatus: (status: any) => {
+                    logger.info('Subscription status update', {
+                        ...status,
+                        currentBlock: status?.block,
+                        timestamp: new Date().toISOString()
+                    });
+                },
+                onError: (error: any) => {
+                    logger.error('Subscription error', {
+                        error: error instanceof Error ? error.message : 'Unknown error'
+                    });
+                },
+                onTransaction: async (tx: any) => {
+                    try {
+                        // Log every transaction we receive
+                        logger.debug('Received transaction from JungleBus', {
+                            txid: tx?.id,
+                            blockHeight: tx?.block_height,
+                            hasData: !!tx?.data,
+                            dataLength: tx?.data?.length,
+                            data: tx?.data
+                        });
+
+                        // Only proceed if it's a valid transaction
+                        if (!this.isValidTransaction(tx)) {
+                            return;
+                        }
+
+                        logger.info('Valid transaction received', {
+                            txid: tx.id,
+                            blockHeight: tx.block_height
+                        });
+
+                        // Hand over to parser
+                        const parsedTx = await this.parser.parseTransaction(tx);
+                        if (parsedTx) {
+                            await this.dbClient.saveTransaction(parsedTx);
+                            logger.info('Transaction processed successfully', {
+                                txid: tx.id,
+                                blockHeight: tx.block_height
+                            });
+                        }
+                    } catch (error) {
+                        logger.error('Error processing transaction', {
+                            error: error instanceof Error ? error.message : 'Unknown error',
+                            txid: tx?.id
+                        });
+                    }
+                }
+            });
+
+            const subscriptionId = randomUUID();
+            this.subscriptions.set(subscriptionId, subscription);
+            logger.info('Successfully subscribed to JungleBus', {
+                subscriptionId,
+                fromBlock
+            });
+
+        } catch (error) {
+            logger.error('Failed to subscribe to JungleBus', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            throw error;
+        }
+    }
+
     private isValidTransaction(tx: any): boolean {
-        // Log raw transaction for debugging
+        // Log raw transaction data
         logger.debug('Raw transaction data', {
             txid: tx?.id,
             block_height: tx?.block_height,
             data: tx?.data,
-            raw: tx
+            raw: JSON.stringify(tx)
         });
 
         // Basic validation of transaction structure
@@ -136,13 +216,20 @@ export class Scanner extends EventEmitter {
             logger.debug('Invalid transaction: missing required fields', {
                 hasId: !!tx.id,
                 hasBlockHeight: !!tx.block_height,
-                hasBlockTime: !!tx.block_time
+                hasBlockTime: !!tx.block_time,
+                txid: tx?.id,
+                blockHeight: tx?.block_height,
+                blockTime: tx?.block_time
             });
             return false;
         }
 
         if (!Array.isArray(tx.data)) {
-            logger.debug('Invalid transaction: data is not an array', { tx });
+            logger.debug('Invalid transaction: data is not an array', {
+                txid: tx.id,
+                dataType: typeof tx.data,
+                data: tx.data
+            });
             return false;
         }
 
@@ -156,8 +243,13 @@ export class Scanner extends EventEmitter {
 
         // Check if this is a LOCK protocol transaction
         const isLockApp = tx.data.some((d: string) => {
-            logger.debug('Checking data item', { data: d });
-            return d === 'app=lockd.app';
+            const isMatch = d === 'app=lockd.app';
+            logger.debug('Checking data item', {
+                data: d,
+                isMatch,
+                txid: tx.id
+            });
+            return isMatch;
         });
 
         if (!isLockApp) {
@@ -243,167 +335,6 @@ export class Scanner extends EventEmitter {
         });
     }
 
-    private async subscribe(): Promise<void> {
-        const startTime = Date.now();
-        try {
-            if (!this.jungleBus) {
-                throw new Error('JungleBus client not initialized');
-            }
-
-            logger.debug('Attempting to subscribe', {
-                subscriptionId: this.SUBSCRIPTION_ID,
-                startBlock: this.START_BLOCK,
-                timestamp: new Date(startTime).toISOString()
-            });
-
-            // Handler for confirmed transactions
-            const onPublish = async (tx: any) => {
-                const txid = tx.transaction?.hash || tx.hash;
-                const blockHeight = tx.block?.height || tx.height;
-                
-                logger.debug('Confirmed transaction received', {
-                    txid,
-                    blockHeight,
-                    timestamp: new Date().toISOString(),
-                    timeSinceSubscription: Date.now() - startTime
-                });
-
-                await this.handleTransaction(tx);
-            };
-
-            // Handler for mempool transactions
-            const onMempool = async (tx: any) => {
-                const txid = tx.transaction?.hash || tx.hash;
-                
-                logger.debug('Mempool transaction received', {
-                    txid,
-                    timestamp: new Date().toISOString(),
-                    timeSinceSubscription: Date.now() - startTime
-                });
-
-                await this.handleTransaction(tx);
-            };
-
-            // Handler for status messages
-            const onStatus = (message: any) => {
-                const statusTime = Date.now() - startTime;
-                
-                if (message.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
-                    logger.info('BLOCK DONE', {
-                        block: message.block,
-                        processingTime: statusTime,
-                        timestamp: new Date().toISOString()
-                    });
-                    this.emit('block:complete', {
-                        block: message.block,
-                        processingTime: statusTime
-                    });
-                } else if (message.statusCode === ControlMessageStatusCode.WAITING) {
-                    logger.info('WAITING FOR NEW BLOCK...', {
-                        message,
-                        timeSinceSubscription: statusTime
-                    });
-                    this.emit('block:waiting', {
-                        timeSinceSubscription: statusTime
-                    });
-                } else if (message.statusCode === ControlMessageStatusCode.REORG) {
-                    logger.warn('REORG TRIGGERED', {
-                        message,
-                        timeSinceSubscription: statusTime,
-                        timestamp: new Date().toISOString()
-                    });
-                    this.emit('block:reorg', {
-                        message,
-                        timeSinceSubscription: statusTime
-                    });
-                } else if (message.statusCode === ControlMessageStatusCode.ERROR) {
-                    logger.error('Status error received', {
-                        message,
-                        timeSinceSubscription: statusTime,
-                        timestamp: new Date().toISOString()
-                    });
-                    this.handleError(new Error(message.message || 'Unknown status error'));
-                }
-            };
-
-            // Handler for subscription errors
-            const onError = (error: Error) => {
-                logger.error('Subscription error', {
-                    error: error.message,
-                    stack: error.stack,
-                    timeSinceSubscription: Date.now() - startTime,
-                    retryCount: this.retryCount
-                });
-                this.handleError(error);
-            };
-
-            // Handler for onTransaction
-            const onTransaction = async (tx: any) => {
-                try {
-                    logger.debug('Received transaction from JungleBus', {
-                        txid: tx?.id,
-                        hasData: !!tx?.data,
-                        dataCount: tx?.data?.length
-                    });
-
-                    // Only proceed if it's a valid transaction
-                    if (!this.isValidTransaction(tx)) {
-                        return;
-                    }
-
-                    logger.info('Valid transaction received', {
-                        txid: tx.id,
-                        blockHeight: tx.block_height
-                    });
-
-                    // Hand over to parser
-                    const parsedTx = await this.parser.parseTransaction(tx);
-                    if (parsedTx) {
-                        await this.dbClient.saveTransaction(parsedTx);
-                        logger.info('Transaction processed successfully', {
-                            txid: tx.id,
-                            blockHeight: tx.block_height
-                        });
-                    }
-                } catch (error) {
-                    logger.error('Error processing transaction', {
-                        error: error instanceof Error ? error.message : 'Unknown error',
-                        txid: tx?.id
-                    });
-                }
-            };
-
-            // Subscribe to both confirmed and mempool transactions
-            this.subscription = await this.jungleBus.Subscribe(
-                this.SUBSCRIPTION_ID,
-                this.START_BLOCK,
-                onPublish,
-                onStatus,
-                onError,
-                onMempool,
-                onTransaction
-            );
-
-            const subscribeTime = Date.now() - startTime;
-            logger.info('Successfully subscribed to JungleBus', {
-                subscriptionId: this.SUBSCRIPTION_ID,
-                fromBlock: this.START_BLOCK,
-                subscriptionTime: subscribeTime,
-                timestamp: new Date().toISOString()
-            });
-
-        } catch (error) {
-            const errorTime = Date.now() - startTime;
-            logger.error('Failed to subscribe', {
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                subscriptionAttemptTime: errorTime,
-                retryCount: this.retryCount
-            });
-            throw error;
-        }
-    }
-
     private async handleError(error: unknown): Promise<void> {
         const startTime = Date.now();
         
@@ -411,7 +342,7 @@ export class Scanner extends EventEmitter {
             retryCount: this.retryCount,
             maxRetries: this.MAX_RETRIES,
             isConnected: this.isConnected,
-            hasSubscription: !!this.subscription,
+            hasSubscription: !!this.subscriptions.size,
             timestamp: new Date(startTime).toISOString()
         });
 
@@ -497,7 +428,7 @@ export class Scanner extends EventEmitter {
             logger.debug('Starting scanner', {
                 isConnected: this.isConnected,
                 hasClient: !!this.jungleBus,
-                hasSubscription: !!this.subscription
+                hasSubscription: !!this.subscriptions.size
             });
 
             // Ensure clean state before starting
@@ -521,7 +452,7 @@ export class Scanner extends EventEmitter {
             logger.debug('Stopping scanner', {
                 isConnected: this.isConnected,
                 hasClient: !!this.jungleBus,
-                hasSubscription: !!this.subscription
+                hasSubscription: !!this.subscriptions.size
             });
 
             if (this.jungleBus) {
@@ -534,7 +465,7 @@ export class Scanner extends EventEmitter {
                     });
                 }
                 this.jungleBus = null;
-                this.subscription = null;
+                this.subscriptions.clear();
             }
             if (this.isConnected) {
                 await this.dbClient.disconnect();
