@@ -25,7 +25,15 @@ export class TransactionParser {
                 return null;
             }
 
-            logger.debug('Starting transaction parse', { txid });
+            logger.debug('Starting transaction parse', { 
+                txid,
+                hasTransaction: !!tx.transaction,
+                hasBlock: !!tx.block,
+                inputCount: tx.transaction?.inputs?.length || 0,
+                outputCount: tx.transaction?.outputs?.length || 0,
+                blockHeight: tx.block?.height,
+                blockTime: tx.block?.timestamp
+            });
 
             // Extract basic transaction data
             const parsedTx: ParsedTransaction = {
@@ -40,21 +48,34 @@ export class TransactionParser {
                 parentSequence: 0  // Default to 0 for now
             };
 
+            logger.debug('Initial transaction data extracted', {
+                txid,
+                type: parsedTx.type,
+                protocol: parsedTx.protocol,
+                blockHeight: parsedTx.blockHeight,
+                blockTime: parsedTx.blockTime,
+                senderAddress: parsedTx.senderAddress?.substring(0, 50) + '...'
+            });
+
             // Try to parse outputs for protocol data
             if (tx.transaction?.outputs) {
-                logger.debug('Processing transaction outputs', { 
-                    txid, 
-                    outputCount: tx.transaction.outputs.length 
-                });
-
                 for (const [index, output] of tx.transaction.outputs.entries()) {
                     try {
+                        logger.debug('Processing output', {
+                            txid,
+                            outputIndex: index,
+                            outputValue: output.value,
+                            scriptLength: output.outputScript?.length || 0,
+                            scriptPreview: output.outputScript?.substring(0, 50) + '...'
+                        });
+
                         // First try to identify LOCK/UNLOCK protocols directly
-                        if (output.outputScript.includes(this.LOCK_PROTOCOL)) {
-                            logger.debug('LOCK protocol detected', { 
+                        if (output.outputScript?.includes(this.LOCK_PROTOCOL)) {
+                            logger.info('LOCK protocol detected', { 
                                 txid,
                                 outputIndex: index,
-                                outputScript: output.outputScript
+                                outputValue: output.value,
+                                scriptPreview: output.outputScript?.substring(0, 50) + '...'
                             });
                             parsedTx.type = 'lock';
                             parsedTx.protocol = this.LOCK_PROTOCOL;
@@ -63,18 +84,13 @@ export class TransactionParser {
                                 outputIndex: index,
                                 value: output.value
                             };
-                            // Try to parse lock amount and duration
-                            parsedTx.lockLike = {
-                                lockAmount: output.value,
-                                lockDuration: 0  // Need to extract this from script
-                            };
-                            logger.debug('Found LOCK protocol', { txid, outputIndex: index });
                             break;
-                        } else if (output.outputScript.includes(this.UNLOCK_PROTOCOL)) {
-                            logger.debug('UNLOCK protocol detected', {
+                        } else if (output.outputScript?.includes(this.UNLOCK_PROTOCOL)) {
+                            logger.info('UNLOCK protocol detected', {
                                 txid,
                                 outputIndex: index,
-                                outputScript: output.outputScript
+                                outputValue: output.value,
+                                scriptPreview: output.outputScript?.substring(0, 50) + '...'
                             });
                             parsedTx.type = 'unlock';
                             parsedTx.protocol = this.UNLOCK_PROTOCOL;
@@ -83,57 +99,81 @@ export class TransactionParser {
                                 outputIndex: index,
                                 value: output.value
                             };
-                            logger.debug('Found UNLOCK protocol', { txid, outputIndex: index });
                             break;
                         }
 
                         // Then try BMAP parsing
-                        const bmapData = await this.bmap.transformTx({
+                        logger.debug('Attempting BMAP parsing', {
+                            txid,
+                            outputIndex: index,
+                            scriptLength: output.outputScript?.length || 0,
+                            scriptPreview: output.outputScript?.substring(0, 50) + '...'
+                        });
+
+                        // Transform transaction data into BMAP format
+                        const bmapTx: TransformTx = {
                             tx: {
                                 h: txid,
-                                out: [{
-                                    s: output.outputScript,
-                                    i: index
-                                }]
-                            }
+                                out: tx.transaction?.outputs?.map((out, i) => ({
+                                    i,  // output index
+                                    s: out.outputScript || '',  // output script
+                                    e: {  // extra data
+                                        v: out.value || 0,  // value in satoshis
+                                        a: out.address || ''  // output address if available
+                                    }
+                                })) || []
+                            },
+                            // Add input data if available
+                            in: tx.transaction?.inputs?.map((input, i) => ({
+                                i,  // input index
+                                s: input.inputScript || '',  // input script
+                                e: {  // extra data
+                                    a: input.address || '',  // input address if available
+                                    h: input.previousTransactionHash || '',  // previous tx hash
+                                    i: input.previousTransactionOutputIndex || 0  // previous tx output index
+                                }
+                            })) || []
+                        };
+
+                        logger.debug('Transformed transaction for BMAP', {
+                            txid,
+                            outputCount: bmapTx.tx.out.length,
+                            inputCount: bmapTx.in?.length || 0,
+                            hasScripts: bmapTx.tx.out.some(o => o.s?.length > 0)
                         });
+
+                        const bmapData = await this.bmap.transformTx(bmapTx);
 
                         if (bmapData && bmapData.length > 0) {
                             const bData = bmapData[0];
-                            logger.debug('Found BMAP data', { 
+                            logger.info('BMAP data parsed successfully', { 
                                 txid, 
                                 outputIndex: index,
                                 dataType: bData.type || 'unknown',
-                                keys: Object.keys(bData)
+                                keys: Object.keys(bData),
+                                hasVote: !!bData.vote,
+                                hasVoteQuestion: !!bData.voteQuestion,
+                                contentLength: JSON.stringify(bData).length
                             });
 
                             // Transform BMAP data to our format
                             parsedTx.type = bData.type || 'B';
                             parsedTx.protocol = 'B';
                             parsedTx.content = bData;
-
-                            // Check for vote data
-                            if (bData.vote) {
-                                parsedTx.voteOption = {
-                                    questionId: bData.vote.questionId,
-                                    index: bData.vote.optionIndex,
-                                    content: bData.vote.content
-                                };
-                            } else if (bData.voteQuestion) {
-                                parsedTx.voteQuestion = {
-                                    question: bData.voteQuestion.question,
-                                    totalOptions: bData.voteQuestion.options.length,
-                                    optionsHash: bData.voteQuestion.optionsHash
-                                };
-                            }
                             break;
+                        } else {
+                            logger.debug('No BMAP data found in output', {
+                                txid,
+                                outputIndex: index
+                            });
                         }
                     } catch (error) {
-                        // Continue to next output if this one fails
-                        logger.debug('Failed to parse output script', {
+                        logger.error('Failed to parse output script', {
                             txid,
                             outputIndex: index,
-                            error: error instanceof Error ? error.message : 'Unknown error'
+                            error: error instanceof Error ? error.message : 'Unknown error',
+                            stack: error instanceof Error ? error.stack : undefined,
+                            scriptPreview: output.outputScript?.substring(0, 50) + '...'
                         });
                     }
                 }
@@ -141,23 +181,32 @@ export class TransactionParser {
                 logger.debug('No outputs found in transaction', { txid });
             }
 
-            // Log parsing result
+            // Log final parsed transaction state
             if (parsedTx.type !== 'unknown') {
                 logger.info('Successfully parsed transaction', {
                     txid,
                     type: parsedTx.type,
                     protocol: parsedTx.protocol,
-                    content: parsedTx.content
+                    hasContent: Object.keys(parsedTx.content || {}).length > 0,
+                    contentKeys: Object.keys(parsedTx.content || {}),
+                    blockHeight: parsedTx.blockHeight,
+                    blockTime: parsedTx.blockTime
                 });
+                return parsedTx;
             } else {
-                logger.debug('No recognized protocols found in transaction', { txid });
+                logger.debug('No recognized protocols found in transaction', { 
+                    txid,
+                    blockHeight: parsedTx.blockHeight,
+                    blockTime: parsedTx.blockTime
+                });
+                return null;
             }
-
-            return parsedTx;
         } catch (error) {
             logger.error('Failed to parse transaction', {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                tx: JSON.stringify(tx)
+                stack: error instanceof Error ? error.stack : undefined,
+                txid: tx.transaction?.hash || tx.id,
+                blockHeight: tx.block?.height
             });
             return null;
         }

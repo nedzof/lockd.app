@@ -124,75 +124,219 @@ export class DbClient {
     async processTransaction(tx: ParsedTransaction | ParsedTransaction[]): Promise<void> {
         try {
             const transactions = Array.isArray(tx) ? tx : [tx];
+            logger.info('Processing transactions', {
+                count: transactions.length,
+                types: transactions.map(t => t.type),
+                txids: transactions.map(t => t.txid)
+            });
 
             for (const transaction of transactions) {
-                switch (transaction.type) {
-                    case 'content':
-                        await this.prisma.post.create({
-                            data: {
-                                postId: transaction.metadata.postId,
-                                type: transaction.type,
-                                content: transaction.metadata.content,
-                                blockTime: transaction.blockTime ? new Date(transaction.blockTime * 1000) : new Date(),
-                                sequence: transaction.metadata.sequence || 0,
-                                parentSequence: transaction.metadata.parentSequence || 0
-                            }
-                        });
-                        break;
-                    case 'question':
-                        await this.prisma.voteQuestion.create({
-                            data: {
-                                postId: transaction.metadata.postId,
-                                question: transaction.metadata.content,
-                                totalOptions: 0,
-                                optionsHash: '',
-                                post: {
-                                    connect: {
-                                        postId: transaction.metadata.postId
-                                    }
-                                }
-                            }
-                        });
-                        break;
-                    case 'vote':
-                        // First find the question
-                        const question = await this.prisma.voteQuestion.findUnique({
-                            where: {
-                                postId: transaction.metadata.postId
-                            }
-                        });
+                logger.debug('Processing single transaction', {
+                    txid: transaction.txid,
+                    type: transaction.type,
+                    protocol: transaction.protocol,
+                    blockHeight: transaction.blockHeight,
+                    hasContent: !!transaction.content,
+                    hasVoteOption: !!transaction.voteOption,
+                    hasVoteQuestion: !!transaction.voteQuestion,
+                    hasLockLike: !!transaction.lockLike
+                });
 
-                        if (!question) {
-                            throw new Error('Vote question not found');
+                try {
+                    // First save the raw transaction
+                    await this.prisma.processedTransaction.create({
+                        data: {
+                            txid: transaction.txid,
+                            type: transaction.type,
+                            protocol: transaction.protocol || 'unknown',
+                            blockHeight: transaction.blockHeight,
+                            blockTime: transaction.blockTime ? new Date(transaction.blockTime * 1000) : new Date(),
+                            content: transaction.content || {},
+                            lockAmount: transaction.lockLike?.lockAmount,
+                            lockDuration: transaction.lockLike?.lockDuration
                         }
+                    });
 
-                        await this.prisma.voteOption.create({
-                            data: {
-                                postId: transaction.metadata.postId,
-                                content: transaction.metadata.content,
-                                index: 0,
-                                post: {
-                                    connect: {
-                                        postId: transaction.metadata.postId
-                                    }
-                                },
-                                voteQuestion: {
-                                    connect: {
-                                        id: question.id
+                    logger.info('Transaction saved to ProcessedTransaction', {
+                        txid: transaction.txid,
+                        type: transaction.type,
+                        protocol: transaction.protocol
+                    });
+
+                    // Then process specific transaction types
+                    switch (transaction.type) {
+                        case 'content':
+                            logger.debug('Creating content post', {
+                                txid: transaction.txid,
+                                postId: transaction.metadata?.postId,
+                                contentLength: transaction.metadata?.content?.length || 0
+                            });
+
+                            await this.prisma.post.create({
+                                data: {
+                                    postId: transaction.metadata.postId,
+                                    type: transaction.type,
+                                    content: transaction.metadata.content,
+                                    blockTime: transaction.blockTime ? new Date(transaction.blockTime * 1000) : new Date(),
+                                    sequence: transaction.metadata.sequence || 0,
+                                    parentSequence: transaction.metadata.parentSequence || 0
+                                }
+                            });
+
+                            logger.info('Content post created successfully', {
+                                txid: transaction.txid,
+                                postId: transaction.metadata.postId
+                            });
+                            break;
+
+                        case 'question':
+                            logger.debug('Creating vote question', {
+                                txid: transaction.txid,
+                                postId: transaction.metadata?.postId,
+                                questionLength: transaction.metadata?.content?.length || 0
+                            });
+
+                            await this.prisma.voteQuestion.create({
+                                data: {
+                                    postId: transaction.metadata.postId,
+                                    question: transaction.metadata.content,
+                                    totalOptions: 0,
+                                    optionsHash: '',
+                                    post: {
+                                        connect: {
+                                            postId: transaction.metadata.postId
+                                        }
                                     }
                                 }
+                            });
+
+                            logger.info('Vote question created successfully', {
+                                txid: transaction.txid,
+                                postId: transaction.metadata.postId
+                            });
+                            break;
+
+                        case 'vote':
+                            logger.debug('Processing vote option', {
+                                txid: transaction.txid,
+                                postId: transaction.metadata?.postId
+                            });
+
+                            // First find the question
+                            const question = await this.prisma.voteQuestion.findUnique({
+                                where: {
+                                    postId: transaction.metadata.postId
+                                }
+                            });
+
+                            if (!question) {
+                                logger.error('Vote question not found', {
+                                    txid: transaction.txid,
+                                    postId: transaction.metadata.postId
+                                });
+                                throw new Error('Vote question not found');
                             }
-                        });
-                        break;
-                    default:
-                        logger.warn('Unknown transaction type', { type: transaction.type });
+
+                            logger.debug('Found associated question', {
+                                txid: transaction.txid,
+                                questionId: question.id,
+                                postId: transaction.metadata.postId
+                            });
+
+                            await this.prisma.voteOption.create({
+                                data: {
+                                    postId: transaction.metadata.postId,
+                                    content: transaction.metadata.content,
+                                    index: 0,
+                                    post: {
+                                        connect: {
+                                            postId: transaction.metadata.postId
+                                        }
+                                    },
+                                    voteQuestion: {
+                                        connect: {
+                                            id: question.id
+                                        }
+                                    }
+                                }
+                            });
+
+                            logger.info('Vote option created successfully', {
+                                txid: transaction.txid,
+                                postId: transaction.metadata.postId,
+                                questionId: question.id
+                            });
+                            break;
+
+                        case 'lock':
+                            logger.debug('Processing lock transaction', {
+                                txid: transaction.txid,
+                                lockAmount: transaction.lockLike?.lockAmount,
+                                lockDuration: transaction.lockLike?.lockDuration
+                            });
+
+                            await this.prisma.processedTransaction.create({
+                                data: {
+                                    txid: transaction.txid,
+                                    type: transaction.type,
+                                    protocol: transaction.protocol,
+                                    blockHeight: transaction.blockHeight,
+                                    blockTime: transaction.blockTime,
+                                    content: transaction.content,
+                                    lockAmount: transaction.lockLike?.lockAmount,
+                                    lockDuration: transaction.lockLike?.lockDuration
+                                }
+                            });
+
+                            logger.info('Lock transaction processed successfully', {
+                                txid: transaction.txid
+                            });
+                            break;
+
+                        case 'unlock':
+                            logger.debug('Processing unlock transaction', {
+                                txid: transaction.txid
+                            });
+
+                            await this.prisma.processedTransaction.create({
+                                data: {
+                                    txid: transaction.txid,
+                                    type: transaction.type,
+                                    protocol: transaction.protocol,
+                                    blockHeight: transaction.blockHeight,
+                                    blockTime: transaction.blockTime,
+                                    content: transaction.content
+                                }
+                            });
+
+                            logger.info('Unlock transaction processed successfully', {
+                                txid: transaction.txid
+                            });
+                            break;
+
+                        default:
+                            logger.warn('Unknown transaction type', {
+                                txid: transaction.txid,
+                                type: transaction.type,
+                                protocol: transaction.protocol
+                            });
+                    }
+                } catch (error) {
+                    logger.error('Error processing single transaction', {
+                        txid: transaction.txid,
+                        type: transaction.type,
+                        error: error instanceof Error ? error.message : 'Unknown error',
+                        stack: error instanceof Error ? error.stack : undefined
+                    });
+                    throw error;
                 }
             }
         } catch (error) {
-            logger.error('Error processing transaction', {
+            logger.error('Error in batch transaction processing', {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                errorType: error?.constructor?.name,
-                txid: Array.isArray(tx) ? tx[0]?.txid : tx.txid
+                stack: error instanceof Error ? error.stack : undefined,
+                txCount: Array.isArray(tx) ? tx.length : 1,
+                firstTxid: Array.isArray(tx) ? tx[0]?.txid : tx.txid
             });
             throw error;
         }

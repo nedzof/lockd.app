@@ -76,12 +76,60 @@ export class Scanner extends EventEmitter {
         });
     }
 
+    private async fetchCompleteTransaction(txid: string): Promise<any> {
+        try {
+            logger.debug('Fetching complete transaction data', { txid });
+            const response = await fetch(`${this.API_BASE_URL}/transaction/get/${txid}`);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch transaction: ${response.statusText}`);
+            }
+            const data = await response.json();
+            logger.debug('Fetched complete transaction data', { 
+                txid,
+                hasInputs: !!data.inputs?.length,
+                inputCount: data.inputs?.length || 0,
+                hasOutputs: !!data.outputs?.length,
+                outputCount: data.outputs?.length || 0,
+                blockHeight: data.block?.height,
+                // Log sample of input and output data
+                sampleInput: data.inputs?.[0] ? {
+                    hasScript: !!data.inputs[0].inputScript,
+                    scriptLength: data.inputs[0].inputScript?.length || 0,
+                    scriptPreview: data.inputs[0].inputScript?.substring(0, 50) + '...',
+                    prevTxHash: data.inputs[0].previousTransactionHash,
+                    prevTxIndex: data.inputs[0].previousTransactionOutputIndex
+                } : null,
+                sampleOutput: data.outputs?.[0] ? {
+                    hasScript: !!data.outputs[0].outputScript,
+                    scriptLength: data.outputs[0].outputScript?.length || 0,
+                    scriptPreview: data.outputs[0].outputScript?.substring(0, 50) + '...',
+                    value: data.outputs[0].value,
+                    address: data.outputs[0].address
+                } : null
+            });
+            return data;
+        } catch (error) {
+            logger.error('Error fetching complete transaction', {
+                txid,
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            throw error;
+        }
+    }
+
     private async handleTransaction(tx: Transaction): Promise<void> {
         try {
+            const txid = tx.transaction?.hash || tx.id;
+            if (!txid) {
+                logger.warn('Transaction has no id', { tx: JSON.stringify(tx) });
+                return;
+            }
+
             // Log raw transaction for debugging
             logger.debug('Raw transaction received', {
                 id: tx.id,
-                hash: tx.transaction?.hash,
+                hash: txid,
                 outputCount: tx.transaction?.outputs?.length,
                 blockHeight: tx.block?.height,
                 blockHash: tx.block?.hash,
@@ -91,23 +139,34 @@ export class Scanner extends EventEmitter {
             // Emit raw transaction
             this.emit('transaction', tx);
 
-            // Parse transaction
-            const parsedTx = await this.parser.parseTransaction(tx);
+            // Fetch complete transaction data
+            const completeTx = await this.fetchCompleteTransaction(txid);
+            
+            // Merge block data from original tx with complete tx data
+            const enrichedTx: Transaction = {
+                id: tx.id,
+                transaction: completeTx,
+                block: tx.block
+            };
+
+            // Parse transaction with complete data
+            const parsedTx = await this.parser.parseTransaction(enrichedTx);
             if (parsedTx) {
                 // Log parsed transaction details
                 logger.debug('Transaction parsed', {
                     txid: parsedTx.txid,
                     type: parsedTx.type,
+                    protocol: parsedTx.protocol,
                     blockHeight: parsedTx.blockHeight,
-                    timestamp: parsedTx.timestamp,
-                    dataKeys: Object.keys(parsedTx.data || {})
+                    blockTime: parsedTx.blockTime,
+                    contentKeys: Object.keys(parsedTx.content || {})
                 });
 
                 // Emit parsed transaction
                 this.emit('transaction:parsed', parsedTx);
 
-                // Save to database with retry logic
-                await this.dbClient.saveTransaction(parsedTx).catch(async (error) => {
+                // Process to database with retry logic
+                await this.dbClient.processTransaction(parsedTx).catch(async (error) => {
                     if (error.code === '23505') { // Unique violation
                         logger.warn('Duplicate transaction detected', { txid: parsedTx.txid });
                     } else {
@@ -116,8 +175,8 @@ export class Scanner extends EventEmitter {
                 });
             } else {
                 logger.debug('Transaction parsing failed or returned null', {
-                    id: tx.id,
-                    hash: tx.transaction?.hash
+                    txid,
+                    blockHeight: tx.block?.height
                 });
             }
         } catch (error) {
@@ -176,18 +235,40 @@ export class Scanner extends EventEmitter {
             };
 
             const onTransaction = async (msg: any) => {
-                logger.debug('Raw JungleBus message:', { msg });
+                logger.debug('Raw JungleBus message received:', {
+                    msgId: msg.id,
+                    hasTransaction: !!msg.transaction,
+                    hasBlock: !!msg.block,
+                    blockHeight: msg.block?.height,
+                    blockHash: msg.block?.hash,
+                    txHash: msg.transaction?.hash,
+                    inputCount: msg.transaction?.inputs?.length,
+                    outputCount: msg.transaction?.outputs?.length
+                });
+
                 try {
                     const tx: Transaction = {
                         id: msg.id,
                         transaction: msg.transaction,
                         block: msg.block
                     };
+
+                    // Log transaction details
+                    logger.debug('Processing transaction:', {
+                        txid: tx.transaction?.hash || tx.id,
+                        blockHeight: tx.block?.height,
+                        blockTime: tx.block?.timestamp,
+                        inputCount: tx.transaction?.inputs?.length || 0,
+                        outputCount: tx.transaction?.outputs?.length || 0
+                    });
+
                     await this.handleTransaction(tx);
                 } catch (error) {
                     logger.error('Error in onTransaction', {
                         error: error instanceof Error ? error.message : 'Unknown error',
-                        stack: error instanceof Error ? error.stack : undefined
+                        stack: error instanceof Error ? error.stack : undefined,
+                        msgId: msg.id,
+                        txHash: msg.transaction?.hash
                     });
                 }
             };
@@ -278,24 +359,24 @@ export class Scanner extends EventEmitter {
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 if (process.env.NODE_ENV !== 'test' && isMainModule) {
     const scanner = new Scanner();
-    
-    // Handle cleanup on exit
+    scanner.start().catch(error => {
+        logger.error('Failed to start scanner', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            stack: error instanceof Error ? error.stack : undefined
+        });
+        process.exit(1);
+    });
+
+    // Handle process termination
     process.on('SIGINT', async () => {
-        logger.info('Received SIGINT. Cleaning up...');
+        logger.info('Received SIGINT. Shutting down...');
         await scanner.stop();
         process.exit(0);
     });
 
     process.on('SIGTERM', async () => {
-        logger.info('Received SIGTERM. Cleaning up...');
+        logger.info('Received SIGTERM. Shutting down...');
         await scanner.stop();
         process.exit(0);
-    });
-
-    scanner.start().catch(error => {
-        logger.error('Scanner failed to start', {
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
-        process.exit(1);
     });
 }
