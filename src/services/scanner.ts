@@ -129,6 +129,7 @@ export class Scanner extends EventEmitter {
                 subscriptionId: this.SUBSCRIPTION_ID
             });
 
+            // Subscribe with specific filters for LOCK protocol transactions
             const subscription = await this.jungleBus.Subscribe(
                 this.SUBSCRIPTION_ID,
                 fromBlock,
@@ -140,7 +141,7 @@ export class Scanner extends EventEmitter {
                             blockHeight: tx?.block_height,
                             hasData: !!tx?.data,
                             dataLength: tx?.data?.length,
-                            data: tx?.data
+                            data: JSON.stringify(tx?.data)
                         });
 
                         // Only proceed if it's a valid transaction
@@ -180,6 +181,11 @@ export class Scanner extends EventEmitter {
                     logger.error('Subscription error', {
                         error: error instanceof Error ? error.message : 'Unknown error'
                     });
+                },
+                { // Add filters
+                    find: ['app=lockd.app'],
+                    findOpcodes: ['OP_RETURN'],
+                    includeMempool: false
                 }
             );
 
@@ -192,7 +198,8 @@ export class Scanner extends EventEmitter {
 
         } catch (error) {
             logger.error('Failed to subscribe to JungleBus', {
-                error: error instanceof Error ? error.message : 'Unknown error'
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
             });
             throw error;
         }
