@@ -117,6 +117,43 @@ export class Scanner extends EventEmitter {
         }
     }
 
+    private isValidTransaction(tx: any): boolean {
+        // Basic validation of transaction structure
+        if (!tx || typeof tx !== 'object') {
+            logger.debug('Invalid transaction: not an object', { tx });
+            return false;
+        }
+
+        if (!tx.id || !tx.block_height || !tx.block_time) {
+            logger.debug('Invalid transaction: missing required fields', {
+                hasId: !!tx.id,
+                hasBlockHeight: !!tx.block_height,
+                hasBlockTime: !!tx.block_time
+            });
+            return false;
+        }
+
+        if (!Array.isArray(tx.data)) {
+            logger.debug('Invalid transaction: data is not an array', { tx });
+            return false;
+        }
+
+        // Check if this is a LOCK protocol transaction
+        const isLockApp = tx.data.some((d: string) => d === 'app=lockd.app');
+        if (!isLockApp) {
+            return false;
+        }
+
+        // Log detected transaction
+        logger.info('TX DETECTED', {
+            txid: tx.id,
+            blockHeight: tx.block_height,
+            timestamp: new Date(tx.block_time * 1000).toISOString()
+        });
+
+        return true;
+    }
+
     private createJungleBusClient(): void {
         const startTime = Date.now();
         
