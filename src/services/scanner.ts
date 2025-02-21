@@ -433,13 +433,38 @@ export class Scanner extends EventEmitter {
 
             // Ensure clean state before starting
             await this.stop();
-            
-            // Create new JungleBus client
+
+            // Create JungleBus client
             this.createJungleBusClient();
-            
+
+            // Connect to JungleBus
+            await this.connect();
+
+            // Subscribe to transactions
             await this.subscribe();
+
         } catch (error) {
             logger.error('Failed to start scanner', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            throw error;
+        }
+    }
+
+    public async connect(): Promise<void> {
+        try {
+            if (!this.jungleBus) {
+                throw new Error('JungleBus client not initialized');
+            }
+
+            logger.info('Connecting to JungleBus');
+            await this.jungleBus.connect();
+            this.isConnected = true;
+            logger.info('Successfully connected to JungleBus');
+
+        } catch (error) {
+            logger.error('Failed to connect to JungleBus', {
                 error: error instanceof Error ? error.message : 'Unknown error',
                 stack: error instanceof Error ? error.stack : undefined
             });
