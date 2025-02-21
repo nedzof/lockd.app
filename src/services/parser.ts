@@ -159,14 +159,12 @@ export class TransactionParser {
     public async parseTransaction(tx: any): Promise<ParsedTransaction | null> {
         try {
             logger.debug('Raw transaction data', {
-                id: tx.id,
-                block_height: tx.block_height,
-                block_time: tx.block_time,
-                addresses: tx.addresses,
-                outputCount: tx.outputs?.length,
-                dataCount: tx.data?.length,
-                hasData: !!tx.data,
-                hasOutputs: !!tx.outputs
+                addresses: tx?.addresses,
+                block_height: tx?.block_height,
+                dataCount: tx?.data?.length,
+                hasData: !!tx?.data,
+                hasOutputs: !!tx?.outputs,
+                id: tx?.id
             });
 
             // First try to extract LOCK protocol data from tx.data
@@ -225,7 +223,8 @@ export class TransactionParser {
                         voteOptions: lockData.voteOptions,
                         voteQuestion: lockData.voteQuestion,
                         image: lockData.image,
-                        imageMetadata: lockData.imageMetadata
+                        imageMetadata: lockData.imageMetadata,
+                        senderAddress: tx.addresses?.[0] || null
                     }
                 };
 

@@ -22,14 +22,16 @@ describe('TransactionParser Integration Tests', () => {
     });
 
     it('should successfully parse and store a real transaction from JungleBus', async () => {
-        // Generate unique test data
+        // Generate test data
+        const timestamp = Date.now();
         const txid = randomUUID().replace(/-/g, '');
         const postId = `post-${randomUUID().substring(0, 8)}`;
+        const senderAddress = '1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR';
         const blockHeight = Math.floor(Math.random() * 1000000);
-        const blockTime = Math.floor(Date.now() / 1000);
+        const blockTime = Math.floor(timestamp / 1000);
         const lockAmount = Math.floor(Math.random() * 10000);
         const lockDuration = Math.floor(Math.random() * 100);
-        const content = `Test content ${Date.now()}`;
+        const content = `Test content ${timestamp}`;
         const voteQuestion = 'Which is your favorite?';
         const voteOptions = ['Option 1', 'Option 2', 'Option 3'];
         const imageFilename = 'test-image.png';
@@ -37,36 +39,35 @@ describe('TransactionParser Integration Tests', () => {
         // 1x1 transparent PNG
         const imageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
-        // Create transaction data
+        // Create test transaction
         const tx = {
             id: txid,
             block_height: blockHeight,
             block_time: blockTime,
-            addresses: ['1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR'],
+            addresses: [senderAddress],
             data: [
                 'app=lockd.app',
-                `lockamount=${lockAmount}`,
-                `lockduration=${lockDuration}`,
-                `postid=${postId}`,
+                `postId=${postId}`,
+                `lockDuration=${lockDuration}`,
+                `lockAmount=${lockAmount}`,
                 `content=${content}`,
-                ...voteOptions.map(opt => `voteoption=${opt}`),
-                `votequestion=${voteQuestion}`,
-                `filename=${imageFilename}`,
-                `contenttype=${imageContentType}`,
-                `image=${imageBase64}`
-            ],
-            outputs: []
+                ...voteOptions.map(opt => `voteOption=${opt}`),
+                `voteQuestion=${voteQuestion}`,
+                `imageFilename=${imageFilename}`,
+                `imageContentType=${imageContentType}`,
+                imageBase64
+            ]
         };
 
         logger.info('Fetched transaction for testing', {
             txid: tx.id,
-            outputCount: tx.outputs.length
+            outputCount: tx.addresses.length
         });
 
         try {
-            // Parse the transaction
+            // Parse transaction
             const parsedTx = await parser.parseTransaction(tx);
-            expect(parsedTx).toBeTruthy();
+            expect(parsedTx).toBeDefined();
             expect(parsedTx?.txid).toBe(txid);
             expect(parsedTx?.metadata.postId).toBe(postId);
             expect(parsedTx?.blockHeight).toBe(blockHeight);
@@ -74,25 +75,29 @@ describe('TransactionParser Integration Tests', () => {
             expect(parsedTx?.metadata.lockAmount).toBe(lockAmount);
             expect(parsedTx?.metadata.lockDuration).toBe(lockDuration);
             expect(parsedTx?.metadata.content).toBe(content);
+            expect(parsedTx?.metadata.senderAddress).toBe(senderAddress);
 
-            // Save the transaction
+            // Save transaction
             const savedTx = await dbClient.saveTransaction(parsedTx!);
-            expect(savedTx).toBeTruthy();
+            expect(savedTx).toBeDefined();
             expect(savedTx.txid).toBe(txid);
+            expect(savedTx.post).toBeDefined();
+            expect(savedTx.post?.id).toBe(postId);
+            expect(savedTx.post?.senderAddress).toBe(senderAddress);
 
             // Verify the Post was created with image
             const post = await dbClient.getPostWithVoteOptions(parsedTx?.metadata.postId!);
-            expect(post).toBeTruthy();
+            expect(post).toBeDefined();
             expect(post?.postId).toBe(postId);
             expect(post?.content).toBe(content);
 
             // Verify the image metadata
-            expect(post?.image).toBeTruthy();
+            expect(post?.image).toBeDefined();
             expect(Buffer.isBuffer(post?.image)).toBe(true);
             expect(post?.image?.length).toBe(70); // Size of our test PNG
 
             // Verify vote question was created
-            expect(post?.voteQuestion).toBeTruthy();
+            expect(post?.voteQuestion).toBeDefined();
             expect(post?.voteQuestion?.question).toBe(voteQuestion);
             expect(post?.voteQuestion?.totalOptions).toBe(voteOptions.length);
 
