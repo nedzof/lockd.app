@@ -100,9 +100,16 @@ export interface JungleBusBlockHeader {
 export interface ParsedTransaction {
     txid: string;
     type: string;
+    protocol: string;
+    content: any;  // Will be stored as JSON in the database
+    senderAddress?: string;
     blockHeight?: number;
-    timestamp?: string;
-    data?: any;
+    blockTime?: Date;
+    sequence: number;
+    parentSequence: number;
+    lockLike?: LockLike;
+    voteQuestion?: VoteQuestion;
+    voteOption?: VoteOption;
 }
 
 export type Transaction = JungleBusTransaction;

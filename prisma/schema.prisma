@@ -11,10 +11,12 @@ datasource db {
 model Post {
   id             String        @id @default(dbgenerated("gen_random_uuid()"))
   postId         String        @unique
+  txid           String?       // Made optional for existing data
   type           String
   protocol       String        @default("MAP")
   content        Json
   senderAddress  String?      // Making it optional in case some old transactions don't have it
+  blockHeight    Int?         // Block height where transaction was found
   blockTime      DateTime
   sequence       Int
   parentSequence Int
@@ -25,7 +27,9 @@ model Post {
   voteQuestion   VoteQuestion?
 
   @@index([postId])
+  @@index([txid])
   @@index([senderAddress])
+  @@index([blockHeight])
 }
 
 model VoteQuestion {
@@ -75,10 +79,15 @@ model LockLike {
 model ProcessedTransaction {
   id          String   @id @default(dbgenerated("gen_random_uuid()"))
   txid        String   @unique
+  type        String   @default("unknown")  // Default for existing data
+  protocol    String   @default("MAP")
   blockHeight Int
   blockTime   DateTime
   createdAt   DateTime @default(now())
   updatedAt   DateTime @default(now())
 
   @@index([txid])
+  @@index([type])
+  @@index([protocol])
+  @@index([blockHeight])
 }
