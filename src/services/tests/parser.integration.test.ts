@@ -1,6 +1,7 @@
 import { TransactionParser } from '../parser.js';
 import { DbClient } from '../dbClient.js';
 import { logger } from '../../utils/logger.js';
+import { randomUUID } from 'crypto';
 
 describe('TransactionParser Integration Tests', () => {
     let parser: TransactionParser;
@@ -12,34 +13,47 @@ describe('TransactionParser Integration Tests', () => {
         await dbClient.connect();
     });
 
-    beforeEach(async () => {
-        await dbClient.cleanupTestData();
-    });
-
     afterAll(async () => {
         await dbClient.disconnect();
     });
 
+    beforeEach(async () => {
+        await dbClient.cleanupTestData();
+    });
+
     it('should successfully parse and store a real transaction from JungleBus', async () => {
-        // Mock transaction data with real image
+        // Generate unique test data
+        const txid = randomUUID().replace(/-/g, '');
+        const postId = `post-${randomUUID().substring(0, 8)}`;
+        const blockHeight = Math.floor(Math.random() * 1000000);
+        const blockTime = Math.floor(Date.now() / 1000);
+        const lockAmount = Math.floor(Math.random() * 10000);
+        const lockDuration = Math.floor(Math.random() * 100);
+        const content = `Test content ${Date.now()}`;
+        const voteQuestion = 'Which is your favorite?';
+        const voteOptions = ['Option 1', 'Option 2', 'Option 3'];
+        const imageFilename = 'test-image.png';
+        const imageContentType = 'image/png';
+        // 1x1 transparent PNG
+        const imageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+        // Create transaction data
         const tx = {
-            id: 'a043fbcdc79628136708f88fad1e33f367037aa3d1bb0bff4bfffe818ec4b598',
-            block_height: 883850,
-            block_time: 1739458216,
+            id: txid,
+            block_height: blockHeight,
+            block_time: blockTime,
             addresses: ['1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR'],
             data: [
                 'app=lockd.app',
-                'lockamount=1000',
-                'lockduration=1',
-                'postid=m73g8bip-ceeh3n0x2',
-                'content=dwedwedd wedw wedwd',
-                'voteoption=Option 1',
-                'voteoption=Option 2',
-                'voteoption=Option 3',
-                'votequestion=Which is your favorite?',
-                'filename=Screenshot from 2025-02-08 11-05-14.png',
-                'contenttype=image/png',
-                'image=iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='  // Actual base64 image data
+                `lockamount=${lockAmount}`,
+                `lockduration=${lockDuration}`,
+                `postid=${postId}`,
+                `content=${content}`,
+                ...voteOptions.map(opt => `voteoption=${opt}`),
+                `votequestion=${voteQuestion}`,
+                `filename=${imageFilename}`,
+                `contenttype=${imageContentType}`,
+                `image=${imageBase64}`
             ],
             outputs: []
         };
@@ -53,40 +67,41 @@ describe('TransactionParser Integration Tests', () => {
             // Parse the transaction
             const parsedTx = await parser.parseTransaction(tx);
             expect(parsedTx).toBeTruthy();
-            expect(parsedTx?.txid).toBe(tx.id);
-            expect(parsedTx?.metadata.postId).toBe('m73g8bip-ceeh3n0x2');
+            expect(parsedTx?.txid).toBe(txid);
+            expect(parsedTx?.metadata.postId).toBe(postId);
+            expect(parsedTx?.blockHeight).toBe(blockHeight);
+            expect(parsedTx?.blockTime).toBe(blockTime);
+            expect(parsedTx?.metadata.lockAmount).toBe(lockAmount);
+            expect(parsedTx?.metadata.lockDuration).toBe(lockDuration);
+            expect(parsedTx?.metadata.content).toBe(content);
 
             // Save the transaction
             const savedTx = await dbClient.saveTransaction(parsedTx!);
             expect(savedTx).toBeTruthy();
-            expect(savedTx.txid).toBe(tx.id);
+            expect(savedTx.txid).toBe(txid);
 
             // Verify the Post was created with image
             const post = await dbClient.getPostWithVoteOptions(parsedTx?.metadata.postId!);
             expect(post).toBeTruthy();
-            expect(post?.postId).toBe(parsedTx?.metadata.postId);
-            expect(post?.content).toBe('dwedwedd wedw wedwd');
+            expect(post?.postId).toBe(postId);
+            expect(post?.content).toBe(content);
 
             // Verify the image metadata
             expect(post?.image).toBeTruthy();
             expect(Buffer.isBuffer(post?.image)).toBe(true);
-            expect(post?.image?.length).toBe(70);
+            expect(post?.image?.length).toBe(70); // Size of our test PNG
 
             // Verify vote question was created
             expect(post?.voteQuestion).toBeTruthy();
-            expect(post?.voteQuestion?.question).toBe('Which is your favorite?');
-            expect(post?.voteQuestion?.totalOptions).toBe(3);
+            expect(post?.voteQuestion?.question).toBe(voteQuestion);
+            expect(post?.voteQuestion?.totalOptions).toBe(voteOptions.length);
 
             // Verify vote options were created
-            expect(post?.voteOptions).toHaveLength(3);
-            expect(post?.voteOptions[0].content).toBe('Option 1');
-            expect(post?.voteOptions[1].content).toBe('Option 2');
-            expect(post?.voteOptions[2].content).toBe('Option 3');
-
-            // Verify vote options are properly linked
-            expect(post?.voteOptions[0].voteQuestionId).toBe(post?.voteQuestion?.id);
-            expect(post?.voteOptions[1].voteQuestionId).toBe(post?.voteQuestion?.id);
-            expect(post?.voteOptions[2].voteQuestionId).toBe(post?.voteQuestion?.id);
+            expect(post?.voteOptions).toHaveLength(voteOptions.length);
+            voteOptions.forEach((option, index) => {
+                expect(post?.voteOptions[index].content).toBe(option);
+                expect(post?.voteOptions[index].voteQuestionId).toBe(post?.voteQuestion?.id);
+            });
 
             logger.info('Transaction successfully parsed and stored', {
                 txid: parsedTx?.txid,
