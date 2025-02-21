@@ -112,6 +112,8 @@ export class TransactionParser {
         lockDuration?: string;
         postId?: string;
         content?: string;
+        voteOptions?: string[];
+        voteQuestion?: string;
     } {
         const isLockApp = tx.data?.some((d: string) => d === 'app=lockd.app');
         const lockAmount = tx.data?.find((d: string) => d.startsWith('lockamount='))?.split('=')[1];
@@ -121,6 +123,15 @@ export class TransactionParser {
             ?.filter((d: string) => d.startsWith('content='))
             .map((d: string) => d.split('content=')[1]);
 
+        // Extract vote options and question
+        const voteOptions = tx.data
+            ?.filter((d: string) => d.startsWith('voteoption='))
+            .map((d: string) => d.split('voteoption=')[1]);
+        
+        const voteQuestion = tx.data
+            ?.find((d: string) => d.startsWith('votequestion='))
+            ?.split('votequestion=')[1];
+
         const content = contentItems?.length > 0 ? contentItems.join(' ') : undefined;
 
         logger.debug('LOCK protocol detection', {
@@ -128,7 +139,9 @@ export class TransactionParser {
             lockAmount,
             lockDuration,
             postId,
-            hasAllRequired: isLockApp && lockAmount && lockDuration
+            hasAllRequired: isLockApp && lockAmount && lockDuration,
+            voteOptionsCount: voteOptions?.length,
+            hasVoteQuestion: !!voteQuestion
         });
 
         return {
@@ -136,7 +149,9 @@ export class TransactionParser {
             lockAmount,
             lockDuration,
             postId,
-            content
+            content,
+            voteOptions: voteOptions?.length ? voteOptions : undefined,
+            voteQuestion
         };
     }
 
@@ -161,7 +176,8 @@ export class TransactionParser {
                     txid: tx.id,
                     lockAmount: lockData.lockAmount,
                     lockDuration: lockData.lockDuration,
-                    postId: lockData.postId
+                    postId: lockData.postId,
+                    voteOptionsCount: lockData.voteOptions?.length
                 });
 
                 let content = lockData.content;
@@ -202,7 +218,9 @@ export class TransactionParser {
                         content: content || '',
                         lockAmount: Number(lockData.lockAmount),
                         lockDuration: Number(lockData.lockDuration),
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        voteOptions: lockData.voteOptions,
+                        voteQuestion: lockData.voteQuestion
                     }
                 };
 

@@ -43,55 +43,78 @@ export class Scanner extends EventEmitter {
 
     private async handleTransaction(tx: any): Promise<void> {
         const startTime = Date.now();
+        const txid = tx.transaction?.hash || tx.hash;
+
+        logger.debug('Starting transaction processing', {
+            txid,
+            blockHeight: tx.block?.height || tx.height,
+            timestamp: tx.block?.timestamp,
+            inputCount: tx.transaction?.inputs?.length,
+            outputCount: tx.transaction?.outputs?.length,
+            processingStartTime: new Date(startTime).toISOString()
+        });
+
         try {
-            const txid = tx.transaction?.hash || tx.tx?.h;
-
-            logger.debug('Starting transaction processing', {
-                txid,
-                processingStartTime: new Date(startTime).toISOString(),
-                rawTxPreview: JSON.stringify(tx).substring(0, 200),
-                inputCount: tx.transaction?.inputs?.length || tx.tx?.in?.length,
-                outputCount: tx.transaction?.outputs?.length || tx.tx?.out?.length,
-                blockHeight: tx.block?.height || tx.blk?.i
-            });
-
+            // Parse the transaction
+            logger.debug('Attempting to parse transaction', { txid });
             const parsedTx = await this.parser.parseTransaction(tx);
+            
             if (!parsedTx) {
                 logger.debug('Transaction skipped - no relevant data found', {
-                    processingTime: Date.now() - startTime,
-                    reason: 'Parser returned null'
+                    txid,
+                    processingTime: Date.now() - startTime
                 });
                 return;
             }
 
             logger.info('Transaction successfully parsed', {
                 txid: parsedTx.txid,
-                type: parsedTx.type,
-                protocol: parsedTx.protocol,
+                protocols: parsedTx.protocols,
+                contentTypes: parsedTx.contentTypes,
+                dataSize: JSON.stringify(parsedTx).length,
                 processingTime: Date.now() - startTime
             });
 
             // Save to database
+            logger.debug('Attempting to save transaction to database', {
+                txid: parsedTx.txid
+            });
+
             await this.dbClient.saveTransaction(parsedTx);
+            
+            const totalTime = Date.now() - startTime;
+            logger.info('Transaction fully processed and saved', {
+                txid: parsedTx.txid,
+                protocols: parsedTx.protocols,
+                totalProcessingTime: totalTime,
+                timestamp: new Date().toISOString()
+            });
+
+            // Emit success event for monitoring
+            this.emit('transaction:processed', {
+                txid: parsedTx.txid,
+                processingTime: totalTime,
+                protocols: parsedTx.protocols
+            });
 
         } catch (error) {
-            // Don't retry on parsing errors
-            if (error instanceof Error && error.message === 'Cannot process tx') {
-                logger.debug('Transaction skipped - parsing error', {
-                    error: error.message,
-                    stack: error.stack,
-                    processingTime: Date.now() - startTime
-                });
-                return;
-            }
-
-            // For other errors, throw to trigger retry
-            logger.error('Failed to handle transaction', {
+            const errorTime = Date.now() - startTime;
+            logger.error('Failed to process transaction', {
+                txid,
+                processingTime: errorTime,
                 error: error instanceof Error ? error.message : 'Unknown error',
                 stack: error instanceof Error ? error.stack : undefined,
-                processingTime: Date.now() - startTime
+                rawTx: JSON.stringify(tx).substring(0, 1000) // First 1000 chars for debugging
             });
-            throw error;
+            
+            // Emit error event for monitoring
+            this.emit('transaction:error', {
+                txid,
+                error: error instanceof Error ? error.message : 'Unknown error',
+                processingTime: errorTime
+            });
+
+            this.handleError(error);
         }
     }
 
@@ -172,90 +195,6 @@ export class Scanner extends EventEmitter {
                 startBlock: this.START_BLOCK,
                 timestamp: new Date(startTime).toISOString()
             });
-
-            // Test transactions for parser verification
-            const testTransactions = [
-                {
-                    transaction: {
-                        hash: 'test_lock_tx',
-                        outputs: [{
-                            outputScript: 'OP_RETURN LOCK test_data',
-                            value: 0
-                        }],
-                        inputs: [{
-                            inputScript: 'test_input',
-                            address: 'test_address'
-                        }]
-                    },
-                    block: {
-                        height: 1000000,
-                        timestamp: Date.now()
-                    }
-                },
-                {
-                    transaction: {
-                        hash: 'test_unlock_tx',
-                        outputs: [{
-                            outputScript: 'OP_RETURN UNLOCK test_data',
-                            value: 0
-                        }],
-                        inputs: [{
-                            inputScript: 'test_input',
-                            address: 'test_address'
-                        }]
-                    },
-                    block: {
-                        height: 1000001,
-                        timestamp: Date.now()
-                    }
-                },
-                {
-                    tx: {
-                        h: 'test_bmap_tx',
-                        out: [
-                            {
-                                i: 0,
-                                s: '19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut',
-                                e: {
-                                    v: 0,
-                                    a: 'test_address'
-                                }
-                            },
-                            {
-                                i: 1,
-                                s: 'OP_RETURN',
-                                b2: 'test_data',
-                                str: 'test message',
-                                e: {
-                                    v: 0
-                                }
-                            }
-                        ],
-                        in: [
-                            {
-                                i: 0,
-                                s: 'test_input',
-                                e: {
-                                    a: 'test_address',
-                                    h: 'prev_tx_hash',
-                                    i: 0
-                                }
-                            }
-                        ]
-                    },
-                    blk: {
-                        i: 1000002,
-                        h: 'test_block_hash',
-                        t: Date.now()
-                    }
-                }
-            ];
-
-            // Process test transactions
-            logger.info('Processing test transactions');
-            for (const testTx of testTransactions) {
-                await this.handleTransaction(testTx);
-            }
 
             // Handler for confirmed transactions
             const onPublish = async (tx: any) => {
@@ -370,20 +309,24 @@ export class Scanner extends EventEmitter {
 
     private async handleError(error: unknown): Promise<void> {
         const startTime = Date.now();
-        this.retryCount++;
-
-        // Log error details
+        
         logger.debug('Handling error', {
+            retryCount: this.retryCount,
+            maxRetries: this.MAX_RETRIES,
             isConnected: this.isConnected,
             hasSubscription: !!this.subscription,
-            maxRetries: this.MAX_RETRIES,
-            retryCount: this.retryCount
+            timestamp: new Date(startTime).toISOString()
         });
 
-        // Check if we should retry
+        this.emit('scanner:error', {
+            error: error instanceof Error ? error : new Error('Unknown error'),
+            retryCount: this.retryCount,
+            timestamp: new Date(startTime).toISOString()
+        });
+
         if (this.retryCount < this.MAX_RETRIES) {
-            // Calculate exponential backoff delay
-            const retryDelay = this.RETRY_DELAY * Math.pow(2, this.retryCount - 1);
+            this.retryCount++;
+            const retryDelay = this.RETRY_DELAY * this.retryCount;
             
             logger.info('Retrying connection', {
                 attempt: this.retryCount,
@@ -398,20 +341,8 @@ export class Scanner extends EventEmitter {
                 delayMs: retryDelay,
                 totalErrorHandlingTime: Date.now() - startTime
             });
-
-            // Only retry if it's a connection error
-            if (error instanceof Error && 
-                (error.message.includes('connection') || 
-                 error.message.includes('network') ||
-                 error.message.includes('socket') ||
-                 error.message.includes('timeout'))) {
-                await this.start();
-            } else {
-                logger.warn('Skipping retry for non-connection error', {
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    stack: error instanceof Error ? error.stack : undefined
-                });
-            }
+            
+            await this.start();
         } else {
             logger.error('Max retries exceeded', {
                 maxRetries: this.MAX_RETRIES,

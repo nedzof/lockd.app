@@ -101,12 +101,20 @@ export interface ParsedTransaction {
     txid: string;
     type: string;
     protocol: string;
-    content: any;  // Will be stored as JSON in the database
+    content?: any;
+    metadata: {
+        postId: string;
+        content: string;
+        lockAmount?: number;
+        lockDuration?: number;
+        timestamp?: number;
+        [key: string]: any;
+    };
     senderAddress?: string;
     blockHeight?: number;
-    blockTime?: Date;
-    sequence: number;
-    parentSequence: number;
+    blockTime?: number;
+    sequence?: number;
+    parentSequence?: number;
     lockLike?: LockLike;
     voteQuestion?: VoteQuestion;
     voteOption?: VoteOption;
