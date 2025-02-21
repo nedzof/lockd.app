@@ -6,6 +6,7 @@ import { logger } from '../utils/logger';
 import { fileURLToPath } from 'url';
 import { EventEmitter } from 'events';
 import fetch from 'node-fetch';
+import { CONFIG } from './config';
 
 export class Scanner extends EventEmitter {
     private jungleBus: JungleBusClient | null = null;
@@ -18,8 +19,7 @@ export class Scanner extends EventEmitter {
     private readonly RETRY_DELAY = 1000; // 1 second
     private readonly START_BLOCK = 882000;
     private readonly API_BASE_URL = 'https://junglebus.gorillapool.io/v1';
-    // Use an empty subscription ID to get all transactions
-    private readonly SUBSCRIPTION_ID = '';
+    private readonly SUBSCRIPTION_ID = CONFIG.JB_SUBSCRIPTION_ID;
 
     constructor() {
         super();
@@ -42,7 +42,11 @@ export class Scanner extends EventEmitter {
     }
 
     private createJungleBusClient(): void {
-        logger.debug('Creating new JungleBus client');
+        logger.debug('Creating new JungleBus client', {
+            configSubscriptionId: CONFIG.JB_SUBSCRIPTION_ID,
+            currentSubscriptionId: this.SUBSCRIPTION_ID,
+            server: CONFIG.JB_SERVER
+        });
         
         this.jungleBus = new JungleBusClient('junglebus.gorillapool.io', {
             useSSL: true,

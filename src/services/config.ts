@@ -1,6 +1,6 @@
 // src/config.ts
 export const CONFIG = {
-    JB_SUBSCRIPTION_ID: "2177e79197422e0d162a685bb6fcc77c67f55a1920869d7c7685b0642043eb9c",
+    JB_SUBSCRIPTION_ID: "4fb59514fc870267ec6ab10dac3000f6b1454abb954e93427998b077150c2343",
     JB_SERVER: "junglebus.gorillapool.io",
     PROTOCOLS: {
       MAP: "MAP",
