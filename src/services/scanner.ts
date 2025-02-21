@@ -17,7 +17,7 @@ export class Scanner extends EventEmitter {
     private subscription: any = null;
     private readonly MAX_RETRIES = 3;
     private readonly RETRY_DELAY = 1000; // 1 second
-    private readonly START_BLOCK = 720000;
+    private readonly START_BLOCK = 883008;
     private readonly API_BASE_URL = 'https://junglebus.gorillapool.io/v1';
     private readonly SUBSCRIPTION_ID = CONFIG.JB_SUBSCRIPTION_ID;
 

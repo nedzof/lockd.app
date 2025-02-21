@@ -1,6 +1,6 @@
 import { logger } from '../utils/logger.js';
 import { ParsedTransaction } from '../shared/types.js';
-import { Script, Transaction } from 'bsv';
+import * as bsv from 'bsv';
 
 interface DecodedTransaction {
     version: number;
@@ -33,74 +33,29 @@ export class TransactionParser {
     private decodeTransaction(txHex: string): DecodedTransaction | null {
         try {
             // Create transaction from hex
-            const tx = Transaction.fromHex(txHex);
+            const tx = new bsv.Transaction(txHex);
             
             // Object to store decoded data
             const decodedData: DecodedTransaction = {
                 version: tx.version,
-                inputs: [],
-                outputs: [],
+                inputs: tx.inputs.map(input => ({
+                    script: input.script.toHex(),
+                    prevTxId: input.prevTxId.toString('hex'),
+                    outputIndex: input.outputIndex,
+                    sequenceNumber: input.sequenceNumber
+                })),
+                outputs: tx.outputs.map(output => ({
+                    script: output.script.toHex(),
+                    satoshis: output.satoshis
+                })),
                 locktime: tx.nLockTime
             };
 
-            // Decode inputs
-            tx.inputs.forEach((input, index) => {
-                decodedData.inputs.push({
-                    index,
-                    prevTxId: input.prevTxId.toString('hex'),
-                    outputIndex: input.outputIndex,
-                    sequenceNumber: input.sequenceNumber,
-                    script: input.script.toHex()
-                });
-            });
-
-            // Decode outputs
-            tx.outputs.forEach((output, index) => {
-                const outputData = {
-                    index,
-                    satoshis: output.satoshis,
-                    script: output.script.toHex(),
-                    opReturn: null as string | null,
-                    decodedData: undefined as any
-                };
-
-                // Try to decode OP_RETURN data if present
-                if (output.script.isDataOut()) {
-                    try {
-                        const data = output.script.getData().toString('utf8');
-                        outputData.opReturn = data;
-                        
-                        // Try to parse as JSON if possible
-                        try {
-                            outputData.decodedData = JSON.parse(data);
-                        } catch {
-                            // If not JSON, keep as string
-                            outputData.decodedData = data;
-                        }
-                    } catch (error) {
-                        logger.error('Error decoding OP_RETURN data', {
-                            error: error instanceof Error ? error.message : 'Unknown error',
-                            outputIndex: index
-                        });
-                    }
-                }
-
-                decodedData.outputs.push(outputData);
-            });
-
-            logger.debug('Transaction decoded successfully', {
-                version: decodedData.version,
-                inputCount: decodedData.inputs.length,
-                outputCount: decodedData.outputs.length,
-                hasOpReturn: decodedData.outputs.some(o => o.opReturn !== null)
-            });
-
             return decodedData;
-
         } catch (error) {
-            logger.error('Error decoding transaction', {
+            logger.error('Failed to decode transaction', {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                txHex: txHex.substring(0, 50) + '...'
+                txHex
             });
             return null;
         }
