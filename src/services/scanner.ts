@@ -138,9 +138,21 @@ export class Scanner extends EventEmitter {
             return false;
         }
 
+        // Log all transaction data for debugging
+        logger.debug('Transaction data received', {
+            txid: tx.id,
+            blockHeight: tx.block_height,
+            data: tx.data,
+            timestamp: new Date(tx.block_time * 1000).toISOString()
+        });
+
         // Check if this is a LOCK protocol transaction
         const isLockApp = tx.data.some((d: string) => d === 'app=lockd.app');
         if (!isLockApp) {
+            logger.debug('Not a LOCK protocol transaction', {
+                txid: tx.id,
+                data: tx.data
+            });
             return false;
         }
 
@@ -313,6 +325,42 @@ export class Scanner extends EventEmitter {
                 this.handleError(error);
             };
 
+            // Handler for onTransaction
+            const onTransaction = async (tx: any) => {
+                try {
+                    logger.debug('Received transaction from JungleBus', {
+                        txid: tx?.id,
+                        hasData: !!tx?.data,
+                        dataCount: tx?.data?.length
+                    });
+
+                    // Only proceed if it's a valid transaction
+                    if (!this.isValidTransaction(tx)) {
+                        return;
+                    }
+
+                    logger.info('Valid transaction received', {
+                        txid: tx.id,
+                        blockHeight: tx.block_height
+                    });
+
+                    // Hand over to parser
+                    const parsedTx = await this.parser.parseTransaction(tx);
+                    if (parsedTx) {
+                        await this.dbClient.saveTransaction(parsedTx);
+                        logger.info('Transaction processed successfully', {
+                            txid: tx.id,
+                            blockHeight: tx.block_height
+                        });
+                    }
+                } catch (error) {
+                    logger.error('Error processing transaction', {
+                        error: error instanceof Error ? error.message : 'Unknown error',
+                        txid: tx?.id
+                    });
+                }
+            };
+
             // Subscribe to both confirmed and mempool transactions
             this.subscription = await this.jungleBus.Subscribe(
                 this.SUBSCRIPTION_ID,
@@ -320,7 +368,8 @@ export class Scanner extends EventEmitter {
                 onPublish,
                 onStatus,
                 onError,
-                onMempool
+                onMempool,
+                onTransaction
             );
 
             const subscribeTime = Date.now() - startTime;
