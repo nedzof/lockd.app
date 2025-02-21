@@ -79,15 +79,13 @@ model LockLike {
 model ProcessedTransaction {
   id          String   @id @default(dbgenerated("gen_random_uuid()"))
   txid        String   @unique
-  blockHeight Int
-  blockTime   DateTime
+  blockHeight Int      @default(0)
+  blockTime   BigInt   @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @default(now()) @updatedAt
   protocol    String   @default("MAP")
   type        String   @default("unknown")
-  content     Json?
-  lockAmount  Int?
-  lockDuration Int?
+  metadata    Json
 
   @@index([txid])
   @@index([type])
