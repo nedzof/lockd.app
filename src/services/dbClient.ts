@@ -174,19 +174,25 @@ export class DbClient {
             // Create block time date safely
             const blockTimeDate = this.createBlockTimeDate(tx.blockTime);
 
-            // First create the post
+            // Create post
             const post = await this.prisma.post.create({
                 data: {
                     postId: tx.metadata.postId,
-                    type: tx.type,
-                    content: tx.metadata,
-                    blockTime: blockTimeDate,
-                    sequence: 0,
-                    parentSequence: 0,
-                    protocol: tx.protocol,
+                    content: tx.metadata.content,
+                    image: tx.metadata.image,
+                    txid: tx.txid,
                     blockHeight: tx.blockHeight,
-                    txid: tx.txid
+                    blockTime: blockTimeDate,
+                    type: tx.type,
+                    protocol: tx.protocol,
+                    sequence: 0,
+                    parentSequence: 0
                 }
+            });
+
+            logger.debug('Post created successfully', {
+                postId: post.postId,
+                hasImage: !!tx.metadata.image
             });
 
             // Create LockLike if this is a lock transaction

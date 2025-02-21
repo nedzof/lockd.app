@@ -33,6 +33,10 @@ export interface TransactionMetadata {
     sequence?: number;
     parentSequence?: number;
     protocol?: string;
+    timestamp?: number;
+    voteOptions?: string[];
+    voteQuestion?: string;
+    image?: Buffer;
     [key: string]: any;
 }
 

@@ -114,6 +114,7 @@ export class TransactionParser {
         content?: string;
         voteOptions?: string[];
         voteQuestion?: string;
+        image?: Buffer;
     } {
         const isLockApp = tx.data?.some((d: string) => d === 'app=lockd.app');
         const lockAmount = tx.data?.find((d: string) => d.startsWith('lockamount='))?.split('=')[1];
@@ -132,6 +133,27 @@ export class TransactionParser {
             ?.find((d: string) => d.startsWith('votequestion='))
             ?.split('votequestion=')[1];
 
+        // Extract image data if present
+        const imageData = tx.data
+            ?.find((d: string) => d.startsWith('image='))
+            ?.split('image=')[1];
+
+        let image: Buffer | undefined;
+        if (imageData) {
+            try {
+                // Assuming image is base64 encoded
+                image = Buffer.from(imageData, 'base64');
+                logger.debug('Image data extracted', {
+                    size: image.length,
+                    isBase64: true
+                });
+            } catch (error) {
+                logger.error('Failed to decode image data', {
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+            }
+        }
+
         const content = contentItems?.length > 0 ? contentItems.join(' ') : undefined;
 
         logger.debug('LOCK protocol detection', {
@@ -141,7 +163,8 @@ export class TransactionParser {
             postId,
             hasAllRequired: isLockApp && lockAmount && lockDuration,
             voteOptionsCount: voteOptions?.length,
-            hasVoteQuestion: !!voteQuestion
+            hasVoteQuestion: !!voteQuestion,
+            hasImage: !!image
         });
 
         return {
@@ -151,7 +174,8 @@ export class TransactionParser {
             postId,
             content,
             voteOptions: voteOptions?.length ? voteOptions : undefined,
-            voteQuestion
+            voteQuestion,
+            image
         };
     }
 
@@ -177,7 +201,8 @@ export class TransactionParser {
                     lockAmount: lockData.lockAmount,
                     lockDuration: lockData.lockDuration,
                     postId: lockData.postId,
-                    voteOptionsCount: lockData.voteOptions?.length
+                    voteOptionsCount: lockData.voteOptions?.length,
+                    hasImage: !!lockData.image
                 });
 
                 let content = lockData.content;
@@ -220,14 +245,18 @@ export class TransactionParser {
                         lockDuration: Number(lockData.lockDuration),
                         timestamp: Date.now(),
                         voteOptions: lockData.voteOptions,
-                        voteQuestion: lockData.voteQuestion
+                        voteQuestion: lockData.voteQuestion,
+                        image: lockData.image
                     }
                 };
 
                 logger.info('Successfully parsed LOCK transaction', {
                     txid: result.txid,
                     blockHeight: result.blockHeight,
-                    metadata: result.metadata
+                    metadata: {
+                        ...result.metadata,
+                        image: lockData.image ? `${lockData.image.length} bytes` : undefined
+                    }
                 });
 
                 return result;

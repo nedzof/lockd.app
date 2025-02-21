@@ -25,6 +25,7 @@ model Post {
   lockLikes      LockLike[]    @relation("PostLockLikes")
   voteOptions    VoteOption[]
   voteQuestion   VoteQuestion?
+  image          Bytes?
 
   @@index([postId])
   @@index([txid])

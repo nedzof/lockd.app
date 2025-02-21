@@ -21,7 +21,7 @@ describe('TransactionParser Integration Tests', () => {
     });
 
     it('should successfully parse and store a real transaction from JungleBus', async () => {
-        // Sample transaction with vote options
+        // Mock transaction data
         const tx = {
             id: 'a043fbcdc79628136708f88fad1e33f367037aa3d1bb0bff4bfffe818ec4b598',
             block_height: 883850,
@@ -29,17 +29,16 @@ describe('TransactionParser Integration Tests', () => {
             addresses: ['1MhXkvyNFGSAc4Ph22ssAZR3vnfoyQHTtR'],
             data: [
                 'app=lockd.app',
-                'cmd=set',
-                'content=dwedwedd',
-                'content=wedw',
-                'content=wedwd',
                 'lockamount=1000',
                 'lockduration=1',
                 'postid=m73g8bip-ceeh3n0x2',
+                'content=dwedwedd wedw wedwd',
                 'voteoption=Option 1',
                 'voteoption=Option 2',
                 'voteoption=Option 3',
-                'votequestion=Which is your favorite?'
+                'votequestion=Which is your favorite?',
+                // Add a small test image (1x1 pixel transparent PNG)
+                'image=iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
             ],
             outputs: []
         };
@@ -79,6 +78,11 @@ describe('TransactionParser Integration Tests', () => {
         expect(post?.voteOptions[0].voteQuestionId).toBe(post?.voteQuestion?.id);
         expect(post?.voteOptions[1].voteQuestionId).toBe(post?.voteQuestion?.id);
         expect(post?.voteOptions[2].voteQuestionId).toBe(post?.voteQuestion?.id);
+
+        // Verify the image was saved
+        expect(post?.image).toBeTruthy();
+        expect(Buffer.isBuffer(post?.image)).toBe(true);
+        expect(post?.image?.length).toBeGreaterThan(0);
 
         logger.info('Transaction successfully parsed and stored', {
             txid: parsedTx?.txid,
