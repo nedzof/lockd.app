@@ -21,10 +21,10 @@ export class Scanner extends EventEmitter {
     private readonly API_BASE_URL = 'https://junglebus.gorillapool.io/v1';
     private readonly SUBSCRIPTION_ID = CONFIG.JB_SUBSCRIPTION_ID;
 
-    constructor() {
+    constructor(parser: TransactionParser, dbClient: DbClient) {
         super();
-        this.dbClient = new DbClient();
-        this.parser = new TransactionParser();
+        this.dbClient = dbClient;
+        this.parser = parser;
 
         // Set up error handling for uncaught events
         this.on('error', (error) => {
@@ -55,8 +55,7 @@ export class Scanner extends EventEmitter {
         });
 
         try {
-            // Parse the transaction
-            logger.debug('Attempting to parse transaction', { txid });
+            // Hand over to parser
             const parsedTx = await this.parser.parseTransaction(tx);
             
             if (!parsedTx) {
@@ -456,7 +455,9 @@ export class Scanner extends EventEmitter {
 // Check if this file is being run directly
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 if (process.env.NODE_ENV !== 'test' && isMainModule) {
-    const scanner = new Scanner();
+    const parser = new TransactionParser();
+    const dbClient = new DbClient();
+    const scanner = new Scanner(parser, dbClient);
     scanner.start().catch(error => {
         logger.error('Failed to start scanner', {
             error: error instanceof Error ? error.message : 'Unknown error',
