@@ -17,7 +17,7 @@ export class Scanner extends EventEmitter {
     private subscription: any = null;
     private readonly MAX_RETRIES = 3;
     private readonly RETRY_DELAY = 1000; // 1 second
-    private readonly START_BLOCK = 883008;
+    private readonly START_BLOCK = 883850;
     private readonly API_BASE_URL = 'https://junglebus.gorillapool.io/v1';
     private readonly SUBSCRIPTION_ID = CONFIG.JB_SUBSCRIPTION_ID;
 
@@ -118,6 +118,14 @@ export class Scanner extends EventEmitter {
     }
 
     private isValidTransaction(tx: any): boolean {
+        // Log raw transaction for debugging
+        logger.debug('Raw transaction data', {
+            txid: tx?.id,
+            block_height: tx?.block_height,
+            data: tx?.data,
+            raw: tx
+        });
+
         // Basic validation of transaction structure
         if (!tx || typeof tx !== 'object') {
             logger.debug('Invalid transaction: not an object', { tx });
@@ -147,7 +155,11 @@ export class Scanner extends EventEmitter {
         });
 
         // Check if this is a LOCK protocol transaction
-        const isLockApp = tx.data.some((d: string) => d === 'app=lockd.app');
+        const isLockApp = tx.data.some((d: string) => {
+            logger.debug('Checking data item', { data: d });
+            return d === 'app=lockd.app';
+        });
+
         if (!isLockApp) {
             logger.debug('Not a LOCK protocol transaction', {
                 txid: tx.id,
