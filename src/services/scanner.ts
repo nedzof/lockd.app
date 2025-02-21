@@ -119,8 +119,8 @@ export class Scanner extends EventEmitter {
     }
 
     private async subscribe(fromBlock: number = this.START_BLOCK): Promise<void> {
-        if (!this.isConnected) {
-            throw new Error('Not connected to JungleBus');
+        if (!this.jungleBus) {
+            throw new Error('JungleBus client not initialized');
         }
 
         try {
@@ -129,21 +129,10 @@ export class Scanner extends EventEmitter {
                 subscriptionId: this.SUBSCRIPTION_ID
             });
 
-            const subscription = await this.jungleBus.Subscribe({
+            const subscription = await this.jungleBus.Subscribe(
+                this.SUBSCRIPTION_ID,
                 fromBlock,
-                onStatus: (status: any) => {
-                    logger.info('Subscription status update', {
-                        ...status,
-                        currentBlock: status?.block,
-                        timestamp: new Date().toISOString()
-                    });
-                },
-                onError: (error: any) => {
-                    logger.error('Subscription error', {
-                        error: error instanceof Error ? error.message : 'Unknown error'
-                    });
-                },
-                onTransaction: async (tx: any) => {
+                async (tx: any) => {
                     try {
                         // Log every transaction we receive
                         logger.debug('Received transaction from JungleBus', {
@@ -179,8 +168,20 @@ export class Scanner extends EventEmitter {
                             txid: tx?.id
                         });
                     }
+                },
+                (status: any) => {
+                    logger.info('Subscription status update', {
+                        ...status,
+                        currentBlock: status?.block,
+                        timestamp: new Date().toISOString()
+                    });
+                },
+                (error: any) => {
+                    logger.error('Subscription error', {
+                        error: error instanceof Error ? error.message : 'Unknown error'
+                    });
                 }
-            });
+            );
 
             const subscriptionId = randomUUID();
             this.subscriptions.set(subscriptionId, subscription);
@@ -272,66 +273,20 @@ export class Scanner extends EventEmitter {
 
     private createJungleBusClient(): void {
         const startTime = Date.now();
-        
         logger.debug('Creating new JungleBus client', {
-            configSubscriptionId: CONFIG.JB_SUBSCRIPTION_ID,
+            server: 'junglebus.gorillapool.io',
+            configSubscriptionId: this.SUBSCRIPTION_ID,
             currentSubscriptionId: this.SUBSCRIPTION_ID,
-            server: CONFIG.JB_SERVER,
             startTime: new Date(startTime).toISOString()
         });
-        
-        this.jungleBus = new JungleBusClient(CONFIG.JB_SERVER, {
-            useSSL: true,
-            onConnected: (ctx) => {
-                const connectTime = Date.now() - startTime;
-                logger.info('Connected to JungleBus', {
-                    context: ctx,
-                    connectionTime: connectTime,
-                    timestamp: new Date().toISOString()
-                });
-                this.isConnected = true;
-                this.retryCount = 0;
-                this.emit('scanner:connected', {
-                    connectionTime: connectTime,
-                    context: ctx
-                });
-            },
-            onConnecting: (ctx) => {
-                logger.info('Connecting to JungleBus', {
-                    context: ctx,
-                    attemptTime: Date.now() - startTime,
-                    retryCount: this.retryCount
-                });
-                this.emit('scanner:connecting');
-            },
-            onDisconnected: (ctx) => {
-                logger.warn('Disconnected from JungleBus', {
-                    context: ctx,
-                    connectionDuration: Date.now() - startTime,
-                    wasConnected: this.isConnected,
-                    retryCount: this.retryCount
-                });
-                this.isConnected = false;
-                this.emit('scanner:disconnected', {
-                    context: ctx,
-                    timestamp: new Date().toISOString()
-                });
-            },
-            onError: (error) => {
-                logger.error('JungleBus connection error', {
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    context: error,
-                    timeSinceStart: Date.now() - startTime,
-                    wasConnected: this.isConnected,
-                    retryCount: this.retryCount
-                });
-                this.handleError(error);
-            }
-        });
 
+        this.jungleBus = new JungleBusClient(this.API_BASE_URL);
+        this.isConnected = true;
+
+        const initTime = Date.now() - startTime;
         logger.debug('JungleBus client created', {
-            clientState: this.jungleBus ? 'initialized' : 'failed',
-            initializationTime: Date.now() - startTime
+            clientState: 'initialized',
+            initializationTime: initTime
         });
     }
 
@@ -434,13 +389,8 @@ export class Scanner extends EventEmitter {
             // Ensure clean state before starting
             await this.stop();
 
-            // Create JungleBus client
+            // Create JungleBus client and subscribe
             this.createJungleBusClient();
-
-            // Connect to JungleBus
-            await this.connect();
-
-            // Subscribe to transactions
             await this.subscribe();
 
         } catch (error) {
@@ -459,7 +409,7 @@ export class Scanner extends EventEmitter {
             }
 
             logger.info('Connecting to JungleBus');
-            await this.jungleBus.connect();
+            // Removed connect call as it's not needed with the new JungleBus client interface
             this.isConnected = true;
             logger.info('Successfully connected to JungleBus');
 
@@ -482,15 +432,14 @@ export class Scanner extends EventEmitter {
 
             if (this.jungleBus) {
                 try {
-                    await this.jungleBus.Disconnect();
-                    logger.debug('JungleBus disconnected');
+                    // Removed disconnect call as it's not needed with the new JungleBus client interface
+                    this.jungleBus = null;
+                    this.subscriptions.clear();
                 } catch (error) {
                     logger.error('Error disconnecting from JungleBus', {
                         error: error instanceof Error ? error.message : 'Unknown error'
                     });
                 }
-                this.jungleBus = null;
-                this.subscriptions.clear();
             }
             if (this.isConnected) {
                 await this.dbClient.disconnect();
