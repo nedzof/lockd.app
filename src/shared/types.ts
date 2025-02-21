@@ -28,15 +28,19 @@ export interface ParsedTransaction {
 export interface TransactionMetadata {
     postId: string;
     content: string;
-    lockAmount?: number;
-    lockDuration?: number;
-    sequence?: number;
-    parentSequence?: number;
-    protocol?: string;
-    timestamp?: number;
+    lockAmount: number;
+    lockDuration: number;
+    timestamp: number;
     voteOptions?: string[];
     voteQuestion?: string;
     image?: Buffer;
+    imageMetadata?: {
+        filename: string;
+        contentType: string;
+    };
+    sequence?: number;
+    parentSequence?: number;
+    protocol?: string;
     [key: string]: any;
 }
 

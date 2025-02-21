@@ -115,6 +115,10 @@ export class TransactionParser {
         voteOptions?: string[];
         voteQuestion?: string;
         image?: Buffer;
+        imageMetadata?: {
+            filename: string;
+            contentType: string;
+        };
     } {
         const isLockApp = tx.data?.some((d: string) => d === 'app=lockd.app');
         const lockAmount = tx.data?.find((d: string) => d.startsWith('lockamount='))?.split('=')[1];
@@ -133,23 +137,39 @@ export class TransactionParser {
             ?.find((d: string) => d.startsWith('votequestion='))
             ?.split('votequestion=')[1];
 
-        // Extract image data if present
+        // Extract image data and metadata if present
         const imageData = tx.data
             ?.find((d: string) => d.startsWith('image='))
             ?.split('image=')[1];
 
+        const filename = tx.data
+            ?.find((d: string) => d.startsWith('filename='))
+            ?.split('filename=')[1];
+
+        const contentType = tx.data
+            ?.find((d: string) => d.startsWith('contenttype='))
+            ?.split('contenttype=')[1];
+
         let image: Buffer | undefined;
-        if (imageData) {
+        let imageMetadata: { filename: string; contentType: string; } | undefined;
+
+        if (imageData && filename && contentType) {
             try {
-                // Assuming image is base64 encoded
                 image = Buffer.from(imageData, 'base64');
+                imageMetadata = {
+                    filename,
+                    contentType
+                };
                 logger.debug('Image data extracted', {
-                    size: image.length,
-                    isBase64: true
+                    filename,
+                    contentType,
+                    size: image.length
                 });
             } catch (error) {
                 logger.error('Failed to decode image data', {
-                    error: error instanceof Error ? error.message : 'Unknown error'
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    filename,
+                    contentType
                 });
             }
         }
@@ -164,7 +184,8 @@ export class TransactionParser {
             hasAllRequired: isLockApp && lockAmount && lockDuration,
             voteOptionsCount: voteOptions?.length,
             hasVoteQuestion: !!voteQuestion,
-            hasImage: !!image
+            hasImage: !!image,
+            imageFilename: filename
         });
 
         return {
@@ -175,7 +196,8 @@ export class TransactionParser {
             content,
             voteOptions: voteOptions?.length ? voteOptions : undefined,
             voteQuestion,
-            image
+            image,
+            imageMetadata
         };
     }
 
@@ -202,7 +224,8 @@ export class TransactionParser {
                     lockDuration: lockData.lockDuration,
                     postId: lockData.postId,
                     voteOptionsCount: lockData.voteOptions?.length,
-                    hasImage: !!lockData.image
+                    hasImage: !!lockData.image,
+                    imageMetadata: lockData.imageMetadata
                 });
 
                 let content = lockData.content;
@@ -246,7 +269,8 @@ export class TransactionParser {
                         timestamp: Date.now(),
                         voteOptions: lockData.voteOptions,
                         voteQuestion: lockData.voteQuestion,
-                        image: lockData.image
+                        image: lockData.image,
+                        imageMetadata: lockData.imageMetadata
                     }
                 };
 
@@ -255,7 +279,8 @@ export class TransactionParser {
                     blockHeight: result.blockHeight,
                     metadata: {
                         ...result.metadata,
-                        image: lockData.image ? `${lockData.image.length} bytes` : undefined
+                        image: lockData.image ? `${lockData.image.length} bytes` : undefined,
+                        imageMetadata: lockData.imageMetadata
                     }
                 });
 
