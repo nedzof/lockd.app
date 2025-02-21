@@ -1,7 +1,8 @@
 import { BMAP, TransformTx } from 'bmapjs';
 import { Tx } from 'scrypt-ts';
 import { Transaction, ParsedTransaction } from './types';
-import { logger } from '../utils/logger';
+import { logger } from '../utils/logger.js';
+import { Script } from 'bsv';
 
 interface ScryptTx extends Tx {
     fromHex(hex: string): void;
@@ -405,9 +406,46 @@ export class TransactionParser {
         }
     }
 
+    private decodeScript(hexScript: string): { type: string; content: string } | null {
+        try {
+            const script = Script.fromHex(hexScript);
+            const chunks = script.chunks;
+
+            // Look for OP_RETURN data (opcode 106)
+            if (chunks.length > 0 && chunks[0].opcodenum === 106) {
+                let content = '';
+                let type = 'unknown';
+
+                // Extract content from script chunks
+                for (let i = 1; i < chunks.length; i++) {
+                    const chunk = chunks[i];
+                    if (chunk.buf) {
+                        const text = chunk.buf.toString('utf8');
+                        if (text.startsWith('text/')) {
+                            type = text;
+                        } else if (text.includes('content=')) {
+                            content = text.split('content=')[1];
+                        } else {
+                            content = text;
+                        }
+                    }
+                }
+
+                return { type, content };
+            }
+
+            return null;
+        } catch (error) {
+            logger.error('Error decoding script', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                hexScript: hexScript.substring(0, 50) + '...'
+            });
+            return null;
+        }
+    }
+
     public async parseTransaction(tx: any): Promise<ParsedTransaction | null> {
         try {
-            // Log full transaction structure
             logger.debug('Raw transaction data', {
                 id: tx.id,
                 block_height: tx.block_height,
@@ -438,6 +476,15 @@ export class TransactionParser {
                         isHex: /^[0-9a-fA-F]+$/.test(out)
                     }))
                 });
+
+                // Try to decode outputs
+                const decodedOutputs = tx.outputs
+                    .map((out: string) => this.decodeScript(out))
+                    .filter((result: any) => result !== null);
+
+                if (decodedOutputs.length > 0) {
+                    logger.debug('Decoded outputs', { decodedOutputs });
+                }
             }
 
             // First check if this is a LOCK protocol transaction
@@ -464,7 +511,7 @@ export class TransactionParser {
                         postId
                     });
 
-                    // Extract content from tx.data instead of outputs
+                    // Extract content from tx.data
                     let content = '';
                     const contentItems = tx.data
                         .filter((d: string) => d.startsWith('content='))
@@ -476,6 +523,21 @@ export class TransactionParser {
                             contentItems,
                             finalContent: content
                         });
+                    } else {
+                        // Try to extract content from decoded outputs
+                        if (Array.isArray(tx.outputs)) {
+                            for (const output of tx.outputs) {
+                                const decoded = this.decodeScript(output);
+                                if (decoded?.content) {
+                                    content = decoded.content;
+                                    logger.debug('Content extracted from decoded output', {
+                                        content,
+                                        type: decoded.type
+                                    });
+                                    break;
+                                }
+                            }
+                        }
                     }
 
                     const result: ParsedTransaction = {
@@ -483,8 +545,7 @@ export class TransactionParser {
                         type: 'lock',
                         protocol: 'LOCK',
                         blockHeight: tx.block_height,
-                        blockTime: tx.block_time * 1000, // Convert to milliseconds
-                        senderAddress: tx.addresses?.[0],
+                        blockTime: tx.block_time,
                         metadata: {
                             postId: postId || tx.id,
                             content,
