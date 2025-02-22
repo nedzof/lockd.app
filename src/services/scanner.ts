@@ -13,14 +13,15 @@ enum ScannerEvent {
     BLOCK_DONE = 'BLOCK_DONE',
     WAITING = 'WAITING',
     REORG = 'REORG',
-    TRANSACTION = 'TRANSACTION'
+    TRANSACTION = 'TRANSACTION',
+    STATUS = 'STATUS'
 }
 
 export class Scanner {
     private jungleBus: JungleBusClient;
     private dbClient: DbClient;
     private parser: TransactionParser;
-    private readonly START_BLOCK = 883849;
+    private readonly START_BLOCK = 883000;
     private readonly SUBSCRIPTION_ID = CONFIG.JB_SUBSCRIPTION_ID;
     private readonly TRACKED_TRANSACTIONS = [
         'b132ddbc21f687f8b782b7a9f426aecd7e9cd8d47d904a068257c746bfa9873d',
@@ -106,25 +107,40 @@ export class Scanner {
         }
     }
 
-    private handleStatus(message: any): void {
-        if (message.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
+    private handleStatus(status: any): void {
+        logger.info(`EVENT: ${ScannerEvent.STATUS}`, {
+            status: JSON.stringify(status),
+            timestamp: new Date().toISOString()
+        });
+
+        // Log block height progress
+        if (status.block) {
+            logger.info('Block height update', {
+                currentBlock: status.block,
+                startBlock: this.START_BLOCK,
+                progress: status.block - this.START_BLOCK,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        if (status.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
             logger.info(`EVENT: ${ScannerEvent.BLOCK_DONE}`, { 
-                block: message.block,
+                block: status.block,
                 timestamp: new Date().toISOString()
             });
-        } else if (message.statusCode === ControlMessageStatusCode.WAITING) {
+        } else if (status.statusCode === ControlMessageStatusCode.WAITING) {
             logger.info(`EVENT: ${ScannerEvent.WAITING}`, {
-                message,
+                message: status,
                 timestamp: new Date().toISOString()
             });
-        } else if (message.statusCode === ControlMessageStatusCode.REORG) {
+        } else if (status.statusCode === ControlMessageStatusCode.REORG) {
             logger.warn(`EVENT: ${ScannerEvent.REORG}`, {
-                message,
+                message: status,
                 timestamp: new Date().toISOString()
             });
-        } else if (message.statusCode === ControlMessageStatusCode.ERROR) {
+        } else if (status.statusCode === ControlMessageStatusCode.ERROR) {
             logger.error(`EVENT: ${ScannerEvent.ERROR}`, {
-                message,
+                message: status,
                 timestamp: new Date().toISOString()
             });
         }
