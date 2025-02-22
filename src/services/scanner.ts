@@ -1,8 +1,20 @@
 import { JungleBusClient, ControlMessageStatusCode } from '@gorillapool/js-junglebus';
-import { DbClient } from './dbClient';
-import { TransactionParser } from './parser';
-import { logger } from '../utils/logger';
-import { CONFIG } from './config';
+import { DbClient } from './dbClient.js';
+import { TransactionParser } from './parser.js';
+import { logger } from '../utils/logger.js';
+import { CONFIG } from './config.js';
+
+// Define event types for better logging
+enum ScannerEvent {
+    CONNECTED = 'CONNECTED',
+    CONNECTING = 'CONNECTING',
+    DISCONNECTED = 'DISCONNECTED',
+    ERROR = 'ERROR',
+    BLOCK_DONE = 'BLOCK_DONE',
+    WAITING = 'WAITING',
+    REORG = 'REORG',
+    TRANSACTION = 'TRANSACTION'
+}
 
 export class Scanner {
     private jungleBus: JungleBusClient;
@@ -19,16 +31,16 @@ export class Scanner {
         this.jungleBus = new JungleBusClient('junglebus.gorillapool.io', {
             useSSL: true,
             onConnected: (ctx) => {
-                logger.info('JungleBus connected', ctx);
+                logger.info(`EVENT: ${ScannerEvent.CONNECTED}`, ctx);
             },
             onConnecting: (ctx) => {
-                logger.info('JungleBus connecting', ctx);
+                logger.info(`EVENT: ${ScannerEvent.CONNECTING}`, ctx);
             },
             onDisconnected: (ctx) => {
-                logger.error('JungleBus disconnected', ctx);
+                logger.error(`EVENT: ${ScannerEvent.DISCONNECTED}`, ctx);
             },
             onError: (ctx) => {
-                logger.error('JungleBus error', ctx);
+                logger.error(`EVENT: ${ScannerEvent.ERROR}`, ctx);
             },
         });
     }
@@ -38,10 +50,22 @@ export class Scanner {
         if (!txid) return;
 
         try {
+            logger.info(`EVENT: ${ScannerEvent.TRANSACTION}`, {
+                txid,
+                message: 'PARSING TRANSACTION',
+                timestamp: new Date().toISOString()
+            });
+
             await this.parser.parseTransaction(txid);
+            
+            logger.info('Transaction passed to parser successfully', {
+                txid,
+                timestamp: new Date().toISOString()
+            });
         } catch (error) {
             logger.error('Error processing transaction', {
                 txid,
+                event: ScannerEvent.ERROR,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
         }
@@ -49,19 +73,32 @@ export class Scanner {
 
     private handleStatus(message: any): void {
         if (message.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
-            logger.info('Block processing completed', { block: message.block });
+            logger.info(`EVENT: ${ScannerEvent.BLOCK_DONE}`, { 
+                block: message.block,
+                timestamp: new Date().toISOString()
+            });
         } else if (message.statusCode === ControlMessageStatusCode.WAITING) {
-            logger.info('Waiting for new block', message);
+            logger.info(`EVENT: ${ScannerEvent.WAITING}`, {
+                message,
+                timestamp: new Date().toISOString()
+            });
         } else if (message.statusCode === ControlMessageStatusCode.REORG) {
-            logger.warn('Chain reorganization detected', message);
+            logger.warn(`EVENT: ${ScannerEvent.REORG}`, {
+                message,
+                timestamp: new Date().toISOString()
+            });
         } else if (message.statusCode === ControlMessageStatusCode.ERROR) {
-            logger.error('JungleBus status error', message);
+            logger.error(`EVENT: ${ScannerEvent.ERROR}`, {
+                message,
+                timestamp: new Date().toISOString()
+            });
         }
     }
 
     private handleError(error: any): void {
-        logger.error('JungleBus subscription error', {
-            error: error instanceof Error ? error.message : 'Unknown error'
+        logger.error(`EVENT: ${ScannerEvent.ERROR}`, {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date().toISOString()
         });
     }
 
@@ -77,11 +114,14 @@ export class Scanner {
             );
             logger.info('Scanner started', {
                 startBlock: this.START_BLOCK,
-                subscriptionId: this.SUBSCRIPTION_ID
+                subscriptionId: this.SUBSCRIPTION_ID,
+                timestamp: new Date().toISOString()
             });
         } catch (error) {
             logger.error('Failed to start scanner', {
-                error: error instanceof Error ? error.message : 'Unknown error'
+                event: ScannerEvent.ERROR,
+                error: error instanceof Error ? error.message : 'Unknown error',
+                timestamp: new Date().toISOString()
             });
             throw error;
         }
@@ -90,10 +130,15 @@ export class Scanner {
     public async stop(): Promise<void> {
         try {
             await this.jungleBus.Disconnect();
-            logger.info('Scanner stopped');
+            logger.info(`EVENT: ${ScannerEvent.DISCONNECTED}`, {
+                message: 'Scanner stopped',
+                timestamp: new Date().toISOString()
+            });
         } catch (error) {
             logger.error('Failed to stop scanner', {
-                error: error instanceof Error ? error.message : 'Unknown error'
+                event: ScannerEvent.ERROR,
+                error: error instanceof Error ? error.message : 'Unknown error',
+                timestamp: new Date().toISOString()
             });
             throw error;
         }

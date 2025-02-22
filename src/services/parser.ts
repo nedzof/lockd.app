@@ -1,8 +1,8 @@
 import { DbClient } from './dbClient.js';
 import { logger } from '../utils/logger.js';
 import * as bsv from 'bsv';
-import { ParsedTransaction, LockProtocolData, JungleBusResponse } from '../shared/types.ts';
-import { JungleBusClient } from '../shared/jungleBusClient.js';
+import { ParsedTransaction, LockProtocolData, JungleBusResponse } from '../shared/types.js';
+import { JungleBusClient } from '@gorillapool/js-junglebus';
 
 // Helper function to extract text content from transactions
 export function extractTextContent(tx: JungleBusResponse): string[] {
