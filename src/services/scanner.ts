@@ -86,17 +86,12 @@ export class Scanner {
                 });
             }
 
-            // Parse transaction data
-            const txData = {
+            // Log before parsing
+            logger.debug('About to parse transaction', {
                 txid,
                 blockHeight,
-                data: tx.data || [],
-                outputs: tx.outputs || [],
-                transaction: tx.transaction || {},
                 timestamp: new Date().toISOString()
-            };
-
-            logger.debug('Processing transaction', txData);
+            });
 
             await this.parser.parseTransaction(txid);
             
@@ -109,6 +104,7 @@ export class Scanner {
             logger.error('Error processing transaction', {
                 tx: JSON.stringify(tx),
                 error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined,
                 timestamp: new Date().toISOString()
             });
         }

@@ -286,11 +286,29 @@ export class TransactionParser {
         }
     }
 
-    public async parseTransaction(txid: string): Promise<ParsedTransaction | null> {
+    public async parseTransaction(txid: string): Promise<void> {
+        logger.debug('Parser received transaction', {
+            txid,
+            timestamp: new Date().toISOString()
+        });
+
+        if (!txid) {
+            logger.error('Invalid transaction ID', {
+                txid,
+                timestamp: new Date().toISOString()
+            });
+            return;
+        }
+
         try {
             // Fetch transaction details from JungleBus
             const response = await this.jungleBus.GetTransaction(txid);
             const tx = response as unknown as JungleBusResponse;
+            logger.debug('JungleBus response', {
+                txid,
+                data: tx.data,
+                timestamp: new Date().toISOString()
+            });
 
             logger.debug('Raw transaction data', {
                 addresses: tx?.addresses,
@@ -304,11 +322,12 @@ export class TransactionParser {
             // First try to extract LOCK protocol data from tx.data
             const lockData = this.extractLockProtocolData(tx.data, tx);
             if (!lockData) {
-                return null;
+                return;
             }
 
             // Return parsed transaction data
-            return {
+            // Return parsed transaction data
+            const parsedTransaction: ParsedTransaction = {
                 txid: tx.id,
                 type: 'lock',
                 protocol: 'LOCK',
