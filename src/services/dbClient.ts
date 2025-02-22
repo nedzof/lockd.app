@@ -171,7 +171,8 @@ export class DbClient {
         }
     }
 
-    public async saveTransaction(tx: ParsedTransaction): Promise<any> {
+    public async saveTransaction(tx: ParsedTransaction): Promise<void> {
+        logger.info('💾 About to save transaction to database', { txid: tx.txid });
         return await this.withRetry(async () => {
             const postData = {
                 postId: tx.metadata.postId,
@@ -190,7 +191,7 @@ export class DbClient {
                 data: postData
             });
 
-            logger.debug('Post created successfully', {
+            logger.info('✅ Post created successfully', {
                 postId: post.postId,
                 hasImage: !!tx.metadata.image
             });
@@ -236,7 +237,7 @@ export class DbClient {
                     })
                 ));
 
-                logger.debug('Created vote question and options', {
+                logger.info('✅ Created vote question and options', {
                     questionId: question.id,
                     optionCount: voteOptions.length
                 });
@@ -256,12 +257,7 @@ export class DbClient {
                 )
             `;
 
-            return { 
-                post: {
-                    id: post.postId,
-                    senderAddress: post.senderAddress
-                }
-            };
+            logger.info('✅ Transaction saved successfully', { txid: tx.txid });
         });
     }
 

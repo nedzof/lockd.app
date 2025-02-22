@@ -76,25 +76,16 @@ export function extractVoteData(tx: JungleBusResponse): {
 
 export class TransactionParser {
     private jungleBus: JungleBusClient;
-    private dbClient: DbClient;
 
-    constructor(dbClient: DbClient) {
-        this.dbClient = dbClient;
-        this.jungleBus = new JungleBusClient('junglebus.gorillapool.io', {
-            useSSL: true,
-            onConnected: (ctx) => {
-                logger.info('Parser JungleBus connected', {
-                    ...ctx,
-                    timestamp: new Date().toISOString()
-                });
-            },
-            onError: (error) => {
-                logger.error('Parser JungleBus error', {
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    timestamp: new Date().toISOString()
-                });
-            }
+    constructor(private dbClient: DbClient) {
+        logger.info('TransactionParser initialized', {
+            bmapAvailable: true,
+            bmapExports: [],
+            bmapVersion: 'unknown'
         });
+
+        // Initialize JungleBus client
+        this.jungleBus = new JungleBusClient('https://junglebus.gorillapool.io');
     }
 
     private extractLockProtocolData(data: string[], tx: any): LockProtocolData | null {
@@ -295,94 +286,58 @@ export class TransactionParser {
         }
     }
 
-    private async processTransactionData(lockData: LockProtocolData, tx: JungleBusResponse): Promise<void> {
-        // Return parsed transaction data
-        const parsedTransaction: ParsedTransaction = {
-            txid: tx.id,
-            type: 'lock',
-            protocol: 'LOCK',
-            blockHeight: tx.block_height,
-            blockTime: tx.block_time,
-            senderAddress: tx.addresses?.[0] || null,
-            metadata: {
-                postId: lockData.postId,
-                lockAmount: lockData.lockAmount,
-                lockDuration: lockData.lockDuration,
-                content: lockData.content,
-                voteOptions: lockData.voteOptions || [],
-                voteQuestion: lockData.voteQuestion || '',
-                image: lockData.image,
-                imageMetadata: lockData.imageMetadata,
-                senderAddress: tx.addresses?.[0] || null
-            }
-        };
-    }
-
-    public async parseTransaction(txid: string): Promise<void> {
-        logger.debug('Parser received transaction', {
-            txid,
-            timestamp: new Date().toISOString()
-        });
-
-        if (!txid) {
-            logger.error('Invalid transaction ID', {
-                txid,
-                timestamp: new Date().toISOString()
-            });
-            return;
-        }
-
+    public async parseTransaction(txid: string): Promise<ParsedTransaction | null> {
         try {
-            // Get transaction from JungleBus
-            const tx = await this.jungleBus.GetTransaction(txid);
+            logger.info('🔍 About to parse transaction', { txid });
             
-            if (!tx) {
-                logger.error('No transaction data received', {
-                    txid,
-                    timestamp: new Date().toISOString()
-                });
-                return;
-            }
+            // Fetch transaction details from JungleBus
+            logger.info('📡 Fetching transaction from JungleBus', { txid });
+            const response = await this.jungleBus.GetTransaction(txid);
+            const tx = response as unknown as JungleBusResponse;
 
-            logger.debug('JungleBus response', {
-                txid,
-                data: tx.data,
-                timestamp: new Date().toISOString()
-            });
-
-            logger.debug('Raw transaction data', {
+            logger.debug('📦 Raw transaction data', {
                 addresses: tx?.addresses,
                 block_height: tx?.block_height,
                 dataCount: tx?.data?.length,
-                hasData: !!tx?.data?.length,
-                hasOutputs: !!tx?.outputs?.length,
-                id: tx?.id,
-                timestamp: new Date().toISOString()
+                hasData: !!tx?.data,
+                hasOutputs: !!tx?.outputs,
+                id: tx?.id
             });
 
             // First try to extract LOCK protocol data from tx.data
+            logger.info('🔎 Extracting LOCK protocol data', { txid });
             const lockData = this.extractLockProtocolData(tx.data, tx);
             if (!lockData) {
-                logger.debug('No LOCK protocol data found', {
-                    txid,
-                    timestamp: new Date().toISOString()
-                });
-                return;
+                logger.info('⏭️ Skipping - not a LOCK protocol transaction', { txid });
+                return null;
             }
 
-            // Process the transaction data
-            await this.processTransactionData(lockData, tx);
+            logger.info('✅ Successfully parsed transaction', { txid });
 
-            logger.info('Transaction processed successfully', {
-                txid,
-                timestamp: new Date().toISOString()
-            });
+            // Return parsed transaction data
+            return {
+                txid: tx.id,
+                type: 'lock',
+                protocol: 'LOCK',
+                blockHeight: tx.block_height,
+                blockTime: tx.block_time,
+                senderAddress: tx.addresses?.[0] || null,
+                metadata: {
+                    postId: lockData.postId,
+                    lockAmount: lockData.lockAmount,
+                    lockDuration: lockData.lockDuration,
+                    content: lockData.content,
+                    voteOptions: lockData.voteOptions || [],
+                    voteQuestion: lockData.voteQuestion || '',
+                    image: lockData.image,
+                    imageMetadata: lockData.imageMetadata,
+                    senderAddress: tx.addresses?.[0] || null
+                }
+            };
         } catch (error) {
-            logger.error('Error parsing transaction', {
+            logger.error('❌ Error parsing transaction', { 
                 txid,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                timestamp: new Date().toISOString()
+                error: error instanceof Error ? error.message : 'Unknown error'
             });
             throw error;
         }
