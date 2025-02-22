@@ -5,6 +5,7 @@ import { ParsedTransaction } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
+import { Post, VoteOption, VoteQuestion, LockLike, Prisma } from '@prisma/client';
 
 // Import test transactions
 interface TestTxData {
@@ -24,12 +25,6 @@ interface JungleBusResponse {
     addresses?: string[];
 }
 
-interface ImageOutput {
-    mimeType: string;
-    rawData: string;
-    dataURL: string;
-}
-
 interface TransactionTestCase {
     txid: string;
     description?: string;
@@ -44,59 +39,38 @@ interface TransactionTestCase {
     };
 }
 
-async function extractImageFromTransaction(tx: JungleBusResponse): Promise<ImageOutput | null> {
-    try {
-        // Find the transaction data that contains the image
-        const imageData = tx.transaction;
-        if (!imageData) {
-            logger.debug('No transaction data found');
-            return null;
-        }
+interface VerificationResults {
+    hasPost: boolean;
+    hasVoteQuestion: boolean;
+    voteOptionsCount: number;
+    hasLockLikes: boolean;
+    txid: string;
+    postId: string;
+    voteQuestion?: {
+        question: string;
+        totalOptions: number;
+        optionsHash: string;
+    };
+    voteOptions?: Array<{
+        index: number;
+        content: string;
+    }>;
+}
 
-        // Get the content type from the data array
-        const contentTypeEntry = tx.data.find((item: string) => item.includes('contenttype='));
-        const mimeType = contentTypeEntry ? contentTypeEntry.split('=')[1] : 'image/png';
-
-        // Convert the transaction data to a Buffer
-        const buffer = Buffer.from(imageData, 'base64');
-
-        // Find the JFIF marker in the buffer (FF D8 FF E0)
-        const jfifMarker = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]);
-        let startIndex = -1;
-        
-        for (let i = 0; i < buffer.length - jfifMarker.length; i++) {
-            if (buffer[i] === jfifMarker[0] && 
-                buffer[i + 1] === jfifMarker[1] && 
-                buffer[i + 2] === jfifMarker[2] && 
-                buffer[i + 3] === jfifMarker[3]) {
-                startIndex = i;
-                break;
-            }
-        }
-
-        if (startIndex === -1) {
-            logger.debug('No JFIF marker found in transaction data');
-            return null;
-        }
-
-        // Extract the image data from the buffer
-        const imageBuffer = buffer.slice(startIndex);
-        const base64Data = imageBuffer.toString('base64');
-        
-        logger.debug('Found image data of length:', base64Data.length);
-
-        // Create data URL
-        const dataURL = `data:${mimeType};base64,${base64Data}`;
-
-        return {
-            mimeType,
-            rawData: base64Data,
-            dataURL
-        };
-    } catch (error) {
-        logger.error('Error extracting image:', error);
-        return null;
-    }
+interface ProcessedTxMetadata {
+    postId: string;
+    content: string;
+    image?: Buffer | null;
+    imageMetadata?: {
+        contentType: string;
+        filename: string;
+        width?: number;
+        height?: number;
+        size?: number;
+        encoding: string;
+    };
+    rawTx: JungleBusResponse;
+    [key: string]: any;
 }
 
 // Add new helper function to extract text content
@@ -167,6 +141,94 @@ function extractVoteData(tx: JungleBusResponse): {
     }
     
     return voteData;
+}
+
+// Add new helper function to verify database contents
+async function verifyDatabaseContents(txid: string, dbClient: DbClient, testOutputDir: string) {
+    // Get the processed transaction
+    const processedTx = await dbClient.getTransaction(txid);
+    if (!processedTx) {
+        throw new Error(`No processed transaction found for txid ${txid}`);
+    }
+
+    const metadata = processedTx.metadata as ProcessedTxMetadata;
+
+    // Get the post with vote data
+    const post = await dbClient.getPostWithVoteOptions(metadata.postId);
+    if (!post) {
+        throw new Error(`No post found for postId ${metadata.postId}`);
+    }
+
+    // Prepare verification results
+    const results = {
+        hasPost: true,
+        hasImage: !!post.image,
+        hasVoteQuestion: post.voteQuestion !== null,
+        voteOptionsCount: post.voteOptions?.length || 0,
+        hasLockLikes: post.lockLikes?.length > 0 || false,
+        txid,
+        postId: post.postId,
+        contentType: post.image ? 'Image + Text' : 'Text Only',
+        voteQuestion: post.voteQuestion ? {
+            question: post.voteQuestion.question,
+            totalOptions: post.voteQuestion.totalOptions,
+            optionsHash: post.voteQuestion.optionsHash
+        } : undefined,
+        voteOptions: post.voteOptions?.map(opt => ({
+            content: opt.content,
+            index: opt.index
+        })).sort((a, b) => a.index - b.index)
+    };
+
+    // Log verification results
+    logger.info('Database verification results', results);
+
+    // Save image if present
+    if (post.image) {
+        const ext = (metadata.imageMetadata?.contentType?.split('/')[1] || 'jpg');
+        const imagePath = path.join(testOutputDir, `${txid}_image.${ext}`);
+        await fs.promises.writeFile(imagePath, post.image);
+        logger.info('Saved image to file', { path: imagePath });
+    }
+
+    // Write verification results to file
+    const outputPath = path.join(testOutputDir, `${txid}_verification.txt`);
+    const outputContent = [
+        `Transaction ID: ${txid}`,
+        `Post ID: ${post.postId}`,
+        `Content Type: ${results.contentType}`,
+        `Block Time: ${post.blockTime.toISOString()}`,
+        `Sender Address: ${post.senderAddress || 'Not specified'}`,
+        '\nContent:',
+        post.content,
+        '\nTransaction Details:',
+        `- Has Image: ${results.hasImage}`,
+        `- Has Vote Question: ${results.hasVoteQuestion}`,
+        `- Vote Options Count: ${results.voteOptionsCount}`,
+        `- Has Lock Likes: ${results.hasLockLikes}`,
+        results.hasImage ? [
+            '\nImage Metadata:',
+            `- Content Type: ${metadata.imageMetadata?.contentType || 'Not specified'}`,
+            `- Filename: ${metadata.imageMetadata?.filename || 'Not specified'}`,
+            `- Size: ${metadata.imageMetadata?.size || 'Not specified'}`,
+            `- Dimensions: ${metadata.imageMetadata?.width || '?'}x${metadata.imageMetadata?.height || '?'}`
+        ].join('\n') : '',
+        results.hasVoteQuestion ? [
+            '\nVote Details:',
+            `Question: ${post.voteQuestion?.question}`,
+            `Total Options: ${post.voteQuestion?.totalOptions}`,
+            `Options Hash: ${post.voteQuestion?.optionsHash}`,
+            '\nVote Options:',
+            ...post.voteOptions
+                .sort((a, b) => a.index - b.index)
+                .map((opt, i) => `${i + 1}. ${opt.content} (Index: ${opt.index})`)
+        ].join('\n') : '\nNo Vote Data'
+    ].join('\n');
+
+    await fs.promises.writeFile(outputPath, outputContent);
+    logger.info('Saved verification results to', { path: outputPath });
+
+    return results;
 }
 
 describe('TransactionParser Integration Tests', () => {
@@ -249,12 +311,12 @@ Total Transactions: ${testTxData.transactions.length}
             const tx = response as unknown as JungleBusResponse;
             
             // Debug log the transaction data
-            logger.debug('Raw transaction data:', {
-                id: tx.id,
+            logger.debug('Raw transaction data', {
+                addresses: tx.addresses,
                 block_height: tx.block_height,
                 block_time: tx.block_time,
                 data: tx.data,
-                addresses: tx.addresses,
+                id: tx.id,
                 outputCount: tx.outputs?.length
             });
 
@@ -327,18 +389,6 @@ ${voteData.options.map((opt, index) =>
             fs.writeFileSync(textOutputPath, textOutput);
             logger.info('Saved text content to', { path: textOutputPath });
 
-            // Extract image data if expected
-            if (testCase.hasImage) {
-                const imageData = await extractImageFromTransaction(tx);
-                expect(imageData).toBeDefined();
-                if (imageData) {
-                    const ext = imageData.mimeType.split('/')[1] || 'jpg';
-                    const imagePath = path.join(testOutputDir, `${testCase.txid}_image.${ext}`);
-                    fs.writeFileSync(imagePath, Buffer.from(imageData.rawData, 'base64'));
-                    logger.info('Saved image to', { path: imagePath });
-                }
-            }
-
             // Parse transaction
             const parsedTx = await parser.parseTransaction(tx);
             if (!parsedTx) {
@@ -378,6 +428,9 @@ ${voteData.options.map((opt, index) =>
                 expect(fetchedTx?.metadata.image).toBeDefined();
                 expect(fetchedTx?.metadata.imageMetadata?.contentType).toMatch(/^image\//);
             }
+
+            // Add verification step after saving transaction
+            await verifyDatabaseContents(tx.id, dbClient, testOutputDir);
 
             logger.info('Transaction test completed successfully', {
                 txid: testCase.txid,

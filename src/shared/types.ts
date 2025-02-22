@@ -40,6 +40,15 @@ export interface PostWithVoteOptions extends Post {
         updatedAt: Date;
         voteQuestionId: string;
     }[];
+    lockLikes: {
+        id: string;
+        txid: string;
+        lockAmount: number;
+        lockDuration: number;
+        createdAt: Date;
+        updatedAt: Date;
+        postId: string;
+    }[];
 }
 
 export interface ParsedTransaction {
@@ -87,6 +96,11 @@ export interface LockProtocolData {
     imageMetadata: {
         filename: string;
         contentType: string;
+        width?: number;
+        height?: number;
+        size?: number;
+        encoding?: string;
+        format?: string;
     } | null;
 }
 

@@ -12,7 +12,7 @@ export class TransactionParser {
         });
     }
 
-    private extractLockProtocolData(data: string[]): LockProtocolData | null {
+    private extractLockProtocolData(data: string[], tx: any): LockProtocolData | null {
         try {
             if (!Array.isArray(data)) {
                 return null;
@@ -33,25 +33,22 @@ export class TransactionParser {
                 voteOptions: [],
                 voteQuestion: null,
                 image: null,
-                imageMetadata: null
+                imageMetadata: null,
+                optionsHash: null
             };
 
+            // Initialize image metadata if needed
+            let imageData: string | null = null;
+            let imageMetadata: { [key: string]: any } = {};
+
+            // Check if this is a vote transaction
+            const isVoteQuestion = data.some(item => item.startsWith('type=vote_question'));
+            const isVoteOption = data.some(item => item.startsWith('type=vote_option'));
+
             // Process each data item
-            data.forEach((item: string, index: number) => {
+            data.forEach((item: string) => {
                 const [key, value] = item.split('=');
                 if (!key) return;
-
-                if (index === data.length - 1 && !value) {
-                    // Last item with no '=' is likely the base64 image data
-                    try {
-                        metadata.image = Buffer.from(key, 'base64');
-                        return;
-                    } catch (error) {
-                        logger.error('Failed to decode image data', { error });
-                    }
-                }
-
-                if (!value) return;
 
                 switch (key.toLowerCase()) {
                     case 'postid':
@@ -64,28 +61,142 @@ export class TransactionParser {
                         metadata.lockDuration = parseInt(value, 10);
                         break;
                     case 'content':
+                        if (isVoteQuestion && !metadata.voteQuestion) {
+                            metadata.voteQuestion = value;
+                        } else if (isVoteOption) {
+                            metadata.voteOptions.push(value);
+                        }
                         metadata.content = value;
                         break;
-                    case 'votequestion':
-                        metadata.voteQuestion = value;
+                    case 'totaloptions':
+                        metadata.totalOptions = parseInt(value, 10);
                         break;
-                    case 'voteoption':
-                        metadata.voteOptions.push(value);
+                    case 'optionshash':
+                        metadata.optionsHash = value;
                         break;
+                    // Image related fields
                     case 'contenttype':
-                        if (!metadata.imageMetadata) {
-                            metadata.imageMetadata = { filename: '', contentType: '' };
-                        }
-                        metadata.imageMetadata.contentType = value;
+                        imageMetadata.contentType = value;
+                        break;
+                    case 'imageheight':
+                        imageMetadata.height = parseInt(value, 10);
+                        break;
+                    case 'imagewidth':
+                        imageMetadata.width = parseInt(value, 10);
+                        break;
+                    case 'imagesize':
+                        imageMetadata.size = parseInt(value, 10);
+                        break;
+                    case 'filename':
+                        imageMetadata.filename = value;
                         break;
                     case 'format':
-                        if (!metadata.imageMetadata) {
-                            metadata.imageMetadata = { filename: '', contentType: '' };
-                        }
-                        metadata.imageMetadata.filename = `image.${value}`;
+                        imageMetadata.format = value;
                         break;
+                    case 'encoding':
+                        imageMetadata.encoding = value;
+                        break;
+                    case 'type':
+                        if (value === 'image') {
+                            imageMetadata.isImage = true;
+                        }
+                        break;
+                    default:
+                        // Check if this is base64 encoded image data
+                        if (item.match(/^[A-Za-z0-9+/=]+$/)) {
+                            try {
+                                // Try to decode as base64
+                                Buffer.from(item, 'base64');
+                                imageData = item;
+                            } catch (e) {
+                                // Not valid base64, ignore
+                            }
+                        }
                 }
             });
+
+            // Handle image data
+            if (imageMetadata.isImage && tx.transaction) {
+                try {
+                    // Get raw transaction data
+                    const buffer = Buffer.from(tx.transaction, 'base64');
+                    
+                    // Find image data markers based on content type
+                    let imageBuffer: Buffer | null = null;
+                    
+                    if (imageMetadata.contentType?.includes('jpeg') || imageMetadata.contentType?.includes('jpg')) {
+                        // Look for JPEG marker (FF D8 FF)
+                        const jpegMarker = Buffer.from([0xFF, 0xD8, 0xFF]);
+                        for (let i = 0; i < buffer.length - jpegMarker.length; i++) {
+                            if (buffer[i] === jpegMarker[0] && 
+                                buffer[i + 1] === jpegMarker[1] && 
+                                buffer[i + 2] === jpegMarker[2]) {
+                                imageBuffer = buffer.slice(i);
+                                break;
+                            }
+                        }
+                    } else if (imageMetadata.contentType?.includes('png')) {
+                        // Look for PNG marker (89 50 4E 47)
+                        const pngMarker = Buffer.from([0x89, 0x50, 0x4E, 0x47]);
+                        for (let i = 0; i < buffer.length - pngMarker.length; i++) {
+                            if (buffer[i] === pngMarker[0] && 
+                                buffer[i + 1] === pngMarker[1] && 
+                                buffer[i + 2] === pngMarker[2] && 
+                                buffer[i + 3] === pngMarker[3]) {
+                                imageBuffer = buffer.slice(i);
+                                break;
+                            }
+                        }
+                    } else if (imageMetadata.contentType?.includes('gif')) {
+                        // Look for GIF marker (47 49 46 38)
+                        const gifMarker = Buffer.from([0x47, 0x49, 0x46, 0x38]);
+                        for (let i = 0; i < buffer.length - gifMarker.length; i++) {
+                            if (buffer[i] === gifMarker[0] && 
+                                buffer[i + 1] === gifMarker[1] && 
+                                buffer[i + 2] === gifMarker[2] && 
+                                buffer[i + 3] === gifMarker[3]) {
+                                imageBuffer = buffer.slice(i);
+                                break;
+                            }
+                        }
+                    }
+
+                    if (imageBuffer) {
+                        metadata.image = imageBuffer;
+                        metadata.imageMetadata = {
+                            contentType: imageMetadata.contentType || 'image/jpeg',
+                            filename: imageMetadata.filename || `image.${imageMetadata.format || 'jpg'}`,
+                            width: imageMetadata.width,
+                            height: imageMetadata.height,
+                            size: imageMetadata.size,
+                            encoding: 'binary'
+                        };
+                        logger.debug('Successfully extracted image data', {
+                            size: metadata.image.length,
+                            metadata: metadata.imageMetadata
+                        });
+                    } else {
+                        logger.warn('Could not find image data markers in transaction', {
+                            contentType: imageMetadata.contentType
+                        });
+                    }
+                } catch (error) {
+                    logger.error('Failed to process image data', {
+                        error: error instanceof Error ? error.message : 'Unknown error'
+                    });
+                }
+            }
+
+            // For vote questions, collect all content items after the first one as options
+            if (isVoteQuestion) {
+                const contents = data
+                    .filter(item => item.startsWith('content='))
+                    .map(item => item.split('=')[1]);
+                
+                if (contents.length > 1) {
+                    metadata.voteOptions = contents.slice(1);
+                }
+            }
 
             // Validate required fields
             if (!metadata.postId || !metadata.lockAmount || !metadata.lockDuration || !metadata.content) {
@@ -111,7 +222,7 @@ export class TransactionParser {
             });
 
             // First try to extract LOCK protocol data from tx.data
-            const lockData = this.extractLockProtocolData(tx.data);
+            const lockData = this.extractLockProtocolData(tx.data, tx);
             if (!lockData) {
                 return null;
             }

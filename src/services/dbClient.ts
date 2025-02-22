@@ -206,23 +206,23 @@ export class DbClient {
             }
 
             // Handle vote options if present
-            const voteOptions = tx.metadata.voteOptions as string[] | undefined;
-            const voteQuestion = tx.metadata.voteQuestion as string | undefined;
+            const voteOptions = tx.metadata.voteOptions;
+            const voteQuestion = tx.metadata.voteQuestion;
 
-            if (voteOptions?.length && voteQuestion) {
+            if (voteOptions?.length > 0 && voteQuestion) {
                 // Create vote question
                 const question = await this.prisma.voteQuestion.create({
                     data: {
                         postId: post.postId,
                         question: voteQuestion,
                         totalOptions: voteOptions.length,
-                        optionsHash: '', // TODO: implement hash if needed
+                        optionsHash: tx.metadata.optionsHash || '',
                         protocol: tx.protocol
                     }
                 });
 
                 // Create vote options
-                await Promise.all(voteOptions.map((option, index) => 
+                await Promise.all(voteOptions.map((option: string, index: number) => 
                     this.prisma.voteOption.create({
                         data: {
                             postId: post.postId,
@@ -297,7 +297,8 @@ export class DbClient {
             where: { postId },
             include: {
                 voteOptions: true,
-                voteQuestion: true
+                voteQuestion: true,
+                lockLikes: true
             }
         });
     }
