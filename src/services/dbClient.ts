@@ -186,7 +186,8 @@ export class DbClient {
                     type: tx.type,
                     protocol: tx.protocol,
                     sequence: 0,
-                    parentSequence: 0
+                    parentSequence: 0,
+                    senderAddress: tx.metadata.senderAddress || ''
                 }
             });
 
@@ -258,7 +259,13 @@ export class DbClient {
                 txid: tx.txid
             });
 
-            return processedTx;
+            return { 
+                ...processedTx,
+                post: {
+                    id: post.postId,
+                    senderAddress: post.senderAddress
+                }
+            };
         } catch (error) {
             logger.error('Failed to save transaction', {
                 error: error instanceof Error ? error.message : 'Unknown error',
