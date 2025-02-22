@@ -20,7 +20,7 @@ export class Scanner {
     private jungleBus: JungleBusClient;
     private dbClient: DbClient;
     private parser: TransactionParser;
-    private readonly START_BLOCK = 883850;
+    private readonly START_BLOCK = 883849;
     private readonly SUBSCRIPTION_ID = CONFIG.JB_SUBSCRIPTION_ID;
 
     constructor(parser: TransactionParser, dbClient: DbClient) {
@@ -46,13 +46,22 @@ export class Scanner {
     }
 
     private async handleTransaction(tx: any): Promise<void> {
-        const txid = tx.transaction?.hash || tx.hash;
-        if (!txid) return;
+        const txid = tx.transaction?.hash || tx.hash || tx.id;
+        if (!txid) {
+            logger.warn(`EVENT: ${ScannerEvent.TRANSACTION}`, {
+                message: 'Received transaction without ID',
+                tx: JSON.stringify(tx).substring(0, 200),
+                timestamp: new Date().toISOString()
+            });
+            return;
+        }
 
         try {
             logger.info(`EVENT: ${ScannerEvent.TRANSACTION}`, {
                 txid,
+                blockHeight: tx.block?.height || tx.height || tx.block_height,
                 message: 'PARSING TRANSACTION',
+                data: tx.data,
                 timestamp: new Date().toISOString()
             });
 
@@ -60,13 +69,15 @@ export class Scanner {
             
             logger.info('Transaction passed to parser successfully', {
                 txid,
+                blockHeight: tx.block?.height || tx.height || tx.block_height,
                 timestamp: new Date().toISOString()
             });
         } catch (error) {
             logger.error('Error processing transaction', {
                 txid,
                 event: ScannerEvent.ERROR,
-                error: error instanceof Error ? error.message : 'Unknown error'
+                error: error instanceof Error ? error.message : 'Unknown error',
+                timestamp: new Date().toISOString()
             });
         }
     }
