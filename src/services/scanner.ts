@@ -22,6 +22,11 @@ export class Scanner {
     private parser: TransactionParser;
     private readonly START_BLOCK = 883849;
     private readonly SUBSCRIPTION_ID = CONFIG.JB_SUBSCRIPTION_ID;
+    private readonly TRACKED_TRANSACTIONS = [
+        'b132ddbc21f687f8b782b7a9f426aecd7e9cd8d47d904a068257c746bfa9873d',
+        '355b4989bb76ac9dc1d72b07861d3fa1e58b2f0bddb588ddaa4897226c132df4',
+        '68b291029b9aee6ba305daac6402b40d2694423b3d10e34ec6c9fb9c61ed327e'
+    ];
 
     constructor(parser: TransactionParser, dbClient: DbClient) {
         this.dbClient = dbClient;
@@ -54,6 +59,15 @@ export class Scanner {
                 timestamp: new Date().toISOString()
             });
             return;
+        }
+
+        // Check if this is one of our tracked transactions
+        if (this.TRACKED_TRANSACTIONS.includes(txid)) {
+            logger.info('Found tracked transaction!', {
+                txid,
+                blockHeight: tx.block?.height || tx.height || tx.block_height,
+                timestamp: new Date().toISOString()
+            });
         }
 
         try {
