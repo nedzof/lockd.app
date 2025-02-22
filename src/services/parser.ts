@@ -72,17 +72,17 @@ export class TransactionParser {
                     case 'voteoption':
                         metadata.voteOptions.push(value);
                         break;
-                    case 'imagefilename':
-                        if (!metadata.imageMetadata) {
-                            metadata.imageMetadata = { filename: '', contentType: '' };
-                        }
-                        metadata.imageMetadata.filename = value;
-                        break;
-                    case 'imagecontenttype':
+                    case 'contenttype':
                         if (!metadata.imageMetadata) {
                             metadata.imageMetadata = { filename: '', contentType: '' };
                         }
                         metadata.imageMetadata.contentType = value;
+                        break;
+                    case 'format':
+                        if (!metadata.imageMetadata) {
+                            metadata.imageMetadata = { filename: '', contentType: '' };
+                        }
+                        metadata.imageMetadata.filename = `image.${value}`;
                         break;
                 }
             });
