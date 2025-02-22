@@ -55,7 +55,7 @@ export class Scanner {
         if (!txid) {
             logger.warn(`EVENT: ${ScannerEvent.TRANSACTION}`, {
                 message: 'Received transaction without ID',
-                tx: JSON.stringify(tx).substring(0, 200),
+                tx: JSON.stringify(tx),
                 timestamp: new Date().toISOString()
             });
             return;
@@ -150,7 +150,7 @@ export class Scanner {
                 this.START_BLOCK,
                 (tx: any) => {
                     logger.debug('Raw transaction received', {
-                        tx: JSON.stringify(tx).substring(0, 500),
+                        tx: JSON.stringify(tx),
                         timestamp: new Date().toISOString()
                     });
                     return this.handleTransaction(tx);
@@ -159,8 +159,6 @@ export class Scanner {
                 this.handleError.bind(this),
                 this.handleTransaction.bind(this), // Same handler for mempool
                 {
-                    find: ['app=lockd.app'],
-                    findOpcodes: ['OP_RETURN'],
                     includeMempool: false
                 }
             );
