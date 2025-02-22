@@ -162,6 +162,17 @@ export class Scanner {
                 timestamp: new Date().toISOString()
             });
 
+            const options = {
+                fromBlock: this.START_BLOCK,
+                toBlock: this.END_BLOCK,
+                includeMempool: false
+            };
+
+            logger.debug('Subscribing with options', {
+                options,
+                timestamp: new Date().toISOString()
+            });
+
             await this.jungleBus.Subscribe(
                 this.SUBSCRIPTION_ID,
                 this.START_BLOCK,
@@ -175,9 +186,7 @@ export class Scanner {
                 this.handleStatus.bind(this),
                 this.handleError.bind(this),
                 this.handleTransaction.bind(this), // Same handler for mempool
-                {
-                    includeMempool: false
-                }
+                options
             );
             
             logger.info('Scanner started', {
