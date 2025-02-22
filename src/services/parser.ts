@@ -91,11 +91,23 @@ export class TransactionParser {
     private extractLockProtocolData(data: string[], tx: any): LockProtocolData | null {
         try {
             if (!Array.isArray(data)) {
+                logger.debug('❌ Data is not an array', { data });
                 return null;
             }
 
+            // Log raw data for debugging
+            logger.debug('📝 Processing data array', { 
+                data,
+                dataLength: data.length
+            });
+
             // Check if this is a LOCK protocol transaction
             const isLockApp = data.some(item => item === 'app=lockd.app');
+            logger.debug('🔍 Checking for LOCK protocol', { 
+                isLockApp,
+                firstFewItems: data.slice(0, 5)
+            });
+
             if (!isLockApp) {
                 return null;
             }
@@ -103,8 +115,8 @@ export class TransactionParser {
             // Extract metadata
             const metadata: any = {
                 postId: null,
-                lockAmount: null,
-                lockDuration: null,
+                lockAmount: 0,  
+                lockDuration: 0,  
                 content: null,
                 voteOptions: [],
                 voteQuestion: null,
@@ -131,10 +143,10 @@ export class TransactionParser {
                         metadata.postId = value;
                         break;
                     case 'lockamount':
-                        metadata.lockAmount = parseInt(value, 10);
+                        metadata.lockAmount = parseInt(value, 10) || 0;  
                         break;
                     case 'lockduration':
-                        metadata.lockDuration = parseInt(value, 10);
+                        metadata.lockDuration = parseInt(value, 10) || 0;  
                         break;
                     case 'content':
                         if (isVoteQuestion && !metadata.voteQuestion) {
@@ -275,7 +287,11 @@ export class TransactionParser {
             }
 
             // Validate required fields
-            if (!metadata.postId || !metadata.lockAmount || !metadata.lockDuration || !metadata.content) {
+            if (!metadata.postId || !metadata.content) {
+                logger.debug('Missing required fields', {
+                    hasPostId: !!metadata.postId,
+                    hasContent: !!metadata.content
+                });
                 return null;
             }
 
@@ -286,36 +302,25 @@ export class TransactionParser {
         }
     }
 
-    public async parseTransaction(txid: string): Promise<ParsedTransaction | null> {
+    public async parseTransaction(txid: string): Promise<void> {
         try {
-            logger.info('🔍 About to parse transaction', { txid });
-            
-            // Fetch transaction details from JungleBus
-            logger.info('📡 Fetching transaction from JungleBus', { txid });
-            const response = await this.jungleBus.GetTransaction(txid);
-            const tx = response as unknown as JungleBusResponse;
-
-            logger.debug('📦 Raw transaction data', {
-                addresses: tx?.addresses,
-                block_height: tx?.block_height,
-                dataCount: tx?.data?.length,
-                hasData: !!tx?.data,
-                hasOutputs: !!tx?.outputs,
-                id: tx?.id
-            });
-
-            // First try to extract LOCK protocol data from tx.data
-            logger.info('🔎 Extracting LOCK protocol data', { txid });
-            const lockData = this.extractLockProtocolData(tx.data, tx);
-            if (!lockData) {
-                logger.info('⏭️ Skipping - not a LOCK protocol transaction', { txid });
-                return null;
+            // Check if transaction already exists
+            const existingTx = await this.dbClient.getTransaction(txid);
+            if (existingTx) {
+                return;
             }
 
-            logger.info('✅ Successfully parsed transaction', { txid });
+            const tx = await this.jungleBus.GetTransaction(txid);
+            if (!tx) {
+                return;
+            }
 
-            // Return parsed transaction data
-            return {
+            const parsedTx = this.extractLockProtocolData(tx.data, tx);
+            if (!parsedTx) {
+                return;
+            }
+
+            await this.dbClient.createTransaction({
                 txid: tx.id,
                 type: 'lock',
                 protocol: 'LOCK',
@@ -323,19 +328,24 @@ export class TransactionParser {
                 blockTime: tx.block_time,
                 senderAddress: tx.addresses?.[0] || null,
                 metadata: {
-                    postId: lockData.postId,
-                    lockAmount: lockData.lockAmount,
-                    lockDuration: lockData.lockDuration,
-                    content: lockData.content,
-                    voteOptions: lockData.voteOptions || [],
-                    voteQuestion: lockData.voteQuestion || '',
-                    image: lockData.image,
-                    imageMetadata: lockData.imageMetadata,
+                    postId: parsedTx.postId,
+                    lockAmount: parsedTx.lockAmount,
+                    lockDuration: parsedTx.lockDuration,
+                    content: parsedTx.content,
+                    voteOptions: parsedTx.voteOptions || [],
+                    voteQuestion: parsedTx.voteQuestion || '',
+                    image: parsedTx.image,
+                    imageMetadata: parsedTx.imageMetadata,
                     senderAddress: tx.addresses?.[0] || null
                 }
-            };
+            });
+            logger.info('✅ Transaction saved to database', { 
+                txid,
+                blockHeight: tx.block_height
+            });
+
         } catch (error) {
-            logger.error('❌ Error parsing transaction', { 
+            logger.error('❌ Failed to parse transaction', {
                 txid,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
