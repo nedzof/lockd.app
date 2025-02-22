@@ -51,9 +51,15 @@ export interface ParsedTransactionForProcessing {
 }
 
 export interface ProcessedTransaction {
-  blockHeight?: number;
-  blockTime?: Date;
-  raw: Transaction;
+  id: string;
+  txid: string;
+  blockHeight: number;
+  blockTime: bigint;
+  type: string;
+  protocol: string;
+  metadata: any;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface JungleBusTransaction {
@@ -129,6 +135,7 @@ export interface Post {
     createdBy: string;
     updatedAt?: Date;
     updatedBy?: string;
+    image?: Buffer;
 }
 
 export interface VoteQuestion {
@@ -148,13 +155,6 @@ export interface VoteOption {
     index: number;
     createdAt: Date;
     updatedAt?: Date;
-}
-
-export interface ProcessedTransaction {
-    id: string;
-    txid: string;
-    blockHeight: number;
-    blockTime: Date;
 }
 
 export interface ScannerEvents {

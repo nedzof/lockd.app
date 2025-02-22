@@ -123,6 +123,7 @@ export class TransactionParser {
                 protocol: 'LOCK',
                 blockHeight: tx.block_height,
                 blockTime: tx.block_time,
+                senderAddress: tx.addresses?.[0] || null,
                 metadata: {
                     postId: lockData.postId,
                     lockAmount: lockData.lockAmount,

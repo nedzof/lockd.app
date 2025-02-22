@@ -1,5 +1,5 @@
 import { PrismaClient, Prisma } from '@prisma/client';
-import { Post, ParsedTransaction, DbError } from '../shared/types.js';
+import { Post, ParsedTransaction, DbError, PostWithVoteOptions } from '../shared/types.js';
 import { logger } from '../utils/logger.js';
 
 export class DbClient {
@@ -170,25 +170,22 @@ export class DbClient {
     }
 
     public async saveTransaction(tx: ParsedTransaction): Promise<any> {
-        try {
-            // Create block time date safely
-            const blockTimeDate = this.createBlockTimeDate(tx.blockTime);
+        return await this.withRetry(async () => {
+            const postData = {
+                postId: tx.metadata.postId,
+                type: tx.type,
+                content: tx.metadata.content,
+                blockTime: new Date(Number(tx.blockTime)),
+                sequence: tx.sequence || 0,
+                parentSequence: tx.parentSequence || 0,
+                protocol: tx.protocol,
+                senderAddress: tx.senderAddress || null,
+                txid: tx.txid || null,
+                image: tx.metadata.image ? Buffer.from(tx.metadata.image) : null,
+            };
 
-            // Create post
             const post = await this.prisma.post.create({
-                data: {
-                    postId: tx.metadata.postId,
-                    content: tx.metadata.content,
-                    image: tx.metadata.image,
-                    txid: tx.txid,
-                    blockHeight: tx.blockHeight,
-                    blockTime: blockTimeDate,
-                    type: tx.type,
-                    protocol: tx.protocol,
-                    sequence: 0,
-                    parentSequence: 0,
-                    senderAddress: tx.metadata.senderAddress || ''
-                }
+                data: postData
             });
 
             logger.debug('Post created successfully', {
@@ -244,63 +241,58 @@ export class DbClient {
             }
 
             // Finally create the processed transaction record
-            const processedTx = await this.prisma.processedTransaction.create({
-                data: {
-                    txid: tx.txid,
-                    blockHeight: tx.blockHeight,
-                    blockTime: tx.blockTime ? BigInt(tx.blockTime) : BigInt(0),
-                    type: tx.type,
-                    protocol: tx.protocol,
-                    metadata: tx.metadata
-                }
-            });
-
-            logger.debug('Transaction saved successfully', {
-                txid: tx.txid
-            });
+            await this.prisma.$executeRaw`
+                INSERT INTO "ProcessedTransaction" (
+                    "txid", "blockHeight", "blockTime", "protocol", "type", "metadata"
+                ) VALUES (
+                    ${tx.txid},
+                    ${tx.blockHeight || 0},
+                    ${BigInt(Math.floor(Number(tx.blockTime)))},
+                    ${tx.protocol},
+                    ${tx.type},
+                    ${JSON.stringify(tx.metadata)}::jsonb
+                )
+            `;
 
             return { 
-                ...processedTx,
                 post: {
                     id: post.postId,
                     senderAddress: post.senderAddress
                 }
             };
-        } catch (error) {
-            logger.error('Failed to save transaction', {
-                error: error instanceof Error ? error.message : 'Unknown error',
-                txid: tx.txid
-            });
-            throw error;
-        }
+        });
     }
 
     async getTransaction(txid: string): Promise<ParsedTransaction | null> {
-        try {
-            const transaction = await this.prisma.processedTransaction.findUnique({
-                where: { txid }
-            });
+        const [transaction] = await this.prisma.$queryRaw<Array<{
+            txid: string;
+            type: string;
+            protocol: string;
+            blockHeight: number;
+            blockTime: bigint;
+            metadata: any;
+        }>>`
+            SELECT txid, type, protocol, "blockHeight", "blockTime", metadata
+            FROM "ProcessedTransaction"
+            WHERE txid = ${txid}
+            LIMIT 1
+        `;
 
-            if (!transaction) return null;
-
-            return {
-                txid: transaction.txid,
-                type: transaction.type,
-                protocol: transaction.protocol,
-                blockHeight: transaction.blockHeight,
-                blockTime: transaction.blockTime,
-                metadata: transaction.metadata as any
-            };
-        } catch (error) {
-            logger.error('Error fetching transaction', {
-                txid,
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            throw error;
+        if (!transaction) {
+            return null;
         }
+
+        return {
+            txid: transaction.txid,
+            type: transaction.type,
+            protocol: transaction.protocol,
+            blockHeight: transaction.blockHeight,
+            blockTime: Number(transaction.blockTime),
+            metadata: transaction.metadata
+        };
     }
 
-    public async getPostWithVoteOptions(postId: string) {
+    public async getPostWithVoteOptions(postId: string): Promise<PostWithVoteOptions | null> {
         return await this.prisma.post.findUnique({
             where: { postId },
             include: {

@@ -14,28 +14,48 @@ export interface Post {
     senderAddress?: string | null;
     blockHeight?: number | null;
     txid?: string | null;
+    image?: Buffer | null;
+    lockLikes?: any[];
+    voteOptions?: any[];
+    voteQuestion?: any | null;
+}
+
+export interface PostWithVoteOptions extends Post {
+    voteQuestion: {
+        id: string;
+        postId: string;
+        protocol: string;
+        createdAt: Date;
+        updatedAt: Date;
+        question: string;
+        totalOptions: number;
+        optionsHash: string;
+    } | null;
+    voteOptions: {
+        id: string;
+        postId: string;
+        content: string;
+        index: number;
+        createdAt: Date;
+        updatedAt: Date;
+        voteQuestionId: string;
+    }[];
 }
 
 export interface ParsedTransaction {
     txid: string;
     type: string;
     protocol: string;
-    blockHeight: number;
+    blockHeight?: number;
     blockTime: number | bigint;
-    decodedTx?: DecodedTransaction;
+    sequence?: number;
+    parentSequence?: number;
+    senderAddress?: string;
     metadata: {
         postId: string;
-        lockAmount: number;
-        lockDuration: number;
         content: string;
-        voteOptions: string[];
-        voteQuestion: string;
-        image: Buffer | null;
-        imageMetadata: {
-            filename: string;
-            contentType: string;
-        } | null;
-        senderAddress: string | null;
+        image?: Buffer | null;
+        [key: string]: any;
     };
 }
 

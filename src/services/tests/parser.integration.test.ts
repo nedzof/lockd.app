@@ -92,6 +92,8 @@ describe('TransactionParser Integration Tests', () => {
 
             // Verify the Post was created with image
             const post = await dbClient.getPostWithVoteOptions(parsedTx?.metadata.postId!);
+            console.log('Post object structure:', JSON.stringify(post, null, 2));
+            console.log('Post object keys:', Object.keys(post || {}));
             expect(post).toBeDefined();
             expect(post?.postId).toBe(postId);
             expect(post?.content).toBe('Test content ' + timestamp);
