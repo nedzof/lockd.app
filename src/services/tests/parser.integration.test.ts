@@ -246,6 +246,9 @@ describe('TransactionParser Integration Tests', () => {
         jungleBus = new JungleBusClient('https://junglebus.gorillapool.io');
         parser = new TransactionParser(dbClient);
 
+        // Clean database at start
+        await dbClient.cleanupTestData();
+
         // Create test_output directory if it doesn't exist
         testOutputDir = path.join(process.cwd(), 'test_output');
         fs.mkdirSync(testOutputDir, { recursive: true });
@@ -290,10 +293,6 @@ Total Transactions: ${testTxData.transactions.length}
 - Transactions with Votes: ${stats.withVotes}
 - Transactions with Content: ${stats.withContent}
 `);
-    });
-
-    beforeEach(async () => {
-        await dbClient.cleanupTestData();
     });
 
     // Generate test cases from test_tx.json
