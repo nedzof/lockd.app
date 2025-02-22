@@ -22,6 +22,7 @@ export class Scanner {
     private dbClient: DbClient;
     private parser: TransactionParser;
     private readonly START_BLOCK = 883000;
+    private readonly END_BLOCK = 884500;
     private readonly SUBSCRIPTION_ID = CONFIG.JB_SUBSCRIPTION_ID;
     private readonly TRACKED_TRANSACTIONS = [
         'b132ddbc21f687f8b782b7a9f426aecd7e9cd8d47d904a068257c746bfa9873d',
@@ -34,7 +35,7 @@ export class Scanner {
         this.parser = parser;
 
         // Initialize JungleBus client
-        this.jungleBus = new JungleBusClient('junglebus.gorillapool.io', {
+        this.jungleBus = new JungleBusClient('https://junglebus.gorillapool.io', {
             useSSL: true,
             onConnected: (ctx) => {
                 logger.info(`EVENT: ${ScannerEvent.CONNECTED}`, ctx);
@@ -52,55 +53,61 @@ export class Scanner {
     }
 
     private async handleTransaction(tx: any): Promise<void> {
-        const txid = tx.transaction?.hash || tx.hash || tx.id;
-        if (!txid) {
-            logger.warn(`EVENT: ${ScannerEvent.TRANSACTION}`, {
-                message: 'Received transaction without ID',
-                tx: JSON.stringify(tx),
-                timestamp: new Date().toISOString()
-            });
-            return;
-        }
-
-        // Log full transaction data for debugging
-        logger.debug('Full transaction data', {
-            txid,
-            blockHeight: tx.block?.height || tx.height || tx.block_height,
-            data: tx.data,
-            outputs: tx.outputs,
-            transaction: tx.transaction,
-            timestamp: new Date().toISOString()
-        });
-
-        // Check if this is one of our tracked transactions
-        if (this.TRACKED_TRANSACTIONS.includes(txid)) {
-            logger.info('Found tracked transaction!', {
-                txid,
-                blockHeight: tx.block?.height || tx.height || tx.block_height,
-                timestamp: new Date().toISOString()
-            });
-        }
-
         try {
-            logger.info(`EVENT: ${ScannerEvent.TRANSACTION}`, {
+            // Try to get transaction ID from various possible locations
+            const txid = tx.transaction?.hash || tx.hash || tx.id;
+            if (!txid) {
+                logger.warn('Transaction without ID', {
+                    tx: JSON.stringify(tx),
+                    timestamp: new Date().toISOString()
+                });
+                return;
+            }
+
+            const blockHeight = tx.block?.height || tx.height || tx.block_height;
+            
+            // Skip if we're past our end block
+            if (blockHeight > this.END_BLOCK) {
+                logger.info('Reached end block, stopping scanner', {
+                    endBlock: this.END_BLOCK,
+                    currentBlock: blockHeight,
+                    timestamp: new Date().toISOString()
+                });
+                process.exit(0);
+            }
+
+            // Check if this is one of our tracked transactions
+            if (this.TRACKED_TRANSACTIONS.includes(txid)) {
+                logger.info('Found tracked transaction!', {
+                    txid,
+                    blockHeight,
+                    rawTx: JSON.stringify(tx),
+                    timestamp: new Date().toISOString()
+                });
+            }
+
+            // Parse transaction data
+            const txData = {
                 txid,
-                blockHeight: tx.block?.height || tx.height || tx.block_height,
-                message: 'PARSING TRANSACTION',
-                data: tx.data,
+                blockHeight,
+                data: tx.data || [],
+                outputs: tx.outputs || [],
+                transaction: tx.transaction || {},
                 timestamp: new Date().toISOString()
-            });
+            };
+
+            logger.debug('Processing transaction', txData);
 
             await this.parser.parseTransaction(txid);
             
-            logger.info('Transaction passed to parser successfully', {
+            logger.info('Transaction processed', {
                 txid,
-                blockHeight: tx.block?.height || tx.height || tx.block_height,
+                blockHeight,
                 timestamp: new Date().toISOString()
             });
         } catch (error) {
             logger.error('Error processing transaction', {
-                txid,
-                event: ScannerEvent.ERROR,
+                tx: JSON.stringify(tx),
                 error: error instanceof Error ? error.message : 'Unknown error',
                 timestamp: new Date().toISOString()
             });
