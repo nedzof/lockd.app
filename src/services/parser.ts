@@ -320,7 +320,7 @@ export class TransactionParser {
                 return;
             }
 
-            await this.dbClient.createTransaction({
+            await this.dbClient.saveTransaction({
                 txid: tx.id,
                 type: 'lock',
                 protocol: 'LOCK',
