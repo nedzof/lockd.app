@@ -115,14 +115,32 @@ export class Scanner {
 
     public async start(): Promise<void> {
         try {
+            logger.info('Starting scanner with subscription', {
+                startBlock: this.START_BLOCK,
+                subscriptionId: this.SUBSCRIPTION_ID,
+                timestamp: new Date().toISOString()
+            });
+
             await this.jungleBus.Subscribe(
                 this.SUBSCRIPTION_ID,
                 this.START_BLOCK,
-                this.handleTransaction.bind(this),
+                (tx: any) => {
+                    logger.debug('Raw transaction received', {
+                        tx: JSON.stringify(tx).substring(0, 500),
+                        timestamp: new Date().toISOString()
+                    });
+                    return this.handleTransaction(tx);
+                },
                 this.handleStatus.bind(this),
                 this.handleError.bind(this),
-                this.handleTransaction.bind(this) // Same handler for mempool
+                this.handleTransaction.bind(this), // Same handler for mempool
+                {
+                    find: ['app=lockd.app'],
+                    findOpcodes: ['OP_RETURN'],
+                    includeMempool: false
+                }
             );
+            
             logger.info('Scanner started', {
                 startBlock: this.START_BLOCK,
                 subscriptionId: this.SUBSCRIPTION_ID,
