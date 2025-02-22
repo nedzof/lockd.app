@@ -33,22 +33,20 @@ export class Scanner {
     constructor(parser: TransactionParser, dbClient: DbClient) {
         this.dbClient = dbClient;
         this.parser = parser;
-
-        // Initialize JungleBus client
-        this.jungleBus = new JungleBusClient('https://junglebus.gorillapool.io', {
+        this.jungleBus = new JungleBusClient('junglebus.gorillapool.io', {
             useSSL: true,
             onConnected: (ctx) => {
-                logger.info(`EVENT: ${ScannerEvent.CONNECTED}`, ctx);
+                logger.info(`EVENT: ${ScannerEvent.CONNECTED}`, {
+                    ...ctx,
+                    timestamp: new Date().toISOString()
+                });
             },
-            onConnecting: (ctx) => {
-                logger.info(`EVENT: ${ScannerEvent.CONNECTING}`, ctx);
-            },
-            onDisconnected: (ctx) => {
-                logger.error(`EVENT: ${ScannerEvent.DISCONNECTED}`, ctx);
-            },
-            onError: (ctx) => {
-                logger.error(`EVENT: ${ScannerEvent.ERROR}`, ctx);
-            },
+            onError: (error) => {
+                logger.error(`EVENT: ${ScannerEvent.ERROR}`, {
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    timestamp: new Date().toISOString()
+                });
+            }
         });
     }
 
