@@ -173,19 +173,22 @@ export class Scanner {
                 timestamp: new Date().toISOString()
             });
 
-            await this.jungleBus.Subscribe(
-                this.SUBSCRIPTION_ID,
+            await this.jungleBus.SubscribeToBlocks(
                 this.START_BLOCK,
-                (tx: any) => {
-                    logger.debug('Raw transaction received', {
-                        tx: JSON.stringify(tx),
+                (block: any) => {
+                    logger.debug('Block received', {
+                        block: JSON.stringify(block),
                         timestamp: new Date().toISOString()
                     });
-                    return this.handleTransaction(tx);
+
+                    if (block.transactions) {
+                        for (const tx of block.transactions) {
+                            this.handleTransaction(tx);
+                        }
+                    }
                 },
                 this.handleStatus.bind(this),
                 this.handleError.bind(this),
-                this.handleTransaction.bind(this), // Same handler for mempool
                 options
             );
             
@@ -198,6 +201,7 @@ export class Scanner {
             logger.error('Failed to start scanner', {
                 event: ScannerEvent.ERROR,
                 error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined,
                 timestamp: new Date().toISOString()
             });
             throw error;
