@@ -61,6 +61,16 @@ export class Scanner {
             return;
         }
 
+        // Log full transaction data for debugging
+        logger.debug('Full transaction data', {
+            txid,
+            blockHeight: tx.block?.height || tx.height || tx.block_height,
+            data: tx.data,
+            outputs: tx.outputs,
+            transaction: tx.transaction,
+            timestamp: new Date().toISOString()
+        });
+
         // Check if this is one of our tracked transactions
         if (this.TRACKED_TRANSACTIONS.includes(txid)) {
             logger.info('Found tracked transaction!', {
