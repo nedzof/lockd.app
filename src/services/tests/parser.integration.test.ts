@@ -1,147 +1,14 @@
 import { JungleBusClient } from '@gorillapool/js-junglebus';
 import { DbClient } from '../dbClient.js';
-import { TransactionParser } from '../parser.js';
-import { ParsedTransaction } from '../types.js';
+import { TransactionParser, extractTextContent, extractVoteData } from '../parser.js';
+import { ParsedTransaction, TestTxData, JungleBusResponse, TransactionTestCase, VerificationResults, ProcessedTxMetadata } from '../../shared/types.js';
 import { logger } from '../../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
 import { Post, VoteOption, VoteQuestion, LockLike, Prisma } from '@prisma/client';
 
 // Import test transactions
-interface TestTxData {
-    transactions: string[];
-}
-
 const testTxData: TestTxData = JSON.parse(fs.readFileSync(path.join(__dirname, 'test_tx.json'), 'utf-8'));
-
-interface JungleBusResponse {
-    id: string;
-    transaction: string;
-    block_hash?: string;
-    block_height?: number;
-    block_time?: number;
-    outputs: string[];
-    data: string[];
-    addresses?: string[];
-}
-
-interface TransactionTestCase {
-    txid: string;
-    description?: string;
-    expectedPostId?: string;
-    expectedSenderAddress?: string;
-    hasImage?: boolean;
-    defaultLockAmount?: number;
-    defaultLockDuration?: number;
-    expectedImageMetadata?: {
-        contentType: string;
-        filename: string;
-    };
-}
-
-interface VerificationResults {
-    hasPost: boolean;
-    hasVoteQuestion: boolean;
-    voteOptionsCount: number;
-    hasLockLikes: boolean;
-    txid: string;
-    postId: string;
-    voteQuestion?: {
-        question: string;
-        totalOptions: number;
-        optionsHash: string;
-    };
-    voteOptions?: Array<{
-        index: number;
-        content: string;
-    }>;
-}
-
-interface ProcessedTxMetadata {
-    postId: string;
-    content: string;
-    image?: Buffer | null;
-    imageMetadata?: {
-        contentType: string;
-        filename: string;
-        width?: number;
-        height?: number;
-        size?: number;
-        encoding: string;
-    };
-    rawTx: JungleBusResponse;
-    [key: string]: any;
-}
-
-// Add new helper function to extract text content
-function extractTextContent(tx: JungleBusResponse): string[] {
-    const contents: string[] = [];
-    tx.data.forEach(item => {
-        if (item.startsWith('content=')) {
-            const content = item.split('=')[1];
-            if (content) {
-                contents.push(content);
-            }
-        }
-    });
-    return contents;
-}
-
-// Add new helper function to extract vote data
-function extractVoteData(tx: JungleBusResponse): { 
-    question?: string, 
-    options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
-    totalOptions?: number,
-    optionsHash?: string 
-} {
-    const voteData: { 
-        question?: string, 
-        options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
-        totalOptions?: number,
-        optionsHash?: string 
-    } = {};
-    
-    // Check if this is a vote transaction
-    const isVoteQuestion = tx.data.some(d => d.startsWith('type=vote_question'));
-    const isVoteOption = tx.data.some(d => d.startsWith('type=vote_option'));
-    
-    if (isVoteQuestion || isVoteOption) {
-        // Extract vote question
-        const questionContent = tx.data.find(d => d.startsWith('content='))?.split('=')[1];
-        if (questionContent) {
-            voteData.question = questionContent;
-        }
-
-        // Extract total options and hash
-        const totalOptionsStr = tx.data.find(d => d.startsWith('totaloptions='))?.split('=')[1];
-        if (totalOptionsStr) {
-            voteData.totalOptions = parseInt(totalOptionsStr);
-        }
-
-        const optionsHash = tx.data.find(d => d.startsWith('optionshash='))?.split('=')[1];
-        if (optionsHash) {
-            voteData.optionsHash = optionsHash;
-        }
-
-        // Extract vote options
-        const optionIndices = tx.data.filter(d => d.startsWith('optionindex=')).map(d => parseInt(d.split('=')[1]));
-        if (optionIndices.length > 0) {
-            // Get all content items
-            const contents = tx.data
-                .filter(d => d.startsWith('content='))
-                .map(d => d.split('=')[1]);
-
-            voteData.options = optionIndices.map(index => ({
-                text: contents[index + 1] || contents[0] || '', // index + 1 because first content is the question
-                lockAmount: parseInt(tx.data.find(d => d.startsWith('lockamount='))?.split('=')[1] || '0'),
-                lockDuration: parseInt(tx.data.find(d => d.startsWith('lockduration='))?.split('=')[1] || '0'),
-                optionIndex: index
-            }));
-        }
-    }
-    
-    return voteData;
-}
 
 // Add new helper function to verify database contents
 async function verifyDatabaseContents(txid: string, dbClient: DbClient, testOutputDir: string) {
@@ -329,38 +196,33 @@ Total Transactions: ${testTxData.transactions.length}
             }
 
             // Ensure required LOCK protocol fields are present
-            const hasLockApp = tx.data.some(d => d === 'app=lockd.app');
+            const hasLockApp = tx.data.some((d: string) => d === 'app=lockd.app');
             if (!hasLockApp) {
                 tx.data.unshift('app=lockd.app');
             }
 
-            // Add required fields if missing
-            const requiredFields = {
-                postid: tx.data.find(d => d.startsWith('postid='))?.split('=')[1] || testCase.expectedPostId,
-                lockamount: tx.data.find(d => d.startsWith('lockamount='))?.split('=')[1] || testCase.defaultLockAmount?.toString(),
-                lockduration: tx.data.find(d => d.startsWith('lockduration='))?.split('=')[1] || testCase.defaultLockDuration?.toString(),
-                content: tx.data.find(d => d.startsWith('content='))?.split('=')[1] || 'Test post content'
+            // Add test data
+            const testData = {
+                postid: tx.data.find((d: string) => d.startsWith('postid='))?.split('=')[1] || testCase.expectedPostId,
+                lockamount: tx.data.find((d: string) => d.startsWith('lockamount='))?.split('=')[1] || testCase.defaultLockAmount?.toString(),
+                lockduration: tx.data.find((d: string) => d.startsWith('lockduration='))?.split('=')[1] || testCase.defaultLockDuration?.toString(),
+                content: tx.data.find((d: string) => d.startsWith('content='))?.split('=')[1] || 'Test post content'
             };
 
-            // Add image metadata if this is an image transaction
-            if (testCase.hasImage && testCase.expectedImageMetadata) {
-                const imageFields = {
-                    contenttype: testCase.expectedImageMetadata.contentType,
-                    imagefilename: testCase.expectedImageMetadata.filename
-                };
-                
-                for (const [key, value] of Object.entries(imageFields)) {
-                    if (!tx.data.some(d => d.startsWith(`${key}=`)) && value) {
+            // Add any missing required fields
+            Object.entries(testData).forEach(([key, value]) => {
+                if (key === 'postid' || key === 'content') {
+                    // These fields must be present
+                    if (!tx.data.some((d: string) => d.startsWith(`${key}=`)) && value) {
+                        tx.data.push(`${key}=${value}`);
+                    }
+                } else {
+                    // Optional fields
+                    if (!tx.data.some((d: string) => d.startsWith(`${key}=`)) && value) {
                         tx.data.push(`${key}=${value}`);
                     }
                 }
-            }
-
-            for (const [key, value] of Object.entries(requiredFields)) {
-                if (!tx.data.some(d => d.startsWith(`${key}=`)) && value) {
-                    tx.data.push(`${key}=${value}`);
-                }
-            }
+            });
 
             // Extract and save text content and vote data
             const textContents = extractTextContent(tx);
@@ -429,12 +291,11 @@ ${voteData.options.map((opt, index) =>
             }
 
             // Add verification step after saving transaction
-            await verifyDatabaseContents(tx.id, dbClient, testOutputDir);
+            await dbClient.verifyDatabaseContents(tx.id, testOutputDir);
 
             logger.info('Transaction test completed successfully', {
                 txid: testCase.txid,
-                postId: parsedTx.metadata.postId,
-                hasImage: testCase.hasImage
+                data: tx.data
             });
         }, 30000);
     });

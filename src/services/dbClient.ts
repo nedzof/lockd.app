@@ -1,6 +1,8 @@
-import { PrismaClient, Prisma } from '@prisma/client';
-import { Post, ParsedTransaction, DbError, PostWithVoteOptions } from '../shared/types.js';
+import { PrismaClient, Prisma, Post, VoteOption, VoteQuestion, LockLike } from '@prisma/client';
+import { Post as SharedPost, ParsedTransaction, DbError, PostWithVoteOptions, ProcessedTxMetadata } from '../shared/types.js';
 import { logger } from '../utils/logger.js';
+import fs from 'fs';
+import path from 'path';
 
 export class DbClient {
     private prisma: PrismaClient;
@@ -321,5 +323,93 @@ export class DbClient {
         return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
             arr.slice(i * size, (i + 1) * size)
         );
+    }
+
+    // Verify database contents and generate verification files
+    async verifyDatabaseContents(txid: string, testOutputDir: string) {
+        // Get the processed transaction
+        const processedTx = await this.getTransaction(txid);
+        if (!processedTx) {
+            throw new Error(`No processed transaction found for txid ${txid}`);
+        }
+
+        const metadata = processedTx.metadata as ProcessedTxMetadata;
+
+        // Get the post with vote data
+        const post = await this.getPostWithVoteOptions(metadata.postId);
+        if (!post) {
+            throw new Error(`No post found for postId ${metadata.postId}`);
+        }
+
+        // Prepare verification results
+        const results = {
+            hasPost: true,
+            hasImage: !!post.image,
+            hasVoteQuestion: post.voteQuestion !== null,
+            voteOptionsCount: post.voteOptions?.length || 0,
+            hasLockLikes: post.lockLikes?.length > 0 || false,
+            txid,
+            postId: post.postId,
+            contentType: post.image ? 'Image + Text' : 'Text Only',
+            voteQuestion: post.voteQuestion ? {
+                question: post.voteQuestion.question,
+                totalOptions: post.voteQuestion.totalOptions,
+                optionsHash: post.voteQuestion.optionsHash
+            } : undefined,
+            voteOptions: post.voteOptions?.map(opt => ({
+                content: opt.content,
+                index: opt.index
+            })).sort((a, b) => a.index - b.index)
+        };
+
+        // Log verification results
+        logger.info('Database verification results', results);
+
+        // Save image if present
+        if (post.image) {
+            const ext = (metadata.imageMetadata?.contentType?.split('/')[1] || 'jpg');
+            const imagePath = path.join(testOutputDir, `${txid}_image.${ext}`);
+            await fs.promises.writeFile(imagePath, post.image);
+            logger.info('Saved image to file', { path: imagePath });
+        }
+
+        // Write verification results to file
+        const outputPath = path.join(testOutputDir, `${txid}_verification.txt`);
+        const outputContent = [
+            `Transaction ID: ${txid}`,
+            `Post ID: ${post.postId}`,
+            `Content Type: ${results.contentType}`,
+            `Block Time: ${post.blockTime.toISOString()}`,
+            `Sender Address: ${post.senderAddress || 'Not specified'}`,
+            '\nContent:',
+            post.content,
+            '\nTransaction Details:',
+            `- Has Image: ${results.hasImage}`,
+            `- Has Vote Question: ${results.hasVoteQuestion}`,
+            `- Vote Options Count: ${results.voteOptionsCount}`,
+            `- Has Lock Likes: ${results.hasLockLikes}`,
+            results.hasImage ? [
+                '\nImage Metadata:',
+                `- Content Type: ${metadata.imageMetadata?.contentType || 'Not specified'}`,
+                `- Filename: ${metadata.imageMetadata?.filename || 'Not specified'}`,
+                `- Size: ${metadata.imageMetadata?.size || 'Not specified'}`,
+                `- Dimensions: ${metadata.imageMetadata?.width || '?'}x${metadata.imageMetadata?.height || '?'}`
+            ].join('\n') : '',
+            results.hasVoteQuestion ? [
+                '\nVote Details:',
+                `Question: ${post.voteQuestion?.question}`,
+                `Total Options: ${post.voteQuestion?.totalOptions}`,
+                `Options Hash: ${post.voteQuestion?.optionsHash}`,
+                '\nVote Options:',
+                ...post.voteOptions
+                    .sort((a, b) => a.index - b.index)
+                    .map((opt, i) => `${i + 1}. ${opt.content} (Index: ${opt.index})`)
+            ].join('\n') : '\nNo Vote Data'
+        ].join('\n');
+
+        await fs.promises.writeFile(outputPath, outputContent);
+        logger.info('Saved verification results to', { path: outputPath });
+
+        return results;
     }
 }

@@ -1,7 +1,7 @@
 import { JungleBusClient, ControlMessageStatusCode } from '@gorillapool/js-junglebus';
 import { DbClient } from './dbClient';
 import { TransactionParser } from './parser';
-import { Transaction, JungleBusTransaction, ParsedTransaction, ScannerEvents } from './types';
+import { Transaction, JungleBusTransaction, ParsedTransaction, ScannerEvents } from '../shared/types.js';
 import { logger } from '../utils/logger';
 import { fileURLToPath } from 'url';
 import { EventEmitter } from 'events';
