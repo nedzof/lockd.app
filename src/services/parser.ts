@@ -2,6 +2,7 @@ import { DbClient } from './dbClient.js';
 import { logger } from '../utils/logger.js';
 import * as bsv from 'bsv';
 import { ParsedTransaction, LockProtocolData, JungleBusResponse } from '../shared/types.ts';
+import { JungleBusClient } from '../shared/jungleBusClient.js';
 
 // Helper function to extract text content from transactions
 export function extractTextContent(tx: JungleBusResponse): string[] {
@@ -74,12 +75,17 @@ export function extractVoteData(tx: JungleBusResponse): {
 }
 
 export class TransactionParser {
+    private jungleBus: JungleBusClient;
+
     constructor(private dbClient: DbClient) {
         logger.info('TransactionParser initialized', {
             bmapAvailable: true,
             bmapExports: [],
             bmapVersion: 'unknown'
         });
+
+        // Initialize JungleBus client
+        this.jungleBus = new JungleBusClient('https://junglebus.gorillapool.io');
     }
 
     private extractLockProtocolData(data: string[], tx: any): LockProtocolData | null {
@@ -280,8 +286,12 @@ export class TransactionParser {
         }
     }
 
-    public async parseTransaction(tx: any): Promise<ParsedTransaction | null> {
+    public async parseTransaction(txid: string): Promise<ParsedTransaction | null> {
         try {
+            // Fetch transaction details from JungleBus
+            const response = await this.jungleBus.GetTransaction(txid);
+            const tx = response as unknown as JungleBusResponse;
+
             logger.debug('Raw transaction data', {
                 addresses: tx?.addresses,
                 block_height: tx?.block_height,

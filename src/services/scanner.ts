@@ -50,14 +50,12 @@ export class Scanner extends EventEmitter {
             txid,
             blockHeight: tx.block?.height || tx.height,
             timestamp: tx.block?.timestamp,
-            inputCount: tx.transaction?.inputs?.length,
-            outputCount: tx.transaction?.outputs?.length,
             processingStartTime: new Date(startTime).toISOString()
         });
 
         try {
-            // Hand over to parser
-            const parsedTx = await this.parser.parseTransaction(tx);
+            // Hand over to parser with just the txid
+            const parsedTx = await this.parser.parseTransaction(txid);
             
             if (!parsedTx) {
                 logger.debug('Transaction skipped - no relevant data found', {
