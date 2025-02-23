@@ -10,7 +10,7 @@ export default defineConfig({
   plugins: [react()],
   define: {
     'process.env': {},
-    'global': {},
+    'global': 'globalThis',
   },
   resolve: {
     alias: {
@@ -21,7 +21,7 @@ export default defineConfig({
       '@services': path.resolve(__dirname, './src/frontend/services'),
       '@types': path.resolve(__dirname, './src/frontend/types'),
       '@utils': path.resolve(__dirname, './src/frontend/utils'),
-      // Add Node.js polyfills
+      // Node.js polyfills
       util: 'rollup-plugin-node-polyfills/polyfills/util',
       sys: 'util',
       events: 'rollup-plugin-node-polyfills/polyfills/events',
@@ -72,12 +72,19 @@ export default defineConfig({
       plugins: [
         // Enable rollup polyfills plugin
         rollupNodePolyFill()
-      ]
+      ],
+      format: 'es'
     }
   },
   server: {
     port: 3000,
-    open: true,
-    host: true
+    host: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3011',
+        changeOrigin: true,
+        secure: false
+      }
+    }
   }
-}) 
+})

@@ -16,8 +16,8 @@ const app = express();
 const DEFAULT_PORT = 3001;
 
 // Function to find an available port
-async function findAvailablePort(startPort: number): Promise<number> {
-  const isPortAvailable = (port: number): Promise<boolean> => {
+async function findAvailablePort(startPort) {
+  const isPortAvailable = (port) => {
     return new Promise((resolve) => {
       const server = net.createServer()
         .once('error', () => resolve(false))
@@ -74,7 +74,7 @@ app.use((req, res, next) => {
 });
 
 // Error handling middleware
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err, req, res, next) => {
   console.error('Error occurred:', err);
   res.status(500).json({
     message: 'Internal server error',
