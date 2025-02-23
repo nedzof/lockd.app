@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2, FiExternalLink } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
-import type { MemeSubmission, LockLike } from '../types';
+import type { Post, LockLike } from '../types';
 import { toast } from 'react-hot-toast';
 import LockLikeInteraction from './LockLikeInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
@@ -35,7 +35,7 @@ interface VoteQuestion {
   vote_options: VoteOption[];
 }
 
-interface MemeSubmissionGridProps {
+interface PostGridProps {
   onStatsUpdate: (stats: { totalLocked: number; participantCount: number; roundNumber: number }) => void;
   timeFilter: string;
   rankingFilter: string;
@@ -66,13 +66,14 @@ interface ApiPost {
   vote_options?: VoteOption[];
 }
 
-// Extend MemeSubmission type to include vote-related properties
-type ExtendedMemeSubmission = MemeSubmission & {
+// Extend Post type to include vote-related properties
+type ExtendedPost = Post & {
   is_vote?: boolean;
   vote_options?: VoteOption[];
 };
 
-const API_URL = 'http://localhost:3001';
+// Use environment variable for API URL
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 interface GradientColors {
   from: string;
@@ -86,7 +87,7 @@ const VOTE_OPTION_COLORS: GradientColors[] = [
   { from: '#45B7D1', to: '#3CDFCE', shadow: '#45B7D1' }
 ];
 
-const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({ 
+const PostGrid: React.FC<PostGridProps> = ({ 
   onStatsUpdate,
   timeFilter,
   rankingFilter,
@@ -95,7 +96,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   selectedTags,
   userId
 }) => {
-  const [submissions, setSubmissions] = useState<ExtendedMemeSubmission[]>([]);
+  const [submissions, setSubmissions] = useState<ExtendedPost[]>([]);
   const [votes, setVotes] = useState<VoteQuestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -320,7 +321,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
           toast.error('Error loading some images');
         }
 
-        const submission: ExtendedMemeSubmission = {
+        const submission: ExtendedPost = {
           id: post.id,
           creator: post.author_address || 'Anonymous',
           title: `Post by ${post.author_address || 'Anonymous'}`,
@@ -386,7 +387,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       setSubmissions(filteredSubmissions);
 
       // Update stats
-      const total = filteredSubmissions.reduce((sum: number, sub: ExtendedMemeSubmission) => sum + (sub.totalLocked || 0), 0);
+      const total = filteredSubmissions.reduce((sum: number, sub: ExtendedPost) => sum + (sub.totalLocked || 0), 0);
       onStatsUpdate({
         totalLocked: total,
         participantCount: filteredSubmissions.length,
@@ -399,6 +400,89 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
       setIsLoading(false);
     }
   }, [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, userId, onStatsUpdate]);
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      // Fetch posts
+      const postsResponse = await fetch(`${API_URL}/api/posts?${new URLSearchParams({
+        timeFilter,
+        rankingFilter,
+        personalFilter,
+        blockFilter,
+        selectedTags: JSON.stringify(selectedTags),
+        tagFilterType: 'or',
+        userId: userId || 'anon'
+      })}`, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!postsResponse.ok) {
+        throw new Error(`HTTP error! status: ${postsResponse.status}`);
+      }
+
+      const postsData = await postsResponse.json();
+      console.log('Fetched posts:', postsData);
+
+      // Process posts into Post format
+      const processedPosts = await Promise.all(postsData.map(async (post: ApiPost) => {
+        let imageUrl: string = `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('No image available')}`;
+        
+        // Handle image data if present
+        if (post.raw_image_data) {
+          try {
+            const imageFormat = post.image_format || 'jpeg';
+            imageUrl = `data:image/${imageFormat};base64,${post.raw_image_data}`;
+          } catch (error) {
+            console.error('Error processing image data:', error);
+          }
+        }
+
+        const submission: ExtendedPost = {
+          id: post.id,
+          txid: post.txid,
+          content: post.content,
+          authorAddress: post.author_address,
+          fileUrl: imageUrl,
+          format: post.image_format || 'jpeg',
+          blockHeight: post.block_height,
+          totalLocked: post.amount || 0,
+          unlockHeight: post.unlock_height || 0,
+          description: post.description || '',
+          createdAt: new Date(post.created_at),
+          tags: post.tags || [],
+          metadata: post.metadata || {},
+          isLocked: post.is_locked,
+          lockDuration: post.lock_duration || 0,
+          is_vote: post.is_vote || false,
+          vote_options: post.vote_options || []
+        };
+
+        return submission;
+      }));
+
+      setSubmissions(processedPosts);
+      setError(null);
+
+      // Calculate stats
+      const totalLocked = processedPosts.reduce((sum, post) => sum + (post.totalLocked || 0), 0);
+      const uniqueParticipants = new Set(processedPosts.map(post => post.authorAddress)).size;
+      onStatsUpdate({
+        totalLocked,
+        participantCount: uniqueParticipants,
+        roundNumber: 1 // You might want to get this from somewhere else
+      });
+
+    } catch (error) {
+      console.error('Error fetching posts:', error);
+      setError('Failed to fetch posts. Please try again later.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -423,7 +507,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
         const postsData = await postsResponse.json();
         console.log('Fetched posts:', postsData);
 
-        // Process posts into MemeSubmission format
+        // Process posts into Post format
         const processedPosts = await Promise.all(postsData.map(async (post: ApiPost) => {
           let imageUrl: string = `https://placehold.co/600x400/1A1B23/00ffa3?text=${encodeURIComponent('No image available')}`;
           
@@ -504,7 +588,7 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
     </a>
   );
 
-  const renderContent = (submission: ExtendedMemeSubmission) => {
+  const renderContent = (submission: ExtendedPost) => {
     console.log('Rendering submission:', {
       id: submission.id,
       hasContent: !!submission.content,
@@ -816,4 +900,4 @@ const MemeSubmissionGrid: React.FC<MemeSubmissionGridProps> = ({
   );
 };
 
-export { MemeSubmissionGrid as default };
+export { PostGrid as default };

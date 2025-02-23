@@ -29,7 +29,7 @@ export interface Post {
   locklikes: LockLike[];
 }
 
-export interface MemeSubmission {
+export interface Post {
   id: string;
   creator: string;
   title: string;

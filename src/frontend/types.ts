@@ -11,7 +11,7 @@ export interface LockLike {
 export const DEFAULT_LOCKLIKE_AMOUNT = 0.001; // Default amount in BSV
 export const DEFAULT_LOCKLIKE_BLOCKS = 1; // Default lock duration in blocks
 
-export interface MemeSubmission {
+export interface Post {
   id: string;
   creator: string;
   title: string;

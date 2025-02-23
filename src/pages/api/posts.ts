@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { PrismaClient } from '@prisma/client';
+import { DbClient } from '../../services/dbClient';
 
-const prisma = new PrismaClient();
+const dbClient = new DbClient();
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
@@ -36,9 +36,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // Apply tag filter
-    if (selectedTags && Array.isArray(selectedTags)) {
-      where.tags = { hasEvery: selectedTags };
+    // Apply tag filter if selectedTags is a string (from query params)
+    if (selectedTags) {
+      try {
+        const parsedTags = JSON.parse(selectedTags as string);
+        if (Array.isArray(parsedTags) && parsedTags.length > 0) {
+          where.tags = { hasEvery: parsedTags };
+        }
+      } catch (e) {
+        console.warn('Failed to parse selectedTags:', e);
+      }
     }
 
     // Apply personal filters
@@ -46,10 +53,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       where.author_address = userId;
     }
 
-    // Get the posts
-    const posts = await prisma.post.findMany({
+    // Get the posts using DbClient
+    const posts = await dbClient.prisma.post.findMany({
       where,
-      orderBy: { created_at: 'desc' }
+      orderBy: { created_at: 'desc' },
+      include: {
+        vote_options: true // Include vote options if any
+      }
     });
 
     // Process and return posts
@@ -58,4 +68,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.error('Error fetching posts:', error);
     res.status(500).json({ message: 'Error fetching posts' });
   }
-} 
+}
