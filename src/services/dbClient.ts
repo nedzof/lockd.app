@@ -21,7 +21,11 @@ export class DbClient {
                 { level: 'warn', emit: 'event' },
                 { level: 'error', emit: 'event' }
             ],
-            datasourceUrl: process.env.DATABASE_URL + "?pgbouncer=true&connection_limit=1"
+            datasources: {
+                db: {
+                    url: process.env.DATABASE_URL + "?pgbouncer=true&pool_timeout=30&connection_limit=10"
+                }
+            }
         });
 
         // Set up Prisma error logging
@@ -172,8 +176,48 @@ export class DbClient {
     }
 
     public async saveTransaction(tx: ParsedTransaction): Promise<void> {
-        logger.info('💾 About to save transaction to database', { txid: tx.txid });
-        return await this.withRetry(async () => {
+        logger.info('💾 About to save transaction to database', { 
+            txid: tx.txid,
+            hasImage: !!tx.metadata.image,
+            imageType: tx.metadata.imageMetadata?.contentType
+        });
+
+        try {
+            // Ensure we have metadata
+            tx.metadata = tx.metadata || {};
+            
+            // Generate postId if missing
+            if (!tx.metadata.postId && tx.txid) {
+                // Use the frontend's format: timestamp-random
+                const timestamp = Date.now().toString(36);
+                const random = Math.random().toString(36).substr(2, 9);
+                tx.metadata.postId = [timestamp, random].join('-').substr(0, 32);
+                
+                logger.info('Generated postId for transaction', { 
+                    txid: tx.txid, 
+                    generatedPostId: tx.metadata.postId 
+                });
+            }
+
+            // Validate required fields
+            if (!tx.metadata.postId) {
+                throw new Error('Transaction must have either a postId or txid');
+            }
+
+            // Handle image buffer
+            let imageBuffer = null;
+            if (tx.metadata.image) {
+                // Ensure we have a proper Buffer
+                imageBuffer = Buffer.isBuffer(tx.metadata.image) 
+                    ? tx.metadata.image 
+                    : Buffer.from(tx.metadata.image);
+                
+                logger.debug('📸 Processing image buffer', {
+                    bufferLength: imageBuffer.length,
+                    contentType: tx.metadata.imageMetadata?.contentType
+                });
+            }
+
             const postData = {
                 postId: tx.metadata.postId,
                 type: tx.type,
@@ -184,62 +228,128 @@ export class DbClient {
                 protocol: tx.protocol,
                 senderAddress: tx.senderAddress || null,
                 txid: tx.txid || null,
-                image: tx.metadata.image ? Buffer.from(tx.metadata.image) : null,
+                image: imageBuffer
             };
 
-            const post = await this.prisma.post.create({
-                data: postData
+            logger.debug('Pre-upsert transaction validation:', {
+                txid: tx.txid,
+                postId: tx.metadata?.postId,
+                type: tx.type,
+                hasMetadata: !!tx.metadata,
+                metadataKeys: tx.metadata ? Object.keys(tx.metadata) : [],
+                imageBufferSize: imageBuffer?.length
             });
 
-            logger.info('✅ Post created successfully', {
-                postId: post.postId,
-                hasImage: !!tx.metadata.image
-            });
-
-            // Create LockLike if this is a lock transaction
-            if (tx.type === 'lock' && tx.metadata.lockAmount && tx.metadata.lockDuration) {
-                await this.prisma.lockLike.create({
-                    data: {
-                        txid: tx.txid,
-                        lockAmount: tx.metadata.lockAmount,
-                        lockDuration: tx.metadata.lockDuration,
-                        postId: post.id
-                    }
+            // Check if post exists first
+            try {
+                const exists = await this.prisma.post.findUnique({
+                    where: { postId: tx.metadata.postId }
+                });
+                logger.debug('Post lookup result:', { 
+                    postId: tx.metadata.postId,
+                    exists: !!exists,
+                    operation: exists ? 'update' : 'create'
+                });
+            } catch (e) {
+                logger.error('Post lookup failed:', {
+                    error: e instanceof Error ? e.message : 'Unknown error',
+                    postId: tx.metadata.postId
                 });
             }
 
-            // Handle vote options if present
-            const voteOptions = tx.metadata.voteOptions;
-            const voteQuestion = tx.metadata.voteQuestion;
+            // Use upsert instead of create
+            const post = await this.prisma.post.upsert({
+                where: {
+                    postId: tx.metadata.postId // Use postId as the unique identifier
+                },
+                create: postData,
+                update: {
+                    ...postData,
+                    // Only update image if new image data is provided
+                    ...(imageBuffer ? {
+                        image: imageBuffer
+                    } : {})
+                }
+            });
 
-            if (voteOptions?.length > 0 && voteQuestion) {
-                // Create vote question
-                const question = await this.prisma.voteQuestion.create({
-                    data: {
-                        postId: post.postId,
-                        question: voteQuestion,
-                        totalOptions: voteOptions.length,
-                        optionsHash: tx.metadata.optionsHash || '',
-                        protocol: tx.protocol
+            const action = post.createdAt === post.updatedAt ? 'created' : 'updated';
+            logger.info(`✅ Post ${action} successfully`, {
+                postId: post.postId,
+                txid: post.txid,
+                hasImage: !!imageBuffer,
+                imageSize: imageBuffer?.length,
+                createdAt: post.createdAt,
+                updatedAt: post.updatedAt
+            });
+
+            // Handle lock likes
+            if (tx.type === 'lock') {
+                // First check if a lock like exists for this txid
+                const existingLock = await this.prisma.lockLike.findFirst({
+                    where: {
+                        txid: tx.txid
                     }
                 });
 
-                // Create vote options
-                await Promise.all(voteOptions.map((option: string, index: number) => 
-                    this.prisma.voteOption.create({
+                if (!existingLock) {
+                    // Create new lock like if it doesn't exist
+                    await this.prisma.lockLike.create({
                         data: {
-                            postId: post.postId,
-                            voteQuestionId: question.id,
-                            index,
-                            content: option,
-                            protocol: tx.protocol
+                            postId: post.id,
+                            txid: tx.txid,
+                            lockAmount: tx.metadata.lockAmount || 0,
+                            lockDuration: tx.metadata.lockDuration || 0
                         }
-                    })
-                ));
+                    });
 
-                logger.info('✅ Created vote question and options', {
-                    questionId: question.id,
-                    optionCount: voteOptions.length
+                    logger.debug('✅ Lock like created', {
+                        postId: post.postId,
+                        txid: tx.txid,
+                        lockAmount: tx.metadata.lockAmount
+                    });
+                } else {
+                    // Update existing lock like
+                    await this.prisma.lockLike.update({
+                        where: {
+                            id: existingLock.id
+                        },
+                        data: {
+                            lockAmount: tx.metadata.lockAmount || 0,
+                            lockDuration: tx.metadata.lockDuration || 0
+                        }
+                    });
+
+                    logger.debug('✅ Lock like updated', {
+                        postId: post.postId,
+                        txid: tx.txid,
+                        lockAmount: tx.metadata.lockAmount
+                    });
+                }
+            }
+
+            // Handle vote options if present
+            if (tx.metadata.voteOptions && tx.metadata.voteOptions.length > 0) {
+                // First create the vote question
+                const voteQuestion = await this.prisma.voteQuestion.create({
+                    data: {
+                        postId: post.postId,
+                        question: tx.metadata.voteQuestion || 'Default Question',
+                        totalOptions: tx.metadata.voteOptions.length,
+                        optionsHash: tx.metadata.optionsHash || '',
+                        voteOptions: {
+                            create: tx.metadata.voteOptions.map((option, index) => ({
+                                postId: post.postId,
+                                content: option,
+                                index: index
+                            }))
+                        }
+                    }
+                });
+
+                logger.debug('✅ Vote options created', {
+                    postId: post.postId,
+                    questionId: voteQuestion.id,
+                    optionsCount: tx.metadata.voteOptions.length
                 });
             }
 
@@ -258,7 +368,13 @@ export class DbClient {
             `;
 
             logger.info('✅ Transaction saved successfully', { txid: tx.txid });
-        });
+        } catch (error) {
+            logger.error('Error in saveTransaction', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            throw error;
+        }
     }
 
     async getTransaction(txid: string): Promise<ParsedTransaction | null> {
@@ -353,8 +469,8 @@ export class DbClient {
                 optionsHash: post.voteQuestion.optionsHash
             } : undefined,
             voteOptions: post.voteOptions?.map(opt => ({
-                content: opt.content,
-                index: opt.index
+                content: opt.text,
+                index: opt.optionIndex
             })).sort((a, b) => a.index - b.index)
         };
 
@@ -398,8 +514,8 @@ export class DbClient {
                 `Options Hash: ${post.voteQuestion?.optionsHash}`,
                 '\nVote Options:',
                 ...post.voteOptions
-                    .sort((a, b) => a.index - b.index)
-                    .map((opt, i) => `${i + 1}. ${opt.content} (Index: ${opt.index})`)
+                    .sort((a, b) => a.optionIndex - b.optionIndex)
+                    .map((opt, i) => `${i + 1}. ${opt.text} (Index: ${opt.optionIndex})`)
             ].join('\n') : '\nNo Vote Data'
         ].join('\n');
 
