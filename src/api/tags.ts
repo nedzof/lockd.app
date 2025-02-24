@@ -1,8 +1,8 @@
 import express from 'express';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../db/prisma';
+import { logger } from '../utils/logger';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Default tags if none are found in the database
 const DEFAULT_TAGS = [
@@ -20,27 +20,37 @@ const DEFAULT_TAGS = [
 
 router.get('/', async (req, res) => {
   try {
-    // Get unique tags from posts
-    const posts = await prisma.post.findMany({
+    const uniqueTags = await prisma.post.findMany({
       select: {
         tags: true
       }
     });
 
-    // Extract unique tags
-    const uniqueTags = new Set<string>();
-    posts.forEach(post => {
-      post.tags.forEach(tag => uniqueTags.add(tag));
+    // Flatten and deduplicate tags
+    const allTags = uniqueTags
+      .flatMap(post => post.tags)
+      .filter((tag, index, self) => self.indexOf(tag) === index)
+      .sort();
+
+    // If no tags found, return default tags
+    const tags = allTags.length > 0 ? allTags : DEFAULT_TAGS;
+
+    res.json({ tags });
+  } catch (error: any) {
+    logger.error('Error fetching tags', {
+      error: error.message,
+      code: error.code
     });
 
-    // If no tags found in posts, return default tags
-    const tags = uniqueTags.size > 0 ? Array.from(uniqueTags) : DEFAULT_TAGS;
+    if (error.code === 'P2010' || error.message.includes('prepared statement')) {
+      return res.status(503).json({ 
+        error: 'Database connection error, please try again',
+        retryAfter: 1
+      });
+    }
 
-    res.json(tags);
-  } catch (error) {
-    console.error('Error fetching tags:', error);
-    res.status(500).json({ message: 'Error fetching tags' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-export default router; 
+export default router;

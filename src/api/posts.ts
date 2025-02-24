@@ -1,30 +1,9 @@
-import express, { Request, Response, Router, RequestHandler } from 'express';
-import { PrismaClient, Prisma } from '@prisma/client';
-
-const router: Router = express.Router();
-const prisma = new PrismaClient({
-  log: ['query', 'error']
-});
-
-// Helper function to validate query parameters
-const validateQueryParams = (query: any) => {
-  const { timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, userId } = query;
-  
-  if (timeFilter && !['1d', '7d', '30d'].includes(timeFilter)) {
-    throw new Error('Invalid timeFilter value');
-  }
-  
-  if (selectedTags) {
-    try {
-      const tags = JSON.parse(selectedTags);
-      if (!Array.isArray(tags)) {
-        throw new Error('selectedTags must be an array');
-      }
-    } catch (e) {
-      throw new Error('Invalid selectedTags format');
-    }
-  }
-};
+import express, { Router, RequestHandler } from 'express';
+import prisma from '../db/prisma';
+import { validateQueryParams } from '../utils/validation';
+import type { DirectPostBody } from '../types';
+import { NextApiRequest, NextApiResponse } from 'next';
+import { logger } from '../utils/logger';
 
 // Define request parameter types
 interface PostParams {
@@ -83,147 +62,71 @@ interface DirectPostBody {
 type PostListHandler = RequestHandler<{}, any, any, PostQueryParams>;
 type PostDetailHandler = RequestHandler<PostParams>;
 type PostMediaHandler = RequestHandler<PostParams>;
-type CreatePostHandler = RequestHandler<{}, any, CreatePostBody, any>;
-type CreateDirectPostHandler = RequestHandler<{}, any, DirectPostBody, any>;
+type CreatePostHandler = RequestHandler<{}, any, CreatePostBody>;
+type CreateDirectPostHandler = RequestHandler<{}, any, DirectPostBody>;
 
 const listPosts: PostListHandler = async (req, res, next) => {
   try {
-    console.log('Received request for posts with query:', req.query);
+    const { cursor, limit = '10', tags = [], excludeVotes = 'false' } = req.query;
+    const parsedLimit = Math.min(parseInt(limit as string, 10), 50);
+    const parsedExcludeVotes = excludeVotes === 'true';
     
-    // Validate query parameters
-    validateQueryParams(req.query);
-
-    const {
-      timeFilter,
-      rankingFilter,
-      personalFilter,
-      blockFilter,
-      selectedTags,
-      userId
-    } = req.query;
-
-    // First, find all txids that have vote posts
-    const voteTxids = await prisma.post.findMany({
-      where: { is_vote: true },
-      select: { txid: true }
-    });
-    const voteTxidSet = new Set(voteTxids.map(p => p.txid));
-
-    // Build the base query - exclude non-vote posts if a vote version exists
-    let where: any = {
-      OR: []
-    };
-
-    // Apply time filter
-    if (timeFilter) {
-      const now = new Date();
-      const timeFilters: { [key: string]: number } = {
-        '1d': 1,
-        '7d': 7,
-        '30d': 30
-      };
-      const days = timeFilters[timeFilter];
-      if (days) {
-        const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-        where.OR.push({ created_at: { gte: startDate } });
-      }
-    }
-
-    // Apply tag filter
-    if (selectedTags) {
-      const tags = JSON.parse(selectedTags);
-      if (Array.isArray(tags) && tags.length > 0) {
-        where.OR.push({ tags: { hasSome: tags } });
-      }
-    }
-
-    // Apply personal filters
-    if (personalFilter === 'mylocks' && userId) {
-      where.OR.push({ author_address: userId });
-    }
-
-    // Apply block filter if provided
-    if (blockFilter) {
-      where.OR.push({ block_height: { gte: parseInt(blockFilter, 10) } });
-    }
-
-    // If no filters are applied, show all posts
-    if (where.OR.length === 0) {
-      delete where.OR;
-    }
-
-    // Add vote post handling
-    where = {
-      AND: [
-        where,
-        {
-          OR: [
-            { is_vote: true },
-            { txid: { notIn: Array.from(voteTxidSet) } }
-          ]
-        }
-      ]
-    };
-
-    console.log('Querying posts with where clause:', where);
-
-    // Get the posts with explicit select
     const posts = await prisma.post.findMany({
-      where,
-      select: {
-        id: true,
-        txid: true,
-        content: true,
-        author_address: true,
-        media_type: true,
-        block_height: true,
-        amount: true,
-        unlock_height: true,
-        description: true,
-        created_at: true,
-        tags: true,
-        metadata: true,
-        is_locked: true,
-        lock_duration: true,
-        raw_image_data: true,
-        image_format: true,
-        image_source: true,
-        is_vote: true,
-        vote_options: {
-          select: {
-            id: true,
-            txid: true,
-            content: true,
-            lock_amount: true,
-            lock_duration: true,
-            unlock_height: true,
-            current_height: true,
-            lock_percentage: true
-          }
-        }
+      take: parsedLimit,
+      ...(cursor ? { 
+        cursor: { 
+          id: cursor as string 
+        },
+        skip: 1
+      } : {}),
+      where: {
+        AND: [
+          ...(tags.length > 0 ? [{
+            tags: {
+              hasEvery: Array.isArray(tags) ? tags : [tags]
+            }
+          }] : []),
+          ...(parsedExcludeVotes ? [{
+            is_vote: false
+          }] : [])
+        ]
       },
       orderBy: [
-        { created_at: 'desc' }
+        { created_at: 'desc' },
+        { id: 'desc' }
       ],
-      take: 50 // Limit to 50 posts per request for performance
+      include: {
+        vote_options: true,
+        lock_likes: {
+          orderBy: { created_at: 'desc' }
+        }
+      }
     });
 
-    console.log(`Found ${posts.length} posts`);
+    const lastPost = posts[posts.length - 1];
+    const nextCursor = lastPost?.id;
 
-    // Process and return posts
-    res.json(posts);
-  } catch (error) {
-    console.error('Error fetching posts:', error);
-    if (error instanceof Error) {
-      res.status(400).json({ 
-        message: 'Error fetching posts',
-        error: error.message 
-      });
-    } else {
-      res.status(500).json({ 
-        message: 'Internal server error while fetching posts'
+    return res.status(200).json({
+      posts,
+      nextCursor
+    });
+  } catch (error: any) {
+    logger.error('Error fetching posts', {
+      error: error.message,
+      code: error.code
+    });
+
+    // Return appropriate error response
+    if (error.code === 'P2010' || error.message.includes('prepared statement')) {
+      return res.status(503).json({ 
+        error: 'Database connection error, please try again',
+        retryAfter: 1
       });
     }
+
+    return res.status(500).json({ 
+      error: 'Internal server error'
+    });
   }
 };
 
@@ -502,6 +405,7 @@ const createDirectPost: CreateDirectPostHandler = async (req, res, next): Promis
 };
 
 // Register routes
+const router: Router = express.Router();
 router.get('/', listPosts);
 router.get('/:id', getPost);
 router.get('/:id/media', getPostMedia);

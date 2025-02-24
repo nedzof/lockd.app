@@ -16,7 +16,7 @@ interface TagFilterProps {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selectedTags }) => {
-  const [tags, setTags] = useState<TagCount[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +29,7 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selectedTags }) => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      setTags(data.tags);
+      setTags(data.tags || []);
       setIsLoading(false);
     } catch (err) {
       console.error('Error fetching tags:', err);
@@ -73,29 +73,21 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selectedTags }) => {
 
   return (
     <div className="flex flex-wrap gap-2 p-4">
-      {tags && tags.length > 0 ? tags.map((tag) => (
+      {tags.map((tag) => (
         <button
-          key={tag.tag}
-          onClick={() => handleTagClick(tag.tag)}
+          key={tag}
+          onClick={() => handleTagClick(tag)}
           className={`
             px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-300
-            ${selectedTags.includes(tag.tag)
+            ${selectedTags.includes(tag)
               ? 'bg-[#00ffa3] text-black hover:bg-[#00ff9d]'
               : 'bg-[#2A2B33] text-gray-300 hover:bg-[#3A3B43]'
             }
           `}
         >
-          <span>{tag.tag}</span>
-          <span className="ml-2 text-xs opacity-70">
-            {tag.count}
-          </span>
-          {tag.totalLocked && tag.totalLocked > 0 && (
-            <span className="ml-2 text-xs opacity-70">
-              ({formatBSV(tag.totalLocked)} BSV)
-            </span>
-          )}
+          {tag}
         </button>
-      )) : null}
+      ))}
     </div>
   );
 };

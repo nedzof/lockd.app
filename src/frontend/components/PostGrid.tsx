@@ -88,7 +88,11 @@ const PostGrid: React.FC<PostGridProps> = ({
       const queryParams = new URLSearchParams();
       
       if (timeFilter) queryParams.append('timeFilter', timeFilter);
-      if (rankingFilter) queryParams.append('rankingFilter', rankingFilter);
+      if (rankingFilter) {
+        // Map rankingFilter values to valid backend values
+        const validRankingFilter = rankingFilter === 'top1' ? 'top' : rankingFilter;
+        queryParams.append('rankingFilter', validRankingFilter);
+      }
       if (personalFilter) queryParams.append('personalFilter', personalFilter);
       if (blockFilter) queryParams.append('blockFilter', blockFilter);
       if (selectedTags && selectedTags.length > 0) queryParams.append('selectedTags', JSON.stringify(selectedTags));
