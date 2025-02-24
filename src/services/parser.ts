@@ -88,6 +88,276 @@ export class TransactionParser {
         this.jungleBus = new JungleBusClient('https://junglebus.gorillapool.io');
     }
 
+    private extractImageFromBsvTx(tx: any): { imageData: Buffer; metadata: any } | null {
+        try {
+            logger.debug('📦 Processing transaction for image:', {
+                hasData: !!tx.data,
+                dataType: tx.data ? typeof tx.data : 'undefined',
+                isArray: Array.isArray(tx.data),
+                dataLength: tx.data?.length,
+                txKeys: Object.keys(tx),
+                firstFewItems: tx.data?.slice(0, 3)
+            });
+
+            if (!tx.data || !Array.isArray(tx.data)) {
+                logger.debug('❌ Invalid transaction data structure');
+                return null;
+            }
+
+            let imageData: Buffer | null = null;
+            let metadata: any = {};
+            let foundImage = false;
+            let rawImageData: string | null = null;
+
+            // Known image format headers
+            const imageHeaders = {
+                jpeg: { header: [0xFF, 0xD8, 0xFF], contentType: 'image/jpeg', maxSize: 20 * 1024 * 1024 },
+                png: { header: [0x89, 0x50, 0x4E, 0x47], contentType: 'image/png', maxSize: 20 * 1024 * 1024 },
+                gif: { header: [0x47, 0x49, 0x46, 0x38], contentType: 'image/gif', maxSize: 10 * 1024 * 1024 },
+                webp: { header: [0x52, 0x49, 0x46, 0x46], contentType: 'image/webp', maxSize: 15 * 1024 * 1024 },
+                bmp: { header: [0x42, 0x4D], contentType: 'image/bmp', maxSize: 10 * 1024 * 1024 },
+                tiff: { header: [0x49, 0x49, 0x2A, 0x00], contentType: 'image/tiff', maxSize: 20 * 1024 * 1024 }
+            };
+
+            // Enhanced base64 validation
+            const isValidBase64 = (str: string): boolean => {
+                if (str.length % 4 !== 0) return false;
+                const base64Regex = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+                return base64Regex.test(str);
+            };
+
+            // Enhanced image data validation
+            const validateImageData = (buffer: Buffer, format: string): boolean => {
+                if (!buffer || buffer.length === 0) return false;
+                const formatInfo = imageHeaders[format as keyof typeof imageHeaders];
+                if (!formatInfo) return false;
+                
+                // Check size limits
+                if (buffer.length > formatInfo.maxSize) {
+                    logger.warn(`Image size ${buffer.length} bytes exceeds limit of ${formatInfo.maxSize} bytes for ${format}`);
+                    return false;
+                }
+                
+                return true;
+            };
+
+            // Try to extract image data from different sources in order of preference
+            const extractImageFromBuffer = (buffer: Buffer): Buffer | null => {
+                if (!buffer || buffer.length === 0) {
+                    logger.debug('❌ Empty buffer provided');
+                    return null;
+                }
+
+                for (const [format, { header, contentType }] of Object.entries(imageHeaders)) {
+                    for (let i = 0; i < Math.min(buffer.length - header.length, 1024); i++) {
+                        if (header.every((byte, j) => buffer[i + j] === byte)) {
+                            const extractedData = buffer.slice(i);
+                            
+                            if (!validateImageData(extractedData, format)) {
+                                logger.debug(`❌ Invalid ${format} image data`, {
+                                    size: extractedData.length,
+                                    startPosition: i
+                                });
+                                continue;
+                            }
+
+                            if (!metadata.contentType) {
+                                metadata.contentType = contentType;
+                            }
+                            
+                            logger.debug(`✅ Found valid ${format.toUpperCase()} image`, {
+                                size: extractedData.length,
+                                startPosition: i,
+                                contentType
+                            });
+                            
+                            return extractedData;
+                        }
+                    }
+                }
+                return null;
+            };
+
+            // First pass: collect metadata and image indicators
+            for (const item of tx.data) {
+                if (typeof item !== 'string') continue;
+
+                if (item.includes('=')) {
+                    const [key, value] = item.split('=');
+                    const keyLower = key.toLowerCase();
+
+                    // Handle both regular and MAP protocol fields
+                    switch(keyLower) {
+                        case 'contenttype':
+                        case 'map_content_type':
+                            if (value.startsWith('image/')) {
+                                metadata.contentType = value;
+                                foundImage = true;
+                                logger.debug('🖼️ Found image content type', { contentType: value });
+                            }
+                            break;
+                        case 'map_content':
+                            // Store map_content regardless of current foundImage status
+                            // We might find out it's an image later when we see map_content_type
+                            rawImageData = value;
+                            logger.debug('📦 Found map_content data');
+                            break;
+                        case 'filename':
+                        case 'map_file_name':
+                            metadata.filename = value;
+                            break;
+                        case 'imagewidth':
+                        case 'map_image_width':
+                            metadata.width = parseInt(value);
+                            break;
+                        case 'imageheight':
+                        case 'map_image_height':
+                            metadata.height = parseInt(value);
+                            break;
+                        case 'imagesize':
+                        case 'map_file_size':
+                            metadata.size = parseInt(value);
+                            break;
+                        case 'type':
+                            if (value === 'image') {
+                                foundImage = true;
+                                logger.debug('🖼️ Found image type indicator');
+                            }
+                            break;
+                        case 'map_type':
+                            if (value === 'image') {
+                                foundImage = true;
+                                logger.debug('🖼️ Found MAP image indicator');
+                            }
+                            break;
+                        case 'imagedata':
+                        case 'map_image_data':
+                            rawImageData = value;
+                            logger.debug('📸 Found image data in field', { field: key });
+                            break;
+                        default:
+                            // Check if this is base64 encoded image data
+                            if (item.match(/^[A-Za-z0-9+/=]+$/)) {
+                                try {
+                                    // Try to decode as base64
+                                    Buffer.from(item, 'base64');
+                                    imageData = item;
+                                } catch (e) {
+                                    // Not valid base64, ignore
+                                }
+                            }
+                    }
+                }
+            }
+
+            // Log the final state before attempting extraction
+            logger.debug('🎯 Pre-extraction state:', {
+                foundImage,
+                hasRawData: !!rawImageData,
+                contentType: metadata.contentType,
+                rawDataLength: rawImageData?.length
+            });
+
+            // Try to extract image data from different sources in order of preference
+            // 1. Try imagedata/map_content field first
+            if (!imageData && rawImageData && foundImage) {
+                try {
+                    let base64Data = rawImageData;
+                    
+                    // Handle different base64 formats
+                    if (rawImageData.startsWith('data:')) {
+                        const matches = rawImageData.match(/^data:([^;]+);base64,(.+)$/);
+                        if (matches) {
+                            metadata.contentType = matches[1];
+                            base64Data = matches[2];
+                        }
+                    }
+
+                    // Try to decode base64 even if it doesn't have the data: prefix
+                    if (!isValidBase64(base64Data)) {
+                        // Try to clean up the base64 string
+                        base64Data = base64Data.replace(/[^A-Za-z0-9+/=]/g, '');
+                        if (!isValidBase64(base64Data)) {
+                            logger.debug('❌ Invalid base64 data format after cleanup');
+                            return null;
+                        }
+                    }
+
+                    const buffer = Buffer.from(base64Data, 'base64');
+                    imageData = extractImageFromBuffer(buffer);
+                    
+                    if (imageData) {
+                        logger.debug('✅ Successfully extracted image from data field', {
+                            size: imageData.length,
+                            type: metadata.contentType
+                        });
+                    } else {
+                        logger.debug('❌ Failed to validate extracted image data');
+                    }
+                } catch (e) {
+                    logger.debug('❌ Failed to process image data field:', e);
+                }
+            }
+
+            // 2. Try transaction field
+            if (!imageData && tx.transaction && foundImage) {
+                try {
+                    const buffer = Buffer.from(tx.transaction, 'base64');
+                    imageData = extractImageFromBuffer(buffer);
+                } catch (e) {
+                    logger.debug('❌ Failed to process transaction field:', e);
+                }
+            }
+
+            // 3. Try outputs field
+            if (!imageData && tx.outputs && foundImage) {
+                try {
+                    for (const output of tx.outputs) {
+                        if (output.script?.asm) {
+                            // Try to extract base64 data from script
+                            const matches = output.script.asm.match(/OP_RETURN ([A-Za-z0-9+/=]+)/);
+                            if (matches) {
+                                const buffer = Buffer.from(matches[1], 'base64');
+                                imageData = extractImageFromBuffer(buffer);
+                                if (imageData) break;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    logger.debug('❌ Failed to process outputs:', e);
+                }
+            }
+
+            // Log final result
+            logger.debug('🎯 Image extraction result:', {
+                foundImage,
+                hasImageData: !!imageData,
+                hasContentType: !!metadata.contentType,
+                metadata
+            });
+
+            if (imageData && metadata.contentType) {
+                return {
+                    imageData,
+                    metadata: {
+                        ...metadata,
+                        encoding: 'base64',
+                        size: imageData.length
+                    }
+                };
+            }
+
+            if (foundImage && !imageData) {
+                logger.warn('Could not find image data in transaction', {
+                    contentType: metadata.contentType
+                });
+            }
+        } catch (error) {
+            logger.error('Error extracting image from transaction:', error);
+        }
+        return null;
+    }
+
     private extractLockProtocolData(data: string[], tx: any): LockProtocolData | null {
         try {
             if (!Array.isArray(data)) {
@@ -124,6 +394,13 @@ export class TransactionParser {
                 imageMetadata: null,
                 optionsHash: null
             };
+
+            // Try to extract image from BSV transaction
+            const imageResult = this.extractImageFromBsvTx(tx);
+            if (imageResult) {
+                metadata.image = imageResult.imageData;
+                metadata.imageMetadata = imageResult.metadata;
+            }
 
             // Initialize image metadata if needed
             let imageData: string | null = null;
@@ -287,10 +564,10 @@ export class TransactionParser {
             }
 
             // Validate required fields
-            if (!metadata.postId || !metadata.content) {
-                logger.debug('Missing required fields', {
-                    hasPostId: !!metadata.postId,
-                    hasContent: !!metadata.content
+            if (!metadata.content && !metadata.image) {
+                logger.debug('Missing required content', {
+                    hasContent: !!metadata.content,
+                    hasImage: !!metadata.image
                 });
                 return null;
             }

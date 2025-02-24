@@ -44,6 +44,18 @@ export class Scanner {
 
         const block = tx?.block?.height || tx?.height || tx?.blockHeight;
 
+        // Log the raw transaction structure
+        logger.debug('📥 Raw transaction data:', {
+            txid,
+            block,
+            hasTransaction: !!tx.transaction,
+            hasOutputs: !!tx.outputs,
+            hasData: !!tx.data,
+            dataLength: tx.data?.length,
+            rawTxKeys: Object.keys(tx),
+            firstDataItems: tx.data?.slice(0, 3)
+        });
+
         if (targetTxids.includes(txid)) {
             logger.info("🎯 TARGET TRANSACTION FOUND", {
                 txid,

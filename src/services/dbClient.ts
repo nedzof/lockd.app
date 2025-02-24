@@ -1,71 +1,46 @@
-import { PrismaClient, Prisma, Post, VoteOption, VoteQuestion, LockLike } from '@prisma/client';
+import { prisma } from '../db/prisma';
+import type { Post, LockLike, VoteOption } from '@prisma/client';
 import { Post as SharedPost, ParsedTransaction, DbError, PostWithVoteOptions, ProcessedTxMetadata } from '../shared/types.js';
 import { logger } from '../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
 
 export class DbClient {
-    private prisma: PrismaClient;
-    private static instanceCount = 0;
+    private static instance: DbClient | null = null;
+    private static prismaInstance = prisma;
     private instanceId: number;
     private readonly MAX_RETRIES = 3;
     private readonly RETRY_DELAY = 1000; // 1 second
 
-    constructor() {
-        DbClient.instanceCount++;
-        this.instanceId = DbClient.instanceCount;
-        logger.info(`Creating new DbClient instance`, { instanceId: this.instanceId });
-
-        this.prisma = new PrismaClient({
-            log: [
-                { level: 'warn', emit: 'event' },
-                { level: 'error', emit: 'event' }
-            ],
-            datasources: {
-                db: {
-                    url: process.env.DATABASE_URL + "?pgbouncer=true&pool_timeout=30&connection_limit=10"
-                }
-            }
+    private constructor() {
+        this.instanceId = Date.now();
+        logger.info(`DbClient initialization`, { 
+            instanceId: this.instanceId,
+            prismaInstanceId: (this.prisma as any)._clientVersion
         });
 
         // Set up Prisma error logging
         (this.prisma as any).$on('error', (e: { message: string; target?: string }) => {
-            logger.error('Prisma client error:', {
+            logger.error('Prisma client error', {
+                instanceId: this.instanceId,
                 error: e.message,
                 target: e.target
             });
         });
-
-        logger.info(`PrismaClient initialized`, { instanceId: this.instanceId });
     }
 
-    private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
-        let lastError: Error | null = null;
-        for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
-            try {
-                return await operation();
-            } catch (error) {
-                lastError = error as Error;
-                if (this.shouldRetry(error)) {
-                    logger.warn('Database operation failed, retrying', {
-                        attempt,
-                        error: error instanceof Error ? error.message : 'Unknown error'
-                    });
-                    await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY * attempt));
-                    continue;
-                }
-                throw error;
-            }
+    public static getInstance(): DbClient {
+        if (!DbClient.instance) {
+            DbClient.instance = new DbClient();
+            logger.info('Created new DbClient singleton instance');
+        } else {
+            logger.info('Reusing existing DbClient instance');
         }
-        throw lastError || new Error('Operation failed after retries');
+        return DbClient.instance;
     }
 
-    private shouldRetry(error: unknown): boolean {
-        const dbError = error as DbError;
-        // Retry on connection errors or deadlocks
-        return dbError.code === '40001' || // serialization failure
-               dbError.code === '40P01' || // deadlock
-               dbError.code === '57P01';   // connection lost
+    get prisma() {
+        return DbClient.prismaInstance;
     }
 
     async connect(): Promise<boolean> {
@@ -112,6 +87,35 @@ export class DbClient {
             });
             return false;
         }
+    }
+
+    private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
+        let lastError: Error | null = null;
+        for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
+            try {
+                return await operation();
+            } catch (error) {
+                lastError = error as Error;
+                if (this.shouldRetry(error)) {
+                    logger.warn('Database operation failed, retrying', {
+                        attempt,
+                        error: error instanceof Error ? error.message : 'Unknown error'
+                    });
+                    await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY * attempt));
+                    continue;
+                }
+                throw error;
+            }
+        }
+        throw lastError || new Error('Operation failed after retries');
+    }
+
+    private shouldRetry(error: unknown): boolean {
+        const dbError = error as DbError;
+        // Retry on connection errors or deadlocks
+        return dbError.code === '40001' || // serialization failure
+               dbError.code === '40P01' || // deadlock
+               dbError.code === '57P01';   // connection lost
     }
 
     private createBlockTimeDate(blockTime?: number | bigint): Date {

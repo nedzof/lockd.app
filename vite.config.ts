@@ -78,12 +78,11 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    host: true,
+    strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3011',
-        changeOrigin: true,
-        secure: false
+        target: 'http://localhost:3001',
+        changeOrigin: true
       }
     }
   }

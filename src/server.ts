@@ -7,39 +7,16 @@ import lockLikesRouter from './api/lockLikes.js';
 import tagsRouter from './api/tags.js';
 import statsRouter from './api/stats.js';
 import votesRouter from './api/votes.js';
-import * as net from 'net';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const DEFAULT_PORT = 3001;
-
-// Function to find an available port
-async function findAvailablePort(startPort) {
-  const isPortAvailable = (port) => {
-    return new Promise((resolve) => {
-      const server = net.createServer()
-        .once('error', () => resolve(false))
-        .once('listening', () => {
-          server.close();
-          resolve(true);
-        })
-        .listen(port);
-    });
-  };
-
-  let port = startPort;
-  while (!(await isPortAvailable(port))) {
-    console.log(`Port ${port} is in use, trying next port...`);
-    port++;
-  }
-  return port;
-}
+const PORT = 3001;
 
 // Configure CORS
 const corsOptions = {
-  origin: ['http://localhost:5173', 'http://localhost:3000'], // Add your frontend URLs
+  origin: ['http://localhost:5173', 'http://localhost:3000'], 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
@@ -47,7 +24,7 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '10mb' })); // Increase limit for larger payloads
+app.use(express.json({ limit: '10mb' })); 
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -95,29 +72,17 @@ app.get('/api/health', (req, res) => {
 });
 
 // Start the server
-async function startServer() {
-  try {
-    const port = await findAvailablePort(DEFAULT_PORT);
-    
-    // Log the port that will be used
-    console.log(`Starting server on port ${port}...`);
-    
-    app.listen(port, () => {
-      console.log(`
-🚀 Server is running!
-📝 API Documentation:
-   - Health check: http://localhost:${port}/api/health
-   - Posts API: http://localhost:${port}/api/posts
-   - Tags API: http://localhost:${port}/api/tags
-   - Stats API: http://localhost:${port}/api/stats
-   - Votes API: http://localhost:${port}/api/votes
-      `);
-    });
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  }
-}
+app.listen(PORT, () => {
+  console.log(`
+  Server is running!
+  API Documentation:
+    - Health check: http://localhost:${PORT}/api/health
+    - Posts API: http://localhost:${PORT}/api/posts
+    - Tags API: http://localhost:${PORT}/api/tags
+    - Stats API: http://localhost:${PORT}/api/stats
+    - Votes API: http://localhost:${PORT}/api/votes
+  `);
+});
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
@@ -129,5 +94,3 @@ process.on('SIGINT', () => {
   console.log('SIGINT received. Shutting down gracefully...');
   process.exit(0);
 });
-
-startServer(); 

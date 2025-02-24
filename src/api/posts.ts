@@ -173,7 +173,6 @@ const listPosts: PostListHandler = async (req, res, next) => {
       select: {
         id: true,
         txid: true,
-        postId: true,
         content: true,
         author_address: true,
         media_type: true,

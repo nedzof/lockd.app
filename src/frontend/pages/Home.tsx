@@ -6,7 +6,7 @@ import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
 import { NotificationSettings } from '../components/NotificationSettings';
 import { CreatePost } from '../components/CreatePost';
-import { TagFilter } from '../components/TagFilter';
+import TagFilter from '../components/TagFilter';
 
 interface HomeProps {
   connected: boolean;
