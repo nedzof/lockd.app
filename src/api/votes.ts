@@ -1,8 +1,8 @@
 import express, { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../db/prisma';
+import { logger } from '../utils/logger';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Get all vote questions with their options
 router.get('/', async (req: Request, res: Response) => {
@@ -20,7 +20,19 @@ router.get('/', async (req: Request, res: Response) => {
     });
 
     res.json(voteQuestions);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error('Error fetching votes', {
+      error: error.message,
+      code: error.code
+    });
+
+    if (error.code === 'P2010' || error.message.includes('prepared statement')) {
+      return res.status(503).json({ 
+        error: 'Database connection error, please try again',
+        retryAfter: 1
+      });
+    }
+
     console.error('Error fetching votes:', error);
     res.status(500).json({ error: 'Failed to fetch votes' });
   }
@@ -44,7 +56,19 @@ router.get('/:id', async (req: Request, res: Response) => {
     }
 
     res.json(voteQuestion);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error('Error fetching vote', {
+      error: error.message,
+      code: error.code
+    });
+
+    if (error.code === 'P2010' || error.message.includes('prepared statement')) {
+      return res.status(503).json({ 
+        error: 'Database connection error, please try again',
+        retryAfter: 1
+      });
+    }
+
     console.error('Error fetching vote:', error);
     res.status(500).json({ error: 'Failed to fetch vote' });
   }

@@ -63,7 +63,7 @@ interface PostGridProps {
 }
 
 // Use environment variable for API URL
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
@@ -214,7 +214,7 @@ const PostGrid: React.FC<PostGridProps> = ({
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-6 p-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
       {submissions.map((post) => (
         <div key={post.id} className="bg-[#1A1B23] rounded-xl shadow-lg overflow-hidden">
           {/* Image */}
@@ -239,24 +239,8 @@ const PostGrid: React.FC<PostGridProps> = ({
                 {formatBSV(post.totalLocked || 0)} BSV
               </span>
             </div>
-            <p className="text-white mb-4">{post.content}</p>
 
-            {/* Vote Options */}
-            {post.is_vote && post.vote_options && post.vote_options.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-[#00ffa3] text-sm font-medium mb-2">Vote Options:</h3>
-                <div className="space-y-2">
-                  {post.vote_options.map((option) => (
-                    <div key={option.id} className="bg-[#2A2B33] p-3 rounded-lg">
-                      <p className="text-white">{option.content}</p>
-                      <div className="flex items-center space-x-2 mt-1">
-                        <span className="text-xs text-[#00ffa3]">{formatBSV(option.lock_amount)} BSV</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <p className="text-white mb-4">{post.content}</p>
 
             {/* Tags */}
             {post.tags?.length > 0 && (

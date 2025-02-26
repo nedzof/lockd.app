@@ -76,6 +76,8 @@ export function extractVoteData(tx: JungleBusResponse): {
 
 export class TransactionParser {
     private jungleBus: JungleBusClient;
+    private imageData: Buffer | null = null;
+    private metadata: any = {};
 
     constructor(private dbClient: DbClient) {
         logger.info('TransactionParser initialized', {
@@ -86,6 +88,52 @@ export class TransactionParser {
 
         // Initialize JungleBus client
         this.jungleBus = new JungleBusClient('https://junglebus.gorillapool.io');
+    }
+
+    // Process image data and save to database
+    private async processImage(imageData: Buffer, metadata: any, txid: string): Promise<void> {
+        try {
+            logger.debug('Starting image processing', {
+                txid,
+                hasImageData: !!imageData,
+                metadataKeys: metadata ? Object.keys(metadata) : [],
+                contentType: metadata?.contentType
+            });
+
+            if (!imageData || !metadata.contentType) {
+                throw new Error('Invalid image data or content type');
+            }
+
+            // Log dbClient details before calling saveImage
+            logger.debug('DbClient before saveImage', {
+                dbClientType: typeof this.dbClient,
+                dbClientMethods: Object.keys(this.dbClient),
+                dbClientInstance: this.dbClient instanceof DbClient
+            });
+
+            // Save image data using DbClient
+            await this.dbClient.saveImage({
+                txid,
+                imageData,
+                contentType: metadata.contentType,
+                filename: metadata.filename || 'image.jpg',
+                width: metadata.width,
+                height: metadata.height,
+                size: imageData.length
+            });
+
+            logger.info('Successfully processed and saved image', {
+                txid,
+                contentType: metadata.contentType,
+                size: imageData.length
+            });
+        } catch (error) {
+            logger.error('Failed to process image', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                txid
+            });
+            throw error;
+        }
     }
 
     private extractImageFromBsvTx(tx: any): { imageData: Buffer; metadata: any } | null {
@@ -409,6 +457,11 @@ export class TransactionParser {
             // Check if this is a vote transaction
             const isVoteQuestion = data.some(item => item.startsWith('type=vote_question'));
             const isVoteOption = data.some(item => item.startsWith('type=vote_option'));
+            
+            // If this is a vote transaction, set the type accordingly
+            if (isVoteQuestion || isVoteOption) {
+                metadata.isVote = true;
+            }
 
             // Process each data item
             data.forEach((item: string) => {
@@ -560,6 +613,10 @@ export class TransactionParser {
                 
                 if (contents.length > 1) {
                     metadata.voteOptions = contents.slice(1);
+                    logger.debug('Found vote options', { 
+                        count: metadata.voteOptions.length,
+                        options: metadata.voteOptions
+                    });
                 }
             }
 
@@ -597,30 +654,37 @@ export class TransactionParser {
                 return;
             }
 
-            await this.dbClient.saveTransaction({
+            if (parsedTx.image) {
+                await this.processImage(parsedTx.image, parsedTx.imageMetadata, txid);
+            }
+
+            // Determine transaction type
+            let txType = 'lock';
+            if (parsedTx.isVote || (parsedTx.voteOptions && parsedTx.voteOptions.length > 0)) {
+                txType = 'vote';
+                logger.debug('Processing vote transaction', {
+                    txid,
+                    voteOptions: parsedTx.voteOptions
+                });
+            }
+
+            await this.dbClient.processTransaction({
                 txid: tx.id,
-                type: 'lock',
+                type: txType,
                 protocol: 'LOCK',
                 blockHeight: tx.block_height,
                 blockTime: tx.block_time,
-                senderAddress: tx.addresses?.[0] || null,
                 metadata: {
-                    postId: parsedTx.postId,
-                    lockAmount: parsedTx.lockAmount,
-                    lockDuration: parsedTx.lockDuration,
-                    content: parsedTx.content,
-                    voteOptions: parsedTx.voteOptions || [],
-                    voteQuestion: parsedTx.voteQuestion || '',
-                    image: parsedTx.image,
-                    imageMetadata: parsedTx.imageMetadata,
-                    senderAddress: tx.addresses?.[0] || null
+                    senderAddress: tx.addresses?.[0] || null,
+                    ...parsedTx
                 }
             });
             logger.info('✅ Transaction saved to database', { 
                 txid,
-                blockHeight: tx.block_height
+                blockHeight: tx.block_height,
+                type: txType,
+                hasVoteOptions: parsedTx.voteOptions && parsedTx.voteOptions.length > 0
             });
-
         } catch (error) {
             logger.error('❌ Failed to parse transaction', {
                 txid,

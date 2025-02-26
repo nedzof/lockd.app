@@ -13,7 +13,7 @@ interface TagFilterProps {
 }
 
 // Use environment variable for API URL
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selectedTags }) => {
   const [tags, setTags] = useState<string[]>([]);

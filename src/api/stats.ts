@@ -1,40 +1,44 @@
 import express from 'express';
-import { PrismaClient, Post } from '@prisma/client';
+import type { Post } from '@prisma/client';
+import prisma from '../db/prisma';
+import { logger } from '../utils/logger';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 router.get('/', async (req, res) => {
   try {
-    // Get all posts ordered by creation date
-    const posts = await prisma.post.findMany({
-      orderBy: {
-        created_at: 'asc'
-      }
+    const [totalPosts, totalLockedPosts, totalBSVLocked] = await Promise.all([
+      prisma.post.count(),
+      prisma.post.count({
+        where: { is_locked: true }
+      }),
+      prisma.post.aggregate({
+        _sum: {
+          lock_amount: true
+        }
+      })
+    ]);
+
+    res.json({
+      totalPosts,
+      totalLockedPosts,
+      totalBSVLocked: totalBSVLocked._sum.lock_amount || 0
+    });
+  } catch (error: any) {
+    logger.error('Error fetching stats', {
+      error: error.message,
+      code: error.code
     });
 
-    // Process posts to create time series data
-    const timeSeriesData = posts.reduce((acc: { timestamps: string[], amounts: number[] }, post: Post) => {
-      const timestamp = post.created_at.toISOString().split('T')[0];
-      const amount = Number(post.amount) || 0;
-      const totalAmount = amount / 100000000; // Convert to BSV
+    if (error.code === 'P2010' || error.message.includes('prepared statement')) {
+      return res.status(503).json({ 
+        error: 'Database connection error, please try again',
+        retryAfter: 1
+      });
+    }
 
-      const existingIndex = acc.timestamps.indexOf(timestamp);
-      if (existingIndex !== -1) {
-        acc.amounts[existingIndex] += totalAmount;
-      } else {
-        acc.timestamps.push(timestamp);
-        acc.amounts.push(totalAmount);
-      }
-
-      return acc;
-    }, { timestamps: [], amounts: [] });
-
-    res.json(timeSeriesData);
-  } catch (error) {
-    console.error('Error fetching stats:', error);
-    res.status(500).json({ error: 'Failed to fetch stats' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-export default router; 
+export default router;

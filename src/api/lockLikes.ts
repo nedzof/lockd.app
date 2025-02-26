@@ -1,26 +1,24 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../db/prisma';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 interface LockLikeRequest {
-  postTxid: string;  // The post's txid
-  handle: string;
+  post_id: string;  // The post's id
+  author_address: string;
   amount: number;
-  nLockTime: number;
-  txid: string;    // The lock transaction id
+  lock_duration: number;
 }
 
 interface LockLikeResponse {
   id: string;
   txid: string;
-  postId: string;
+  author_address: string | null;
   amount: number;
-  handle: string;
-  lockPeriod: number;
+  lock_duration: number;
+  unlock_height: number | null;
   created_at: Date;
-  updated_at: Date;
+  post_id: string;
 }
 
 const handleLockLike = async (
@@ -29,49 +27,44 @@ const handleLockLike = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { postTxid, handle, amount, nLockTime, txid } = req.body;
+    const { post_id, author_address, amount, lock_duration } = req.body;
 
-    if (!postTxid || !amount || !handle || !nLockTime || !txid) {
+    if (!post_id || !amount || !author_address || !lock_duration) {
       res.status(400).json({ message: 'Missing required fields' });
       return;
     }
 
-    // First find the post by its txid
+    // First find the post by its id
     const post = await prisma.post.findUnique({
       where: {
-        txid: postTxid
+        id: post_id
       }
     });
 
     if (!post) {
-      res.status(404).json({ message: 'Post not found' });
+      res.status(404).json({ 
+        success: false,
+        error: `Post with id ${post_id} not found`
+      });
       return;
     }
 
     // Create the lock like record using the post's id
     const lockLike = await prisma.lockLike.create({
       data: {
-        txid,
-        postId: post.id,  // Use the post's id, not txid
+        txid: `${post.id}_${Date.now()}`, // Temporary txid until we get the real one
+        post_id: post.id,
+        author_address,
         amount,
-        handle,
-        lockPeriod: nLockTime,
+        lock_duration,
+        created_at: new Date()
       }
     });
 
-    // Update the post's total locked amount
-    await prisma.post.update({
-      where: {
-        id: post.id
-      },
-      data: {
-        amount: {
-          increment: amount
-        }
-      }
+    res.status(201).json({
+      success: true,
+      data: lockLike
     });
-
-    res.json(lockLike);
   } catch (error) {
     console.error('Error creating lock like:', error);
     res.status(500).json({ 

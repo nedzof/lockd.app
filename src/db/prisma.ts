@@ -5,6 +5,18 @@ declare global {
   var prisma: PrismaClient | undefined;
 }
 
+// Determine if we should use direct connection
+const useDirectUrl = process.env.DIRECT_URL && ['findMany', 'create', 'update', 'delete'].some(op => 
+  process.env.NODE_ENV === 'production' || process.env.USE_DIRECT_URL === 'true'
+);
+
+// Log connection details
+logger.info('Initializing Prisma client', {
+  useDirectUrl,
+  databaseUrl: process.env.DATABASE_URL ? 'Set' : 'Not set',
+  directUrl: process.env.DIRECT_URL ? 'Set' : 'Not set',
+});
+
 // Configure Prisma client with proper connection settings
 const prisma = global.prisma || new PrismaClient({
   log: [
@@ -13,60 +25,57 @@ const prisma = global.prisma || new PrismaClient({
     { level: 'info', emit: 'stdout' },
     { level: 'query', emit: 'stdout' },
   ],
-  datasourceUrl: process.env.DATABASE_URL,
+  datasourceUrl: useDirectUrl ? process.env.DIRECT_URL : process.env.DATABASE_URL,
 });
 
 // Add middleware to handle connection issues
 prisma.$use(async (params, next) => {
   const startTime = Date.now();
+  const transactionId = Math.random().toString(36).substring(7);
+
   try {
+    // Execute the query
     const result = await next(params);
-    const duration = Date.now() - startTime;
     
-    // Log slow queries (over 1 second)
+    // Log slow queries
+    const duration = Date.now() - startTime;
     if (duration > 1000) {
       logger.warn('Slow query detected', {
         model: params.model,
         action: params.action,
-        duration: `${duration}ms`
+        duration: `${duration}ms`,
+        transactionId
       });
     }
+    
     return result;
   } catch (error: any) {
-    // Log query errors with detailed information
     logger.error('Prisma query error', {
       model: params.model,
       action: params.action,
       error: error.message,
-      code: error.code
+      code: error.code,
+      transactionId
     });
     
-    // Handle specific prepared statement errors
-    if (error.code === 'P2010' || error.message.includes('prepared statement')) {
-      logger.info('Attempting to recover from prepared statement error');
-      try {
-        await prisma.$disconnect();
-        await prisma.$connect();
-        return await next(params);
-      } catch (retryError) {
-        logger.error('Failed to recover from prepared statement error', {
-          error: retryError
-        });
-        throw retryError;
-      }
-    }
     throw error;
   }
 });
 
-// Handle development mode and hot reloading
+// Initial connection setup
+prisma.$connect().catch(e => {
+  logger.error('Failed to connect to database', {
+    error: e instanceof Error ? e.message : 'Unknown error'
+  });
+});
+
 if (process.env.NODE_ENV !== 'production') {
   global.prisma = prisma;
 }
 
-// Handle cleanup
 process.on('beforeExit', async () => {
   await prisma.$disconnect();
 });
 
+export { prisma };
 export default prisma;

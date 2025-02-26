@@ -1,4 +1,5 @@
-import { prisma } from '../db/prisma';
+import { prisma } from '../db/prisma.js';
+import { PrismaClient } from '@prisma/client';
 import type { Post, LockLike, VoteOption } from '@prisma/client';
 import { Post as SharedPost, ParsedTransaction, DbError, PostWithVoteOptions, ProcessedTxMetadata } from '../shared/types.js';
 import { logger } from '../utils/logger.js';
@@ -7,24 +8,39 @@ import path from 'path';
 
 export class DbClient {
     private static instance: DbClient | null = null;
-    private static prismaInstance = prisma;
     private instanceId: number;
     private readonly MAX_RETRIES = 3;
     private readonly RETRY_DELAY = 1000; // 1 second
 
     private constructor() {
         this.instanceId = Date.now();
+        
+        // Enhanced initialization logging
         logger.info(`DbClient initialization`, { 
             instanceId: this.instanceId,
-            prismaInstanceId: (this.prisma as any)._clientVersion
+            dbUrl: process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':****@').split('?')[0],
+            usingPgBouncer: process.env.DATABASE_URL?.includes('pgbouncer=true'),
+            connectionPooling: process.env.DATABASE_URL?.includes('connection_limit'),
+            poolTimeout: process.env.DATABASE_URL?.includes('pool_timeout')
         });
 
-        // Set up Prisma error logging
-        (this.prisma as any).$on('error', (e: { message: string; target?: string }) => {
+        // Set up Prisma error logging with enhanced details
+        (prisma as any).$on('error', (e: { message: string; target?: string }) => {
             logger.error('Prisma client error', {
                 instanceId: this.instanceId,
                 error: e.message,
-                target: e.target
+                target: e.target,
+                timestamp: new Date().toISOString()
+            });
+        });
+
+        // Add query logging
+        (prisma as any).$on('query', (e: { query: string; params: string[]; duration: number }) => {
+            logger.debug('Prisma query executed', {
+                instanceId: this.instanceId,
+                duration: e.duration,
+                paramCount: e.params.length,
+                queryPreview: e.query.substring(0, 100)
             });
         });
     }
@@ -39,21 +55,191 @@ export class DbClient {
         return DbClient.instance;
     }
 
-    get prisma() {
-        return DbClient.prismaInstance;
+    private async withFreshClient<T>(operation: (client: PrismaClient) => Promise<T>): Promise<T> {
+        // Create a new client for this operation
+        logger.debug('Creating fresh PrismaClient instance', {
+            instanceId: this.instanceId,
+            dbUrl: process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':****@').split('?')[0],
+            isPrismaClientDefined: typeof PrismaClient !== 'undefined',
+            directUrl: process.env.DIRECT_URL?.replace(/:[^:@]*@/, ':****@').split('?')[0],
+        });
+
+        try {
+            // Use DIRECT_URL for operations that need prepared statements
+            // This bypasses PgBouncer and connects directly to the database
+            const client = new PrismaClient({
+                datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL,
+                log: [
+                    { level: 'error', emit: 'stdout' },
+                    { level: 'warn', emit: 'stdout' },
+                ],
+            });
+            
+            logger.debug('PrismaClient instance created', {
+                clientType: typeof client,
+                clientMethods: Object.keys(client),
+                hasConnectMethod: typeof client.$connect === 'function',
+                usingDirectUrl: !!process.env.DIRECT_URL
+            });
+
+            try {
+                await client.$connect();
+                
+                const result = await operation(client);
+                return result;
+            } catch (error) {
+                logger.error('Database operation failed', {
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    instanceId: this.instanceId
+                });
+                throw error;
+            } finally {
+                // Simply disconnect without deallocating prepared statements
+                await client.$disconnect();
+            }
+        } catch (error) {
+            logger.error('Failed to create PrismaClient instance', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                instanceId: this.instanceId
+            });
+            throw error;
+        }
+    }
+
+    private async upsertPost(tx: ParsedTransaction, imageBuffer: Buffer | null): Promise<Post> {
+        const postData = {
+            txid: tx.txid,
+            content: tx.metadata.content,
+            author_address: tx.metadata.senderAddress,
+            block_height: tx.blockHeight,
+            created_at: this.createBlockTimeDate(tx.blockTime),
+            raw_image_data: imageBuffer,
+            tags: tx.metadata.tags || [],
+            metadata: tx.metadata || {},
+            is_locked: tx.type === 'lock',
+            lock_duration: tx.metadata.lockDuration || null,
+            is_vote: tx.type === 'vote' || !!tx.metadata.voteOptions
+        };
+
+        return this.withFreshClient(async (client) => {
+            // Try to find existing post
+            const existingPost = await client.post.findUnique({
+                where: { txid: tx.txid }
+            });
+
+            let post;
+            if (existingPost) {
+                // Update existing post
+                post = await client.post.update({
+                    where: { id: existingPost.id },
+                    data: postData
+                });
+            } else {
+                // Create new post
+                post = await client.post.create({
+                    data: postData
+                });
+            }
+
+            // Process vote options if present
+            if (tx.metadata.voteOptions && Array.isArray(tx.metadata.voteOptions) && tx.metadata.voteOptions.length > 0) {
+                await this.processVoteOptions(post.id, tx);
+            }
+
+            return post;
+        });
+    }
+
+    private async processVoteOptions(postId: string, tx: ParsedTransaction): Promise<void> {
+        if (!tx.metadata.voteOptions || !Array.isArray(tx.metadata.voteOptions)) {
+            return;
+        }
+
+        return this.withFreshClient(async (client) => {
+            // Process each vote option
+            for (let i = 0; i < tx.metadata.voteOptions.length; i++) {
+                const optionContent = tx.metadata.voteOptions[i];
+                const lockAmount = tx.metadata.lockAmount || 0;
+                const lockDuration = tx.metadata.lockDuration || 0;
+                
+                // Generate a unique txid for each option by appending the index to the original txid
+                const optionTxid = `${tx.txid}-option-${i}`;
+                
+                // Check if this option already exists
+                const existingOption = await client.voteOption.findUnique({
+                    where: { txid: optionTxid }
+                });
+                
+                if (!existingOption) {
+                    // Create new vote option
+                    await client.voteOption.create({
+                        data: {
+                            txid: optionTxid,
+                            content: optionContent,
+                            author_address: tx.metadata.senderAddress,
+                            created_at: this.createBlockTimeDate(tx.blockTime),
+                            lock_amount: lockAmount,
+                            lock_duration: lockDuration,
+                            tags: tx.metadata.tags || [],
+                            post_id: postId
+                        }
+                    });
+                    
+                    logger.info(`Created vote option for post`, {
+                        postId,
+                        optionIndex: i,
+                        content: optionContent
+                    });
+                }
+            }
+        });
+    }
+
+    public async processTransaction(tx: ParsedTransaction): Promise<Post> {
+        try {
+            // Process image if present
+            let imageBuffer: Buffer | null = null;
+            if (tx.metadata?.image) {
+                try {
+                    imageBuffer = await this.processImage(tx.metadata.image);
+                } catch (error) {
+                    logger.error('Failed to process image', {
+                        error: error instanceof Error ? error.message : 'Unknown error',
+                        txid: tx.txid
+                    });
+                }
+            }
+
+            const post = await this.upsertPost(tx, imageBuffer);
+
+            const action = post.created_at === this.createBlockTimeDate(tx.blockTime) ? 'created' : 'updated';
+            logger.info(`✅ Post ${action} successfully`, {
+                txid: post.txid,
+                hasImage: !!imageBuffer,
+                imageSize: imageBuffer?.length,
+                tags: post.tags
+            });
+
+            return post;
+        } catch (error) {
+            logger.error('Failed to process transaction', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                txid: tx.txid
+            });
+            throw error;
+        }
     }
 
     async connect(): Promise<boolean> {
         logger.info(`Connecting to database`, { instanceId: this.instanceId });
         try {
-            await this.prisma.$connect();
+            await prisma.$connect();
             logger.info(`Successfully connected to database`, { instanceId: this.instanceId });
             return true;
         } catch (error) {
             logger.error(`Failed to connect to database`, {
                 instanceId: this.instanceId,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined
+                error: error instanceof Error ? error.message : 'Unknown error'
             });
             return false;
         }
@@ -62,22 +248,20 @@ export class DbClient {
     async disconnect(): Promise<void> {
         logger.info(`Disconnecting from database`, { instanceId: this.instanceId });
         try {
-            await this.prisma.$disconnect();
+            await prisma.$disconnect();
             logger.info(`Successfully disconnected from database`, { instanceId: this.instanceId });
         } catch (error) {
             logger.error(`Error disconnecting from database`, {
                 instanceId: this.instanceId,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined
+                error: error instanceof Error ? error.message : 'Unknown error'
             });
-            throw error;
         }
     }
 
     async isConnected(): Promise<boolean> {
         logger.debug(`Checking database connection`, { instanceId: this.instanceId });
         try {
-            await this.prisma.$queryRaw`SELECT 1`;
+            await prisma.$queryRaw`SELECT 1`;
             logger.debug(`Database connection is active`, { instanceId: this.instanceId });
             return true;
         } catch (error) {
@@ -150,7 +334,7 @@ export class DbClient {
         }
     }
 
-    async processTransaction(tx: ParsedTransaction | ParsedTransaction[]): Promise<void> {
+    async processTransactions(tx: ParsedTransaction | ParsedTransaction[]): Promise<void> {
         try {
             const transactions = Array.isArray(tx) ? tx : [tx];
             logger.info('Processing transactions', {
@@ -161,219 +345,17 @@ export class DbClient {
 
             // Handle single transaction
             if (!Array.isArray(tx)) {
-                await this.saveTransaction(tx);
+                await this.processTransaction(tx);
                 return;
             }
 
             // Handle transaction array in chunks
             const chunks = this.chunk(tx, 10);
             for (const chunk of chunks) {
-                await Promise.all(chunk.map(t => this.saveTransaction(t)));
+                await Promise.all(chunk.map(t => this.processTransaction(t)));
             }
         } catch (error) {
-            logger.error('Error in processTransaction', {
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined
-            });
-            throw error;
-        }
-    }
-
-    public async saveTransaction(tx: ParsedTransaction): Promise<void> {
-        logger.info('💾 About to save transaction to database', { 
-            txid: tx.txid,
-            hasImage: !!tx.metadata.image,
-            imageType: tx.metadata.imageMetadata?.contentType
-        });
-
-        try {
-            // Ensure we have metadata
-            tx.metadata = tx.metadata || {};
-            
-            // Generate postId if missing
-            if (!tx.metadata.postId && tx.txid) {
-                // Use the frontend's format: timestamp-random
-                const timestamp = Date.now().toString(36);
-                const random = Math.random().toString(36).substr(2, 9);
-                tx.metadata.postId = [timestamp, random].join('-').substr(0, 32);
-                
-                logger.info('Generated postId for transaction', { 
-                    txid: tx.txid, 
-                    generatedPostId: tx.metadata.postId 
-                });
-            }
-
-            // Validate required fields
-            if (!tx.metadata.postId) {
-                throw new Error('Transaction must have either a postId or txid');
-            }
-
-            // Handle image buffer
-            let imageBuffer = null;
-            if (tx.metadata.image) {
-                // Ensure we have a proper Buffer
-                imageBuffer = Buffer.isBuffer(tx.metadata.image) 
-                    ? tx.metadata.image 
-                    : Buffer.from(tx.metadata.image);
-                
-                logger.debug('📸 Processing image buffer', {
-                    bufferLength: imageBuffer.length,
-                    contentType: tx.metadata.imageMetadata?.contentType
-                });
-            }
-
-            const postData = {
-                postId: tx.metadata.postId,
-                type: tx.type,
-                content: tx.metadata.content,
-                blockTime: new Date(Number(tx.blockTime)),
-                sequence: tx.sequence || 0,
-                parentSequence: tx.parentSequence || 0,
-                protocol: tx.protocol,
-                senderAddress: tx.senderAddress || null,
-                txid: tx.txid || null,
-                image: imageBuffer
-            };
-
-            logger.debug('Pre-upsert transaction validation:', {
-                txid: tx.txid,
-                postId: tx.metadata?.postId,
-                type: tx.type,
-                hasMetadata: !!tx.metadata,
-                metadataKeys: tx.metadata ? Object.keys(tx.metadata) : [],
-                imageBufferSize: imageBuffer?.length
-            });
-
-            // Check if post exists first
-            try {
-                const exists = await this.prisma.post.findUnique({
-                    where: { postId: tx.metadata.postId }
-                });
-                logger.debug('Post lookup result:', { 
-                    postId: tx.metadata.postId,
-                    exists: !!exists,
-                    operation: exists ? 'update' : 'create'
-                });
-            } catch (e) {
-                logger.error('Post lookup failed:', {
-                    error: e instanceof Error ? e.message : 'Unknown error',
-                    postId: tx.metadata.postId
-                });
-            }
-
-            // Use upsert instead of create
-            const post = await this.prisma.post.upsert({
-                where: {
-                    postId: tx.metadata.postId // Use postId as the unique identifier
-                },
-                create: postData,
-                update: {
-                    ...postData,
-                    // Only update image if new image data is provided
-                    ...(imageBuffer ? {
-                        image: imageBuffer
-                    } : {})
-                }
-            });
-
-            const action = post.createdAt === post.updatedAt ? 'created' : 'updated';
-            logger.info(`✅ Post ${action} successfully`, {
-                postId: post.postId,
-                txid: post.txid,
-                hasImage: !!imageBuffer,
-                imageSize: imageBuffer?.length,
-                createdAt: post.createdAt,
-                updatedAt: post.updatedAt
-            });
-
-            // Handle lock likes
-            if (tx.type === 'lock') {
-                // First check if a lock like exists for this txid
-                const existingLock = await this.prisma.lockLike.findFirst({
-                    where: {
-                        txid: tx.txid
-                    }
-                });
-
-                if (!existingLock) {
-                    // Create new lock like if it doesn't exist
-                    await this.prisma.lockLike.create({
-                        data: {
-                            postId: post.id,
-                            txid: tx.txid,
-                            lockAmount: tx.metadata.lockAmount || 0,
-                            lockDuration: tx.metadata.lockDuration || 0
-                        }
-                    });
-
-                    logger.debug('✅ Lock like created', {
-                        postId: post.postId,
-                        txid: tx.txid,
-                        lockAmount: tx.metadata.lockAmount
-                    });
-                } else {
-                    // Update existing lock like
-                    await this.prisma.lockLike.update({
-                        where: {
-                            id: existingLock.id
-                        },
-                        data: {
-                            lockAmount: tx.metadata.lockAmount || 0,
-                            lockDuration: tx.metadata.lockDuration || 0
-                        }
-                    });
-
-                    logger.debug('✅ Lock like updated', {
-                        postId: post.postId,
-                        txid: tx.txid,
-                        lockAmount: tx.metadata.lockAmount
-                    });
-                }
-            }
-
-            // Handle vote options if present
-            if (tx.metadata.voteOptions && tx.metadata.voteOptions.length > 0) {
-                // First create the vote question
-                const voteQuestion = await this.prisma.voteQuestion.create({
-                    data: {
-                        postId: post.postId,
-                        question: tx.metadata.voteQuestion || 'Default Question',
-                        totalOptions: tx.metadata.voteOptions.length,
-                        optionsHash: tx.metadata.optionsHash || '',
-                        voteOptions: {
-                            create: tx.metadata.voteOptions.map((option, index) => ({
-                                postId: post.postId,
-                                content: option,
-                                index: index
-                            }))
-                        }
-                    }
-                });
-
-                logger.debug('✅ Vote options created', {
-                    postId: post.postId,
-                    questionId: voteQuestion.id,
-                    optionsCount: tx.metadata.voteOptions.length
-                });
-            }
-
-            // Finally create the processed transaction record
-            await this.prisma.$executeRaw`
-                INSERT INTO "ProcessedTransaction" (
-                    "txid", "blockHeight", "blockTime", "protocol", "type", "metadata"
-                ) VALUES (
-                    ${tx.txid},
-                    ${tx.blockHeight || 0},
-                    ${BigInt(Math.floor(Number(tx.blockTime)))},
-                    ${tx.protocol},
-                    ${tx.type},
-                    ${JSON.stringify(tx.metadata)}::jsonb
-                )
-            `;
-
-            logger.info('✅ Transaction saved successfully', { txid: tx.txid });
-        } catch (error) {
-            logger.error('Error in saveTransaction', {
+            logger.error('Error in processTransactions', {
                 error: error instanceof Error ? error.message : 'Unknown error',
                 stack: error instanceof Error ? error.stack : undefined
             });
@@ -382,7 +364,7 @@ export class DbClient {
     }
 
     async getTransaction(txid: string): Promise<ParsedTransaction | null> {
-        const [transaction] = await this.prisma.$queryRaw<Array<{
+        const [transaction] = await prisma.$queryRaw<Array<{
             txid: string;
             type: string;
             protocol: string;
@@ -411,7 +393,7 @@ export class DbClient {
     }
 
     public async getPostWithVoteOptions(postId: string): Promise<PostWithVoteOptions | null> {
-        return await this.prisma.post.findUnique({
+        return await prisma.post.findUnique({
             where: { postId },
             include: {
                 voteOptions: true,
@@ -426,11 +408,11 @@ export class DbClient {
             throw new Error('Cleanup can only be run in test environment');
         }
         await this.withRetry(async () => {
-            await this.prisma.voteOption.deleteMany();
-            await this.prisma.voteQuestion.deleteMany();
-            await this.prisma.lockLike.deleteMany();
-            await this.prisma.post.deleteMany();
-            await this.prisma.processedTransaction.deleteMany();
+            await prisma.voteOption.deleteMany();
+            await prisma.voteQuestion.deleteMany();
+            await prisma.lockLike.deleteMany();
+            await prisma.post.deleteMany();
+            await prisma.processedTransaction.deleteMany();
             logger.info('Test data cleaned up');
         });
     }
@@ -527,5 +509,69 @@ export class DbClient {
         logger.info('Saved verification results to', { path: outputPath });
 
         return results;
+    }
+
+    // Save image data to database
+    public async saveImage(params: {
+        txid: string;
+        imageData: Buffer;
+        contentType: string;
+        filename?: string;
+        width?: number;
+        height?: number;
+        size?: number;
+    }): Promise<void> {
+        logger.debug('saveImage called with params', {
+            txid: params.txid,
+            contentType: params.contentType,
+            imageSize: params.imageData?.length,
+            hasFilename: !!params.filename
+        });
+
+        return this.withFreshClient(async (client) => {
+            logger.debug('Inside withFreshClient callback', {
+                clientType: typeof client,
+                clientKeys: Object.keys(client),
+                hasPrismaClient: !!client
+            });
+
+            try {
+                await client.post.update({
+                    where: { txid: params.txid },
+                    data: {
+                        raw_image_data: params.imageData,
+                        media_type: params.contentType,
+                        metadata: {
+                            upsert: {
+                                create: {
+                                    filename: params.filename,
+                                    width: params.width,
+                                    height: params.height,
+                                    size: params.size
+                                },
+                                update: {
+                                    filename: params.filename,
+                                    width: params.width,
+                                    height: params.height,
+                                    size: params.size
+                                }
+                            }
+                        }
+                    }
+                });
+
+                logger.info('Successfully saved image data', {
+                    txid: params.txid,
+                    contentType: params.contentType,
+                    size: params.size
+                });
+            } catch (error) {
+                logger.error('Failed to save image data', {
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    txid: params.txid
+                });
+                throw error;
+            }
+        });
     }
 }
