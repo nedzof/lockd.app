@@ -434,6 +434,54 @@ export class DbClient {
         );
     }
 
+    /**
+     * Get the current blockchain height from the database
+     * @returns The current block height or null if not available
+     */
+    public async getCurrentBlockHeight(): Promise<number | null> {
+        try {
+            logger.debug('Getting current block height');
+            
+            // Try to get the latest block height from the blockchain_state table
+            const blockchainState = await prisma.blockchain_state.findFirst({
+                orderBy: {
+                    updated_at: 'desc'
+                }
+            });
+            
+            if (blockchainState?.current_height) {
+                logger.debug(`Found current block height: ${blockchainState.current_height}`);
+                return blockchainState.current_height;
+            }
+            
+            // If no blockchain_state record, try to get the height from the latest transaction
+            const latestTx = await prisma.transaction.findFirst({
+                orderBy: {
+                    block_height: 'desc'
+                },
+                where: {
+                    block_height: {
+                        not: null
+                    }
+                }
+            });
+            
+            if (latestTx?.block_height) {
+                logger.debug(`Using latest transaction block height: ${latestTx.block_height}`);
+                return latestTx.block_height;
+            }
+            
+            // If we still don't have a height, return null
+            logger.warn('Could not determine current block height');
+            return null;
+        } catch (error) {
+            logger.error('Error getting current block height', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            return null;
+        }
+    }
+
     // Verify database contents and generate verification files
     async verifyDatabaseContents(txid: string, testOutputDir: string) {
         // Get the processed transaction

@@ -81,7 +81,20 @@ const PostGrid: React.FC<PostGridProps> = ({
       if (timeFilter) queryParams.append('timeFilter', timeFilter);
       if (rankingFilter) {
         // Map rankingFilter values to valid backend values
-        const validRankingFilter = rankingFilter === 'top1' ? 'top' : rankingFilter;
+        let validRankingFilter;
+        switch (rankingFilter) {
+          case 'top1':
+            validRankingFilter = 'top-1';
+            break;
+          case 'top3':
+            validRankingFilter = 'top-3';
+            break;
+          case 'top10':
+            validRankingFilter = 'top-10';
+            break;
+          default:
+            validRankingFilter = rankingFilter;
+        }
         queryParams.append('rankingFilter', validRankingFilter);
       }
       if (personalFilter) queryParams.append('personalFilter', personalFilter);

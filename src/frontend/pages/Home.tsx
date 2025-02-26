@@ -18,21 +18,51 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const isPosts = location.pathname === '/posts' || location.pathname === '/';
   const isStats = location.pathname === '/stats';
   const [timeFilter, setTimeFilter] = useState('');
-  const [rankingFilter, setRankingFilter] = useState('top1');
+  const [rankingFilter, setRankingFilter] = useState('top-1');
   const [personalFilter, setPersonalFilter] = useState('');
   const [blockFilter, setBlockFilter] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   const handleTimeFilter = (filter: string) => {
-    setTimeFilter(timeFilter === filter ? '' : filter);
-  };
-
-  const handleRankingFilter = (filter: string) => {
-    setRankingFilter(rankingFilter === filter ? '' : filter);
+    // If the same filter is clicked again, clear it
+    if (timeFilter === filter) {
+      setTimeFilter('');
+    } else {
+      // Otherwise, set the new filter and clear other filter types
+      setTimeFilter(filter);
+      setBlockFilter(''); // Clear block filter when time filter is set
+    }
   };
 
   const handleBlockFilter = (filter: string) => {
-    setBlockFilter(blockFilter === filter ? '' : filter);
+    // If the same filter is clicked again, clear it
+    if (blockFilter === filter) {
+      setBlockFilter('');
+    } else {
+      // Otherwise, set the new filter and clear other filter types
+      setBlockFilter(filter);
+      setTimeFilter(''); // Clear time filter when block filter is set
+    }
+  };
+
+  const handleRankingFilter = (filter: string) => {
+    // If the same filter is clicked again, clear it
+    if (rankingFilter === filter) {
+      setRankingFilter('');
+    } else {
+      // Otherwise, set the new filter
+      setRankingFilter(filter);
+    }
+  };
+
+  const handlePersonalFilter = (filter: string) => {
+    // If the same filter is clicked again, clear it
+    if (personalFilter === filter) {
+      setPersonalFilter('');
+    } else {
+      // Otherwise, set the new filter
+      setPersonalFilter(filter);
+    }
   };
 
   const handleStatsUpdate = (stats: { totalLocked: number; participantCount: number; roundNumber: number }) => {
@@ -78,9 +108,9 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
               {/* Block Filters */}
               <div className="flex items-center space-x-1">
                 {[
-                  { id: 'last_block', label: 'Last Block' },
-                  { id: 'last_5_blocks', label: 'Last 5 Blocks' },
-                  { id: 'last_10_blocks', label: 'Last 10 Blocks' }
+                  { id: 'last-block', label: 'Last Block' },
+                  { id: 'last-5-blocks', label: 'Last 5 Blocks' },
+                  { id: 'last-10-blocks', label: 'Last 10 Blocks' }
                 ].map(({ id, label }) => (
                   <button
                     key={id}
@@ -102,9 +132,9 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
               {/* Ranking Filters */}
               <div className="flex items-center space-x-1">
                 {[
-                  { id: 'top1', label: 'Top 1' },
-                  { id: 'top3', label: 'Top 3' },
-                  { id: 'top10', label: 'Top 10' }
+                  { id: 'top-1', label: 'Top 1' },
+                  { id: 'top-3', label: 'Top 3' },
+                  { id: 'top-10', label: 'Top 10' }
                 ].map(({ id, label }) => (
                   <button
                     key={id}
@@ -131,7 +161,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 ].map(({ id, label }) => (
                   <button
                     key={id}
-                    onClick={() => setPersonalFilter(personalFilter === id ? '' : id)}
+                    onClick={() => handlePersonalFilter(id)}
                     className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
                       personalFilter === id
                         ? 'bg-white/10 text-white'

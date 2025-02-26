@@ -62,7 +62,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     try {
       // Apply ranking filter
-      if (rankingFilter === 'top1') {
+      if (rankingFilter) {
+        console.log('Applying ranking filter:', rankingFilter);
+        
+        // Determine the number of top posts to fetch
+        let topCount = 1; // Default to 1
+        
+        if (rankingFilter === 'top-1' || rankingFilter === 'top1') {
+          topCount = 1;
+        } else if (rankingFilter === 'top-3' || rankingFilter === 'top3') {
+          topCount = 3;
+        } else if (rankingFilter === 'top-10' || rankingFilter === 'top10') {
+          topCount = 10;
+        }
+        
+        console.log('Using top count:', topCount);
+        
         // First get posts with their lock_like counts
         const postsWithCounts = await dbClient.prisma.post.findMany({
           select: {
@@ -78,11 +93,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               _count: 'desc'
             }
           },
-          take: 100
+          take: Math.max(topCount * 10, 100) // Get enough posts to filter from
         });
 
         // Create an array of post IDs in the correct order
-        const orderedIds = postsWithCounts.map(p => p.id);
+        const orderedIds = postsWithCounts.map(p => p.id).slice(0, topCount);
+        
+        console.log(`Selected top ${topCount} posts with IDs:`, orderedIds);
         
         // Add the IDs to the where clause
         where.id = { in: orderedIds };
@@ -93,7 +110,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       // Apply personal filters
-      if (userId) {
+      if (personalFilter) {
+        console.log('Applying personal filter:', personalFilter);
+        
+        if (personalFilter === 'mylocks' && userId) {
+          // Show only posts created by the current user
+          where.author_address = userId;
+          console.log(`Filtering posts by author: ${userId}`);
+        } else if (personalFilter === 'locked') {
+          // Show only posts that have lock_likes
+          where.lock_likes = {
+            some: {} // At least one lock_like
+          };
+          console.log('Filtering posts with lock_likes');
+        }
+      } else if (userId) {
+        // If no personal filter but userId is provided, filter by that user
         if (userId === 'anon') {
           where.author_address = {
             isNull: true
@@ -116,6 +148,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (days) {
           const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
           where.created_at = { gte: startDate };
+        }
+      }
+
+      // Apply block filter
+      if (blockFilter) {
+        console.log('Applying block filter:', blockFilter);
+        
+        // Determine the number of blocks to look back
+        let blockCount = 1; // Default to 1
+        
+        if (blockFilter === 'last-block') {
+          blockCount = 1;
+        } else if (blockFilter === 'last-5-blocks') {
+          blockCount = 5;
+        } else if (blockFilter === 'last-10-blocks') {
+          blockCount = 10;
+        }
+        
+        console.log('Looking back', blockCount, 'blocks');
+        
+        // Get the current block height
+        const currentBlockHeight = await dbClient.getCurrentBlockHeight();
+        if (currentBlockHeight) {
+          const minBlockHeight = currentBlockHeight - blockCount;
+          
+          // Find posts created in the last N blocks
+          where.created_block_height = { 
+            gte: minBlockHeight 
+          };
+          
+          console.log(`Filtering posts with block height >= ${minBlockHeight} (current: ${currentBlockHeight})`);
+        } else {
+          console.error('Failed to get current block height');
         }
       }
 
