@@ -8,6 +8,8 @@ import { toast } from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
 import { createPortal } from 'react-dom';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
 interface LockLikeInteractionProps {
   postTxid?: string;
   replyTxid?: string;
@@ -160,7 +162,7 @@ export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike 
       }
 
       // Create the lock like record
-      const apiResponse = await fetch('http://localhost:3001/api/lockLikes', {
+      const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

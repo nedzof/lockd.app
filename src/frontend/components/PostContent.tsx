@@ -2,6 +2,7 @@ import * as React from 'react';
 import { HODLTransaction } from '../types';
 import PostPlaceholder from './placeholders/PostPlaceholder';
 import ImagePlaceholder from './placeholders/ImagePlaceholder';
+import VoteOptionsDisplay from './VoteOptionsDisplay';
 
 interface PostContentProps {
   transaction: HODLTransaction;
@@ -25,10 +26,80 @@ export default function PostContent({ transaction }: PostContentProps) {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [imageLoading, setImageLoading] = React.useState(true);
   const [note, setNote] = React.useState(transaction.content);
+  const [imageUrl, setImageUrl] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setIsLoading(false);
-  }, [transaction.txid]);
+
+    // Process raw image data if available
+    if (transaction.raw_image_data) {
+      try {
+        // Debug: Check the format of raw_image_data
+        console.log('PostContent - Raw image data format check:', {
+          txid: transaction.txid,
+          dataLength: transaction.raw_image_data.length,
+          firstChars: transaction.raw_image_data.substring(0, 30)
+        });
+        
+        // Handle different possible formats of raw_image_data
+        if (transaction.raw_image_data.startsWith('data:')) {
+          // Already a data URL
+          setImageUrl(transaction.raw_image_data);
+        } else if (transaction.raw_image_data.startsWith('/9j/') || 
+                   transaction.raw_image_data.startsWith('iVBOR') || 
+                   /^[A-Za-z0-9+/=]+$/.test(transaction.raw_image_data.substring(0, 20))) {
+          // Looks like base64 without data URL prefix
+          const mediaType = transaction.media_type || 'image/jpeg';
+          setImageUrl(`data:${mediaType};base64,${transaction.raw_image_data}`);
+        } else {
+          // Try UTF-8 encoded string approach
+          try {
+            // Try to parse as JSON in case it's stored as a JSON string
+            const parsedData = JSON.parse(transaction.raw_image_data);
+            if (typeof parsedData === 'string') {
+              if (parsedData.startsWith('data:')) {
+                setImageUrl(parsedData);
+              } else {
+                setImageUrl(`data:${transaction.media_type || 'image/jpeg'};base64,${parsedData}`);
+              }
+            }
+          } catch (parseError) {
+            // Not JSON, try original approach with Buffer
+            try {
+              // Try standard base64 decoding
+              const blob = new Blob([Buffer.from(transaction.raw_image_data, 'base64')], { 
+                type: transaction.media_type || 'image/jpeg' 
+              });
+              setImageUrl(URL.createObjectURL(blob));
+            } catch (bufferError) {
+              console.error('Buffer approach failed:', bufferError);
+              
+              // Last resort: try treating it as binary data directly
+              try {
+                const byteArray = new Uint8Array(transaction.raw_image_data.length);
+                for (let i = 0; i < transaction.raw_image_data.length; i++) {
+                  byteArray[i] = transaction.raw_image_data.charCodeAt(i);
+                }
+                const blob = new Blob([byteArray], { type: transaction.media_type || 'image/jpeg' });
+                setImageUrl(URL.createObjectURL(blob));
+              } catch (binaryError) {
+                console.error('Binary approach failed:', binaryError);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to process raw image data for transaction:', transaction.txid, e);
+      }
+    }
+
+    // Cleanup function to revoke object URL when component unmounts
+    return () => {
+      if (imageUrl) {
+        URL.revokeObjectURL(imageUrl);
+      }
+    };
+  }, [transaction.txid, transaction.raw_image_data]);
 
   const toggleExpansion = () => setIsExpanded(!isExpanded);
 
@@ -36,17 +107,17 @@ export default function PostContent({ transaction }: PostContentProps) {
     return <PostPlaceholder />;
   }
 
-  const isImagePost = !!transaction.media_url;
-  const content = isImagePost ? transaction.description || note : note;
+  const hasImage = !!transaction.media_url || !!imageUrl;
+  const content = hasImage ? transaction.description || note : note;
 
   return (
     <div className="space-y-4">
       {/* Image (if present) */}
-      {isImagePost && (
+      {hasImage && (
         <div className="relative">
           {imageLoading && <ImagePlaceholder />}
           <img
-            src={transaction.media_url}
+            src={transaction.media_url || imageUrl || ''}
             alt={transaction.description || 'Post image'}
             className={`w-full h-auto rounded-lg object-cover ${imageLoading ? 'hidden' : ''}`}
             onLoad={() => setImageLoading(false)}
@@ -104,6 +175,11 @@ export default function PostContent({ transaction }: PostContentProps) {
           <div className="mt-4">Spotify Embed</div>
         )}
       </div>
+
+      {/* Vote Options (if present) */}
+      {transaction.is_vote && (
+        <VoteOptionsDisplay transaction={transaction} />
+      )}
     </div>
   );
 } 

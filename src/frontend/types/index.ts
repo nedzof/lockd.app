@@ -78,11 +78,13 @@ export interface HODLTransaction {
   content: string;
   media_url?: string;
   media_type?: string;
+  raw_image_data?: string;
   description?: string;
   amount: number;
   created_at: Date;
   locklikes: LockLike[];
   replies: HODLTransaction[];
+  is_vote?: boolean;
 }
 
 export interface BitcoinerSettings {

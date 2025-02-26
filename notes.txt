@@ -65,6 +65,20 @@ Fixed the API server's database connection issues with PgBouncer:
 
 4. For production, consider adding the environment variable to your deployment configuration.
 
+## Port Configuration (2025-02-26)
+
+Updated the port configuration to use consistent ports:
+
+1. Frontend (Vite): Port 3000
+2. Backend (Express): Port 3001
+
+All API URLs in the frontend components have been updated to use the environment variable:
+```typescript
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+```
+
+This ensures that the frontend and backend can communicate properly without CORS issues.
+
 ## Vote Options Implementation (2025-02-26)
 
 Enhanced the scanner to properly identify and save vote options to the VoteOption table:

@@ -206,73 +206,68 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
 
 const createPost: CreatePostHandler = async (req, res, next): Promise<void> => {
   try {
-    console.log('Received post creation request with body:', {
-      ...req.body,
-      raw_image_data: req.body.raw_image_data ? `[base64 data length: ${req.body.raw_image_data.length}]` : null
-    });
-
-    const requiredFields = ['txid', 'content', 'author_address'] as const;
-    for (const field of requiredFields) {
-      if (!req.body[field]) {
-        throw new Error(`Missing required field: ${field}`);
-      }
+    const { content, author_address, tags, is_vote, vote_options } = req.body;
+    
+    if (!content || !author_address) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const { 
-      txid,
-      content,
-      author_address,
-      media_type,
-      raw_image_data,
-      tags = []
-    } = req.body;
+    // Generate a unique txid for the post
+    const txid = `${author_address}_${Date.now()}`;
 
-    const createdPost = await prisma.post.create({
+    // Create the post
+    const post = await prisma.post.create({
       data: {
         txid,
         content,
         author_address,
-        media_type: media_type || null,
-        raw_image_data: raw_image_data || null,
-        tags,
-        created_at: new Date()
+        created_at: new Date(),
+        tags: tags || [],
+        is_vote: is_vote || false
       }
     });
 
-    // Create vote options if this is a vote post
-    if (req.body.is_vote && req.body.vote_options && req.body.vote_options.length > 0) {
-      const voteOptionPromises = req.body.vote_options.map((option: any, index: number) => {
+    // If this is a vote post, create the vote options
+    if (is_vote && vote_options && Array.isArray(vote_options) && vote_options.length >= 2) {
+      // Create vote options
+      const voteOptionPromises = vote_options.map(option => {
+        if (!option || typeof option !== 'string' || !option.trim()) {
+          return null; // Skip empty options
+        }
+        
         return prisma.voteOption.create({
           data: {
-            id: `${createdPost.id}-option-${index}`,
-            txid: `${txid}-option-${index}`,
-            post_id: createdPost.id,
-            content: option.text,
-            author_address: createdPost.author_address,
-            lock_amount: option.lockAmount || 0,
-            lock_duration: option.lockDuration || 0,
-            tags: option.tags || []
+            txid: `${post.id}_option_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            content: option.trim(),
+            author_address,
+            created_at: new Date(),
+            post_id: post.id
           }
         });
       });
 
-      await Promise.all(voteOptionPromises);
+      await Promise.all(voteOptionPromises.filter(Boolean));
     }
 
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
-      data: {
-        ...createdPost,
-        vote_options: req.body.vote_options
-      }
+      data: post
     });
-  } catch (error) {
-    console.error('Error processing post creation request:', error);
-    res.status(500).json({
-      message: 'Error processing post creation request',
-      error: error instanceof Error ? error.message : 'Unknown error'
+  } catch (error: any) {
+    logger.error('Error creating post', {
+      error: error.message,
+      code: error.code
     });
-    return;
+
+    if (error.code === 'P2010' || error.message.includes('prepared statement')) {
+      return res.status(503).json({ 
+        error: 'Database connection error, please try again',
+        retryAfter: 1
+      });
+    }
+
+    console.error('Error creating post:', error);
+    res.status(500).json({ error: 'Failed to create post' });
   }
 };
 

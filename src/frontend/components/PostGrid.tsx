@@ -6,6 +6,7 @@ import { getProgressColor } from '../utils/getProgressColor';
 import type { Post, LockLike } from '../types';
 import { toast } from 'react-hot-toast';
 import LockLikeInteraction from './LockLikeInteraction';
+import VoteOptionLockInteraction from './VoteOptionLockInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
 
 interface VoteOption {
@@ -50,6 +51,7 @@ interface ExtendedPost {
   lock_likes: LockLike[];
   imageUrl?: string;
   totalLocked?: number;
+  media_url?: string;
 }
 
 interface PostGridProps {
@@ -63,7 +65,7 @@ interface PostGridProps {
 }
 
 // Use environment variable for API URL
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
@@ -108,14 +110,70 @@ const PostGrid: React.FC<PostGridProps> = ({
       // Process posts and their images
       const processedPosts = await Promise.all(data.posts.map(async (post: ExtendedPost) => {
         let imageUrl = null;
-        if (post.raw_image_data) {
+        
+        // First check for media_url
+        if (post.media_url) {
+          imageUrl = post.media_url;
+        } 
+        // Then check for raw_image_data
+        else if (post.raw_image_data) {
           try {
-            const blob = new Blob([Buffer.from(post.raw_image_data, 'base64')], { 
-              type: post.media_type || 'image/jpeg' 
+            // Debug: Check the format of raw_image_data
+            console.log('Raw image data format check:', {
+              postId: post.id,
+              dataLength: post.raw_image_data.length,
+              firstChars: post.raw_image_data.substring(0, 30)
             });
-            imageUrl = URL.createObjectURL(blob);
+            
+            // Handle different possible formats of raw_image_data
+            if (post.raw_image_data.startsWith('data:')) {
+              // Already a data URL
+              imageUrl = post.raw_image_data;
+            } else if (post.raw_image_data.startsWith('/9j/') || 
+                       post.raw_image_data.startsWith('iVBOR') || 
+                       /^[A-Za-z0-9+/=]+$/.test(post.raw_image_data.substring(0, 20))) {
+              // Looks like base64 without data URL prefix
+              const mediaType = post.media_type || 'image/jpeg';
+              imageUrl = `data:${mediaType};base64,${post.raw_image_data}`;
+            } else {
+              // Try UTF-8 encoded string approach
+              try {
+                // Try to parse as JSON in case it's stored as a JSON string
+                const parsedData = JSON.parse(post.raw_image_data);
+                if (typeof parsedData === 'string') {
+                  if (parsedData.startsWith('data:')) {
+                    imageUrl = parsedData;
+                  } else {
+                    imageUrl = `data:${post.media_type || 'image/jpeg'};base64,${parsedData}`;
+                  }
+                }
+              } catch (parseError) {
+                // Not JSON, try original approach with Buffer
+                try {
+                  // Try standard base64 decoding
+                  const blob = new Blob([Buffer.from(post.raw_image_data, 'base64')], { 
+                    type: post.media_type || 'image/jpeg' 
+                  });
+                  imageUrl = URL.createObjectURL(blob);
+                } catch (bufferError) {
+                  console.error('Buffer approach failed:', bufferError);
+                  
+                  // Last resort: try treating it as binary data directly
+                  try {
+                    const byteArray = new Uint8Array(post.raw_image_data.length);
+                    for (let i = 0; i < post.raw_image_data.length; i++) {
+                      byteArray[i] = post.raw_image_data.charCodeAt(i);
+                    }
+                    const blob = new Blob([byteArray], { type: post.media_type || 'image/jpeg' });
+                    imageUrl = URL.createObjectURL(blob);
+                  } catch (binaryError) {
+                    console.error('Binary approach failed:', binaryError);
+                  }
+                }
+              }
+            }
           } catch (e) {
-            console.warn('Failed to process image for post:', post.id, e);
+            console.error('Failed to process raw image data for post:', post.id, e);
           }
         }
 
@@ -166,16 +224,16 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
 
     try {
-      const response = await fetch(`${API_URL}/api/lockLikes`, {
+      const response = await fetch(`${API_URL}/api/lock-likes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          postId: post.id,
+          post_id: post.id,
+          author_address: wallet.bsvAddress,
           amount,
-          duration,
-          authorAddress: wallet.bsvAddress
+          lock_duration: duration
         }),
       });
 
@@ -188,6 +246,43 @@ const PostGrid: React.FC<PostGridProps> = ({
     } catch (error) {
       console.error('Error creating lock like:', error);
       toast.error('Failed to create lock like');
+    }
+  };
+
+  const handleVoteOptionLock = async (optionId: string, amount: number, duration: number) => {
+    if (!wallet.connected) {
+      toast.error('Please connect your wallet first');
+      return;
+    }
+
+    if (amount <= 0) {
+      toast.error('Please enter a valid amount to lock');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/lock-likes/voteOption`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          vote_option_id: optionId,
+          author_address: wallet.bsvAddress,
+          amount,
+          lock_duration: duration
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to lock BSV on vote option');
+      }
+
+      toast.success(`Successfully locked ${amount} BSV on vote option`);
+      fetchPosts(); // Refresh posts to show updated lock amounts
+    } catch (error) {
+      console.error('Error locking BSV on vote option:', error);
+      toast.error('Failed to lock BSV on vote option');
     }
   };
 
@@ -249,8 +344,15 @@ const PostGrid: React.FC<PostGridProps> = ({
                   {post.vote_options.map((option) => (
                     <div key={option.id} className="bg-[#2A2B33] p-3 rounded-lg">
                       <p className="text-white">{option.content}</p>
-                      <div className="flex items-center space-x-2 mt-1">
-                        <span className="text-xs text-[#00ffa3]">{formatBSV(option.lock_amount)} BSV</span>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs text-[#00ffa3]">{formatBSV(option.lock_amount || 0)} BSV</span>
+                        <VoteOptionLockInteraction 
+                          optionId={option.id}
+                          optionContent={option.content}
+                          onLock={handleVoteOptionLock}
+                          connected={wallet.connected}
+                          balance={wallet.balance}
+                        />
                       </div>
                     </div>
                   ))}

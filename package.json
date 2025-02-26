@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "scanner": "tsx src/services/scanner.ts",
-    "dev": "USE_DIRECT_URL=true concurrently \"vite --port 3002 --strictPort\" \"PORT=3003 tsx watch src/server.ts\""
+    "dev": "USE_DIRECT_URL=true concurrently \"vite --port 3000 --strictPort\" \"PORT=3001 tsx watch src/server.ts\""
   },
   "dependencies": {
     "@gorillapool/js-junglebus": "^0.4.4",

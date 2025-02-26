@@ -1,448 +1,253 @@
 import * as React from 'react';
-import { useState } from 'react';
-import { FiSend, FiX, FiImage, FiTrash2, FiTwitter, FiMessageCircle, FiLoader, FiBarChart2, FiTag, FiLock } from 'react-icons/fi';
-import { createPost } from '../services/post.service';
-import { getLinkPreview, LinkPreviewData } from '../services/link-preview.service';
+import { useState, useRef, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import { useWallet } from '../providers/WalletProvider';
-import ImageUploading, { ImageListType } from 'react-images-uploading';
+import { useTags } from '../hooks/useTags';
+import { FiX, FiPlus, FiCheck } from 'react-icons/fi';
 
-// Available tags based on schema comment
-const AVAILABLE_TAGS = [
-  'Politics',
-  'Crypto',
-  'Sports',
-  'Pop Culture',
-  'Business',
-  'Tech',
-  'Current Events',
-  'Finance',
-  'Health',
-  'Memes'
-];
-
-interface PollOption {
-  text: string;
-  lockAmount?: number;
-  lockDuration?: number;
-}
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface CreatePostProps {
-  isOpen: boolean;
-  onClose: () => void;
   onPostCreated?: () => void;
 }
 
-export const CreatePost: React.FC<CreatePostProps> = ({ isOpen, onClose, onPostCreated }) => {
-  const { bsvAddress, wallet } = useWallet();
+const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [images, setImages] = useState<ImageListType>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [showTagSelector, setShowTagSelector] = useState(false);
-  const [isLocked, setIsLocked] = useState(false);
-  const [showLockOptions, setShowLockOptions] = useState(false);
-  const [lockDuration, setLockDuration] = useState<number>(1);
-  const [lockAmount, setLockAmount] = useState<number>(1000);
-  const [linkPreview, setLinkPreview] = useState<LinkPreviewData | null>(null);
-  const [hasVoteOptions, setHasVoteOptions] = useState(false);
-  const [pollOptions, setPollOptions] = useState<PollOption[]>([]);
-  const [showVoteOptions, setShowVoteOptions] = useState(false);
-  const [activeOption, setActiveOption] = useState<'vote' | 'tags' | 'lock' | null>(null);
+  const [newTag, setNewTag] = useState('');
+  const [isVotePost, setIsVotePost] = useState(false);
+  const [voteOptions, setVoteOptions] = useState<string[]>(['', '']);
+  const { wallet, connect, isConnected } = useWallet();
+  const { tags, isLoading, error, fetchTags } = useTags();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const onImagesChange = (imageList: ImageListType) => {
-    setImages(imageList);
-  };
+  useEffect(() => {
+    fetchTags();
+  }, [fetchTags]);
 
-  const handleTagToggle = (tag: string) => {
-    setSelectedTags(prev => 
-      prev.includes(tag) 
-        ? prev.filter(t => t !== tag)
-        : [...prev, tag]
-    );
-  };
-
-  const handleSubmit = async () => {
-    if (!wallet || !bsvAddress) {
-      toast.error('Please connect your wallet');
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!content.trim()) {
+      toast.error('Please enter some content');
+      return;
+    }
+    
+    if (!isConnected || !wallet) {
+      toast.error('Please connect your wallet first');
+      connect();
       return;
     }
 
-    if (!content.trim() && !images.length) {
-      toast.error('Please provide either text content or an image');
-      return;
-    }
-
-    if (hasVoteOptions) {
-      if (pollOptions.length < 2) {
-        toast.error('Please add at least 2 poll options');
-        return;
-      }
-      if (pollOptions.some(opt => !opt.text.trim())) {
-        toast.error('Please fill in all poll options');
+    // For vote posts, validate that we have at least 2 options
+    if (isVotePost) {
+      const validOptions = voteOptions.filter(option => option.trim().length > 0);
+      if (validOptions.length < 2) {
+        toast.error('Please provide at least 2 vote options');
         return;
       }
     }
-
+    
     setIsSubmitting(true);
+    
     try {
-      const standardLockOptions = isLocked ? {
-        isLocked: true,
-        duration: lockDuration,
-        amount: lockAmount
-      } : { isLocked: false };
-
-      const voteOptions = hasVoteOptions ? {
-        isPoll: true,
-        options: pollOptions.map(opt => ({
-          text: opt.text,
-          lockDuration: 1,  // Default values, will be configured later
-          lockAmount: 1000
-        }))
-      } : undefined;
-
-      await createPost(
+      const postData = {
         content,
-        bsvAddress,
-        wallet,
-        images[0]?.file,
-        undefined,
-        selectedTags,
-        undefined,
-        {
-          ...standardLockOptions,
-          ...voteOptions
-        }
-      );
-
-      // Reset form
+        author_address: wallet.address,
+        tags: selectedTags,
+        is_vote: isVotePost,
+        vote_options: isVotePost ? voteOptions.filter(opt => opt.trim().length > 0) : undefined
+      };
+      
+      const response = await fetch(`${API_URL}/api/posts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(postData),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to create post');
+      }
+      
+      toast.success('Post created successfully!');
       setContent('');
-      setImages([]);
       setSelectedTags([]);
-      setIsLocked(false);
-      setLockDuration(1);
-      setLockAmount(1000);
-      setPollOptions([]);
-      setHasVoteOptions(false);
-      onPostCreated?.();
-      onClose();
+      setIsVotePost(false);
+      setVoteOptions(['', '']);
+      
+      if (onPostCreated) {
+        onPostCreated();
+      }
     } catch (error) {
-      console.error('Failed to create post:', error);
-      toast.error('Failed to create post. Please try again.');
+      console.error('Error creating post:', error);
+      toast.error('Failed to create post');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handlePollOptionChange = (index: number, field: keyof PollOption, value: string | number) => {
-    setPollOptions(prev => {
-      const newOptions = [...prev];
-      if (field === 'text') {
-        newOptions[index] = { ...newOptions[index], text: value as string };
-      } else if (field === 'lockAmount') {
-        newOptions[index] = { ...newOptions[index], lockAmount: Math.max(1000, Number(value)) };
-      } else if (field === 'lockDuration') {
-        newOptions[index] = { ...newOptions[index], lockDuration: Math.min(52560, Math.max(1, Number(value))) };
-      }
-      return newOptions;
-    });
-  };
-
-  const addPollOption = () => {
-    setPollOptions(prev => [...prev, { text: '' }]);
-  };
-
-  const removePollOption = (index: number) => {
-    setPollOptions(prev => prev.filter((_, i) => i !== index));
-  };
-
-  // Extract URLs from text
-  const extractUrls = (text: string): string[] => {
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    return text.match(urlRegex) || [];
-  };
-
-  // Handle content change with link detection
-  const handleContentChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newContent = e.target.value;
-    setContent(newContent);
-    
-    // Extract URLs and fetch preview for the first one
-    const urls = extractUrls(newContent);
-    if (urls.length > 0 && (!linkPreview || linkPreview.url !== urls[0])) {
-      const preview = await getLinkPreview(urls[0]);
-      if (preview) {
-        setLinkPreview(preview);
-      }
-    } else if (urls.length === 0 && linkPreview) {
-      setLinkPreview(null);
-    }
-  };
-
-  const handleOptionClick = (option: 'vote' | 'tags' | 'lock') => {
-    if (activeOption === option) {
-      setActiveOption(null);
-      setShowVoteOptions(false);
-      setShowTagSelector(false);
-      setShowLockOptions(false);
-      if (option === 'vote') setHasVoteOptions(false);
-      if (option === 'lock') setIsLocked(false);
+  const handleTagClick = (tag: string) => {
+    if (selectedTags.includes(tag)) {
+      setSelectedTags(selectedTags.filter(t => t !== tag));
     } else {
-      setActiveOption(option);
-      setShowVoteOptions(option === 'vote');
-      setShowTagSelector(option === 'tags');
-      setShowLockOptions(option === 'lock');
-      if (option === 'vote') {
-        setHasVoteOptions(true);
-        if (pollOptions.length === 0) {
-          setPollOptions([
-            { text: '' },
-            { text: '' }
-          ]);
-        }
-      }
-      if (option === 'lock') setIsLocked(true);
+      setSelectedTags([...selectedTags, tag]);
     }
   };
 
-  if (!isOpen) return null;
+  const handleAddNewTag = () => {
+    if (newTag.trim() && !selectedTags.includes(newTag.trim())) {
+      setSelectedTags([...selectedTags, newTag.trim()]);
+      setNewTag('');
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleAddNewTag();
+    }
+  };
+
+  const handleAddVoteOption = () => {
+    setVoteOptions([...voteOptions, '']);
+  };
+
+  const handleRemoveVoteOption = (index: number) => {
+    if (voteOptions.length <= 2) {
+      toast.error('A vote post needs at least 2 options');
+      return;
+    }
+    const newOptions = [...voteOptions];
+    newOptions.splice(index, 1);
+    setVoteOptions(newOptions);
+  };
+
+  const handleVoteOptionChange = (index: number, value: string) => {
+    const newOptions = [...voteOptions];
+    newOptions[index] = value;
+    setVoteOptions(newOptions);
+  };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-gradient-to-br from-[#2A2A40] to-[#1A1B23] rounded-xl shadow-xl w-full max-w-2xl mx-4 transform transition-all overflow-y-auto max-h-[90vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-800/30">
-          <h2 className="text-xl font-semibold text-white">Create Post</h2>
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-6">
+      <form onSubmit={handleSubmit}>
+        <textarea
+          ref={textareaRef}
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          className="w-full p-3 border dark:border-gray-700 rounded-lg dark:bg-gray-700 dark:text-white resize-none"
+          placeholder="What's on your mind?"
+          rows={3}
+        />
+        
+        <div className="flex items-center mt-2 mb-3">
+          <label className="flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isVotePost}
+              onChange={() => setIsVotePost(!isVotePost)}
+              className="form-checkbox h-4 w-4 text-blue-600"
+            />
+            <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">Create a vote post</span>
+          </label>
+        </div>
+        
+        {isVotePost && (
+          <div className="mb-4 space-y-2">
+            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Vote Options:</div>
+            {voteOptions.map((option, index) => (
+              <div key={index} className="flex items-center">
+                <input
+                  type="text"
+                  value={option}
+                  onChange={(e) => handleVoteOptionChange(index, e.target.value)}
+                  className="flex-grow p-2 border dark:border-gray-700 rounded-lg dark:bg-gray-700 dark:text-white text-sm"
+                  placeholder={`Option ${index + 1}`}
+                />
+                {voteOptions.length > 2 && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveVoteOption(index)}
+                    className="ml-2 p-1 text-red-500 hover:text-red-700"
+                  >
+                    <FiX size={18} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={handleAddVoteOption}
+              className="flex items-center text-sm text-blue-500 hover:text-blue-700"
+            >
+              <FiPlus size={16} className="mr-1" /> Add Option
+            </button>
+          </div>
+        )}
+        
+        <div className="mt-3">
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tags:</div>
+          {isLoading ? (
+            <div>Loading tags...</div>
+          ) : error ? (
+            <div className="text-red-500">Error loading tags: {error.message}</div>
+          ) : (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {tags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => handleTagClick(tag)}
+                  className={`px-2 py-1 text-xs rounded-full ${
+                    selectedTags.includes(tag)
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
+          
+          <div className="flex mt-2">
+            <input
+              type="text"
+              value={newTag}
+              onChange={(e) => setNewTag(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="flex-grow p-2 text-sm border dark:border-gray-700 rounded-l-lg dark:bg-gray-700 dark:text-white"
+              placeholder="Add a new tag"
+            />
+            <button
+              type="button"
+              onClick={handleAddNewTag}
+              className="px-3 py-2 bg-blue-500 text-white rounded-r-lg hover:bg-blue-600"
+            >
+              <FiCheck size={16} />
+            </button>
+          </div>
+        </div>
+        
+        <div className="mt-4 flex justify-end">
           <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/5 rounded-lg"
+            type="submit"
+            disabled={isSubmitting || !content.trim()}
+            className={`px-4 py-2 rounded-lg ${
+              isSubmitting || !content.trim()
+                ? 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
+                : 'bg-blue-500 hover:bg-blue-600 text-white'
+            }`}
           >
-            <FiX className="w-5 h-5" />
+            {isSubmitting ? 'Posting...' : 'Post'}
           </button>
         </div>
-
-        {/* Content */}
-        <div className="p-6 space-y-6">
-          {/* Main Content */}
-          <div className="space-y-4">
-            <div className="relative">
-              <textarea
-                value={content}
-                onChange={handleContentChange}
-                placeholder="What's on your mind?"
-                className="w-full px-4 py-3 text-white bg-[#1A1B23] border border-gray-800 rounded-lg focus:outline-none focus:border-[#00ffa3] resize-none min-h-[120px]"
-                disabled={isSubmitting}
-              />
-              
-              {/* Image Upload Button */}
-              <ImageUploading
-                multiple={false}
-                value={images}
-                onChange={onImagesChange}
-                maxNumber={1}
-                dataURLKey="data_url"
-              >
-                {({
-                  imageList,
-                  onImageUpload,
-                  onImageRemove,
-                  isDragging,
-                  dragProps
-                }) => (
-                  <div>
-                    {imageList.length === 0 ? (
-                      <button
-                        onClick={onImageUpload}
-                        {...dragProps}
-                        className="absolute bottom-3 right-3 p-2 text-gray-400 hover:text-[#00ffa3] transition-colors rounded-lg hover:bg-[#00ffa3]/5"
-                        title="Add image"
-                      >
-                        <FiImage className="w-5 h-5" />
-                      </button>
-                    ) : (
-                      <div className="mt-2">
-                        <div className="relative rounded-lg overflow-hidden group">
-                          <img
-                            src={imageList[0].data_url}
-                            alt="Upload preview"
-                            className="w-full h-auto max-h-[200px] object-cover rounded-lg"
-                          />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <button
-                              onClick={() => onImageRemove(0)}
-                              className="p-2 text-white/80 hover:text-white transition-colors"
-                              title="Remove image"
-                            >
-                              <FiTrash2 className="w-5 h-5" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </ImageUploading>
-            </div>
-
-            {/* Optional Features */}
-            <div className="flex items-center gap-4 py-2">
-              {/* Vote Options Toggle */}
-              <button
-                onClick={() => handleOptionClick('vote')}
-                className={`flex items-center gap-2 text-sm transition-colors ${
-                  activeOption === 'vote'
-                    ? 'text-[#00ffa3]'
-                    : 'text-gray-400 hover:text-[#00ffa3]'
-                }`}
-              >
-                <FiBarChart2 className="w-4 h-4" />
-                <span>Add Vote Options</span>
-              </button>
-
-              {/* Tags Toggle */}
-              <button
-                onClick={() => handleOptionClick('tags')}
-                className={`flex items-center gap-2 text-sm transition-colors ${
-                  activeOption === 'tags'
-                    ? 'text-[#00ffa3]'
-                    : 'text-gray-400 hover:text-[#00ffa3]'
-                }`}
-              >
-                <FiTag className="w-4 h-4" />
-                <span>Add Tags</span>
-              </button>
-
-              {/* Lock Toggle */}
-              <button
-                onClick={() => handleOptionClick('lock')}
-                className={`flex items-center gap-2 text-sm transition-colors ${
-                  activeOption === 'lock'
-                    ? 'text-[#00ffa3]'
-                    : 'text-gray-400 hover:text-[#00ffa3]'
-                }`}
-              >
-                <FiLock className="w-4 h-4" />
-                <span>{activeOption === 'lock' ? 'Locking' : 'Add Lock'}</span>
-              </button>
-            </div>
-
-            {/* Vote Options Section */}
-            {activeOption === 'vote' && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-gray-400 text-sm">Vote Options</h3>
-                  <button
-                    onClick={addPollOption}
-                    className="text-[#00ffa3] text-xs hover:text-[#00ffa3]/80 transition-colors"
-                  >
-                    Add Option
-                  </button>
-                </div>
-
-                <div className="space-y-2">
-                  {pollOptions.map((option, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={option.text}
-                        onChange={(e) => handlePollOptionChange(index, 'text', e.target.value)}
-                        placeholder={`Option ${index + 1}`}
-                        className="flex-1 px-3 py-2 text-sm bg-[#1A1B23] border border-gray-800/50 rounded-lg text-white/90 focus:outline-none focus:border-[#00ffa3]/50"
-                      />
-                      <button
-                        onClick={() => removePollOption(index)}
-                        className="p-2 text-gray-500 hover:text-red-400 transition-colors"
-                        title="Remove option"
-                      >
-                        <FiTrash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Tag Selector */}
-            {activeOption === 'tags' && (
-              <div className="flex flex-wrap gap-2 py-2">
-                {AVAILABLE_TAGS.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => handleTagToggle(tag)}
-                    className={`px-3 py-1 text-sm rounded-lg transition-colors ${
-                      selectedTags.includes(tag)
-                        ? 'bg-[#1A1B23] text-[#00ffa3] border border-[#00ffa3]/20'
-                        : 'bg-[#1A1B23] text-gray-400 border border-gray-800/50 hover:text-white hover:border-gray-700'
-                    }`}
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Lock Options */}
-            {activeOption === 'lock' && (
-              <div className="grid grid-cols-2 gap-4 py-2">
-                <div>
-                  <label className="text-gray-400 text-sm block mb-2">Duration (blocks)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="52560"
-                    value={lockDuration}
-                    onChange={(e) => setLockDuration(Math.min(52560, Math.max(1, parseInt(e.target.value) || 0)))}
-                    className="w-full px-3 py-2 text-sm bg-[#1A1B23] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:border-[#00ffa3]/50"
-                  />
-                  <span className="text-xs text-gray-500 mt-1 block">≈ {(lockDuration / 144).toFixed(1)} days</span>
-                </div>
-
-                <div>
-                  <label className="text-gray-400 text-sm block mb-2">Amount (sats)</label>
-                  <input
-                    type="number"
-                    min="1000"
-                    step="1000"
-                    value={lockAmount}
-                    onChange={(e) => setLockAmount(Math.max(1000, parseInt(e.target.value) || 0))}
-                    className="w-full px-3 py-2 text-sm bg-[#1A1B23] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:border-[#00ffa3]/50"
-                  />
-                  <span className="text-xs text-gray-500 mt-1 block">Min: 1000 sats</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between p-6 border-t border-gray-800/30">
-          <div className="text-sm text-gray-400">
-            {content.length} characters
-          </div>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
-              disabled={isSubmitting}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={isSubmitting || (!content.trim() && !images.length)}
-              className="group relative px-6 py-2 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl transition-all duration-300"></div>
-              <div className="absolute inset-0 bg-gradient-to-r from-[#00ff9d] to-[#00ffa3] rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
-              <div className="relative flex items-center space-x-2 text-black">
-                <span>{isSubmitting ? 'Creating...' : 'Create Post'}</span>
-                <FiSend className={`w-4 h-4 transition-all duration-300 ${isSubmitting ? 'animate-pulse' : 'group-hover:rotate-45'}`} />
-              </div>
-              <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-xl"></div>
-            </button>
-          </div>
-        </div>
-      </div>
+      </form>
     </div>
   );
-}; 
+};
+
+export default CreatePost;

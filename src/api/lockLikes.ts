@@ -10,6 +10,13 @@ interface LockLikeRequest {
   lock_duration: number;
 }
 
+interface VoteOptionLockRequest {
+  vote_option_id: string;  // The vote option's id
+  author_address: string;
+  amount: number;
+  lock_duration: number;
+}
+
 interface LockLikeResponse {
   id: string;
   txid: string;
@@ -74,6 +81,77 @@ const handleLockLike = async (
   }
 };
 
+// Handle locking a vote option
+const handleVoteOptionLock = async (
+  req: Request<{}, any, VoteOptionLockRequest>,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { vote_option_id, author_address, amount, lock_duration } = req.body;
+
+    if (!vote_option_id || !amount || !author_address || !lock_duration) {
+      res.status(400).json({ message: 'Missing required fields' });
+      return;
+    }
+
+    // First find the vote option by its id
+    const voteOption = await prisma.voteOption.findUnique({
+      where: {
+        id: vote_option_id
+      },
+      include: {
+        post: true
+      }
+    });
+
+    if (!voteOption) {
+      res.status(404).json({ 
+        success: false,
+        error: `Vote option with id ${vote_option_id} not found`
+      });
+      return;
+    }
+
+    // Create the lock like record for the vote option
+    const lockLike = await prisma.lockLike.create({
+      data: {
+        txid: `${voteOption.id}_${Date.now()}`, // Temporary txid until we get the real one
+        post_id: voteOption.post_id, // Link to the parent post
+        vote_option_id: voteOption.id, // Link to the specific vote option
+        author_address,
+        amount,
+        lock_duration,
+        created_at: new Date()
+      }
+    });
+
+    // Update the vote option's total locked amount
+    await prisma.voteOption.update({
+      where: {
+        id: vote_option_id
+      },
+      data: {
+        lock_amount: {
+          increment: amount
+        }
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      data: lockLike
+    });
+  } catch (error) {
+    console.error('Error creating vote option lock:', error);
+    res.status(500).json({ 
+      message: 'Error creating vote option lock', 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    });
+  }
+};
+
 router.post('/', handleLockLike);
+router.post('/voteOption', handleVoteOptionLock);
 
 export default router; 

@@ -11,30 +11,23 @@ datasource db {
 }
 
 model Post {
-  id             String        @id @default(dbgenerated("gen_random_uuid()"))
-  txid           String        @unique
+  id             String   @id @default(dbgenerated("gen_random_uuid()"))
+  txid           String   @unique
   content        String
   author_address String?
   media_type     String?
-  block_height   Int?
-  raw_image_data Bytes?
-  unlock_height  Int?
-  description    String?
-  created_at     DateTime      @default(now())
-  tags           String[]      @default([])
-  metadata       Json?
-  is_locked      Boolean       @default(false)
-  lock_duration  Int?
-  is_vote        Boolean       @default(false)
-  vote_options   VoteOption[]
+  media_url      String?
+  raw_image_data String?
+  created_at     DateTime @default(now())
+  tags           String[] @default([])
+  is_vote        Boolean  @default(false)
   lock_likes     LockLike[]
+  vote_options   VoteOption[]
 
   @@index([txid])
   @@index([author_address])
-  @@index([block_height])
   @@index([created_at])
-  @@index([created_at, id])
-  @@index([is_locked, created_at])
+  @@index([tags])
 }
 
 model VoteOption {
@@ -49,25 +42,30 @@ model VoteOption {
   tags          String[] @default([])
   post_id       String
   post          Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  lock_likes    LockLike[]
 
   @@index([txid])
   @@index([post_id])
+  @@index([created_at])
 }
 
 model LockLike {
   id             String   @id @default(dbgenerated("gen_random_uuid()"))
   txid           String   @unique
-  author_address String?
-  amount         Int      @default(0)
-  lock_duration  Int      @default(0)
-  unlock_height  Int?
-  created_at     DateTime @default(now())
   post_id        String
   post           Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  vote_option_id String?
+  vote_option    VoteOption? @relation(fields: [vote_option_id], references: [id], onDelete: Cascade)
+  author_address String?
+  amount         Int
+  lock_duration  Int
+  unlock_height  Int?
+  created_at     DateTime @default(now())
 
-  @@index([txid])
   @@index([post_id])
   @@index([author_address])
+  @@index([created_at])
+  @@index([vote_option_id])
 }
 
 model ProcessedTransaction {
