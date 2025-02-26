@@ -4,9 +4,9 @@ import { useLocation } from 'react-router-dom';
 import { FiTrendingUp, FiClock, FiHeart, FiStar, FiPlus } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
-import { NotificationSettings } from '../components/NotificationSettings';
 import CreatePost from '../components/CreatePost';
 import TagFilter from '../components/TagFilter';
+import ThresholdSettings from '../components/ThresholdSettings';
 
 interface HomeProps {
   connected: boolean;
@@ -17,7 +17,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const location = useLocation();
   const isPosts = location.pathname === '/posts' || location.pathname === '/';
   const isStats = location.pathname === '/stats';
-  const isSettings = location.pathname === '/settings';
   const [timeFilter, setTimeFilter] = useState('');
   const [rankingFilter, setRankingFilter] = useState('top1');
   const [personalFilter, setPersonalFilter] = useState('');
@@ -49,10 +48,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const renderContent = () => {
     if (isStats) {
       return <BSVStats />;
-    }
-    
-    if (isSettings) {
-      return <NotificationSettings />;
     }
 
     return (
@@ -148,6 +143,14 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                   </button>
                 ))}
               </div>
+              
+              {/* Divider */}
+              <div className="h-4 w-px bg-gray-800/30 mx-4" />
+              
+              {/* Threshold Settings */}
+              {connected && (
+                <ThresholdSettings connected={connected} />
+              )}
             </div>
           </div>
 

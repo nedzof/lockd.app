@@ -8,7 +8,7 @@ import { toast } from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
 import { createPortal } from 'react-dom';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 interface LockLikeInteractionProps {
   postTxid?: string;

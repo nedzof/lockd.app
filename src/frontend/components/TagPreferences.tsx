@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FiX, FiPlus, FiRefreshCw } from 'react-icons/fi';
 import { useTags } from '../hooks/useTags';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 interface TagPreferencesProps {
   selectedTags: string[];

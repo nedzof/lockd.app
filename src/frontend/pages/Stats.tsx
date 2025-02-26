@@ -21,7 +21,7 @@ interface StatsData {
   priceData: Array<{ name: string; price: number }>;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 const Stats: React.FC = () => {
   const [stats, setStats] = useState<StatsData | null>(null);

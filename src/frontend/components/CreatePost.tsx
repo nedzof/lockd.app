@@ -5,7 +5,7 @@ import { useWallet } from '../providers/WalletProvider';
 import { useTags } from '../hooks/useTags';
 import { FiX, FiPlus, FiCheck, FiRefreshCw } from 'react-icons/fi';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 interface CreatePostProps {
   onPostCreated?: () => void;

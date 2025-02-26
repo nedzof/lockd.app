@@ -10,7 +10,7 @@ import { getFeeRate } from '../../shared/utils/whatsOnChain';
 import { FiExternalLink } from 'react-icons/fi';
 
 // Add API base URL configuration at the top of the file
-const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:3002';
+const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:3003';
 
 // Base interfaces
 export interface VoteOption {

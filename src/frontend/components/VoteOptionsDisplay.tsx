@@ -19,7 +19,7 @@ interface VoteOptionsDisplayProps {
   transaction: HODLTransaction;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) => {
   const [voteOptions, setVoteOptions] = useState<VoteOption[]>([]);
@@ -140,7 +140,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
             : 0;
           
           return (
-            <div key={option.id} className="border border-gray-800/30 p-3 rounded-md">
+            <div key={option.id} className="border-b border-gray-700/20 p-3 mb-2">
               <div className="flex justify-between items-center mb-2">
                 <div className="font-medium text-white">{option.content}</div>
                 <div className="text-sm text-gray-400">{percentage}%</div>

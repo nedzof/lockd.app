@@ -65,7 +65,7 @@ interface PostGridProps {
 }
 
 // Use environment variable for API URL
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
@@ -232,12 +232,13 @@ const PostGrid: React.FC<PostGridProps> = ({
 
     try {
       setIsLocking(true);
-      const response = await fetch(`${API_URL}/api/vote-options/${optionId}/lock`, {
+      const response = await fetch(`${API_URL}/api/lock-likes/voteOption`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          vote_option_id: optionId,
           amount,
           duration,
           author_address: wallet.address,
@@ -345,7 +346,18 @@ const PostGrid: React.FC<PostGridProps> = ({
                 <p className="text-white mb-4 font-light">{post.content}</p>
                 
                 {/* Total Locked Display */}
-                <div className="flex justify-end mb-4">
+                <div className="flex justify-between items-center mb-4">
+                  <button
+                    onClick={() => handleLockLike(post, 1, 1)}
+                    disabled={!wallet.connected}
+                    className={`text-xs border rounded-md px-3 py-1 transition-all flex items-center ${
+                      wallet.connected 
+                        ? 'text-[#00ffa3] border-[#00ffa3] hover:bg-[#00ffa320]' 
+                        : 'text-gray-500 border-gray-500 cursor-not-allowed'
+                    }`}
+                  >
+                    <FiLock className="mr-1 w-3 h-3" /> Lock BSV
+                  </button>
                   <span className="text-sm font-medium text-[#00ffa3]">
                     {formatBSV(post.totalLocked || 0)} BSV locked
                   </span>
@@ -361,7 +373,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                       return (
                         <div 
                           key={option.id} 
-                          className="relative bg-[#111218] rounded-lg p-3 transition-all duration-200 hover:bg-[#15161F]"
+                          className="relative border-b border-gray-700/20 p-3 mb-2 transition-all duration-200"
                         >
                           <div className="flex justify-between items-center mb-1">
                             <span className="text-white font-light">{option.content}</span>
@@ -369,7 +381,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                           </div>
                           
                           {/* Progress bar */}
-                          <div className="w-full h-1 bg-[#2A2C3A] rounded-full mt-2 overflow-hidden">
+                          <div className="w-full h-1 bg-gray-800/30 rounded-full mt-2 overflow-hidden">
                             <div 
                               className="h-full bg-[#00ffa3]" 
                               style={{ width: `${percentage}%` }}
@@ -379,7 +391,12 @@ const PostGrid: React.FC<PostGridProps> = ({
                           {/* Lock BSV button */}
                           <button
                             onClick={() => handleVoteOptionLock(option.id, 1, 1)}
-                            className="mt-2 text-xs text-[#00ffa3] border border-[#00ffa3] rounded-md px-3 py-1 transition-all hover:bg-[#00ffa320] flex items-center"
+                            disabled={!wallet.connected}
+                            className={`mt-2 text-xs border rounded-md px-3 py-1 transition-all flex items-center ${
+                              wallet.connected 
+                                ? 'text-[#00ffa3] border-[#00ffa3] hover:bg-[#00ffa320]' 
+                                : 'text-gray-500 border-gray-500 cursor-not-allowed'
+                            }`}
                           >
                             <FiLock className="mr-1 w-3 h-3" /> Lock BSV
                           </button>
