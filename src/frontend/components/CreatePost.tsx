@@ -9,9 +9,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 interface CreatePostProps {
   onPostCreated?: () => void;
+  isOpen: boolean;
+  onClose: () => void;
 }
 
-const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
+const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose }) => {
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -29,10 +31,46 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
     generateTags 
   } = useTags();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchTags();
   }, [fetchTags]);
+
+  useEffect(() => {
+    // Focus the textarea when the modal opens
+    if (isOpen && textareaRef.current) {
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 100);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    // Handle clicking outside to close the modal
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    };
+
+    // Handle escape key to close the modal
+    const handleEscKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleEscKey);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscKey);
+    };
+  }, [isOpen, onClose]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,6 +123,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
       setSelectedTags([]);
       setIsVotePost(false);
       setVoteOptions(['', '']);
+      onClose();
       
       if (onPostCreated) {
         onPostCreated();
@@ -139,164 +178,188 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
     setVoteOptions(newOptions);
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-6">
-      <form onSubmit={handleSubmit}>
-        <textarea
-          ref={textareaRef}
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          className="w-full p-3 border dark:border-gray-700 rounded-lg dark:bg-gray-700 dark:text-white resize-none"
-          placeholder="What's on your mind?"
-          rows={3}
-        />
-        
-        <div className="flex items-center mt-2 mb-3">
-          <label className="flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isVotePost}
-              onChange={() => setIsVotePost(!isVotePost)}
-              className="form-checkbox h-4 w-4 text-blue-600"
-            />
-            <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">Create a vote post</span>
-          </label>
-        </div>
-        
-        {isVotePost && (
-          <div className="mb-4 space-y-2">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Vote Options:</div>
-            {voteOptions.map((option, index) => (
-              <div key={index} className="flex items-center">
-                <input
-                  type="text"
-                  value={option}
-                  onChange={(e) => handleVoteOptionChange(index, e.target.value)}
-                  className="flex-grow p-2 border dark:border-gray-700 rounded-lg dark:bg-gray-700 dark:text-white text-sm"
-                  placeholder={`Option ${index + 1}`}
-                />
-                {voteOptions.length > 2 && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveVoteOption(index)}
-                    className="ml-2 p-1 text-red-500 hover:text-red-700"
-                  >
-                    <FiX size={18} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={handleAddVoteOption}
-              className="flex items-center text-sm text-blue-500 hover:text-blue-700"
-            >
-              <FiPlus size={16} className="mr-1" /> Add Option
-            </button>
-          </div>
-        )}
-        
-        <div className="mt-3">
-          <div className="flex justify-between items-center mb-1">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Tags:</div>
-            <button
-              type="button"
-              onClick={() => generateTags()}
-              disabled={isGeneratingTags}
-              className="flex items-center text-xs text-blue-500 hover:text-blue-700"
-            >
-              <FiRefreshCw size={14} className={`mr-1 ${isGeneratingTags ? 'animate-spin' : ''}`} /> 
-              {isGeneratingTags ? 'Generating...' : 'Generate Current Event Tags'}
-            </button>
-          </div>
-          
-          {isLoading ? (
-            <div>Loading tags...</div>
-          ) : error ? (
-            <div className="text-red-500">Error loading tags: {error.message}</div>
-          ) : (
-            <>
-              {/* Current Event Tags Section */}
-              {currentEventTags.length > 0 && (
-                <div className="mb-3">
-                  <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                    Current Events:
-                  </div>
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {currentEventTags.map((tag) => (
-                      <button
-                        key={tag.id || tag.name}
-                        type="button"
-                        onClick={() => handleTagClick(tag.name)}
-                        className={`px-2 py-1 text-xs rounded-full ${
-                          selectedTags.includes(tag.name)
-                            ? 'bg-green-500 text-white'
-                            : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
-                        }`}
-                      >
-                        {tag.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {/* Regular Tags Section */}
-              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                Popular Tags:
-              </div>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {tags.map((tag) => (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => handleTagClick(tag)}
-                    className={`px-2 py-1 text-xs rounded-full ${
-                      selectedTags.includes(tag)
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
-                    }`}
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          
-          <div className="flex mt-2">
-            <input
-              type="text"
-              value={newTag}
-              onChange={(e) => setNewTag(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="flex-grow p-2 text-sm border dark:border-gray-700 rounded-l-lg dark:bg-gray-700 dark:text-white"
-              placeholder="Add a new tag"
-            />
-            <button
-              type="button"
-              onClick={handleAddNewTag}
-              className="px-3 py-2 bg-blue-500 text-white rounded-r-lg hover:bg-blue-600"
-            >
-              <FiCheck size={16} />
-            </button>
-          </div>
-        </div>
-        
-        <div className="mt-4 flex justify-end">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
+      <div 
+        ref={modalRef}
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto relative"
+      >
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Create a Post</h2>
           <button
-            type="submit"
-            disabled={isSubmitting || !content.trim()}
-            className={`px-4 py-2 rounded-lg ${
-              isSubmitting || !content.trim()
-                ? 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
-                : 'bg-blue-500 hover:bg-blue-600 text-white'
-            }`}
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
-            {isSubmitting ? 'Posting...' : 'Post'}
+            <FiX size={24} />
           </button>
         </div>
-      </form>
+
+        <form onSubmit={handleSubmit}>
+          <textarea
+            ref={textareaRef}
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            className="w-full p-3 border dark:border-gray-700 rounded-lg dark:bg-gray-700 dark:text-white resize-none"
+            placeholder="What's on your mind?"
+            rows={3}
+          />
+          
+          <div className="flex items-center mt-2 mb-3">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isVotePost}
+                onChange={() => setIsVotePost(!isVotePost)}
+                className="form-checkbox h-4 w-4 text-blue-600"
+              />
+              <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">Create a vote post</span>
+            </label>
+          </div>
+          
+          {isVotePost && (
+            <div className="mb-4 space-y-2">
+              <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Vote Options:</div>
+              {voteOptions.map((option, index) => (
+                <div key={index} className="flex items-center">
+                  <input
+                    type="text"
+                    value={option}
+                    onChange={(e) => handleVoteOptionChange(index, e.target.value)}
+                    className="flex-grow p-2 border dark:border-gray-700 rounded-lg dark:bg-gray-700 dark:text-white text-sm"
+                    placeholder={`Option ${index + 1}`}
+                  />
+                  {voteOptions.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveVoteOption(index)}
+                      className="ml-2 p-1 text-red-500 hover:text-red-700"
+                    >
+                      <FiX size={18} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={handleAddVoteOption}
+                className="flex items-center text-sm text-blue-500 hover:text-blue-700"
+              >
+                <FiPlus size={16} className="mr-1" /> Add Option
+              </button>
+            </div>
+          )}
+          
+          <div className="mt-3">
+            <div className="flex justify-between items-center mb-1">
+              <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Tags:</div>
+              <button
+                type="button"
+                onClick={() => generateTags()}
+                disabled={isGeneratingTags}
+                className="flex items-center text-xs text-blue-500 hover:text-blue-700"
+              >
+                <FiRefreshCw size={14} className={`mr-1 ${isGeneratingTags ? 'animate-spin' : ''}`} /> 
+                {isGeneratingTags ? 'Generating...' : 'Generate Current Event Tags'}
+              </button>
+            </div>
+            
+            {isLoading ? (
+              <div>Loading tags...</div>
+            ) : error ? (
+              <div className="text-red-500">Error loading tags: {error.message}</div>
+            ) : (
+              <>
+                {/* Current Event Tags Section */}
+                {currentEventTags.length > 0 && (
+                  <div className="mb-3">
+                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                      Current Events:
+                    </div>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {currentEventTags.map((tag) => (
+                        <button
+                          key={tag.id || tag.name}
+                          type="button"
+                          onClick={() => handleTagClick(tag.name)}
+                          className={`px-2 py-1 text-xs rounded-full ${
+                            selectedTags.includes(tag.name)
+                              ? 'bg-green-500 text-white'
+                              : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                          }`}
+                        >
+                          {tag.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Regular Tags Section */}
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                  Popular Tags:
+                </div>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {tags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => handleTagClick(tag)}
+                      className={`px-2 py-1 text-xs rounded-full ${
+                        selectedTags.includes(tag)
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            
+            <div className="flex mt-2">
+              <input
+                type="text"
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="flex-grow p-2 text-sm border dark:border-gray-700 rounded-l-lg dark:bg-gray-700 dark:text-white"
+                placeholder="Add a new tag"
+              />
+              <button
+                type="button"
+                onClick={handleAddNewTag}
+                className="px-3 py-2 bg-blue-500 text-white rounded-r-lg hover:bg-blue-600"
+              >
+                <FiCheck size={16} />
+              </button>
+            </div>
+          </div>
+          
+          <div className="mt-6 flex justify-end space-x-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting || !content.trim()}
+              className={`px-4 py-2 rounded-lg ${
+                isSubmitting || !content.trim()
+                  ? 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
+                  : 'bg-blue-500 hover:bg-blue-600 text-white'
+              }`}
+            >
+              {isSubmitting ? 'Posting...' : 'Post'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };

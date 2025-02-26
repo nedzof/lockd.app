@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { FiTrendingUp, FiClock, FiHeart, FiStar, FiPlus } from 'react-icons/fi';
+import { FiTrendingUp, FiClock, FiHeart, FiStar } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
-import CreatePost from '../components/CreatePost';
+import CreatePostButton from '../components/CreatePostButton';
 import TagFilter from '../components/TagFilter';
 import ThresholdSettings from '../components/ThresholdSettings';
 
@@ -22,7 +22,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const [personalFilter, setPersonalFilter] = useState('');
   const [blockFilter, setBlockFilter] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [isCreatePostOpen, setIsCreatePostOpen] = useState(false);
 
   const handleTimeFilter = (filter: string) => {
     setTimeFilter(timeFilter === filter ? '' : filter);
@@ -162,13 +161,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           />
         </div>
 
-        {/* Create Post Modal */}
-        <CreatePost
-          isOpen={isCreatePostOpen}
-          onClose={() => setIsCreatePostOpen(false)}
-          onPostCreated={handleRefreshPosts}
-        />
-        
         <PostGrid 
           onStatsUpdate={handleStatsUpdate}
           timeFilter={timeFilter}
@@ -181,18 +173,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
         {/* Create Post Button - Fixed at bottom center */}
         {connected && (
-          <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-10">
-            <button 
-              onClick={() => setIsCreatePostOpen(true)}
+          <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-20">
+            <CreatePostButton 
+              onPostCreated={handleRefreshPosts}
               className="group relative px-6 py-3 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 transform hover:scale-105"
-            >
-              <div className="relative flex items-center space-x-2 text-black">
-                <FiPlus className="w-5 h-5" />
-                <span>Create Post</span>
-              </div>
-              <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 rounded-xl transition-all duration-300"></div>
-              <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-xl"></div>
-            </button>
+            />
           </div>
         )}
       </div>

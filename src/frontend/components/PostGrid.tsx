@@ -232,7 +232,7 @@ const PostGrid: React.FC<PostGridProps> = ({
 
     try {
       setIsLocking(true);
-      const response = await fetch(`${API_URL}/api/lock-likes/voteOption`, {
+      const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

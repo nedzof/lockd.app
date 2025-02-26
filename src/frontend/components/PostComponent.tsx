@@ -2,7 +2,6 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { AiOutlineBlock } from 'react-icons/ai';
 import { HODLTransaction, LockLike } from '../types';
-import LockLikeInteraction from './LockLikeInteraction';
 import LockLikeDrawer from './LockLikeDrawer';
 import PostContent from './PostContent';
 
@@ -37,34 +36,19 @@ const timeSincePost = (transaction: HODLTransaction) => {
 };
 
 export default function PostComponent({ transaction, postLockLike, postTxid }: PostProps) {
-  const avatar = `https://a.relayx.com/u/${transaction.handle_id}@relayx.io`;
-
   return (
     <div className="bg-white dark:bg-black rounded-sm flex flex-col relative">
       <div className="p-4">
         <div className="flex items-center">
-          <Link to={`/${transaction.handle_id}`} className="flex-shrink-0">
-            <img
-              className="h-10 w-10 rounded-full"
-              src={avatar}
-              alt={transaction.handle_id}
-            />
-          </Link>
-          <div className="ml-3 flex-1">
+          <div className="flex-1">
             <div className="flex items-center">
-              <Link
-                to={`/${transaction.handle_id}`}
-                className="text-base font-medium text-gray-900 dark:text-white hover:text-orange-500 dark:hover:text-orange-400"
-              >
-                {transaction.handle_id}
-              </Link>
+              <div className="text-base font-medium text-gray-900 dark:text-white">
+                {transaction.content_type === 'vote' ? 'Test vote post' : transaction.content}
+              </div>
               <span className="mx-2 text-gray-500 dark:text-gray-400">·</span>
-              <Link
-                to={`/${transaction.handle_id}/post/${transaction.txid}`}
-                className="text-sm text-gray-500 dark:text-gray-400 hover:text-orange-500 dark:hover:text-orange-400"
-              >
+              <span className="text-sm text-gray-500 dark:text-gray-400">
                 {timeSincePost(transaction)}
-              </Link>
+              </span>
             </div>
           </div>
           <a
@@ -83,14 +67,10 @@ export default function PostComponent({ transaction, postLockLike, postTxid }: P
 
         <div className="mt-4 flex items-center space-x-4">
           <div className="flex items-center">
-            <LockLikeInteraction
-              postTxid={transaction.txid}
-              postLockLike={postLockLike}
-            />
             <LockLikeDrawer transaction={transaction} />
           </div>
         </div>
       </div>
     </div>
   );
-} 
+}
