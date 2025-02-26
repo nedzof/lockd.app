@@ -68,11 +68,37 @@ export class Scanner {
         try {
             await this.parser.parseTransaction(txid);
         } catch (error) {
-            logger.error('❌ Error processing transaction', {
-                txid,
-                block,
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
+            // Check if this is a prepared statement error
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            if (errorMessage.includes('prepared statement') || errorMessage.includes('P2010')) {
+                logger.warn('⚠️ Prepared statement error, will retry later', {
+                    txid,
+                    block,
+                    error: errorMessage
+                });
+                
+                // For target txids, retry with a delay
+                if (targetTxids.includes(txid)) {
+                    setTimeout(async () => {
+                        try {
+                            logger.info('🔄 Retrying target transaction', { txid });
+                            await this.parser.parseTransaction(txid);
+                            logger.info('✅ Successfully processed target transaction on retry', { txid });
+                        } catch (retryError) {
+                            logger.error('❌ Failed to process target transaction on retry', {
+                                txid,
+                                error: retryError instanceof Error ? retryError.message : 'Unknown error'
+                            });
+                        }
+                    }, 5000); // Retry after 5 seconds
+                }
+            } else {
+                logger.error('❌ Error processing transaction', {
+                    txid,
+                    block,
+                    error: errorMessage
+                });
+            }
         }
     }
 

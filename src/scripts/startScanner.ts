@@ -1,7 +1,7 @@
-import { Scanner } from '../services/scanner';
-import { logger } from '../utils/logger';
-import { DbClient } from '../services/dbClient';
-import { TransactionParser } from '../services/parser';
+import { Scanner } from '../services/scanner.js';
+import { logger } from '../utils/logger.js';
+import { DbClient } from '../services/dbClient.js';
+import { TransactionParser } from '../services/parser.js';
 
 async function main() {
     const dbClient = DbClient.getInstance();

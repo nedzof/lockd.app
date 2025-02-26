@@ -65,8 +65,7 @@ export class DbClient {
         });
 
         try {
-            // Use DIRECT_URL for operations that need prepared statements
-            // This bypasses PgBouncer and connects directly to the database
+            // Always use DIRECT_URL to bypass PgBouncer for operations that need prepared statements
             const client = new PrismaClient({
                 datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL,
                 log: [
@@ -85,7 +84,19 @@ export class DbClient {
             try {
                 await client.$connect();
                 
-                const result = await operation(client);
+                // Set a timeout to prevent hanging operations
+                const timeoutPromise = new Promise<T>((_, reject) => {
+                    setTimeout(() => {
+                        reject(new Error('Database operation timed out after 10 seconds'));
+                    }, 10000);
+                });
+
+                // Race the operation against the timeout
+                const result = await Promise.race([
+                    operation(client),
+                    timeoutPromise
+                ]);
+
                 return result;
             } catch (error) {
                 logger.error('Database operation failed', {
@@ -514,7 +525,7 @@ export class DbClient {
     // Save image data to database
     public async saveImage(params: {
         txid: string;
-        imageData: Buffer;
+        imageData: Buffer | string;
         contentType: string;
         filename?: string;
         width?: number;
@@ -524,7 +535,8 @@ export class DbClient {
         logger.debug('saveImage called with params', {
             txid: params.txid,
             contentType: params.contentType,
-            imageSize: params.imageData?.length,
+            imageDataType: typeof params.imageData,
+            imageSize: typeof params.imageData === 'string' ? params.imageData.length : params.imageData?.length,
             hasFilename: !!params.filename
         });
 
@@ -536,28 +548,36 @@ export class DbClient {
             });
 
             try {
+                // Ensure imageData is a Buffer
+                let imageBuffer: Buffer;
+                if (typeof params.imageData === 'string') {
+                    // Try to convert string to Buffer
+                    try {
+                        // Check if it's a base64 string
+                        if (params.imageData.match(/^[A-Za-z0-9+/=]+$/)) {
+                            imageBuffer = Buffer.from(params.imageData, 'base64');
+                        } else {
+                            // Just convert the string to a buffer
+                            imageBuffer = Buffer.from(params.imageData);
+                        }
+                    } catch (e) {
+                        logger.error('Failed to convert string to Buffer', {
+                            error: e instanceof Error ? e.message : 'Unknown error',
+                            txid: params.txid
+                        });
+                        // Use a minimal buffer if conversion fails
+                        imageBuffer = Buffer.from('placeholder');
+                    }
+                } else {
+                    imageBuffer = params.imageData;
+                }
+
                 // No need to convert Buffer to string since raw_image_data is now Bytes type
                 await client.post.update({
                     where: { txid: params.txid },
                     data: {
-                        raw_image_data: params.imageData,
-                        media_type: params.contentType,
-                        metadata: {
-                            upsert: {
-                                create: {
-                                    filename: params.filename,
-                                    width: params.width,
-                                    height: params.height,
-                                    size: params.size
-                                },
-                                update: {
-                                    filename: params.filename,
-                                    width: params.width,
-                                    height: params.height,
-                                    size: params.size
-                                }
-                            }
-                        }
+                        raw_image_data: imageBuffer,
+                        media_type: params.contentType
                     }
                 });
 

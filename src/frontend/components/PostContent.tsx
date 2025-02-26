@@ -42,12 +42,12 @@ export default function PostContent({ transaction }: PostContentProps) {
           type: typeof transaction.raw_image_data
         });
         
-        // Convert raw_image_data to string if it's not already a string
+        // Ensure raw_image_data is a string
         const rawImageDataStr = typeof transaction.raw_image_data === 'string' 
           ? transaction.raw_image_data 
-          : JSON.stringify(transaction.raw_image_data);
+          : Buffer.from(transaction.raw_image_data).toString('base64');
         
-        // Create a data URL directly
+        // Create a data URL
         const mediaType = transaction.media_type || 'image/jpeg';
         const dataUrl = `data:${mediaType};base64,${rawImageDataStr}`;
         
@@ -62,15 +62,18 @@ export default function PostContent({ transaction }: PostContentProps) {
       } catch (e) {
         console.error('Failed to process raw image data for transaction:', transaction.txid, e);
       }
+    } else if (transaction.media_url) {
+      // If no raw_image_data but we have a media_url, use that
+      setImageUrl(transaction.media_url);
     }
 
     // Cleanup function to revoke object URL when component unmounts
     return () => {
-      if (imageUrl) {
+      if (imageUrl && imageUrl.startsWith('blob:')) {
         URL.revokeObjectURL(imageUrl);
       }
     };
-  }, [transaction.txid, transaction.raw_image_data]);
+  }, [transaction.txid, transaction.raw_image_data, transaction.media_url]);
 
   const toggleExpansion = () => setIsExpanded(!isExpanded);
 

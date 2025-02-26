@@ -234,10 +234,19 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
       res.setHeader('Content-Type', post.media_type);
     }
 
-    // Send the raw image data
-    res.send(Buffer.from(post.raw_image_data, 'base64'));
+    // Log information about the image data
+    logger.debug('Sending image data', {
+      postId: req.params.id,
+      mediaType: post.media_type,
+      dataType: typeof post.raw_image_data,
+      isBuffer: Buffer.isBuffer(post.raw_image_data),
+      dataLength: post.raw_image_data.length
+    });
+
+    // Send the raw image data - it's already a Buffer in the database
+    res.send(post.raw_image_data);
   } catch (error) {
-    console.error('Error fetching media:', error);
+    logger.error('Error fetching media:', error);
     res.status(500).json({ message: 'Error fetching media' });
   }
 };

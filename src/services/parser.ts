@@ -331,6 +331,7 @@ export class TransactionParser {
                         }
                     }
 
+                    // Ensure we're working with a Buffer
                     const buffer = Buffer.from(base64Data, 'base64');
                     imageData = extractImageFromBuffer(buffer);
                     

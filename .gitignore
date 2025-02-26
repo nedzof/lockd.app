@@ -16,8 +16,6 @@ dist-ssr
 # Misc
 .DS_Store
 
-# Environment variables
-.env
 
 
 # Logs
