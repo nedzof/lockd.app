@@ -38,56 +38,27 @@ export default function PostContent({ transaction }: PostContentProps) {
         console.log('PostContent - Raw image data format check:', {
           txid: transaction.txid,
           dataLength: transaction.raw_image_data.length,
-          firstChars: transaction.raw_image_data.substring(0, 30)
+          firstChars: typeof transaction.raw_image_data === 'string' ? transaction.raw_image_data.substring(0, 30) : 'Not a string',
+          type: typeof transaction.raw_image_data
         });
         
-        // Handle different possible formats of raw_image_data
-        if (transaction.raw_image_data.startsWith('data:')) {
-          // Already a data URL
-          setImageUrl(transaction.raw_image_data);
-        } else if (transaction.raw_image_data.startsWith('/9j/') || 
-                   transaction.raw_image_data.startsWith('iVBOR') || 
-                   /^[A-Za-z0-9+/=]+$/.test(transaction.raw_image_data.substring(0, 20))) {
-          // Looks like base64 without data URL prefix
-          const mediaType = transaction.media_type || 'image/jpeg';
-          setImageUrl(`data:${mediaType};base64,${transaction.raw_image_data}`);
-        } else {
-          // Try UTF-8 encoded string approach
-          try {
-            // Try to parse as JSON in case it's stored as a JSON string
-            const parsedData = JSON.parse(transaction.raw_image_data);
-            if (typeof parsedData === 'string') {
-              if (parsedData.startsWith('data:')) {
-                setImageUrl(parsedData);
-              } else {
-                setImageUrl(`data:${transaction.media_type || 'image/jpeg'};base64,${parsedData}`);
-              }
-            }
-          } catch (parseError) {
-            // Not JSON, try original approach with Buffer
-            try {
-              // Try standard base64 decoding
-              const blob = new Blob([Buffer.from(transaction.raw_image_data, 'base64')], { 
-                type: transaction.media_type || 'image/jpeg' 
-              });
-              setImageUrl(URL.createObjectURL(blob));
-            } catch (bufferError) {
-              console.error('Buffer approach failed:', bufferError);
-              
-              // Last resort: try treating it as binary data directly
-              try {
-                const byteArray = new Uint8Array(transaction.raw_image_data.length);
-                for (let i = 0; i < transaction.raw_image_data.length; i++) {
-                  byteArray[i] = transaction.raw_image_data.charCodeAt(i);
-                }
-                const blob = new Blob([byteArray], { type: transaction.media_type || 'image/jpeg' });
-                setImageUrl(URL.createObjectURL(blob));
-              } catch (binaryError) {
-                console.error('Binary approach failed:', binaryError);
-              }
-            }
-          }
-        }
+        // Convert raw_image_data to string if it's not already a string
+        const rawImageDataStr = typeof transaction.raw_image_data === 'string' 
+          ? transaction.raw_image_data 
+          : JSON.stringify(transaction.raw_image_data);
+        
+        // Create a data URL directly
+        const mediaType = transaction.media_type || 'image/jpeg';
+        const dataUrl = `data:${mediaType};base64,${rawImageDataStr}`;
+        
+        // Log the created URL
+        console.log('Created image URL:', {
+          txid: transaction.txid,
+          urlLength: dataUrl.length,
+          urlStart: dataUrl.substring(0, 50)
+        });
+        
+        setImageUrl(dataUrl);
       } catch (e) {
         console.error('Failed to process raw image data for transaction:', transaction.txid, e);
       }

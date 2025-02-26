@@ -127,11 +127,32 @@ const listPosts: PostListHandler = async (req, res, next) => {
       }
     });
 
-    const lastPost = posts[posts.length - 1];
+    // Process posts to handle raw_image_data
+    const processedPosts = posts.map(post => {
+      // Process raw_image_data to ensure it's in the correct format for the frontend
+      if (post.raw_image_data) {
+        try {
+          // Convert Bytes to base64 string for frontend use
+          post.raw_image_data = Buffer.from(post.raw_image_data).toString('base64');
+          logger.debug('Converted raw_image_data from Bytes to base64 string', {
+            postId: post.id,
+            dataLength: post.raw_image_data.length
+          });
+        } catch (e) {
+          logger.error('Error processing raw_image_data', {
+            error: e instanceof Error ? e.message : 'Unknown error',
+            postId: post.id
+          });
+        }
+      }
+      return post;
+    });
+
+    const lastPost = processedPosts[processedPosts.length - 1];
     const nextCursor = lastPost?.id;
 
     return res.status(200).json({
-      posts,
+      posts: processedPosts,
       nextCursor
     });
   } catch (error: any) {
@@ -166,6 +187,23 @@ const getPost: PostDetailHandler = async (req, res, next) => {
     if (!post) {
       res.status(404).json({ message: 'Post not found' });
       return;
+    }
+
+    // Process raw_image_data to ensure it's in the correct format for the frontend
+    if (post.raw_image_data) {
+      try {
+        // Convert Bytes to base64 string for frontend use
+        post.raw_image_data = Buffer.from(post.raw_image_data).toString('base64');
+        logger.debug('Converted raw_image_data from Bytes to base64 string', {
+          postId: post.id,
+          dataLength: post.raw_image_data.length
+        });
+      } catch (e) {
+        logger.error('Error processing raw_image_data', {
+          error: e instanceof Error ? e.message : 'Unknown error',
+          postId: post.id
+        });
+      }
     }
 
     res.json(post);

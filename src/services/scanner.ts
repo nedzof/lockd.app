@@ -36,6 +36,7 @@ export class Scanner {
             return;
         }
 
+        // Target txids for logging purposes only
         const targetTxids = [
             "0861619cb8357753cb415832777d9a1bb42701047bb233cbdd5a9318c8328fea",
             "3f440827985052004a2d9db778445591f8fb09e3a60e661e8cbe8e6d2798bd84",
@@ -63,6 +64,7 @@ export class Scanner {
             });
         }
 
+        // Process all transactions, not just target txids
         try {
             await this.parser.parseTransaction(txid);
         } catch (error) {

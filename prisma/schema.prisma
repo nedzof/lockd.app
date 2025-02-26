@@ -17,7 +17,7 @@ model Post {
   author_address String?
   media_type     String?
   media_url      String?
-  raw_image_data String?
+  raw_image_data Bytes?
   created_at     DateTime @default(now())
   tags           String[] @default([])
   is_vote        Boolean  @default(false)

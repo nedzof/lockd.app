@@ -122,56 +122,25 @@ const PostGrid: React.FC<PostGridProps> = ({
             console.log('Raw image data format check:', {
               postId: post.id,
               dataLength: post.raw_image_data.length,
-              firstChars: post.raw_image_data.substring(0, 30)
+              firstChars: typeof post.raw_image_data === 'string' ? post.raw_image_data.substring(0, 30) : 'Not a string',
+              type: typeof post.raw_image_data
             });
             
-            // Handle different possible formats of raw_image_data
-            if (post.raw_image_data.startsWith('data:')) {
-              // Already a data URL
-              imageUrl = post.raw_image_data;
-            } else if (post.raw_image_data.startsWith('/9j/') || 
-                       post.raw_image_data.startsWith('iVBOR') || 
-                       /^[A-Za-z0-9+/=]+$/.test(post.raw_image_data.substring(0, 20))) {
-              // Looks like base64 without data URL prefix
-              const mediaType = post.media_type || 'image/jpeg';
-              imageUrl = `data:${mediaType};base64,${post.raw_image_data}`;
-            } else {
-              // Try UTF-8 encoded string approach
-              try {
-                // Try to parse as JSON in case it's stored as a JSON string
-                const parsedData = JSON.parse(post.raw_image_data);
-                if (typeof parsedData === 'string') {
-                  if (parsedData.startsWith('data:')) {
-                    imageUrl = parsedData;
-                  } else {
-                    imageUrl = `data:${post.media_type || 'image/jpeg'};base64,${parsedData}`;
-                  }
-                }
-              } catch (parseError) {
-                // Not JSON, try original approach with Buffer
-                try {
-                  // Try standard base64 decoding
-                  const blob = new Blob([Buffer.from(post.raw_image_data, 'base64')], { 
-                    type: post.media_type || 'image/jpeg' 
-                  });
-                  imageUrl = URL.createObjectURL(blob);
-                } catch (bufferError) {
-                  console.error('Buffer approach failed:', bufferError);
-                  
-                  // Last resort: try treating it as binary data directly
-                  try {
-                    const byteArray = new Uint8Array(post.raw_image_data.length);
-                    for (let i = 0; i < post.raw_image_data.length; i++) {
-                      byteArray[i] = post.raw_image_data.charCodeAt(i);
-                    }
-                    const blob = new Blob([byteArray], { type: post.media_type || 'image/jpeg' });
-                    imageUrl = URL.createObjectURL(blob);
-                  } catch (binaryError) {
-                    console.error('Binary approach failed:', binaryError);
-                  }
-                }
-              }
-            }
+            // Convert raw_image_data to string if it's not already a string
+            const rawImageDataStr = typeof post.raw_image_data === 'string' 
+              ? post.raw_image_data 
+              : JSON.stringify(post.raw_image_data);
+            
+            // Create a data URL directly
+            const mediaType = post.media_type || 'image/jpeg';
+            imageUrl = `data:${mediaType};base64,${rawImageDataStr}`;
+            
+            // Log the created URL
+            console.log('Created image URL:', {
+              postId: post.id,
+              urlLength: imageUrl.length,
+              urlStart: imageUrl.substring(0, 50)
+            });
           } catch (e) {
             console.error('Failed to process raw image data for post:', post.id, e);
           }

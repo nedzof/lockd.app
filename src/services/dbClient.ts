@@ -536,6 +536,7 @@ export class DbClient {
             });
 
             try {
+                // No need to convert Buffer to string since raw_image_data is now Bytes type
                 await client.post.update({
                     where: { txid: params.txid },
                     data: {
