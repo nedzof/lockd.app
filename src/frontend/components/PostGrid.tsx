@@ -187,20 +187,13 @@ const PostGrid: React.FC<PostGridProps> = ({
     };
   }, [submissions]);
 
-  // Handle locking BSV on a post
   const handleLockLike = async (post: ExtendedPost, amount: number, duration: number) => {
     if (!wallet.connected) {
       toast.error('Please connect your wallet first');
       return;
     }
 
-    if (wallet.balance < amount) {
-      toast.error('Insufficient balance');
-      return;
-    }
-
     try {
-      setIsLocking(true);
       const response = await fetch(`${API_URL}/api/lock-likes`, {
         method: 'POST',
         headers: {
@@ -208,23 +201,21 @@ const PostGrid: React.FC<PostGridProps> = ({
         },
         body: JSON.stringify({
           post_id: post.id,
+          author_address: wallet.bsvAddress,
           amount,
-          duration,
-          author_address: wallet.address,
+          lock_duration: duration
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to lock BSV on post');
+        throw new Error('Failed to create lock like');
       }
 
-      toast.success('Successfully locked BSV on post');
-      fetchPosts(); 
+      toast.success('Lock like created successfully!');
+      fetchPosts(); // Refresh posts to show updated lock amount
     } catch (error) {
-      console.error('Error locking BSV on post:', error);
-      toast.error('Failed to lock BSV on post');
-    } finally {
-      setIsLocking(false);
+      console.error('Error creating lock like:', error);
+      toast.error('Failed to create lock like');
     }
   };
 
@@ -258,7 +249,7 @@ const PostGrid: React.FC<PostGridProps> = ({
       }
 
       toast.success('Successfully locked BSV on vote option');
-      fetchPosts(); 
+      fetchPosts(); // Refresh posts to show updated lock amounts
     } catch (error) {
       console.error('Error locking BSV on vote option:', error);
       toast.error('Failed to lock BSV on vote option');
@@ -320,7 +311,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                     <img
                       src={post.imageUrl}
                       alt={post.description || 'Post image'}
-                      className="w-full object-cover max-h-[500px]"
+                      className="w-full object-cover"
                       onClick={() => setExpandedImage(post.imageUrl!)}
                       ref={(el) => {
                         if (el) imageRefs.current[post.id] = el;
@@ -335,34 +326,29 @@ const PostGrid: React.FC<PostGridProps> = ({
 
               {/* Content */}
               <div className="p-6 w-full">
-                <div className="flex justify-end mb-4">
-                  <a
-                    href={`https://whatsonchain.com/tx/${post.txid}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-gray-500 flex items-center hover:text-[#00ffa3] transition-colors"
-                  >
-                    <FiExternalLink className="w-3 h-3" />
-                  </a>
+                <div className="flex flex-col space-y-2 mb-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-400 font-mono">
+                      {post.author_address?.slice(0, 8)}...{post.author_address?.slice(-8)}
+                    </span>
+                    <a
+                      href={`https://whatsonchain.com/tx/${post.txid}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-gray-500 flex items-center hover:text-[#00ffa3] transition-colors"
+                    >
+                      <FiExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
                 </div>
                 
                 <p className="text-white mb-4 font-light">{post.content}</p>
                 
                 {/* Total Locked Display */}
-                <div className="flex justify-between items-center mb-4">
-                  <span className="text-xs text-[#00ffa3]/80">
-                    {formatBSV(post.totalLocked || 0)} locked
+                <div className="flex justify-end mb-4">
+                  <span className="text-sm font-medium text-[#00ffa3]">
+                    {formatBSV(post.totalLocked || 0)} BSV locked
                   </span>
-                  
-                  {/* Lock button only for non-vote posts */}
-                  {!post.is_vote && (
-                    <button
-                      onClick={() => handleLockLike(post, 1, 1)}
-                      className="text-xs text-[#00ffa3]/80 rounded-md px-2 py-1 transition-all hover:text-[#00ffa3] flex items-center"
-                    >
-                      <FiLock className="mr-1 w-3 h-3" /> Lock
-                    </button>
-                  )}
                 </div>
 
                 {/* Vote Options - Only show if post is a vote */}
@@ -375,16 +361,17 @@ const PostGrid: React.FC<PostGridProps> = ({
                       return (
                         <div 
                           key={option.id} 
-                          className="relative border-b border-[#2A2C3A]/30 pb-3"
+                          className="relative bg-[#111218] rounded-lg p-3 transition-all duration-200 hover:bg-[#15161F]"
                         >
                           <div className="flex justify-between items-center mb-1">
-                            <span className="text-gray-300 text-sm font-light">{option.content}</span>
+                            <span className="text-white font-light">{option.content}</span>
+                            <span className="text-sm text-[#00ffa3]">{formatBSV(option.lock_amount || 0)} BSV</span>
                           </div>
                           
                           {/* Progress bar */}
-                          <div className="w-full h-[2px] bg-[#2A2C3A]/30 mt-2 overflow-hidden">
+                          <div className="w-full h-1 bg-[#2A2C3A] rounded-full mt-2 overflow-hidden">
                             <div 
-                              className="h-full bg-[#00ffa3]/70" 
+                              className="h-full bg-[#00ffa3]" 
                               style={{ width: `${percentage}%` }}
                             />
                           </div>
@@ -392,9 +379,9 @@ const PostGrid: React.FC<PostGridProps> = ({
                           {/* Lock BSV button */}
                           <button
                             onClick={() => handleVoteOptionLock(option.id, 1, 1)}
-                            className="mt-2 text-xs text-[#00ffa3]/80 rounded-md px-2 py-1 transition-all hover:text-[#00ffa3] flex items-center"
+                            className="mt-2 text-xs text-[#00ffa3] border border-[#00ffa3] rounded-md px-3 py-1 transition-all hover:bg-[#00ffa320] flex items-center"
                           >
-                            <FiLock className="mr-1 w-3 h-3" /> Lock
+                            <FiLock className="mr-1 w-3 h-3" /> Lock BSV
                           </button>
                         </div>
                       );
@@ -403,6 +390,38 @@ const PostGrid: React.FC<PostGridProps> = ({
                 )}
               </div>
             </div>
+          ))}
+
+          {/* Image Modal */}
+          {expandedImage && (
+            <div
+              className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center z-50 backdrop-blur-sm"
+              onClick={() => setExpandedImage(null)}
+            >
+              <button 
+                className="absolute top-4 right-4 text-white p-2 rounded-full bg-black bg-opacity-50 hover:bg-opacity-70 transition-all"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpandedImage(null);
+                }}
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+              <img
+                src={expandedImage}
+                alt="Expanded view"
+                className="max-w-[90vw] max-h-[90vh] object-contain"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default PostGrid;
           ))}
 
           {/* Image Modal */}

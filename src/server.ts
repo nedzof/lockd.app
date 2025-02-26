@@ -8,6 +8,7 @@ import tagsRouter from './api/tags';
 import statsRouter from './api/stats';
 import votesRouter from './api/votes';
 import { logger } from './utils/logger';
+import { initializeTagGenerationJob } from './jobs/tagGenerationJob';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -85,6 +86,10 @@ app.get('/api/health', (req, res) => {
 // Start server
 app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
+  
+  // Initialize the tag generation job
+  initializeTagGenerationJob();
+  logger.info('Tag generation job initialized');
 });
 
 // Handle graceful shutdown

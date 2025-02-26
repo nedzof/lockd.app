@@ -91,6 +91,14 @@ export default function Layout({
                 >
                   WTF is Lockd.app?
                 </Link>
+                {connected && (
+                  <Link
+                    to="/admin/tags"
+                    className="text-gray-400 hover:text-white transition-colors duration-300 text-sm"
+                  >
+                    Tag Admin
+                  </Link>
+                )}
               </nav>
             </div>
 

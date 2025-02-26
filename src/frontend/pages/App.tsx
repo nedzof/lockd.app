@@ -4,6 +4,8 @@ import { Toaster } from 'react-hot-toast';
 import Layout from '../components/layout/Layout';
 import Home from './Home';
 import WTF from './WTF';
+import TagManagement from './TagManagement';
+import Settings from './Settings';
 import { useWallet } from '../providers/WalletProvider';
 
 export default function App() {
@@ -26,8 +28,9 @@ export default function App() {
           {/* Main routes */}
           <Route path="/posts" element={<Home connected={isConnected} bsvAddress={bsvAddress} />} />
           <Route path="/stats" element={<Home connected={isConnected} bsvAddress={bsvAddress} />} />
-          <Route path="/settings" element={<Home connected={isConnected} bsvAddress={bsvAddress} />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="/wtf" element={<WTF />} />
+          <Route path="/admin/tags" element={<TagManagement />} />
           
           {/* Catch all route - redirect to /posts */}
           <Route path="*" element={<Navigate to="/posts" replace />} />

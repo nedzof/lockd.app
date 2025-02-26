@@ -1,6 +1,14 @@
 import express from 'express';
 import prisma from '../db/prisma';
 import { logger } from '../utils/logger';
+import { 
+  generateTags, 
+  getCurrentEventTags, 
+  getAllTags,
+  updateTag,
+  deleteTag,
+  incrementTagUsage
+} from '../controllers/tagController';
 
 const router = express.Router();
 
@@ -20,6 +28,28 @@ const DEFAULT_TAGS = [
 
 router.get('/', async (req, res) => {
   try {
+    // First check for dynamic tags in the Tag model
+    const dynamicTags = await prisma.tag.findMany({
+      where: {
+        type: 'current_event'
+      },
+      orderBy: {
+        usageCount: 'desc'
+      },
+      take: 20,
+      select: {
+        name: true
+      }
+    });
+    
+    // If we have dynamic tags, use those first
+    if (dynamicTags.length > 0) {
+      const tagNames = dynamicTags.map(tag => tag.name);
+      logger.info(`Returning ${tagNames.length} dynamic tags`);
+      return res.json({ tags: tagNames });
+    }
+    
+    // Fall back to existing behavior if no dynamic tags
     const uniqueTags = await prisma.post.findMany({
       select: {
         tags: true
@@ -52,5 +82,23 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Generate new tags from current events
+router.post('/generate', generateTags);
+
+// Get current event tags
+router.get('/current-events', getCurrentEventTags);
+
+// Get all tags with their metadata
+router.get('/all', getAllTags);
+
+// Update a tag
+router.put('/:id', updateTag);
+
+// Delete a tag
+router.delete('/:id', deleteTag);
+
+// Increment tag usage count
+router.post('/usage/:name', incrementTagUsage);
 
 export default router;

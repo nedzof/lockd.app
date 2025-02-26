@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import { useWallet } from '../providers/WalletProvider';
 import { useTags } from '../hooks/useTags';
-import { FiX, FiPlus, FiCheck } from 'react-icons/fi';
+import { FiX, FiPlus, FiCheck, FiRefreshCw } from 'react-icons/fi';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -19,7 +19,15 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
   const [isVotePost, setIsVotePost] = useState(false);
   const [voteOptions, setVoteOptions] = useState<string[]>(['', '']);
   const { wallet, connect, isConnected } = useWallet();
-  const { tags, isLoading, error, fetchTags } = useTags();
+  const { 
+    tags, 
+    currentEventTags, 
+    isLoading, 
+    error, 
+    isGeneratingTags,
+    fetchTags, 
+    generateTags 
+  } = useTags();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -189,28 +197,71 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
         )}
         
         <div className="mt-3">
-          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tags:</div>
+          <div className="flex justify-between items-center mb-1">
+            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Tags:</div>
+            <button
+              type="button"
+              onClick={() => generateTags()}
+              disabled={isGeneratingTags}
+              className="flex items-center text-xs text-blue-500 hover:text-blue-700"
+            >
+              <FiRefreshCw size={14} className={`mr-1 ${isGeneratingTags ? 'animate-spin' : ''}`} /> 
+              {isGeneratingTags ? 'Generating...' : 'Generate Current Event Tags'}
+            </button>
+          </div>
+          
           {isLoading ? (
             <div>Loading tags...</div>
           ) : error ? (
             <div className="text-red-500">Error loading tags: {error.message}</div>
           ) : (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {tags.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => handleTagClick(tag)}
-                  className={`px-2 py-1 text-xs rounded-full ${
-                    selectedTags.includes(tag)
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
+            <>
+              {/* Current Event Tags Section */}
+              {currentEventTags.length > 0 && (
+                <div className="mb-3">
+                  <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                    Current Events:
+                  </div>
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {currentEventTags.map((tag) => (
+                      <button
+                        key={tag.id || tag.name}
+                        type="button"
+                        onClick={() => handleTagClick(tag.name)}
+                        className={`px-2 py-1 text-xs rounded-full ${
+                          selectedTags.includes(tag.name)
+                            ? 'bg-green-500 text-white'
+                            : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                        }`}
+                      >
+                        {tag.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Regular Tags Section */}
+              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                Popular Tags:
+              </div>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {tags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => handleTagClick(tag)}
+                    className={`px-2 py-1 text-xs rounded-full ${
+                      selectedTags.includes(tag)
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
           
           <div className="flex mt-2">

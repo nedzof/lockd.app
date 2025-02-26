@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { FiX, FiPlus } from 'react-icons/fi';
+import { FiX, FiPlus, FiRefreshCw } from 'react-icons/fi';
+import { useTags } from '../hooks/useTags';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -9,30 +10,17 @@ interface TagPreferencesProps {
 }
 
 export const TagPreferences: React.FC<TagPreferencesProps> = ({ selectedTags, onTagsChange }) => {
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const { 
+    tags, 
+    currentEventTags, 
+    isLoading, 
+    error, 
+    isGeneratingTags,
+    generateTags,
+    addTag
+  } = useTags();
+  
   const [newTag, setNewTag] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchTags = async () => {
-      try {
-        const response = await fetch(`${API_URL}/api/tags`);
-        if (!response.ok) {
-          throw new Error('Failed to fetch tags');
-        }
-        const tags = await response.json();
-        setAvailableTags(tags);
-      } catch (error) {
-        console.error('Error fetching tags:', error);
-        setError(error instanceof Error ? error.message : 'Failed to load tags');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchTags();
-  }, []);
 
   const handleTagClick = (tag: string) => {
     if (selectedTags.includes(tag)) {
@@ -46,73 +34,127 @@ export const TagPreferences: React.FC<TagPreferencesProps> = ({ selectedTags, on
     e.preventDefault();
     if (!newTag.trim()) return;
 
-    try {
-      const response = await fetch(`${API_URL}/api/tags`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ tag: newTag.trim() }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to add tag');
-      }
-
-      setAvailableTags([...availableTags, newTag.trim()]);
-      setNewTag('');
-    } catch (error) {
-      console.error('Error adding tag:', error);
-      setError(error instanceof Error ? error.message : 'Failed to add tag');
+    await addTag(newTag.trim());
+    
+    // Add to selected tags
+    if (!selectedTags.includes(newTag.trim())) {
+      onTagsChange([...selectedTags, newTag.trim()]);
     }
+    
+    // Clear input
+    setNewTag('');
   };
 
-  if (isLoading) {
-    return <div className="text-gray-400">Loading tags...</div>;
-  }
-
-  if (error) {
-    return <div className="text-red-500">{error}</div>;
-  }
-
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        {availableTags.map(tag => (
-          <button
-            key={tag}
-            onClick={() => handleTagClick(tag)}
-            className={`px-3 py-1 rounded-full text-sm font-medium flex items-center space-x-1 transition-all duration-300 ${
-              selectedTags.includes(tag)
-                ? 'bg-[#00ffa3] text-black'
-                : 'bg-[#2A2A40]/30 text-gray-300 hover:bg-[#2A2A40]/50'
-            }`}
-          >
-            <span>{tag}</span>
-            {selectedTags.includes(tag) && (
-              <FiX className="w-4 h-4 ml-1" />
-            )}
-          </button>
-        ))}
-      </div>
-
-      <form onSubmit={handleAddTag} className="flex space-x-2">
-        <input
-          type="text"
-          value={newTag}
-          onChange={(e) => setNewTag(e.target.value)}
-          placeholder="Add new tag..."
-          className="flex-1 bg-[#2A2A40]/30 border border-gray-700/20 rounded-lg px-3 py-1.5 text-white placeholder-gray-400/70 focus:border-[#00ffa3]/30 focus:outline-none transition-colors"
-        />
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Tag Preferences</h2>
         <button
-          type="submit"
-          disabled={!newTag.trim()}
-          className="flex items-center space-x-1 px-4 py-1.5 bg-gradient-to-r from-[#00ffa3]/80 to-[#00ff9d]/80 text-black rounded-lg font-medium hover:shadow-lg hover:from-[#00ff9d]/90 hover:to-[#00ffa3]/90 transition-all duration-300 disabled:opacity-50"
+          onClick={() => generateTags()}
+          disabled={isGeneratingTags}
+          className="flex items-center px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-blue-300"
         >
-          <FiPlus className="w-4 h-4" />
-          <span>Add</span>
+          <FiRefreshCw className={`mr-2 ${isGeneratingTags ? 'animate-spin' : ''}`} />
+          {isGeneratingTags ? 'Generating...' : 'Generate Tags'}
         </button>
-      </form>
+      </div>
+      
+      {isLoading ? (
+        <div className="text-center py-4">Loading tags...</div>
+      ) : error ? (
+        <div className="text-red-500 text-center py-4">{error instanceof Error ? error.message : 'Error loading tags'}</div>
+      ) : (
+        <>
+          {/* Current Event Tags Section */}
+          {currentEventTags.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Current Event Tags</h3>
+              <div className="flex flex-wrap gap-2">
+                {currentEventTags.map((tag) => (
+                  <button
+                    key={tag.id || tag.name}
+                    type="button"
+                    onClick={() => handleTagClick(tag.name)}
+                    className={`px-3 py-1 text-sm rounded-full ${
+                      selectedTags.includes(tag.name)
+                        ? 'bg-green-500 text-white'
+                        : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                    }`}
+                  >
+                    {tag.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {/* Popular Tags Section */}
+          <div className="mb-4">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Popular Tags</h3>
+            <div className="flex flex-wrap gap-2">
+              {tags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => handleTagClick(tag)}
+                  className={`px-3 py-1 text-sm rounded-full ${
+                    selectedTags.includes(tag)
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          {/* Selected Tags Section */}
+          <div className="mb-4">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Your Selected Tags</h3>
+            <div className="flex flex-wrap gap-2">
+              {selectedTags.length > 0 ? (
+                selectedTags.map((tag) => (
+                  <div
+                    key={tag}
+                    className="flex items-center px-3 py-1 bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 rounded-full text-sm"
+                  >
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => handleTagClick(tag)}
+                      className="ml-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-200"
+                    >
+                      <FiX size={16} />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">No tags selected. Select tags above or add your own.</p>
+              )}
+            </div>
+          </div>
+          
+          {/* Add Custom Tag Form */}
+          <form onSubmit={handleAddTag} className="mt-4">
+            <div className="flex">
+              <input
+                type="text"
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                className="flex-grow px-3 py-2 border dark:border-gray-700 rounded-l-lg dark:bg-gray-700 dark:text-white"
+                placeholder="Add a custom tag..."
+              />
+              <button
+                type="submit"
+                className="px-3 py-2 bg-indigo-500 text-white rounded-r-lg hover:bg-indigo-600 flex items-center"
+              >
+                <FiPlus size={18} className="mr-1" /> Add
+              </button>
+            </div>
+          </form>
+        </>
+      )}
     </div>
   );
-}; 
+};
