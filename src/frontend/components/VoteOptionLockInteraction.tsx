@@ -66,7 +66,7 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
     <>
       <button
         onClick={() => setShowInput(true)}
-        className="inline-flex items-center px-2 py-1 text-xs bg-[#2A2B33] text-[#00ffa3] rounded hover:bg-[#3A3B43] transition-colors"
+        className="inline-flex items-center px-2 py-1 text-xs text-[#00ffa3] rounded hover:text-[#00E6CC] transition-colors"
         disabled={!connected}
       >
         <SiBitcoinsv className="mr-1" />
@@ -99,13 +99,12 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  className="w-full px-3 py-2 bg-[#2A2B33] text-white rounded border border-gray-700 focus:outline-none focus:ring-2 focus:ring-[#00ffa3]"
-                  placeholder="Enter BSV amount"
+                  className="w-full px-3 py-2 bg-[#2A2B33] border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-[#00ffa3] focus:border-transparent"
                 />
                 {balance !== undefined && (
-                  <p className="text-xs text-gray-400 mt-1">
+                  <div className="mt-1 text-xs text-gray-400">
                     Balance: {formatBSV(balance)} BSV
-                  </p>
+                  </div>
                 )}
               </div>
 
@@ -117,22 +116,25 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
                   id="duration"
                   type="number"
                   min="1"
+                  step="1"
                   value={duration}
                   onChange={(e) => setDuration(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  className="w-full px-3 py-2 bg-[#2A2B33] text-white rounded border border-gray-700 focus:outline-none focus:ring-2 focus:ring-[#00ffa3]"
-                  placeholder="Enter lock duration"
+                  className="w-full px-3 py-2 bg-[#2A2B33] border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-[#00ffa3] focus:border-transparent"
                 />
+                <div className="mt-1 text-xs text-gray-400">
+                  Approximately {Math.round(parseInt(duration) / 144)} days
+                </div>
               </div>
 
               <button
                 onClick={handleLock}
                 disabled={isLocking || !connected}
-                className={`w-full py-2 px-4 rounded font-medium ${
-                  isLocking || !connected
-                    ? 'bg-gray-600 cursor-not-allowed text-gray-300'
-                    : 'bg-[#00ffa3] hover:bg-[#00e093] text-black'
-                } transition-colors`}
+                className={`w-full py-2 px-4 rounded-md text-white font-medium flex items-center justify-center ${
+                  isLocking
+                    ? 'bg-gray-700 cursor-not-allowed'
+                    : 'bg-[#00ffa3] hover:bg-[#00E6CC] text-[#1A1B23]'
+                }`}
               >
                 {isLocking ? 'Locking...' : 'Lock BSV'}
               </button>

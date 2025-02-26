@@ -9,6 +9,7 @@ import statsRouter from './api/stats';
 import votesRouter from './api/votes';
 import { logger } from './utils/logger';
 import { initializeTagGenerationJob } from './jobs/tagGenerationJob';
+import { initializeStatsUpdateJob } from './jobs/statsUpdateJob';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -90,6 +91,10 @@ app.listen(PORT, () => {
   // Initialize the tag generation job
   initializeTagGenerationJob();
   logger.info('Tag generation job initialized');
+  
+  // Initialize the stats update job
+  initializeStatsUpdateJob();
+  logger.info('Stats update job initialized');
 });
 
 // Handle graceful shutdown

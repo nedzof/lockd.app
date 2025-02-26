@@ -122,17 +122,16 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
   const totalLockedAmount = voteOptions.reduce((sum, option) => sum + (option.total_locked || 0), 0);
 
   if (loading) {
-    return <div className="mt-4 p-4 bg-gray-100 rounded-lg">Loading vote options...</div>;
+    return <div className="mt-4 p-4 text-gray-300">Loading vote options...</div>;
   }
 
   if (voteOptions.length === 0) {
-    return <div className="mt-4 p-4 bg-gray-100 rounded-lg">No vote options available for this post.</div>;
+    return <div className="mt-4 p-4 text-gray-300">No vote options available for this post.</div>;
   }
 
   return (
-    <div className="mt-4 p-4 bg-gray-100 rounded-lg">
+    <div className="mt-4 space-y-4">
       <h3 className="text-lg font-semibold mb-3">Vote Options</h3>
-      
       <div className="space-y-4">
         {voteOptions.map((option) => {
           // Calculate percentage of total locked amount
@@ -141,21 +140,21 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
             : 0;
           
           return (
-            <div key={option.id} className="bg-white p-3 rounded-md shadow-sm">
+            <div key={option.id} className="border border-gray-800/30 p-3 rounded-md">
               <div className="flex justify-between items-center mb-2">
-                <div className="font-medium">{option.content}</div>
-                <div className="text-sm text-gray-600">{percentage}%</div>
+                <div className="font-medium text-white">{option.content}</div>
+                <div className="text-sm text-gray-400">{percentage}%</div>
               </div>
               
               {/* Progress bar */}
-              <div className="w-full bg-gray-200 rounded-full h-2.5 mb-3">
+              <div className="w-full bg-gray-800 rounded-full h-2.5 mb-3">
                 <div 
-                  className="bg-blue-600 h-2.5 rounded-full" 
+                  className="bg-[#00E6CC] h-2.5 rounded-full" 
                   style={{ width: `${percentage}%` }}
                 ></div>
               </div>
               
-              <div className="text-sm text-gray-600 mb-3">
+              <div className="text-sm text-gray-400 mb-3">
                 Locked: {formatBSV(option.total_locked || 0)} BSV
               </div>
               
@@ -215,7 +214,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
       </div>
       
       {!connected && (
-        <div className="mt-4 text-sm text-gray-600">
+        <div className="mt-4 text-sm text-gray-400">
           Connect your wallet to lock BSV on vote options.
         </div>
       )}

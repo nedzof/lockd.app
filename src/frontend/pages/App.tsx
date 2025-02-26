@@ -6,6 +6,7 @@ import Home from './Home';
 import WTF from './WTF';
 import TagManagement from './TagManagement';
 import Settings from './Settings';
+import Stats from './Stats';
 import { useWallet } from '../providers/WalletProvider';
 
 export default function App() {
@@ -27,7 +28,7 @@ export default function App() {
           
           {/* Main routes */}
           <Route path="/posts" element={<Home connected={isConnected} bsvAddress={bsvAddress} />} />
-          <Route path="/stats" element={<Home connected={isConnected} bsvAddress={bsvAddress} />} />
+          <Route path="/stats" element={<Stats />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/wtf" element={<WTF />} />
           <Route path="/admin/tags" element={<TagManagement />} />

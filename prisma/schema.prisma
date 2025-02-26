@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["views"]
 }
 
 datasource db {
@@ -96,4 +97,20 @@ model Tag {
   @@index([name])
   @@index([type])
   @@index([usageCount])
+}
+
+// Statistics model
+model Stats {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()"))
+  total_posts          Int
+  total_votes          Int
+  total_lock_likes     Int
+  total_users          Int
+  total_bsv_locked     Float
+  avg_lock_duration    Float
+  most_used_tag        String?
+  most_active_user     String?
+  last_updated         DateTime @default(now())
+
+  @@map("stats")
 }

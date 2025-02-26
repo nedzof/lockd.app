@@ -5,12 +5,12 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "test": "NODE_ENV=test jest --forceExit --detectOpenHandles",
     "build": "tsc",
+    "test": "NODE_ENV=test jest --forceExit --detectOpenHandles",
     "start": "node dist/index.js",
     "scanner": "tsx src/services/scanner.ts",
     "generate-tags": "tsx scripts/generateTags.js",
-    "dev": "USE_DIRECT_URL=true concurrently \"vite --port 3000 --strictPort\" \"PORT=3001 tsx watch src/server.ts\""
+    "dev": "USE_DIRECT_URL=true concurrently \"vite --port 3000 --strictPort\" \"PORT=3003 tsx watch src/server.ts\""
   },
   "dependencies": {
     "@gorillapool/js-junglebus": "^0.4.4",
@@ -35,6 +35,7 @@
     "react-icons": "^5.0.1",
     "react-images-uploading": "^3.1.7",
     "react-router-dom": "^6.22.0",
+    "recharts": "^2.15.1",
     "scrypt-ts": "^1.4.5",
     "winston": "^3.11.0",
     "yours-wallet-provider": "^3.6.0"
