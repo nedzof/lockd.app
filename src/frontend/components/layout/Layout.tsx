@@ -143,6 +143,18 @@ export default function Layout({
                 <span className="hidden sm:inline text-sm font-medium">WTF?</span>
               </Link>
               
+              <Link
+                to="/wallet-test"
+                className={`px-3 py-2 rounded-lg flex items-center space-x-1 transition-all duration-300 ${
+                  isActive('/wallet-test') 
+                    ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <FiLock className={`${isActive('/wallet-test') ? 'text-[#00ffa3]' : ''}`} />
+                <span className="hidden sm:inline text-sm font-medium">Wallet Test</span>
+              </Link>
+              
               {connected && (
                 <Link
                   to="/admin/tags"

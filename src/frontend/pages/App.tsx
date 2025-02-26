@@ -6,6 +6,7 @@ import Home from './Home';
 import WTF from './WTF';
 import TagManagement from './TagManagement';
 import Stats from './Stats';
+import WalletTest from './WalletTest';
 import { useWallet } from '../providers/WalletProvider';
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/stats" element={<Stats />} />
           <Route path="/wtf" element={<WTF />} />
           <Route path="/admin/tags" element={<TagManagement />} />
+          <Route path="/wallet-test" element={<WalletTest />} />
           
           {/* Catch all route - redirect to /posts */}
           <Route path="*" element={<Navigate to="/posts" replace />} />
