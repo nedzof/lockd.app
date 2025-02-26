@@ -48,7 +48,7 @@ export default function Layout({
     <div className="min-h-screen bg-[#1A1B23] text-white">
       {/* Header */}
       <header className="border-b border-gray-800/30 backdrop-blur-xl bg-gradient-to-r from-[#1A1B23]/95 via-[#2A2A40]/95 to-[#1A1B23]/95 sticky top-0 z-50 transition-all duration-300">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center h-16">
             {/* Logo */}
             <div className="flex-shrink-0">
@@ -141,7 +141,7 @@ export default function Layout({
       </header>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <main className="w-full">
           {children}
         </main>

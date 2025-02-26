@@ -80,6 +80,7 @@ const PostGrid: React.FC<PostGridProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
+  const [isLocking, setIsLocking] = useState(false);
   const imageRefs = useRef<{ [key: string]: HTMLImageElement }>({});
   const wallet = useYoursWallet();
 
@@ -186,13 +187,20 @@ const PostGrid: React.FC<PostGridProps> = ({
     };
   }, [submissions]);
 
+  // Handle locking BSV on a post
   const handleLockLike = async (post: ExtendedPost, amount: number, duration: number) => {
     if (!wallet.connected) {
       toast.error('Please connect your wallet first');
       return;
     }
 
+    if (wallet.balance < amount) {
+      toast.error('Insufficient balance');
+      return;
+    }
+
     try {
+      setIsLocking(true);
       const response = await fetch(`${API_URL}/api/lock-likes`, {
         method: 'POST',
         headers: {
@@ -200,21 +208,23 @@ const PostGrid: React.FC<PostGridProps> = ({
         },
         body: JSON.stringify({
           post_id: post.id,
-          author_address: wallet.bsvAddress,
           amount,
-          lock_duration: duration
+          duration,
+          author_address: wallet.address,
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create lock like');
+        throw new Error('Failed to lock BSV on post');
       }
 
-      toast.success('Lock like created successfully!');
-      fetchPosts(); // Refresh posts to show updated lock amount
+      toast.success('Successfully locked BSV on post');
+      fetchPosts(); 
     } catch (error) {
-      console.error('Error creating lock like:', error);
-      toast.error('Failed to create lock like');
+      console.error('Error locking BSV on post:', error);
+      toast.error('Failed to lock BSV on post');
+    } finally {
+      setIsLocking(false);
     }
   };
 
@@ -224,22 +234,22 @@ const PostGrid: React.FC<PostGridProps> = ({
       return;
     }
 
-    if (amount <= 0) {
-      toast.error('Please enter a valid amount to lock');
+    if (wallet.balance < amount) {
+      toast.error('Insufficient balance');
       return;
     }
 
     try {
-      const response = await fetch(`${API_URL}/api/lock-likes/voteOption`, {
+      setIsLocking(true);
+      const response = await fetch(`${API_URL}/api/vote-options/${optionId}/lock`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          vote_option_id: optionId,
-          author_address: wallet.bsvAddress,
           amount,
-          lock_duration: duration
+          duration,
+          author_address: wallet.address,
         }),
       });
 
@@ -247,11 +257,13 @@ const PostGrid: React.FC<PostGridProps> = ({
         throw new Error('Failed to lock BSV on vote option');
       }
 
-      toast.success(`Successfully locked ${amount} BSV on vote option`);
-      fetchPosts(); // Refresh posts to show updated lock amounts
+      toast.success('Successfully locked BSV on vote option');
+      fetchPosts(); 
     } catch (error) {
       console.error('Error locking BSV on vote option:', error);
       toast.error('Failed to lock BSV on vote option');
+    } finally {
+      setIsLocking(false);
     }
   };
 
@@ -278,92 +290,144 @@ const PostGrid: React.FC<PostGridProps> = ({
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-6 p-6">
-      {submissions.map((post) => (
-        <div key={post.id} className="bg-[#1A1B23] rounded-xl shadow-lg overflow-hidden">
-          {/* Image */}
-          {post.imageUrl && (
-            <div className="relative aspect-video bg-black">
+    <div className="container mx-auto max-w-3xl px-4">
+      {isLoading && (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#00ffa3]"></div>
+        </div>
+      )}
+
+      {error && (
+        <div className="flex flex-col items-center space-y-4 min-h-[400px]">
+          <p className="text-red-500">{error}</p>
+          <button
+            onClick={fetchPosts}
+            className="px-4 py-2 text-[#00ffa3] border border-[#00ffa3] rounded-lg hover:bg-[#00ffa3] hover:text-black transition-all duration-300"
+          >
+            Try Again
+          </button>
+        </div>
+      )}
+
+      {!isLoading && !error && (
+        <div className="grid grid-cols-1 gap-6 p-6">
+          {submissions.map((post) => (
+            <div key={post.id} className="bg-[#1A1B23] rounded-xl shadow-lg overflow-hidden max-w-2xl mx-auto w-full transition-all duration-200 hover:shadow-xl hover:bg-[#1E1F29]">
+              {/* Image Container - Only show if image exists */}
+              {post.imageUrl && (
+                <div className="w-full">
+                  <div className="relative bg-black w-full">
+                    <img
+                      src={post.imageUrl}
+                      alt={post.description || 'Post image'}
+                      className="w-full object-cover max-h-[500px]"
+                      onClick={() => setExpandedImage(post.imageUrl!)}
+                      ref={(el) => {
+                        if (el) imageRefs.current[post.id] = el;
+                      }}
+                      onLoad={() => {
+                        console.log(`Image loaded for post ${post.id}`);
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Content */}
+              <div className="p-6 w-full">
+                <div className="flex justify-end mb-4">
+                  <a
+                    href={`https://whatsonchain.com/tx/${post.txid}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-gray-500 flex items-center hover:text-[#00ffa3] transition-colors"
+                  >
+                    <FiExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+                
+                <p className="text-white mb-4 font-light">{post.content}</p>
+                
+                {/* Total Locked Display */}
+                <div className="flex justify-between items-center mb-4">
+                  <span className="text-xs text-[#00ffa3]/80">
+                    {formatBSV(post.totalLocked || 0)} locked
+                  </span>
+                  
+                  {/* Lock button only for non-vote posts */}
+                  {!post.is_vote && (
+                    <button
+                      onClick={() => handleLockLike(post, 1, 1)}
+                      className="text-xs text-[#00ffa3]/80 rounded-md px-2 py-1 transition-all hover:text-[#00ffa3] flex items-center"
+                    >
+                      <FiLock className="mr-1 w-3 h-3" /> Lock
+                    </button>
+                  )}
+                </div>
+
+                {/* Vote Options - Only show if post is a vote */}
+                {post.is_vote && post.vote_options.length > 0 && (
+                  <div className="space-y-3 mt-4">
+                    {post.vote_options.map((option) => {
+                      const totalLocked = post.vote_options.reduce((sum, opt) => sum + (opt.lock_amount || 0), 0);
+                      const percentage = totalLocked > 0 ? ((option.lock_amount || 0) / totalLocked) * 100 : 0;
+                      
+                      return (
+                        <div 
+                          key={option.id} 
+                          className="relative border-b border-[#2A2C3A]/30 pb-3"
+                        >
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-gray-300 text-sm font-light">{option.content}</span>
+                          </div>
+                          
+                          {/* Progress bar */}
+                          <div className="w-full h-[2px] bg-[#2A2C3A]/30 mt-2 overflow-hidden">
+                            <div 
+                              className="h-full bg-[#00ffa3]/70" 
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                          
+                          {/* Lock BSV button */}
+                          <button
+                            onClick={() => handleVoteOptionLock(option.id, 1, 1)}
+                            className="mt-2 text-xs text-[#00ffa3]/80 rounded-md px-2 py-1 transition-all hover:text-[#00ffa3] flex items-center"
+                          >
+                            <FiLock className="mr-1 w-3 h-3" /> Lock
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* Image Modal */}
+          {expandedImage && (
+            <div
+              className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center z-50 backdrop-blur-sm"
+              onClick={() => setExpandedImage(null)}
+            >
+              <button 
+                className="absolute top-4 right-4 text-white p-2 rounded-full bg-black bg-opacity-50 hover:bg-opacity-70 transition-all"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpandedImage(null);
+                }}
+              >
+                <FiX className="w-5 h-5" />
+              </button>
               <img
-                src={post.imageUrl}
-                alt={post.description || 'Post image'}
-                className="w-full h-full object-contain"
-                onClick={() => setExpandedImage(post.imageUrl!)}
+                src={expandedImage}
+                alt="Expanded view"
+                className="max-w-[90vw] max-h-[90vh] object-contain"
+                onClick={(e) => e.stopPropagation()}
               />
             </div>
           )}
-
-          {/* Content */}
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-sm text-gray-400">
-                {post.author_address?.slice(0, 8)}...{post.author_address?.slice(-8)}
-              </span>
-              <span className="text-sm text-[#00ffa3]">
-                {formatBSV(post.totalLocked || 0)} BSV
-              </span>
-            </div>
-            <p className="text-white mb-4">{post.content}</p>
-
-            {/* Vote Options */}
-            {post.is_vote && post.vote_options && post.vote_options.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-[#00ffa3] text-sm font-medium mb-2">Vote Options:</h3>
-                <div className="space-y-2">
-                  {post.vote_options.map((option) => (
-                    <div key={option.id} className="bg-[#2A2B33] p-3 rounded-lg">
-                      <p className="text-white">{option.content}</p>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-xs text-[#00ffa3]">{formatBSV(option.lock_amount || 0)} BSV</span>
-                        <VoteOptionLockInteraction 
-                          optionId={option.id}
-                          optionContent={option.content}
-                          onLock={handleVoteOptionLock}
-                          connected={wallet.connected}
-                          balance={wallet.balance}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Tags */}
-            {post.tags?.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-4">
-                {post.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="px-2 py-1 text-xs bg-[#2A2B33] text-gray-300 rounded-full"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {/* Lock Like Button */}
-            <LockLikeInteraction
-              post={post}
-              onLockLike={(amount, duration) => handleLockLike(post, amount, duration)}
-              wallet={wallet}
-            />
-          </div>
-        </div>
-      ))}
-
-      {/* Image Modal */}
-      {expandedImage && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50"
-          onClick={() => setExpandedImage(null)}
-        >
-          <img
-            src={expandedImage}
-            alt="Expanded view"
-            className="max-w-[90vw] max-h-[90vh] object-contain"
-          />
         </div>
       )}
     </div>
