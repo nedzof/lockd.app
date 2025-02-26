@@ -26,14 +26,20 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
   const [isLocking, setIsLocking] = useState<Record<string, boolean>>({});
   const { address, connected, balance, refreshBalance } = useWallet();
 
+  console.log('VoteOptionsDisplay rendering for txid:', transaction.txid);
+
   useEffect(() => {
+    console.log('VoteOptionsDisplay useEffect running for txid:', transaction.txid);
+    
     const fetchVoteOptions = async () => {
       try {
+        console.log('Fetching vote options for txid:', transaction.txid);
         const response = await fetch(`${API_URL}/api/votes/${transaction.txid}/options`);
         if (!response.ok) {
           throw new Error('Failed to fetch vote options');
         }
         const data = await response.json();
+        console.log('Vote options received:', data);
         setVoteOptions(data);
       } catch (error) {
         console.error('Error fetching vote options:', error);
@@ -49,6 +55,8 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
   }, [transaction.txid]);
 
   const handleLock = async (optionId: string, amount: number) => {
+    console.log('Lock button clicked for option:', optionId, 'amount:', amount);
+    
     if (!connected) {
       toast.error('Please connect your wallet first');
       return;
@@ -67,6 +75,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
     setIsLocking(prev => ({ ...prev, [optionId]: true }));
 
     try {
+      console.log('Sending lock request to API for option:', optionId);
       const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
         method: 'POST',
         headers: {
@@ -106,52 +115,57 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
   };
 
   if (loading) {
+    console.log('VoteOptionsDisplay is loading...');
     return <div className="mt-4 p-4 text-gray-300">Loading vote options...</div>;
   }
 
   if (voteOptions.length === 0) {
+    console.log('No vote options found');
     return null;
   }
 
   // Calculate total locked amount across all options
   const totalLockedAmount = voteOptions.reduce((sum, option) => sum + (option.total_locked || 0), 0);
+  console.log('Total locked amount:', totalLockedAmount);
 
   return (
     <div className="mt-4 space-y-4">
       {/* Display total locked amount */}
-      <div className="text-right text-sm font-medium text-gray-400">
+      <div className="text-right text-base font-medium text-green-500 mb-4">
         {formatBSV(totalLockedAmount)} BSV locked
       </div>
       
       <div className="space-y-4">
-        {voteOptions.map((option) => (
-          <div key={option.id} className="border-b border-gray-700/20 p-3 mb-2">
-            <div className="flex justify-between items-center mb-2">
-              <div className="font-medium text-white">{option.content}</div>
-              <div className="text-sm text-right">{formatBSV(option.total_locked || 0)} BSV</div>
-            </div>
-            
-            {/* Progress bar */}
-            <div className="w-full bg-gray-800 rounded-full h-2.5 mb-3">
+        {voteOptions.map((option) => {
+          console.log('Rendering option:', option.content, 'with locked amount:', option.total_locked);
+          // Calculate percentage for this option
+          const totalLockedForAll = voteOptions.reduce((sum, opt) => sum + (opt.total_locked || 0), 0);
+          const percentage = totalLockedForAll > 0 ? ((option.total_locked || 0) / totalLockedForAll) * 100 : 0;
+          
+          return (
+            <div key={option.id} className="relative border-b border-gray-700/20 p-3 mb-2 overflow-hidden">
+              {/* Background progress bar */}
               <div 
-                className="bg-[#00E6CC] h-2.5 rounded-full" 
-                style={{ width: option.total_locked > 0 ? '100%' : '0%' }}
-              ></div>
-            </div>
-            
-            {connected && (
-              <div className="flex items-center justify-end mt-2">
-                <button
-                  onClick={() => handleLock(option.id, 0.00001)}
-                  disabled={isLocking[option.id]}
-                  className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-gray-800 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-                >
-                  {isLocking[option.id] ? 'Locking...' : 'Lock BSV'}
-                </button>
+                className="absolute inset-0 bg-[#00E6CC]/10 z-0" 
+                style={{ width: `${percentage}%` }}
+              />
+              
+              <div className="flex items-center justify-between relative z-10">
+                <div className="font-medium text-white flex-grow">{option.content}</div>
+                
+                {connected && (
+                  <button
+                    onClick={() => handleLock(option.id, 0.00001)}
+                    disabled={isLocking[option.id]}
+                    className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-gray-800 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                  >
+                    {isLocking[option.id] ? 'Locking...' : 'Lock BSV'}
+                  </button>
+                )}
               </div>
-            )}
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

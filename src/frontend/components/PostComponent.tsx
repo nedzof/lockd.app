@@ -1,20 +1,10 @@
 import * as React from 'react';
-import { Link } from 'react-router-dom';
 import { AiOutlineBlock } from 'react-icons/ai';
-import { HODLTransaction, LockLike } from '../types';
-import LockLikeDrawer from './LockLikeDrawer';
+import { HODLTransaction } from '../types';
 import PostContent from './PostContent';
 
 interface PostProps {
   transaction: HODLTransaction;
-  postLockLike: (
-    txid: string,
-    amount: number,
-    nLockTime: number,
-    handle: string,
-    postTxid?: string,
-    replyTxid?: string
-  ) => Promise<LockLike>;
   postTxid?: string;
 }
 
@@ -35,7 +25,13 @@ const timeSincePost = (transaction: HODLTransaction) => {
   return `${Math.floor(months / 12)}y`;
 };
 
-export default function PostComponent({ transaction, postLockLike, postTxid }: PostProps) {
+export default function PostComponent({ transaction, postTxid }: PostProps) {
+  React.useEffect(() => {
+    console.log('PostComponent rendered with txid:', transaction.txid);
+    console.log('Transaction type:', transaction.content_type);
+    console.log('Full transaction object:', transaction);
+  }, [transaction]);
+
   return (
     <div className="bg-white dark:bg-black rounded-sm flex flex-col relative">
       <div className="p-4">
@@ -63,12 +59,6 @@ export default function PostComponent({ transaction, postLockLike, postTxid }: P
 
         <div className="mt-4">
           <PostContent transaction={transaction} />
-        </div>
-
-        <div className="mt-4 flex items-center space-x-4">
-          <div className="flex items-center">
-            <LockLikeDrawer transaction={transaction} />
-          </div>
         </div>
       </div>
     </div>

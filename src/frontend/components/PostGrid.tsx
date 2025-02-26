@@ -3,9 +3,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2, FiExternalLink } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
-import type { Post, LockLike } from '../types';
+import type { Post } from '../types';
 import { toast } from 'react-hot-toast';
-import LockLikeInteraction from './LockLikeInteraction';
 import VoteOptionLockInteraction from './VoteOptionLockInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
 
@@ -19,16 +18,6 @@ interface VoteOption {
   lock_duration: number;
   unlock_height?: number;
   tags: string[];
-}
-
-interface LockLike {
-  id: string;
-  txid: string;
-  author_address?: string;
-  amount: number;
-  lock_duration: number;
-  unlock_height?: number;
-  created_at: string;
 }
 
 interface ExtendedPost {
@@ -48,7 +37,6 @@ interface ExtendedPost {
   lock_duration?: number;
   is_vote: boolean;
   vote_options: VoteOption[];
-  lock_likes: LockLike[];
   imageUrl?: string;
   totalLocked?: number;
   media_url?: string;
@@ -148,7 +136,9 @@ const PostGrid: React.FC<PostGridProps> = ({
         }
 
         // Calculate total locked amount
-        const totalLocked = post.lock_likes?.reduce((sum, lock) => sum + (lock.amount || 0), 0) || 0;
+        const totalLocked = post.is_vote 
+          ? post.vote_options?.reduce((sum, option) => sum + (option.lock_amount || 0), 0) || 0
+          : 0;
 
         return {
           ...post,
@@ -186,38 +176,6 @@ const PostGrid: React.FC<PostGridProps> = ({
       });
     };
   }, [submissions]);
-
-  const handleLockLike = async (post: ExtendedPost, amount: number, duration: number) => {
-    if (!wallet.connected) {
-      toast.error('Please connect your wallet first');
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API_URL}/api/lock-likes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          post_id: post.id,
-          author_address: wallet.bsvAddress,
-          amount,
-          lock_duration: duration
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to create lock like');
-      }
-
-      toast.success('Lock like created successfully!');
-      fetchPosts(); // Refresh posts to show updated lock amount
-    } catch (error) {
-      console.error('Error creating lock like:', error);
-      toast.error('Failed to create lock like');
-    }
-  };
 
   const handleVoteOptionLock = async (optionId: string, amount: number, duration: number) => {
     if (!wallet.connected) {
@@ -330,7 +288,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                 <div className="flex flex-col space-y-2 mb-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-gray-400 font-mono">
-                      {post.author_address?.slice(0, 8)}...{post.author_address?.slice(-8)}
+                      {/* Author address removed */}
                     </span>
                     <a
                       href={`https://whatsonchain.com/tx/${post.txid}`}
@@ -346,18 +304,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                 <p className="text-white mb-4 font-light">{post.content}</p>
                 
                 {/* Total Locked Display */}
-                <div className="flex justify-between items-center mb-4">
-                  <button
-                    onClick={() => handleLockLike(post, 1, 1)}
-                    disabled={!wallet.connected}
-                    className={`text-xs border rounded-md px-3 py-1 transition-all flex items-center ${
-                      wallet.connected 
-                        ? 'text-[#00ffa3] border-[#00ffa3] hover:bg-[#00ffa320]' 
-                        : 'text-gray-500 border-gray-500 cursor-not-allowed'
-                    }`}
-                  >
-                    <FiLock className="mr-1 w-3 h-3" /> Lock BSV
-                  </button>
+                <div className="flex justify-end items-center mb-4">
                   <span className="text-sm font-medium text-[#00ffa3]">
                     {formatBSV(post.totalLocked || 0)} BSV locked
                   </span>
@@ -373,33 +320,30 @@ const PostGrid: React.FC<PostGridProps> = ({
                       return (
                         <div 
                           key={option.id} 
-                          className="relative border-b border-gray-700/20 p-3 mb-2 transition-all duration-200"
+                          className="relative border-b border-gray-700/20 p-3 mb-2 transition-all duration-200 overflow-hidden"
                         >
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="text-white font-light">{option.content}</span>
-                            <span className="text-sm text-[#00ffa3]">{formatBSV(option.lock_amount || 0)} BSV</span>
-                          </div>
+                          {/* Background progress bar */}
+                          <div 
+                            className="absolute inset-0 bg-[#00ffa3]/10 z-0" 
+                            style={{ width: `${percentage}%` }}
+                          />
                           
-                          {/* Progress bar */}
-                          <div className="w-full h-1 bg-gray-800/30 rounded-full mt-2 overflow-hidden">
-                            <div 
-                              className="h-full bg-[#00ffa3]" 
-                              style={{ width: `${percentage}%` }}
-                            />
+                          <div className="flex items-center justify-between relative z-10">
+                            <span className="text-white font-light flex-grow">{option.content}</span>
+                            
+                            {/* Lock BSV button */}
+                            <button
+                              onClick={() => handleVoteOptionLock(option.id, 1, 1)}
+                              disabled={!wallet.connected}
+                              className={`text-xs border rounded-md px-3 py-1 transition-all flex items-center ${
+                                wallet.connected 
+                                  ? 'text-[#00ffa3] border-[#00ffa3] hover:bg-[#00ffa320]' 
+                                  : 'text-gray-500 border-gray-500 cursor-not-allowed'
+                              }`}
+                            >
+                              <FiLock className="mr-1 w-3 h-3" /> Lock BSV
+                            </button>
                           </div>
-                          
-                          {/* Lock BSV button */}
-                          <button
-                            onClick={() => handleVoteOptionLock(option.id, 1, 1)}
-                            disabled={!wallet.connected}
-                            className={`mt-2 text-xs border rounded-md px-3 py-1 transition-all flex items-center ${
-                              wallet.connected 
-                                ? 'text-[#00ffa3] border-[#00ffa3] hover:bg-[#00ffa320]' 
-                                : 'text-gray-500 border-gray-500 cursor-not-allowed'
-                            }`}
-                          >
-                            <FiLock className="mr-1 w-3 h-3" /> Lock BSV
-                          </button>
                         </div>
                       );
                     })}
