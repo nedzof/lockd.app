@@ -207,20 +207,20 @@ const Stats: React.FC = () => {
       result.sort((a, b) => {
         const hourA = a.name.split(':')[0];
         const hourB = b.name.split(':')[0];
-        return parseInt(hourB) - parseInt(hourA);
+        return parseInt(hourA) - parseInt(hourB); // Normal order (oldest to newest)
       });
     } else if (timeRange === 'week' || timeRange === 'month') {
       // For week and month, sort by day
       result.sort((a, b) => {
         const dayA = parseInt(a.name.split(' ')[0]);
         const dayB = parseInt(b.name.split(' ')[0]);
-        return dayB - dayA;
+        return dayA - dayB; // Normal order (oldest to newest)
       });
     } else {
       // For all time, sort by month
       const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       result.sort((a, b) => {
-        return monthOrder.indexOf(b.name) - monthOrder.indexOf(a.name);
+        return monthOrder.indexOf(a.name) - monthOrder.indexOf(b.name); // Normal order (oldest to newest)
       });
     }
     
@@ -418,6 +418,7 @@ const Stats: React.FC = () => {
                       tick={{ fill: '#ccc' }} 
                       tickLine={{ stroke: '#666' }}
                       axisLine={{ stroke: '#666' }}
+                      reversed={true} // Reverse the X-axis direction
                     />
                     <YAxis 
                       yAxisId="left" 
