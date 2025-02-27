@@ -620,12 +620,19 @@ export class DbClient {
                     imageBuffer = params.imageData;
                 }
 
-                // No need to convert Buffer to string since raw_image_data is now Bytes type
-                await client.post.update({
+                // Use upsert instead of update to handle cases where the post doesn't exist yet
+                await client.post.upsert({
                     where: { txid: params.txid },
-                    data: {
+                    update: {
                         raw_image_data: imageBuffer,
                         media_type: params.contentType
+                    },
+                    create: {
+                        txid: params.txid,
+                        content: '',  // Required field, can be updated later
+                        raw_image_data: imageBuffer,
+                        media_type: params.contentType,
+                        created_at: new Date()
                     }
                 });
 

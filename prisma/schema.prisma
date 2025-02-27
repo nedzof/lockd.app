@@ -22,11 +22,13 @@ model Post {
   raw_image_data Bytes?
   lock_likes     LockLike[]
   vote_options   VoteOption[]
+  block_height   Int?
 
   @@index([txid])
   @@index([author_address])
   @@index([created_at])
   @@index([tags])
+  @@index([block_height])
 }
 
 model VoteOption {
