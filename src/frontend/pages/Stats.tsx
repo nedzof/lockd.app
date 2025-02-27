@@ -51,6 +51,26 @@ const Stats: React.FC = () => {
         const data = await response.json();
         console.log('Stats data received:', data);
         
+        // Fetch BSV price history
+        try {
+          const priceResponse = await fetch(`${API_URL}/api/bsv-price/history?period=${timeRange}`);
+          if (priceResponse.ok) {
+            const priceData = await priceResponse.json();
+            console.log('Price history data:', priceData);
+            
+            // Transform the price data to match our format
+            const formattedPriceData = priceData.map((item: any) => ({
+              name: new Date(item.date).toLocaleString('default', { month: 'short' }),
+              price: item.price
+            }));
+            
+            // Add the price data to our stats object
+            data.priceData = formattedPriceData;
+          }
+        } catch (priceError) {
+          console.error('Error fetching price history:', priceError);
+        }
+        
         setStats(data);
         
         // Combine all data into one dataset
@@ -157,7 +177,9 @@ const Stats: React.FC = () => {
         // Generate some random but increasing values
         const lockValue = 100 + Math.floor(Math.random() * 150) + (i * 20);
         const bsvValue = 0.000005 + (Math.random() * 0.000008) + (i * 0.000001);
-        const priceValue = 100 + (Math.random() * 50) + (i * 10);
+        
+        // More realistic BSV price data (around $35-45)
+        const priceValue = 35 + (Math.random() * 10);
         
         sampleData.push({
           name: monthName,
@@ -280,6 +302,7 @@ const Stats: React.FC = () => {
                       stroke="#FF69B4"
                       tick={{ fontSize: 12 }}
                       tickFormatter={(value) => `$${value}`}
+                      domain={[30, 'auto']}
                       width={40}
                     />
                     <Tooltip 
