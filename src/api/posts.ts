@@ -95,8 +95,16 @@ const listPosts: PostListHandler = async (req, res, next) => {
     const parsedLimit = Math.min(parseInt(limit as string, 10), 50);
     const parsedExcludeVotes = excludeVotes === 'true';
     
+    logger.debug('Fetching posts with params', {
+      cursor,
+      limit: parsedLimit,
+      tags,
+      excludeVotes: parsedExcludeVotes
+    });
+    
+    // First fetch one more item than requested to determine if there are more items
     const posts = await prisma.post.findMany({
-      take: parsedLimit,
+      take: parsedLimit + 1, // Take one extra to check if there are more
       ...(cursor ? { 
         cursor: { 
           id: cursor as string 
@@ -127,8 +135,19 @@ const listPosts: PostListHandler = async (req, res, next) => {
       }
     });
 
+    logger.debug('Found posts', {
+      count: posts.length,
+      requestedLimit: parsedLimit
+    });
+
+    // Check if there are more items
+    const hasMore = posts.length > parsedLimit;
+    
+    // Remove the extra item if we fetched more than requested
+    const postsToReturn = hasMore ? posts.slice(0, parsedLimit) : posts;
+
     // Process posts to handle raw_image_data
-    const processedPosts = posts.map(post => {
+    const processedPosts = postsToReturn.map(post => {
       // Process raw_image_data to ensure it's in the correct format for the frontend
       if (post.raw_image_data) {
         try {
@@ -148,12 +167,19 @@ const listPosts: PostListHandler = async (req, res, next) => {
       return post;
     });
 
-    const lastPost = processedPosts[processedPosts.length - 1];
-    const nextCursor = lastPost?.id;
+    const lastPost = postsToReturn[postsToReturn.length - 1];
+    const nextCursor = hasMore ? lastPost?.id : null;
+
+    logger.debug('Returning posts with pagination info', {
+      postsCount: processedPosts.length,
+      nextCursor,
+      hasMore
+    });
 
     return res.status(200).json({
       posts: processedPosts,
-      nextCursor
+      nextCursor,
+      hasMore
     });
   } catch (error: any) {
     logger.error('Error fetching posts', {

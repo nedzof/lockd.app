@@ -37,13 +37,24 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
     
     const fetchVoteOptions = async () => {
       try {
-        console.log('Fetching vote options for txid:', transaction.txid);
+        console.log(`[Frontend] Fetching vote options for txid: ${transaction.txid}`);
+        console.log(`[Frontend] API URL: ${API_URL}/api/votes/${transaction.txid}/options`);
+        
         const response = await fetch(`${API_URL}/api/votes/${transaction.txid}/options`);
+        console.log(`[Frontend] Response status:`, response.status);
+        
         if (!response.ok) {
+          console.log(`[Frontend] Response not OK:`, response.statusText);
           throw new Error('Failed to fetch vote options');
         }
+        
         const data = await response.json();
-        console.log('Vote options received:', data);
+        console.log('[Frontend] Vote options received:', JSON.stringify(data, null, 2));
+        
+        if (data.length === 0) {
+          console.log('[Frontend] No vote options found in response');
+        }
+        
         setVoteOptions(data);
         
         // Calculate and notify parent of total locked amount
@@ -171,6 +182,11 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
 
   return (
     <div className="mt-4 space-y-4">
+      {/* Display the vote question/content */}
+      <div className="text-lg font-semibold text-white mb-4">
+        {transaction.content || (transaction.metadata?.voteQuestion) || 'Vote Post'}
+      </div>
+      
       <div className="space-y-4">
         {voteOptions.map((option) => {
           console.log('Rendering option:', option.content, 'with locked amount:', option.total_locked);

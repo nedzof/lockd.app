@@ -129,7 +129,7 @@ export class DbClient {
             metadata: tx.metadata || {},
             is_locked: tx.type === 'lock',
             lock_duration: tx.metadata.lockDuration || null,
-            is_vote: tx.type === 'vote' || !!tx.metadata.voteOptions
+            is_vote: tx.type === 'vote' || !!tx.metadata.voteOptions || tx.metadata.content_type === 'vote'
         };
 
         return this.withFreshClient(async (client) => {
@@ -221,14 +221,48 @@ export class DbClient {
                 }
             }
 
+            // Ensure vote posts have content_type set
+            if (tx.type === 'vote' && !tx.metadata.content_type) {
+                tx.metadata.content_type = 'vote';
+                logger.debug('Set content_type for vote post', { txid: tx.txid });
+            }
+
             const post = await this.upsertPost(tx, imageBuffer);
+
+            // For vote posts, ensure they have vote options
+            if ((tx.type === 'vote' || post.is_vote) && (!tx.metadata.voteOptions || !Array.isArray(tx.metadata.voteOptions) || tx.metadata.voteOptions.length === 0)) {
+                logger.info('Creating default vote options for vote post', { postId: post.id, txid: tx.txid });
+                
+                // Create default vote options
+                const defaultOptions = ['Yes', 'No', 'Maybe'];
+                tx.metadata.voteOptions = defaultOptions;
+                
+                // Process the default vote options
+                await this.processVoteOptions(post.id, tx);
+                
+                // Update the post metadata to include vote options
+                await this.withFreshClient(async (client) => {
+                    await client.post.update({
+                        where: { id: post.id },
+                        data: {
+                            metadata: {
+                                ...post.metadata,
+                                voteOptions: defaultOptions,
+                                content_type: 'vote'
+                            }
+                        }
+                    });
+                });
+            }
 
             const action = post.created_at === this.createBlockTimeDate(tx.blockTime) ? 'created' : 'updated';
             logger.info(`✅ Post ${action} successfully`, {
                 txid: post.txid,
                 hasImage: !!imageBuffer,
                 imageSize: imageBuffer?.length,
-                tags: post.tags
+                tags: post.tags,
+                isVote: post.is_vote,
+                contentType: tx.metadata.content_type
             });
 
             return post;

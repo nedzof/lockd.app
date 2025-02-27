@@ -94,6 +94,29 @@ router.get('/:txid/options', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Post not found' });
     }
 
+    // Check if this is a vote post
+    if (!post.is_vote && (!post.metadata || post.metadata.content_type !== 'vote')) {
+      console.log(`[API] Post ${txid} is not a vote post. is_vote=${post.is_vote}, metadata=${JSON.stringify(post.metadata)}`);
+      
+      // If it's not marked as a vote post but should be, update it
+      if (post.metadata && (post.metadata.voteOptions || post.metadata.content_type === 'vote' || post.metadata.isVote)) {
+        console.log(`[API] Updating post ${txid} to mark it as a vote post`);
+        await prisma.post.update({
+          where: { id: post.id },
+          data: { 
+            is_vote: true,
+            metadata: {
+              ...post.metadata,
+              content_type: 'vote',
+              isVote: true
+            }
+          }
+        });
+      } else {
+        return res.status(404).json({ error: 'Not a vote post' });
+      }
+    }
+
     // Get the vote options with their total locked amounts
     const voteOptions = await prisma.voteOption.findMany({
       where: {
@@ -105,6 +128,58 @@ router.get('/:txid/options', async (req: Request, res: Response) => {
     });
 
     console.log(`[API] Vote options found for post ${post.id}:`, voteOptions);
+
+    // If no vote options found, create default ones
+    if (voteOptions.length === 0) {
+      console.log(`[API] No vote options found for post ${post.id}, creating default options`);
+      
+      const defaultOptions = ['Yes', 'No', 'Maybe'];
+      const createdOptions = [];
+      
+      for (let i = 0; i < defaultOptions.length; i++) {
+        const optionTxid = `${post.txid}-option-${i}`;
+        const newOption = await prisma.voteOption.create({
+          data: {
+            txid: optionTxid,
+            content: defaultOptions[i],
+            post_id: post.id,
+            author_address: post.author_address || '',
+            lock_duration: 1000,
+            created_at: new Date()
+          },
+          include: {
+            lock_likes: true
+          }
+        });
+        createdOptions.push(newOption);
+      }
+      
+      // Calculate total locked amount for each option
+      const voteOptionsWithTotals = createdOptions.map(option => {
+        return {
+          ...option,
+          total_locked: 0,
+          lock_likes: undefined // Don't expose the individual lock likes
+        };
+      });
+      
+      console.log(`[API] Created default vote options for post ${post.id}:`, voteOptionsWithTotals);
+      
+      // Update the post to ensure it's marked as a vote post
+      await prisma.post.update({
+        where: { id: post.id },
+        data: { 
+          is_vote: true,
+          metadata: {
+            ...post.metadata,
+            content_type: 'vote',
+            isVote: true
+          }
+        }
+      });
+      
+      return res.json(voteOptionsWithTotals);
+    }
 
     // Calculate total locked amount for each option
     const voteOptionsWithTotals = voteOptions.map(option => {

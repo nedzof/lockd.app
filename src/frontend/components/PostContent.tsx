@@ -12,10 +12,24 @@ const PostContent: React.FC<PostContentProps> = ({ transaction, onTotalLockedAmo
     console.log('PostContent rendered with txid:', transaction.txid);
     console.log('Content type:', transaction.content_type);
     console.log('Is vote:', transaction.is_vote);
+    console.log('Metadata:', transaction.metadata);
+    
+    // Check if this is a vote post based on multiple criteria
+    const isVotePost = transaction.is_vote || 
+                      transaction.content_type === 'vote' || 
+                      (transaction.metadata && 
+                        (transaction.metadata.content_type === 'vote' || 
+                         transaction.metadata.isVote));
+    
+    console.log('Is vote post (calculated):', isVotePost);
   }, [transaction]);
 
   // Handle vote type posts
-  if (transaction.content_type === 'vote' || transaction.is_vote) {
+  if (transaction.content_type === 'vote' || 
+      transaction.is_vote || 
+      (transaction.metadata && 
+        (transaction.metadata.content_type === 'vote' || 
+         transaction.metadata.isVote))) {
     console.log('Rendering VoteOptionsDisplay for vote post');
     return <VoteOptionsDisplay 
       transaction={transaction} 

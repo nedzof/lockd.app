@@ -40,6 +40,15 @@ export default function PostComponent({ transaction, postTxid }: PostProps) {
     console.log('Transaction metadata:', transaction.metadata);
     console.log('Full transaction object:', JSON.stringify(transaction, null, 2));
     console.log('Total locked amount:', totalLockedAmount);
+    
+    // Check if this is a vote post based on multiple criteria
+    const isVotePost = transaction.is_vote || 
+                      transaction.content_type === 'vote' || 
+                      (transaction.metadata && 
+                        (transaction.metadata.content_type === 'vote' || 
+                         transaction.metadata.isVote));
+    
+    console.log('Is vote post (calculated):', isVotePost);
     console.log('======================================');
     
     // Log the DOM structure after render
@@ -75,7 +84,8 @@ export default function PostComponent({ transaction, postTxid }: PostProps) {
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center">
             <div className="text-base font-medium text-gray-900 dark:text-white">
-              {(transaction.content_type === 'vote' || transaction.is_vote) ? 'Test vote post' : transaction.content}
+              {/* Don't display content in title for vote posts - it will be shown in the vote component */}
+              {(transaction.content_type === 'vote' || transaction.is_vote) ? 'Vote Post' : transaction.content}
             </div>
             <span className="mx-2 text-gray-500 dark:text-gray-400">·</span>
             <span className="text-sm text-gray-500 dark:text-gray-400">

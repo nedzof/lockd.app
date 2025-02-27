@@ -20,12 +20,12 @@ model Post {
   tags           String[]     @default([])
   media_url      String?
   raw_image_data Bytes?
-  lock_likes     LockLike[]
-  vote_options   VoteOption[]
   block_height   Int?
   metadata       Json?
   is_locked      Boolean      @default(false)
   lock_duration  Int?
+  lock_likes     LockLike[]
+  vote_options   VoteOption[]
 
   @@index([txid])
   @@index([author_address])

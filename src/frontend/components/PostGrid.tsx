@@ -69,12 +69,21 @@ const PostGrid: React.FC<PostGridProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const [isLocking, setIsLocking] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
   const imageRefs = useRef<{ [key: string]: HTMLImageElement }>({});
   const wallet = useYoursWallet();
 
-  const fetchPosts = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const fetchPosts = useCallback(async (reset = true) => {
+    if (reset) {
+      setIsLoading(true);
+      setError(null);
+      setNextCursor(null); // Reset cursor when fetching from the beginning
+    } else {
+      setIsFetchingMore(true);
+    }
+    
     try {
       const queryParams = new URLSearchParams();
       
@@ -101,6 +110,13 @@ const PostGrid: React.FC<PostGridProps> = ({
       if (blockFilter) queryParams.append('blockFilter', blockFilter);
       if (selectedTags && selectedTags.length > 0) queryParams.append('selectedTags', JSON.stringify(selectedTags));
       if (userId) queryParams.append('userId', userId);
+      
+      // Add pagination parameters
+      queryParams.append('limit', '10'); // Fetch 10 posts at a time
+      if (!reset && nextCursor) {
+        queryParams.append('cursor', nextCursor);
+        console.log('Adding cursor to request:', nextCursor);
+      }
 
       console.log('Fetching posts with params:', queryParams.toString());
       const response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`);
@@ -108,6 +124,8 @@ const PostGrid: React.FC<PostGridProps> = ({
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
+      
+      console.log('API response:', data);
       
       // Process posts and their images
       const processedPosts = await Promise.all(data.posts.map(async (post: ExtendedPost) => {
@@ -160,26 +178,60 @@ const PostGrid: React.FC<PostGridProps> = ({
         };
       }));
 
-      setSubmissions(processedPosts);
+      if (reset) {
+        setSubmissions(processedPosts);
+      } else {
+        setSubmissions(prev => [...prev, ...processedPosts]);
+      }
       
       // Update stats
       if (data.stats) {
         onStatsUpdate(data.stats);
       }
 
-      setIsLoading(false);
+      // Update pagination state
+      setNextCursor(data.nextCursor);
+      setHasMore(data.hasMore);
+      
+      console.log('Updated submissions:', {
+        count: processedPosts.length,
+        totalCount: reset ? processedPosts.length : submissions.length + processedPosts.length,
+        nextCursor: data.nextCursor,
+        hasMore: data.hasMore
+      });
     } catch (err) {
       console.error('Error fetching posts:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch posts');
-      setIsLoading(false);
+      setError('Failed to fetch posts. Please try again later.');
+    } finally {
+      if (reset) {
+        setIsLoading(false);
+      } else {
+        setIsFetchingMore(false);
+      }
     }
   }, [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, userId, onStatsUpdate]);
 
+  const handleLoadMore = useCallback(() => {
+    console.log('Load more clicked, current cursor:', nextCursor);
+    if (!isFetchingMore && hasMore) {
+      fetchPosts(false);
+    }
+  }, [fetchPosts, isFetchingMore, hasMore, nextCursor]);
+
   useEffect(() => {
-    fetchPosts();
+    console.log('PostGrid component mounted or dependencies changed');
+    fetchPosts(true);
   }, [fetchPosts]);
 
-  // Cleanup image URLs when component unmounts
+  useEffect(() => {
+    console.log('Pagination state updated:', {
+      nextCursor,
+      hasMore,
+      submissionsCount: submissions.length,
+      isFetchingMore
+    });
+  }, [nextCursor, hasMore, submissions.length, isFetchingMore]);
+
   useEffect(() => {
     return () => {
       submissions.forEach(post => {
@@ -365,6 +417,20 @@ const PostGrid: React.FC<PostGridProps> = ({
               </div>
             </div>
           ))}
+
+          {/* Load more button */}
+          {hasMore && (
+            <button 
+              onClick={handleLoadMore}
+              className="w-full mt-6 px-4 py-2 text-[#00ffa3] border border-[#00ffa3] rounded-lg hover:bg-[#00ffa3] hover:text-black transition-all duration-300 flex items-center justify-center"
+            >
+              {isFetchingMore ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-[#00ffa3]"></div>
+              ) : (
+                'Load More Posts'
+              )}
+            </button>
+          )}
 
           {/* Image Modal */}
           {expandedImage && (

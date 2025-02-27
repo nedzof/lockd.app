@@ -23,20 +23,26 @@ export function extractVoteData(tx: JungleBusResponse): {
     question?: string, 
     options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
     totalOptions?: number,
-    optionsHash?: string 
+    optionsHash?: string,
+    content_type?: string 
 } {
     const voteData: { 
         question?: string, 
         options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
         totalOptions?: number,
-        optionsHash?: string 
+        optionsHash?: string,
+        content_type?: string 
     } = {};
     
     // Check if this is a vote transaction
     const isVoteQuestion = tx.data.some(d => d.startsWith('type=vote_question'));
     const isVoteOption = tx.data.some(d => d.startsWith('type=vote_option'));
+    const isVoteType = tx.data.some(d => d.startsWith('content_type=vote'));
     
-    if (isVoteQuestion || isVoteOption) {
+    if (isVoteQuestion || isVoteOption || isVoteType) {
+        // Set content_type for vote posts
+        voteData.content_type = 'vote';
+        
         // Extract vote question
         const questionContent = tx.data.find(d => d.startsWith('content='))?.split('=')[1];
         if (questionContent) {
@@ -441,7 +447,8 @@ export class TransactionParser {
                 voteQuestion: null,
                 image: null,
                 imageMetadata: null,
-                optionsHash: null
+                optionsHash: null,
+                content_type: null
             };
 
             // Try to extract image from BSV transaction
@@ -458,10 +465,12 @@ export class TransactionParser {
             // Check if this is a vote transaction
             const isVoteQuestion = data.some(item => item.startsWith('type=vote_question'));
             const isVoteOption = data.some(item => item.startsWith('type=vote_option'));
+            const isVoteType = data.some(item => item.startsWith('content_type=vote'));
             
             // If this is a vote transaction, set the type accordingly
-            if (isVoteQuestion || isVoteOption) {
+            if (isVoteQuestion || isVoteOption || isVoteType) {
                 metadata.isVote = true;
+                metadata.content_type = 'vote';
             }
 
             // Process each data item
@@ -492,6 +501,18 @@ export class TransactionParser {
                         break;
                     case 'optionshash':
                         metadata.optionsHash = value;
+                        break;
+                    case 'content_type':
+                        metadata.content_type = value;
+                        if (value === 'vote') {
+                            metadata.isVote = true;
+                        }
+                        break;
+                    case 'type':
+                        if (value === 'vote' || value === 'vote_question' || value === 'vote_option') {
+                            metadata.isVote = true;
+                            metadata.content_type = 'vote';
+                        }
                         break;
                     // Image related fields
                     case 'contenttype':
@@ -661,12 +682,26 @@ export class TransactionParser {
 
             // Determine transaction type
             let txType = 'lock';
-            if (parsedTx.isVote || (parsedTx.voteOptions && parsedTx.voteOptions.length > 0)) {
+            if (parsedTx.isVote || (parsedTx.voteOptions && parsedTx.voteOptions.length > 0) || parsedTx.content_type === 'vote') {
                 txType = 'vote';
                 logger.debug('Processing vote transaction', {
                     txid,
-                    voteOptions: parsedTx.voteOptions
+                    voteOptions: parsedTx.voteOptions,
+                    isVote: parsedTx.isVote,
+                    contentType: parsedTx.content_type
                 });
+                
+                // Ensure we have vote options
+                if (!parsedTx.voteOptions || parsedTx.voteOptions.length === 0) {
+                    // Create default vote options if none exist
+                    logger.info('Creating default vote options for vote post', { txid });
+                    parsedTx.voteOptions = ['Yes', 'No', 'Maybe'];
+                }
+            }
+
+            // Ensure content_type is set for vote posts
+            if (txType === 'vote' && !parsedTx.content_type) {
+                parsedTx.content_type = 'vote';
             }
 
             await this.dbClient.processTransaction({
@@ -684,7 +719,8 @@ export class TransactionParser {
                 txid,
                 blockHeight: tx.block_height,
                 type: txType,
-                hasVoteOptions: parsedTx.voteOptions && parsedTx.voteOptions.length > 0
+                hasVoteOptions: parsedTx.voteOptions && parsedTx.voteOptions.length > 0,
+                contentType: parsedTx.content_type
             });
         } catch (error) {
             logger.error('❌ Failed to parse transaction', {
