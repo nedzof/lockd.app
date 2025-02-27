@@ -111,8 +111,8 @@ const Stats: React.FC = () => {
   // Combine all datasets into one for the chart
   const combineDatasets = (data: any) => {
     console.log('Combining datasets from:', data);
-    if (!data || !data.lockTimeData || !data.bsvLockedOverTime) {
-      console.log('Missing required data for chart');
+    if (!data) {
+      console.log('Missing data for chart');
       return [];
     }
     
@@ -122,7 +122,9 @@ const Stats: React.FC = () => {
     // Process lock data
     if (data.lockTimeData && Array.isArray(data.lockTimeData)) {
       data.lockTimeData.forEach((item: any) => {
-        const date = new Date(item.name);
+        if (!item || !item.date) return;
+        
+        const date = new Date(item.date);
         let key = '';
         
         // Format the key based on the time range
@@ -141,14 +143,16 @@ const Stats: React.FC = () => {
         }
         
         const entry = combinedMap.get(key);
-        entry.locks = item.locks;
+        entry.locks = item.count || 0;
       });
     }
     
     // Process BSV data
     if (data.bsvLockedOverTime && Array.isArray(data.bsvLockedOverTime)) {
       data.bsvLockedOverTime.forEach((item: any) => {
-        const date = new Date(item.name);
+        if (!item || !item.date) return;
+        
+        const date = new Date(item.date);
         let key = '';
         
         // Format the key based on the time range
@@ -167,13 +171,15 @@ const Stats: React.FC = () => {
         }
         
         const entry = combinedMap.get(key);
-        entry.bsv = item.bsv;
+        entry.bsv = item.amount || 0;
       });
     }
     
     // Process price data
     if (data.priceData && Array.isArray(data.priceData)) {
       data.priceData.forEach((item: any) => {
+        if (!item || !item.name) return;
+        
         const key = item.name;
         
         if (!combinedMap.has(key)) {
@@ -181,12 +187,19 @@ const Stats: React.FC = () => {
         }
         
         const entry = combinedMap.get(key);
-        entry.price = item.price;
+        entry.price = item.price || 0;
       });
     }
     
     // Convert map to array and sort by date
     const result = Array.from(combinedMap.values());
+    
+    // Make sure all entries have all three values (locks, bsv, price)
+    result.forEach(entry => {
+      if (!entry.locks) entry.locks = 0;
+      if (!entry.bsv) entry.bsv = 0;
+      if (!entry.price) entry.price = 0;
+    });
     
     // Sort the data based on the time range
     if (timeRange === 'day') {
@@ -194,20 +207,20 @@ const Stats: React.FC = () => {
       result.sort((a, b) => {
         const hourA = a.name.split(':')[0];
         const hourB = b.name.split(':')[0];
-        return parseInt(hourA) - parseInt(hourB);
+        return parseInt(hourB) - parseInt(hourA);
       });
     } else if (timeRange === 'week' || timeRange === 'month') {
       // For week and month, sort by day
       result.sort((a, b) => {
         const dayA = parseInt(a.name.split(' ')[0]);
         const dayB = parseInt(b.name.split(' ')[0]);
-        return dayA - dayB;
+        return dayB - dayA;
       });
     } else {
       // For all time, sort by month
       const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       result.sort((a, b) => {
-        return monthOrder.indexOf(a.name) - monthOrder.indexOf(b.name);
+        return monthOrder.indexOf(b.name) - monthOrder.indexOf(a.name);
       });
     }
     
@@ -389,32 +402,39 @@ const Stats: React.FC = () => {
               </div>
               
               <div className="h-[450px] px-2">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart
+                <ResponsiveContainer width="100%" height={400}>
+                  <LineChart
                     data={addSampleData()}
-                    margin={{ top: 5, right: 30, left: 5, bottom: 5 }}
+                    margin={{
+                      top: 20,
+                      right: 40,
+                      left: 20,
+                      bottom: 20,
+                    }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2A2A40" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#444" />
                     <XAxis 
                       dataKey="name" 
-                      stroke="#9CA3AF" 
-                      tick={{ fontSize: 12 }}
-                      padding={{ left: 10, right: 10 }}
+                      tick={{ fill: '#ccc' }} 
+                      tickLine={{ stroke: '#666' }}
+                      axisLine={{ stroke: '#666' }}
                     />
                     <YAxis 
                       yAxisId="left" 
-                      stroke="#8884d8" 
-                      tick={{ fontSize: 12 }}
-                      tickFormatter={(value) => value.toString()}
-                      width={30}
+                      orientation="left" 
+                      stroke="#8884d8"
+                      tick={{ fill: '#ccc' }}
+                      tickLine={{ stroke: '#666' }}
+                      axisLine={{ stroke: '#666' }}
                     />
                     <YAxis 
                       yAxisId="right" 
                       orientation="right" 
-                      stroke="#00E6CC"
-                      tick={{ fontSize: 12 }}
-                      tickFormatter={(value) => value.toString()}
-                      width={40}
+                      stroke="#82ca9d"
+                      tick={{ fill: '#ccc' }}
+                      tickLine={{ stroke: '#666' }}
+                      axisLine={{ stroke: '#666' }}
+                      tickFormatter={(value) => `${value}`}
                     />
                     <YAxis 
                       yAxisId="price" 
@@ -426,68 +446,51 @@ const Stats: React.FC = () => {
                       width={40}
                     />
                     <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: '#1A1B23', 
-                        borderColor: '#2A2A40',
-                        color: '#FFFFFF',
-                        fontSize: '12px',
-                        padding: '8px'
-                      }}
-                      itemStyle={{ color: '#FFFFFF' }}
-                      labelStyle={{ color: '#FFFFFF', marginBottom: '4px' }}
+                      contentStyle={{ backgroundColor: '#333', border: '1px solid #666' }}
+                      labelStyle={{ color: '#fff' }}
                       formatter={(value, name) => {
-                        if (name === 'BSV Locked') return [formatBSV(value as number), name];
-                        if (name === 'Price') return [`$${value}`, name];
+                        if (name === 'price') {
+                          return [`$${value}`, 'BSV Price'];
+                        } else if (name === 'locks') {
+                          return [value, 'Total Locks'];
+                        } else if (name === 'bsv') {
+                          return [value, 'BSV Locked'];
+                        }
                         return [value, name];
                       }}
                     />
-                    <Legend 
-                      height={20}
-                      iconSize={8}
-                      iconType="circle"
-                      align="center"
-                      wrapperStyle={{ 
-                        fontSize: '12px',
-                        paddingTop: '5px'
-                      }}
-                    />
-                    <Brush 
-                      dataKey="name" 
-                      height={20} 
-                      stroke="#2A2A40"
-                      fill="#1A1B23"
-                      tickFormatter={() => ''}
-                    />
-                    <Line 
+                    <Legend wrapperStyle={{ color: '#ccc' }} />
+                    <Line
+                      type="monotone"
+                      dataKey="locks"
+                      name="Total Locks"
+                      stroke="#8884d8"
                       yAxisId="left"
-                      type="monotone" 
-                      dataKey="locks" 
-                      name="Total Locks" 
-                      stroke="#8884d8" 
-                      strokeWidth={2}
                       dot={{ r: 3 }}
-                      activeDot={{ r: 6 }} 
+                      activeDot={{ r: 5 }}
+                      isAnimationActive={false}
                     />
-                    <Area 
+                    <Line
+                      type="monotone"
+                      dataKey="bsv"
+                      name="BSV Locked"
+                      stroke="#82ca9d"
                       yAxisId="right"
-                      type="monotone" 
-                      dataKey="bsv" 
-                      name="BSV Locked" 
-                      stroke="#00E6CC" 
-                      fill="#00E6CC" 
-                      fillOpacity={0.2}
-                    />
-                    <Line 
-                      yAxisId="price"
-                      type="monotone" 
-                      dataKey="price" 
-                      name="Price" 
-                      stroke="#FF69B4" 
-                      strokeWidth={2}
                       dot={{ r: 3 }}
-                      activeDot={{ r: 6 }} 
+                      activeDot={{ r: 5 }}
+                      isAnimationActive={false}
                     />
-                  </ComposedChart>
+                    <Line
+                      type="monotone"
+                      dataKey="price"
+                      name="Price"
+                      stroke="#FF69B4"
+                      yAxisId="price"
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 5 }}
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
                 </ResponsiveContainer>
               </div>
               
