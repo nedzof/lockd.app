@@ -243,7 +243,9 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           walletInstance,
           content,
           image, // Pass the File object directly
-          image ? image.type : undefined
+          image ? image.type : undefined,
+          isVotePost,
+          isVotePost ? voteOptions.filter(option => option.trim() !== '') : []
         );
         
         console.log('Post created successfully:', newPost);
@@ -309,20 +311,14 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   };
 
   const handleAddVoteOption = () => {
-    setVoteOptions([...voteOptions, '']);
+    if (voteOptions.length < 10) { // Limit to 10 options
+      setVoteOptions([...voteOptions, '']);
+    }
   };
 
   const handleRemoveVoteOption = (index: number) => {
     if (voteOptions.length <= 2) {
-      toast.error('A vote post needs at least 2 options', {
-        style: {
-          background: '#1A1B23',
-          color: '#f87171',
-          border: '1px solid rgba(248, 113, 113, 0.3)',
-          borderRadius: '0.375rem'
-        }
-      });
-      return;
+      return; // Maintain at least 2 options
     }
     const newOptions = [...voteOptions];
     newOptions.splice(index, 1);

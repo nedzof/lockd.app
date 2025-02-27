@@ -19,6 +19,7 @@ export interface VoteOption {
     lockAmount: number;
     lockDuration: number;
     optionIndex: number;
+    feeSatoshis?: number;
 }
 
 export interface VoteData {
@@ -113,9 +114,14 @@ export interface PostMetadata {
             unlockHeight?: number;
             currentHeight?: number;
             lockPercentage?: number;
+            feeSatoshis?: number;
         }>;
         totalOptions?: number;
         optionsHash?: string;
+        optionIndex?: number;
+        optionText?: string;
+        lockAmount?: number;
+        lockDuration?: number;
     };
     image?: {
         file: File;
@@ -407,13 +413,14 @@ async function createVoteQuestionComponent(
 }
 
 // Create vote option component
-function createVoteOptionComponent(
+async function createVoteOptionComponent(
     option: VoteOption,
     postId: string,
     sequence: number,
     parentSequence: number,
     address: string
-): InscribeRequest {
+): Promise<InscribeRequest> {
+    // Create structured metadata for easy parsing
     const metadata: PostMetadata = {
         app: 'lockd.app',
         type: 'vote_option',
@@ -429,18 +436,68 @@ function createVoteOptionComponent(
         is_vote: true,
         vote: {
             isVoteQuestion: false,
-            options: [option]
+            options: [option],
+            optionIndex: option.optionIndex,
+            optionText: option.text,
+            lockAmount: option.lockAmount,
+            lockDuration: option.lockDuration
         }
     };
 
     const map = createMapData(metadata);
-    return createInscriptionRequest(address, option.text, map, 1000);
+    const satoshis = option.feeSatoshis || await calculateOutputSatoshis(option.text.length, true);
+    
+    // Log the vote option details for debugging
+    console.log(`Creating vote option #${option.optionIndex}: "${option.text}" with ${satoshis} satoshis`);
+    
+    return createInscriptionRequest(address, option.text, map, satoshis);
 }
 
 // Helper function to calculate output satoshis
-async function calculateOutputSatoshis(contentSize: number): Promise<number> {
+async function calculateOutputSatoshis(contentSize: number, isVoteOption: boolean = false): Promise<number> {
+    // Get current fee rate from WhatsOnChain
     const feeRate = await getFeeRate();
-    return Math.max(1000, Math.ceil(contentSize * feeRate));
+    console.log(`Current fee rate: ${feeRate} sat/vbyte`);
+    console.log(`Content size: ${contentSize} bytes`);
+    
+    // Base size for transaction overhead (P2PKH output, basic script)
+    const baseTxSize = 250; // bytes
+    
+    // Calculate total size including content and overhead
+    const totalSize = baseTxSize + contentSize;
+    console.log(`Total transaction size: ${totalSize} bytes`);
+    
+    // Calculate fee based on size and rate
+    const calculatedFee = Math.ceil(totalSize * feeRate);
+    console.log(`Calculated base fee: ${calculatedFee} satoshis`);
+    
+    // For vote options, ensure we have enough satoshis for the lock amount
+    // This ensures each vote option has its own UTXO with sufficient value
+    if (isVoteOption) {
+        // For vote options, use a more aggressive calculation
+        // Especially for short content
+        
+        // Base value that scales with content length - more aggressive for short content
+        const baseValue = Math.max(contentSize * 100);
+        console.log(`Base value (contentSize * 100): ${baseValue}`);
+        
+        // Scale based on fee rate too
+        const feeMultiplier = Math.max(2, Math.ceil(feeRate / 0.5)); 
+        const feeBasedValue = calculatedFee * feeMultiplier;
+        console.log(`Fee-based value (calculatedFee * ${feeMultiplier}): ${feeBasedValue}`);
+        
+        // Ensure we have a good minimum value that varies by content
+        const recommendedVoteOptionSats = Math.max(baseValue, feeBasedValue);
+        
+        console.log(`Final vote option satoshis: ${recommendedVoteOptionSats}`);
+        
+        // Force the value to be different for each option by adding the content length
+        // This ensures even identical options have slightly different values
+        return recommendedVoteOptionSats + contentSize;
+    }
+    
+    // For regular content, ensure minimum dust limit
+    return Math.max(1000, calculatedFee);
 }
 
 // Helper function to hash content
@@ -592,9 +649,12 @@ export const createPost = async (
     wallet: any,
     content: string,
     imageData?: string | File,
-    imageMimeType?: string
+    imageMimeType?: string,
+    isVotePost: boolean = false,
+    voteOptions: string[] = []
 ): Promise<Post> => {
     console.log('Creating post with wallet:', wallet ? 'Wallet provided' : 'No wallet');
+    console.log('Is vote post:', isVotePost, 'Vote options:', voteOptions);
   
     if (!wallet) {
         console.error('No wallet provided to createPost');
@@ -633,7 +693,7 @@ export const createPost = async (
         // Create main content metadata
         const metadata: PostMetadata = {
             app: 'lockd.app',
-            type: 'content',
+            type: isVotePost ? 'vote_question' : 'content',
             content,
             timestamp: new Date().toISOString(),
             version: '1.0.0',
@@ -641,7 +701,7 @@ export const createPost = async (
             sequence: sequence.next(),
             postId,
             is_locked: false,
-            is_vote: false
+            is_vote: isVotePost
         };
 
         console.log('Created post metadata:', { ...metadata, content: content.substring(0, 50) + (content.length > 50 ? '...' : '') });
@@ -733,7 +793,7 @@ export const createPost = async (
                 console.log('Image component created successfully');
             } catch (imageError) {
                 console.error('Error processing image:', imageError);
-                toast.error(`Error processing image: ${imageError.message}`, { 
+                toast.error(`Error processing image: ${imageError.message}`, {
                     id: pendingToast,
                     style: {
                         background: '#1A1B23',
@@ -747,16 +807,80 @@ export const createPost = async (
             }
         }
 
-        // Create main content component
-        console.log('Creating main content inscription request...');
-        const contentComponent = createInscriptionRequest(
-            bsvAddress,
-            content,
-            createMapData(metadata),
-            await calculateOutputSatoshis(content.length)
-        );
-        components.push(contentComponent);
-        console.log('Content component created successfully');
+        // Handle vote post
+        if (isVotePost && voteOptions.length >= 2) {
+            console.log('Creating vote post with options:', voteOptions);
+            
+            // Filter out empty options
+            const validOptions = voteOptions.filter(opt => opt.trim() !== '');
+            
+            if (validOptions.length < 2) {
+                throw new Error('Vote posts require at least 2 valid options');
+            }
+            
+            // Get current block height for lock calculations
+            const currentBlockHeight = await getCurrentBlockHeight();
+            console.log('Current block height:', currentBlockHeight);
+            
+            // Create vote options objects
+            const voteOptionObjects: VoteOption[] = await Promise.all(
+                validOptions.map(async (text, index) => ({
+                    text,
+                    lockAmount: 1000, // Base lock amount in satoshis
+                    lockDuration: 144, // Default to 1 day (144 blocks)
+                    optionIndex: index,
+                    feeSatoshis: await calculateOutputSatoshis(text.length, true)
+                }))
+            );
+            
+            // Add vote data to metadata
+            metadata.vote = {
+                isVoteQuestion: true,
+                question: content,
+                options: voteOptionObjects,
+                totalOptions: voteOptionObjects.length,
+                optionsHash: await hashContent(JSON.stringify(voteOptionObjects))
+            };
+            
+            // Create main vote question component
+            console.log('Creating vote question component...');
+            const voteQuestionComponent = await createVoteQuestionComponent(
+                content,
+                voteOptionObjects,
+                postId,
+                sequence.next(),
+                metadata.sequence,
+                bsvAddress
+            );
+            components.push(voteQuestionComponent);
+            
+            // Create individual components for each vote option
+            // Each with its own transaction output for easy parsing
+            for (const option of voteOptionObjects) {
+                console.log(`Creating vote option component for "${option.text}"...`);
+                const voteOptionComponent = await createVoteOptionComponent(
+                    option,
+                    postId,
+                    sequence.next(),
+                    metadata.sequence,
+                    bsvAddress
+                );
+                components.push(voteOptionComponent);
+            }
+            
+            console.log(`Created ${components.length} components for vote post`);
+        } else {
+            // Create regular content component
+            console.log('Creating main content inscription request...');
+            const contentComponent = createInscriptionRequest(
+                bsvAddress,
+                content,
+                createMapData(metadata),
+                await calculateOutputSatoshis(content.length)
+            );
+            components.push(contentComponent);
+            console.log('Content component created successfully');
+        }
 
         // Send to wallet
         console.log('Sending inscription request to wallet...');
