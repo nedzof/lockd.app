@@ -253,7 +253,22 @@ const PostGrid: React.FC<PostGridProps> = ({
       });
     } catch (err) {
       console.error('Error fetching posts:', err);
-      setError('Failed to fetch posts. Please try again later.');
+      
+      // Add more detailed error logging
+      if (err instanceof Error) {
+        console.error('Error details:', {
+          message: err.message,
+          name: err.name,
+          stack: err.stack
+        });
+      }
+      
+      // Check for network errors
+      if (err instanceof TypeError && err.message.includes('fetch')) {
+        setError('Network error. Please check your connection and try again.');
+      } else {
+        setError('Failed to fetch posts. Please try again later.');
+      }
     } finally {
       if (reset) {
         setIsLoading(false);
@@ -269,7 +284,17 @@ const PostGrid: React.FC<PostGridProps> = ({
       const response = await fetch(`${API_URL}/api/votes/${post.txid}/options`);
       
       if (!response.ok) {
-        console.log(`[Frontend] Failed to fetch vote options for post: ${post.txid}`);
+        console.log(`[Frontend] Failed to fetch vote options for post: ${post.txid}, status: ${response.status}`);
+        
+        // Handle specific HTTP error codes
+        if (response.status === 404) {
+          console.log(`[Frontend] Vote options not found for post: ${post.txid}`);
+          return;
+        } else if (response.status >= 500) {
+          console.log(`[Frontend] Server error when fetching vote options for post: ${post.txid}`);
+          return;
+        }
+        
         return;
       }
       
@@ -289,18 +314,24 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
   };
 
-  const handleLoadMore = useCallback(() => {
-    console.log('Load more clicked, current cursor:', nextCursor);
-    if (!isFetchingMore && hasMore && nextCursor) {
-      fetchPosts(false);
-    } else {
-      console.warn('Cannot load more posts:', {
-        isFetchingMore,
-        hasMore,
-        nextCursor
-      });
+  const loadMore = useCallback(() => {
+    console.log('Load more button clicked');
+    console.log('Current pagination state:', {
+      nextCursor,
+      hasMore,
+      isFetchingMore,
+      currentPostCount: submissions.length,
+      seenPostIds: seenPostIds.current.size
+    });
+    
+    if (!hasMore || isFetchingMore) {
+      console.log('Cannot load more: hasMore =', hasMore, 'isFetchingMore =', isFetchingMore);
+      return;
     }
-  }, [isFetchingMore, hasMore, nextCursor]);
+    
+    // Important: We're setting reset=false here to append to existing posts
+    fetchPosts(false);
+  }, [hasMore, isFetchingMore, nextCursor, fetchPosts, submissions.length]);
 
   useEffect(() => {
     console.log('PostGrid component mounted or dependencies changed');
@@ -505,7 +536,7 @@ const PostGrid: React.FC<PostGridProps> = ({
           {/* Load more button */}
           {hasMore && (
             <button 
-              onClick={handleLoadMore}
+              onClick={loadMore}
               className="w-full mt-6 px-4 py-2 text-[#00ffa3] border border-[#00ffa3] rounded-lg hover:bg-[#00ffa3] hover:text-black transition-all duration-300 flex items-center justify-center"
             >
               {isFetchingMore ? (

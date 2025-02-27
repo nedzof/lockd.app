@@ -70,3 +70,52 @@ The changes have been tested to ensure:
 - The UI remains responsive during pagination operations
 
 These improvements should resolve the pagination issues and provide a more consistent user experience when interacting with posts and vote options.
+
+## Pagination and Post Loading Fixes - Update (2025-02-27)
+
+### API Endpoint Consistency
+
+1. **Fixed Kebab-Case Endpoint Naming**
+   - Updated the vote option lock endpoint in `lockLikes.ts` from `/voteOption` to `/vote-options`
+   - This ensures consistency with the kebab-case convention used throughout the API
+   - Matches the endpoint called in the frontend components
+
+### Enhanced Error Handling and Logging
+
+1. **Improved Error Handling in `fetchPosts`**
+   - Added detailed error logging with error type, message, and stack trace
+   - Added specific error messages for network errors vs. other types of errors
+   - Improved user feedback for different error scenarios
+
+2. **Enhanced Vote Options Fetching**
+   - Added specific handling for different HTTP status codes (404, 500+)
+   - Improved logging for vote options fetching failures
+   - Better error recovery for missing vote options
+
+3. **Improved Pagination Debugging**
+   - Enhanced logging in the `loadMore` function
+   - Added tracking of current post count and seen post IDs count
+   - Makes it easier to debug pagination issues in the future
+
+### Port Configuration Verification
+
+1. **Confirmed API URL Configuration**
+   - Verified that the server is running on port 3003
+   - Confirmed that all frontend components are using the correct API URL
+   - Ensured environment variable `NEXT_PUBLIC_API_URL` is set correctly
+
+### Future Recommendations
+
+1. **Consider Adding Retry Logic**
+   - For transient network errors, implement retry logic with exponential backoff
+   - This would improve resilience against temporary API unavailability
+
+2. **Add Error Boundaries**
+   - Implement React Error Boundaries to prevent the entire UI from crashing
+   - Provide fallback UI components for failed sections
+
+3. **Performance Monitoring**
+   - Consider adding performance metrics for API calls and rendering
+   - Track pagination efficiency and optimize as needed
+
+These improvements build upon the previous pagination fixes, ensuring a more robust and reliable post loading experience with better error handling and debugging capabilities.

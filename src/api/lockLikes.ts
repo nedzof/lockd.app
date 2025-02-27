@@ -152,6 +152,6 @@ const handleVoteOptionLock = async (
 };
 
 router.post('/', handleLockLike);
-router.post('/voteOption', handleVoteOptionLock);
+router.post('/vote-options', handleVoteOptionLock);
 
 export default router; 
