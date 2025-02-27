@@ -1,6 +1,7 @@
 import { CronJob } from 'cron';
 import { PrismaClient } from '@prisma/client';
 import { logger } from '../utils/logger';
+import { fetchBsvPrice, checkIfColumnExists } from '../utils/bsvPrice';
 
 const prisma = new PrismaClient();
 
@@ -13,6 +14,10 @@ export const initializeStatsUpdateJob = () => {
     try {
       logger.info('Running stats update job');
       
+      // Check if the current_bsv_price column exists in the stats table
+      const bsvPriceColumnExists = await checkIfColumnExists(prisma, 'stats', 'current_bsv_price');
+      logger.info(`BSV price column exists: ${bsvPriceColumnExists}`);
+      
       // Calculate statistics
       const [
         totalPosts,
@@ -22,7 +27,8 @@ export const initializeStatsUpdateJob = () => {
         totalBsvLockedResult,
         avgLockDurationResult,
         mostUsedTag,
-        mostActiveUser
+        mostActiveUser,
+        currentBsvPrice
       ] = await Promise.all([
         // Total posts
         prisma.post.count(),
@@ -89,22 +95,34 @@ export const initializeStatsUpdateJob = () => {
             }
           },
           take: 1
-        })
+        }),
+        
+        // Current BSV price
+        fetchBsvPrice()
       ]);
+      
+      // Create stats data object
+      const statsData: any = {
+        total_posts: totalPosts,
+        total_votes: totalVotes,
+        total_lock_likes: totalLockLikes,
+        total_users: totalUsers,
+        total_bsv_locked: totalBsvLockedResult._sum.amount || 0,
+        avg_lock_duration: avgLockDurationResult._avg.lock_duration || 0,
+        most_used_tag: mostUsedTag.length > 0 ? mostUsedTag[0].name : null,
+        most_active_user: mostActiveUser.length > 0 ? mostActiveUser[0].author_address : null,
+        last_updated: new Date()
+      };
+      
+      // Only add the current_bsv_price field if the column exists
+      if (bsvPriceColumnExists && currentBsvPrice !== null) {
+        statsData.current_bsv_price = currentBsvPrice;
+        logger.info(`Adding BSV price to stats: ${currentBsvPrice}`);
+      }
       
       // Create stats in the database
       await prisma.stats.create({
-        data: {
-          total_posts: totalPosts,
-          total_votes: totalVotes,
-          total_lock_likes: totalLockLikes,
-          total_users: totalUsers,
-          total_bsv_locked: totalBsvLockedResult._sum.amount || 0,
-          avg_lock_duration: avgLockDurationResult._avg.lock_duration || 0,
-          most_used_tag: mostUsedTag.length > 0 ? mostUsedTag[0].name : null,
-          most_active_user: mostActiveUser.length > 0 ? mostActiveUser[0].author_address : null,
-          last_updated: new Date()
-        }
+        data: statsData
       });
       
       logger.info('Stats update job completed successfully');

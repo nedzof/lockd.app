@@ -7,6 +7,7 @@ import lockLikesRouter from './api/lockLikes';
 import tagsRouter from './api/tags';
 import statsRouter from './api/stats';
 import votesRouter from './api/votes';
+import bsvPriceRouter from './api/bsv-price';
 import tagGenerationRouter from './routes/tagGenerationRoutes';
 import postTaggingRouter from './routes/postTaggingRoutes';
 import { logger } from './utils/logger';
@@ -65,6 +66,7 @@ app.use('/api/lock-likes', lockLikesRouter);
 app.use('/api/tags', tagsRouter);
 app.use('/api/stats', statsRouter);
 app.use('/api/votes', votesRouter);
+app.use('/api/bsv-price', bsvPriceRouter);
 app.use('/api', tagGenerationRouter);
 app.use('/api', postTaggingRouter);
 

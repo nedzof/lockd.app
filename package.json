@@ -13,6 +13,9 @@
     "download-model": "node scripts/download-model.js",
     "verify-tag-system": "node scripts/verify-tag-system.js",
     "tag-generator": "tsx src/scripts/testTagGenerationAPI.ts",
+    "fetch-bsv-price": "tsx scripts/bsv-price-fetcher.ts",
+    "update-stats-price": "tsx scripts/update-stats-bsv-price.ts",
+    "setup-bsv-price-cron": "bash scripts/setup-bsv-price-cron.sh",
     "dev": "USE_DIRECT_URL=true concurrently \"vite --port 3000 --strictPort\" \"PORT=3003 tsx watch src/server.ts\""
   },
   "dependencies": {

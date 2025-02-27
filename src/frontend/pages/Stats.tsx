@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FiBarChart2, FiLock } from 'react-icons/fi';
+import { FiBarChart2, FiLock, FiDollarSign } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import {
   LineChart, Line, AreaChart, Area, ComposedChart,
@@ -15,10 +15,16 @@ interface StatsData {
   avg_lock_duration: number;
   most_used_tag: string | null;
   most_active_user: string | null;
+  current_bsv_price: number | null;
   last_updated: string;
   lockTimeData: Array<{ name: string; locks: number }>;
   bsvLockedOverTime: Array<{ name: string; bsv: number }>;
   priceData: Array<{ name: string; price: number }>;
+}
+
+interface PriceHistoryData {
+  date: string;
+  price: number;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
@@ -50,7 +56,7 @@ const Stats: React.FC = () => {
         const data = await response.json();
         
         // Add sample price data if not available
-        if (!data.priceData) {
+        if (!data.priceData || data.priceData.length === 0) {
           data.priceData = [
             { name: 'Jan', price: 45 },
             { name: 'Feb', price: 52 },
@@ -60,6 +66,11 @@ const Stats: React.FC = () => {
             { name: 'Jun', price: 60 },
             { name: 'Jul', price: 68 },
           ];
+        }
+        
+        // Ensure current_bsv_price exists
+        if (data.current_bsv_price === undefined || data.current_bsv_price === null) {
+          data.current_bsv_price = data.priceData.length > 0 ? data.priceData[data.priceData.length - 1].price : 45.0;
         }
         
         setStats(data);
@@ -108,23 +119,24 @@ const Stats: React.FC = () => {
     });
     
     // Convert map to array and sort by name
-    const result = Array.from(timeMap.entries()).map(([name, values]) => ({
-      name,
-      ...values
-    }));
-    
-    // Sort by name (assuming names are months or dates)
-    const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    result.sort((a, b) => {
-      // If names are months
-      if (monthOrder.includes(a.name) && monthOrder.includes(b.name)) {
-        return monthOrder.indexOf(a.name) - monthOrder.indexOf(b.name);
-      }
-      // Otherwise sort alphabetically
-      return a.name.localeCompare(b.name);
-    });
-    
-    return result;
+    return Array.from(timeMap.entries())
+      .map(([name, values]) => ({
+        name,
+        ...values
+      }))
+      .sort((a, b) => {
+        // Try to sort by month name if possible
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const aIndex = months.indexOf(a.name.split(' ')[0]);
+        const bIndex = months.indexOf(b.name.split(' ')[0]);
+        
+        if (aIndex !== -1 && bIndex !== -1) {
+          return aIndex - bIndex;
+        }
+        
+        // Fall back to alphabetical sorting
+        return a.name.localeCompare(b.name);
+      });
   };
 
   return (
@@ -139,47 +151,57 @@ const Stats: React.FC = () => {
             </p>
           </div>
           
-          <div className="flex space-x-1 bg-[#2A2A40] p-1 rounded-lg mt-2 md:mt-0">
-            <button
-              onClick={() => setTimeRange('day')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                timeRange === 'day'
-                  ? 'bg-[#00E6CC] text-[#1A1B23]'
-                  : 'text-white hover:bg-[#3A3A50]'
-              }`}
-            >
-              24h
-            </button>
-            <button
-              onClick={() => setTimeRange('week')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                timeRange === 'week'
-                  ? 'bg-[#00E6CC] text-[#1A1B23]'
-                  : 'text-white hover:bg-[#3A3A50]'
-              }`}
-            >
-              Week
-            </button>
-            <button
-              onClick={() => setTimeRange('month')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                timeRange === 'month'
-                  ? 'bg-[#00E6CC] text-[#1A1B23]'
-                  : 'text-white hover:bg-[#3A3A50]'
-              }`}
-            >
-              Month
-            </button>
-            <button
-              onClick={() => setTimeRange('all')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                timeRange === 'all'
-                  ? 'bg-[#00E6CC] text-[#1A1B23]'
-                  : 'text-white hover:bg-[#3A3A50]'
-              }`}
-            >
-              All Time
-            </button>
+          <div className="flex flex-col items-end">
+            <div className="flex items-center mb-2">
+              <FiDollarSign className="text-[#FF8042] mr-1" />
+              <span className="text-white font-bold">BSV Price: </span>
+              <span className="text-[#FF8042] font-bold ml-1">
+                ${stats?.current_bsv_price ? stats.current_bsv_price.toFixed(2) : 'N/A'}
+              </span>
+            </div>
+            
+            <div className="flex space-x-1 bg-[#2A2A40] p-1 rounded-lg mt-2 md:mt-0">
+              <button
+                onClick={() => setTimeRange('day')}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  timeRange === 'day'
+                    ? 'bg-[#00E6CC] text-[#1A1B23]'
+                    : 'text-white hover:bg-[#3A3A50]'
+                }`}
+              >
+                24h
+              </button>
+              <button
+                onClick={() => setTimeRange('week')}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  timeRange === 'week'
+                    ? 'bg-[#00E6CC] text-[#1A1B23]'
+                    : 'text-white hover:bg-[#3A3A50]'
+                }`}
+              >
+                Week
+              </button>
+              <button
+                onClick={() => setTimeRange('month')}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  timeRange === 'month'
+                    ? 'bg-[#00E6CC] text-[#1A1B23]'
+                    : 'text-white hover:bg-[#3A3A50]'
+                }`}
+              >
+                Month
+              </button>
+              <button
+                onClick={() => setTimeRange('all')}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  timeRange === 'all'
+                    ? 'bg-[#00E6CC] text-[#1A1B23]'
+                    : 'text-white hover:bg-[#3A3A50]'
+                }`}
+              >
+                All Time
+              </button>
+            </div>
           </div>
         </div>
 
@@ -323,7 +345,10 @@ const Stats: React.FC = () => {
                     <div className="w-2 h-2 rounded-full bg-[#FF8042]"></div>
                     <span className="text-white text-xs">Current BSV Price</span>
                   </div>
-                  <p className="text-xl font-bold text-white mt-1">${combinedData.length > 0 ? combinedData[combinedData.length - 1].price : 'N/A'}</p>
+                  <p className="text-xl font-bold text-white mt-1">
+                    ${stats?.current_bsv_price ? stats.current_bsv_price.toFixed(2) : 'N/A'}
+                    <span className="text-xs text-gray-400 ml-1">(OKX)</span>
+                  </p>
                 </div>
               </div>
             </div>

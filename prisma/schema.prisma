@@ -1,27 +1,25 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["views"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
-  // Connection pooling is configured in the DATABASE_URL
-  // Example URL format: postgresql://user:password@host:6543/db?pgbouncer=true&connection_limit=15&pool_timeout=20
 }
 
 model Post {
-  id             String   @id @default(dbgenerated("gen_random_uuid()"))
-  txid           String   @unique
+  id             String       @id @default(dbgenerated("gen_random_uuid()"))
   content        String
+  txid           String       @unique
   author_address String?
+  created_at     DateTime     @default(now())
+  is_vote        Boolean      @default(false)
   media_type     String?
+  tags           String[]     @default([])
   media_url      String?
   raw_image_data Bytes?
-  created_at     DateTime @default(now())
-  tags           String[] @default([])
-  is_vote        Boolean  @default(false)
   lock_likes     LockLike[]
   vote_options   VoteOption[]
 
@@ -32,18 +30,18 @@ model Post {
 }
 
 model VoteOption {
-  id             String   @id @default(dbgenerated("gen_random_uuid()"))
-  txid           String   @unique
+  id             String     @id @default(dbgenerated("gen_random_uuid()"))
   content        String
   author_address String?
-  created_at     DateTime @default(now())
-  lock_amount    Int      @default(0)
-  lock_duration  Int      @default(0)
+  created_at     DateTime   @default(now())
+  lock_amount    Int        @default(0)
+  lock_duration  Int        @default(0)
+  post_id        String
+  tags           String[]   @default([])
+  txid           String     @unique
   unlock_height  Int?
-  tags          String[] @default([])
-  post_id       String
-  post          Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  lock_likes    LockLike[]
+  lock_likes     LockLike[]
+  post           Post       @relation(fields: [post_id], references: [id], onDelete: Cascade)
 
   @@index([txid])
   @@index([post_id])
@@ -51,17 +49,17 @@ model VoteOption {
 }
 
 model LockLike {
-  id             String   @id @default(dbgenerated("gen_random_uuid()"))
-  txid           String   @unique
-  post_id        String
-  post           Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  vote_option_id String?
-  vote_option    VoteOption? @relation(fields: [vote_option_id], references: [id], onDelete: Cascade)
-  author_address String?
+  id             String      @id @default(dbgenerated("gen_random_uuid()"))
+  txid           String      @unique
   amount         Int
+  author_address String?
+  created_at     DateTime    @default(now())
   lock_duration  Int
+  post_id        String
   unlock_height  Int?
-  created_at     DateTime @default(now())
+  vote_option_id String?
+  post           Post        @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  vote_option    VoteOption? @relation(fields: [vote_option_id], references: [id], onDelete: Cascade)
 
   @@index([post_id])
   @@index([author_address])
@@ -73,12 +71,12 @@ model ProcessedTransaction {
   id          String   @id @default(dbgenerated("gen_random_uuid()"))
   txid        String   @unique
   blockHeight Int      @default(0)
-  blockTime   BigInt   @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @default(now()) @updatedAt
   protocol    String   @default("MAP")
   type        String   @default("unknown")
   metadata    Json
+  blockTime   BigInt   @default(0)
 
   @@index([txid])
   @@index([type])
@@ -87,30 +85,37 @@ model ProcessedTransaction {
 }
 
 model Tag {
-  id          String   @id @default(dbgenerated("gen_random_uuid()"))
-  name        String   @unique
-  type        String   @default("user_created") // current_event, user_created, etc.
-  usageCount  Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now()) @updatedAt
+  id         String   @id @default(dbgenerated("gen_random_uuid()"))
+  name       String   @unique
+  type       String   @default("user_created")
+  usageCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
 
   @@index([name])
   @@index([type])
   @@index([usageCount])
 }
 
-// Statistics model
 model Stats {
-  id                   String   @id @default(dbgenerated("gen_random_uuid()"))
-  total_posts          Int
-  total_votes          Int
-  total_lock_likes     Int
-  total_users          Int
-  total_bsv_locked     Float
-  avg_lock_duration    Float
-  most_used_tag        String?
-  most_active_user     String?
-  last_updated         DateTime @default(now())
+  id                String   @id @default(dbgenerated("gen_random_uuid()"))
+  total_posts       Int
+  total_votes       Int
+  total_lock_likes  Int
+  total_users       Int
+  total_bsv_locked  Float
+  avg_lock_duration Float
+  most_used_tag     String?
+  most_active_user  String?
+  last_updated      DateTime @default(now())
+  current_bsv_price Float?
 
   @@map("stats")
+}
+
+model bsv_price_history {
+  id         Int       @id @default(autoincrement())
+  date       DateTime  @unique @db.Date
+  price      Float
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
 }
