@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FiBarChart2, FiLock, FiDollarSign } from 'react-icons/fi';
+import { FiBarChart2, FiLock } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import {
   LineChart, Line, AreaChart, Area, ComposedChart,
@@ -20,11 +20,6 @@ interface StatsData {
   lockTimeData: Array<{ name: string; locks: number }>;
   bsvLockedOverTime: Array<{ name: string; bsv: number }>;
   priceData: Array<{ name: string; price: number }>;
-}
-
-interface PriceHistoryData {
-  date: string;
-  price: number;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
@@ -54,29 +49,13 @@ const Stats: React.FC = () => {
         }
         
         const data = await response.json();
-        
-        // Add sample price data if not available
-        if (!data.priceData || data.priceData.length === 0) {
-          data.priceData = [
-            { name: 'Jan', price: 45 },
-            { name: 'Feb', price: 52 },
-            { name: 'Mar', price: 49 },
-            { name: 'Apr', price: 62 },
-            { name: 'May', price: 55 },
-            { name: 'Jun', price: 60 },
-            { name: 'Jul', price: 68 },
-          ];
-        }
-        
-        // Ensure current_bsv_price exists
-        if (data.current_bsv_price === undefined || data.current_bsv_price === null) {
-          data.current_bsv_price = data.priceData.length > 0 ? data.priceData[data.priceData.length - 1].price : 45.0;
-        }
+        console.log('Stats data received:', data);
         
         setStats(data);
         
         // Combine all data into one dataset
         const combined = combineDatasets(data);
+        console.log('Combined data:', combined);
         setCombinedData(combined);
       } catch (err) {
         console.error('Error fetching stats:', err);
@@ -94,8 +73,19 @@ const Stats: React.FC = () => {
     // Create a map of all time periods
     const timeMap = new Map<string, { locks: number; bsv: number; price: number }>();
     
+    // Ensure we have arrays to work with
+    const lockData = data.lockTimeData || [];
+    const bsvData = data.bsvLockedOverTime || [];
+    const priceData = data.priceData || [];
+    
+    // If both arrays are empty, return an empty array
+    if (lockData.length === 0 && bsvData.length === 0) {
+      console.log('No data available for chart');
+      return [];
+    }
+    
     // Add lock data
-    (data.lockTimeData || []).forEach(item => {
+    lockData.forEach(item => {
       if (!timeMap.has(item.name)) {
         timeMap.set(item.name, { locks: 0, bsv: 0, price: 0 });
       }
@@ -103,7 +93,7 @@ const Stats: React.FC = () => {
     });
     
     // Add BSV locked data
-    (data.bsvLockedOverTime || []).forEach(item => {
+    bsvData.forEach(item => {
       if (!timeMap.has(item.name)) {
         timeMap.set(item.name, { locks: 0, bsv: 0, price: 0 });
       }
@@ -111,32 +101,75 @@ const Stats: React.FC = () => {
     });
     
     // Add price data
-    (data.priceData || []).forEach(item => {
+    priceData.forEach(item => {
       if (!timeMap.has(item.name)) {
         timeMap.set(item.name, { locks: 0, bsv: 0, price: 0 });
       }
       timeMap.get(item.name)!.price = item.price;
     });
     
-    // Convert map to array and sort by name
+    // Convert map to array and sort by date
     return Array.from(timeMap.entries())
       .map(([name, values]) => ({
         name,
-        ...values
+        locks: values.locks,
+        bsv: values.bsv,
+        price: values.price,
       }))
       .sort((a, b) => {
-        // Try to sort by month name if possible
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const aIndex = months.indexOf(a.name.split(' ')[0]);
-        const bIndex = months.indexOf(b.name.split(' ')[0]);
+        // Try to parse as dates first
+        const dateA = new Date(a.name);
+        const dateB = new Date(b.name);
         
-        if (aIndex !== -1 && bIndex !== -1) {
-          return aIndex - bIndex;
+        if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
+          return dateA.getTime() - dateB.getTime();
         }
         
-        // Fall back to alphabetical sorting
+        // If not valid dates, try to sort by month names
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthA = months.indexOf(a.name);
+        const monthB = months.indexOf(b.name);
+        
+        if (monthA !== -1 && monthB !== -1) {
+          return monthA - monthB;
+        }
+        
+        // Default to string comparison
         return a.name.localeCompare(b.name);
       });
+  };
+
+  // Add sample data if no data is available
+  const addSampleData = () => {
+    if (combinedData.length === 0) {
+      console.log('Using sample data for chart');
+      // Create sample data with monthly points for the last 7 months
+      const sampleData = [];
+      const now = new Date();
+      
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(now);
+        date.setMonth(now.getMonth() - i);
+        
+        // Format the month name
+        const monthName = date.toLocaleString('default', { month: 'short' });
+        
+        // Generate some random but increasing values
+        const lockValue = 100 + Math.floor(Math.random() * 150) + (i * 20);
+        const bsvValue = 0.000005 + (Math.random() * 0.000008) + (i * 0.000001);
+        const priceValue = 100 + (Math.random() * 50) + (i * 10);
+        
+        sampleData.push({
+          name: monthName,
+          locks: lockValue,
+          bsv: bsvValue,
+          price: priceValue
+        });
+      }
+      
+      return sampleData;
+    }
+    return combinedData;
   };
 
   return (
@@ -152,14 +185,6 @@ const Stats: React.FC = () => {
           </div>
           
           <div className="flex flex-col items-end">
-            <div className="flex items-center mb-2">
-              <FiDollarSign className="text-[#FF8042] mr-1" />
-              <span className="text-white font-bold">BSV Price: </span>
-              <span className="text-[#FF8042] font-bold ml-1">
-                ${stats?.current_bsv_price ? stats.current_bsv_price.toFixed(2) : 'N/A'}
-              </span>
-            </div>
-            
             <div className="flex space-x-1 bg-[#2A2A40] p-1 rounded-lg mt-2 md:mt-0">
               <button
                 onClick={() => setTimeRange('day')}
@@ -224,7 +249,7 @@ const Stats: React.FC = () => {
               <div className="h-[450px] px-2">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart
-                    data={combinedData}
+                    data={addSampleData()}
                     margin={{ top: 5, right: 30, left: 5, bottom: 5 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#2A2A40" />
@@ -252,12 +277,10 @@ const Stats: React.FC = () => {
                     <YAxis 
                       yAxisId="price" 
                       orientation="right" 
-                      stroke="#FF8042"
+                      stroke="#FF69B4"
                       tick={{ fontSize: 12 }}
                       tickFormatter={(value) => `$${value}`}
                       width={40}
-                      axisLine={false}
-                      tickLine={false}
                     />
                     <Tooltip 
                       contentStyle={{ 
@@ -271,7 +294,7 @@ const Stats: React.FC = () => {
                       labelStyle={{ color: '#FFFFFF', marginBottom: '4px' }}
                       formatter={(value, name) => {
                         if (name === 'BSV Locked') return [formatBSV(value as number), name];
-                        if (name === 'BSV Price') return [`$${value}`, name];
+                        if (name === 'Price') return [`$${value}`, name];
                         return [value, name];
                       }}
                     />
@@ -315,8 +338,8 @@ const Stats: React.FC = () => {
                       yAxisId="price"
                       type="monotone" 
                       dataKey="price" 
-                      name="BSV Price" 
-                      stroke="#FF8042" 
+                      name="Price" 
+                      stroke="#FF69B4" 
                       strokeWidth={2}
                       dot={{ r: 3 }}
                       activeDot={{ r: 6 }} 
@@ -342,12 +365,11 @@ const Stats: React.FC = () => {
                 </div>
                 <div className="bg-[#2A2A40] p-3 rounded-md">
                   <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-[#FF8042]"></div>
+                    <div className="w-2 h-2 rounded-full bg-[#FF69B4]"></div>
                     <span className="text-white text-xs">Current BSV Price</span>
                   </div>
                   <p className="text-xl font-bold text-white mt-1">
                     ${stats?.current_bsv_price ? stats.current_bsv_price.toFixed(2) : 'N/A'}
-                    <span className="text-xs text-gray-400 ml-1">(OKX)</span>
                   </p>
                 </div>
               </div>
