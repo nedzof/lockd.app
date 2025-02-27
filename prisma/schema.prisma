@@ -24,6 +24,7 @@ model Post {
   vote_options   VoteOption[]
   block_height   Int?
   metadata       Json?
+  is_locked      Boolean      @default(false)
 
   @@index([txid])
   @@index([author_address])
