@@ -59,10 +59,30 @@ const Stats: React.FC = () => {
             console.log('Price history data:', priceData);
             
             // Transform the price data to match our format
-            const formattedPriceData = priceData.map((item: any) => ({
-              name: new Date(item.date).toLocaleString('default', { month: 'short' }),
-              price: item.price
-            }));
+            const formattedPriceData = priceData.map((item: any) => {
+              const date = new Date(item.date);
+              let name = '';
+              
+              // Format the date based on the time range
+              if (timeRange === 'day') {
+                // For 24h, show hours
+                name = date.toLocaleString('default', { hour: '2-digit', minute: '2-digit' });
+              } else if (timeRange === 'week') {
+                // For week, show day and month
+                name = date.toLocaleString('default', { day: 'numeric', month: 'short' });
+              } else if (timeRange === 'month') {
+                // For month, show day and month
+                name = date.toLocaleString('default', { day: 'numeric', month: 'short' });
+              } else {
+                // For all time, show only month
+                name = date.toLocaleString('default', { month: 'short' });
+              }
+              
+              return {
+                name,
+                price: item.price
+              };
+            });
             
             // Add the price data to our stats object
             data.priceData = formattedPriceData;
@@ -88,105 +108,205 @@ const Stats: React.FC = () => {
     fetchStats();
   }, [timeRange]);
   
-  // Function to combine all datasets into one
-  const combineDatasets = (data: StatsData) => {
-    // Create a map of all time periods
-    const timeMap = new Map<string, { locks: number; bsv: number; price: number }>();
-    
-    // Ensure we have arrays to work with
-    const lockData = data.lockTimeData || [];
-    const bsvData = data.bsvLockedOverTime || [];
-    const priceData = data.priceData || [];
-    
-    // If both arrays are empty, return an empty array
-    if (lockData.length === 0 && bsvData.length === 0) {
-      console.log('No data available for chart');
+  // Combine all datasets into one for the chart
+  const combineDatasets = (data: any) => {
+    console.log('Combining datasets from:', data);
+    if (!data || !data.lockTimeData || !data.bsvLockedOverTime) {
+      console.log('Missing required data for chart');
       return [];
     }
     
-    // Add lock data
-    lockData.forEach(item => {
-      if (!timeMap.has(item.name)) {
-        timeMap.set(item.name, { locks: 0, bsv: 0, price: 0 });
-      }
-      timeMap.get(item.name)!.locks = item.locks;
-    });
+    // Create a map to store combined data by date
+    const combinedMap = new Map();
     
-    // Add BSV locked data
-    bsvData.forEach(item => {
-      if (!timeMap.has(item.name)) {
-        timeMap.set(item.name, { locks: 0, bsv: 0, price: 0 });
-      }
-      timeMap.get(item.name)!.bsv = item.bsv;
-    });
+    // Process lock data
+    if (data.lockTimeData && Array.isArray(data.lockTimeData)) {
+      data.lockTimeData.forEach((item: any) => {
+        const date = new Date(item.name);
+        let key = '';
+        
+        // Format the key based on the time range
+        if (timeRange === 'day') {
+          key = date.toLocaleString('default', { hour: '2-digit', minute: '2-digit' });
+        } else if (timeRange === 'week') {
+          key = date.toLocaleString('default', { day: 'numeric', month: 'short' });
+        } else if (timeRange === 'month') {
+          key = date.toLocaleString('default', { day: 'numeric', month: 'short' });
+        } else {
+          key = date.toLocaleString('default', { month: 'short' });
+        }
+        
+        if (!combinedMap.has(key)) {
+          combinedMap.set(key, { name: key });
+        }
+        
+        const entry = combinedMap.get(key);
+        entry.locks = item.locks;
+      });
+    }
     
-    // Add price data
-    priceData.forEach(item => {
-      if (!timeMap.has(item.name)) {
-        timeMap.set(item.name, { locks: 0, bsv: 0, price: 0 });
-      }
-      timeMap.get(item.name)!.price = item.price;
-    });
+    // Process BSV data
+    if (data.bsvLockedOverTime && Array.isArray(data.bsvLockedOverTime)) {
+      data.bsvLockedOverTime.forEach((item: any) => {
+        const date = new Date(item.name);
+        let key = '';
+        
+        // Format the key based on the time range
+        if (timeRange === 'day') {
+          key = date.toLocaleString('default', { hour: '2-digit', minute: '2-digit' });
+        } else if (timeRange === 'week') {
+          key = date.toLocaleString('default', { day: 'numeric', month: 'short' });
+        } else if (timeRange === 'month') {
+          key = date.toLocaleString('default', { day: 'numeric', month: 'short' });
+        } else {
+          key = date.toLocaleString('default', { month: 'short' });
+        }
+        
+        if (!combinedMap.has(key)) {
+          combinedMap.set(key, { name: key });
+        }
+        
+        const entry = combinedMap.get(key);
+        entry.bsv = item.bsv;
+      });
+    }
+    
+    // Process price data
+    if (data.priceData && Array.isArray(data.priceData)) {
+      data.priceData.forEach((item: any) => {
+        const key = item.name;
+        
+        if (!combinedMap.has(key)) {
+          combinedMap.set(key, { name: key });
+        }
+        
+        const entry = combinedMap.get(key);
+        entry.price = item.price;
+      });
+    }
     
     // Convert map to array and sort by date
-    return Array.from(timeMap.entries())
-      .map(([name, values]) => ({
-        name,
-        locks: values.locks,
-        bsv: values.bsv,
-        price: values.price,
-      }))
-      .sort((a, b) => {
-        // Try to parse as dates first
-        const dateA = new Date(a.name);
-        const dateB = new Date(b.name);
-        
-        if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
-          return dateA.getTime() - dateB.getTime();
-        }
-        
-        // If not valid dates, try to sort by month names
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const monthA = months.indexOf(a.name);
-        const monthB = months.indexOf(b.name);
-        
-        if (monthA !== -1 && monthB !== -1) {
-          return monthA - monthB;
-        }
-        
-        // Default to string comparison
-        return a.name.localeCompare(b.name);
+    const result = Array.from(combinedMap.values());
+    
+    // Sort the data based on the time range
+    if (timeRange === 'day') {
+      // For day, sort by hour
+      result.sort((a, b) => {
+        const hourA = a.name.split(':')[0];
+        const hourB = b.name.split(':')[0];
+        return parseInt(hourA) - parseInt(hourB);
       });
+    } else if (timeRange === 'week' || timeRange === 'month') {
+      // For week and month, sort by day
+      result.sort((a, b) => {
+        const dayA = parseInt(a.name.split(' ')[0]);
+        const dayB = parseInt(b.name.split(' ')[0]);
+        return dayA - dayB;
+      });
+    } else {
+      // For all time, sort by month
+      const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      result.sort((a, b) => {
+        return monthOrder.indexOf(a.name) - monthOrder.indexOf(b.name);
+      });
+    }
+    
+    console.log('Combined and sorted result:', result);
+    return result;
   };
 
   // Add sample data if no data is available
   const addSampleData = () => {
     if (combinedData.length === 0) {
       console.log('Using sample data for chart');
-      // Create sample data with monthly points for the last 7 months
+      // Create sample data with points based on the selected time range
       const sampleData = [];
       const now = new Date();
       
-      for (let i = 6; i >= 0; i--) {
-        const date = new Date(now);
-        date.setMonth(now.getMonth() - i);
-        
-        // Format the month name
-        const monthName = date.toLocaleString('default', { month: 'short' });
-        
-        // Generate some random but increasing values
-        const lockValue = 100 + Math.floor(Math.random() * 150) + (i * 20);
-        const bsvValue = 0.000005 + (Math.random() * 0.000008) + (i * 0.000001);
-        
-        // More realistic BSV price data (around $35-45)
-        const priceValue = 35 + (Math.random() * 10);
-        
-        sampleData.push({
-          name: monthName,
-          locks: lockValue,
-          bsv: bsvValue,
-          price: priceValue
-        });
+      if (timeRange === 'day') {
+        // For 24h, create hourly data points for the last 24 hours
+        for (let i = 24; i >= 0; i--) {
+          const date = new Date(now);
+          date.setHours(date.getHours() - i);
+          
+          // Format the hour
+          const hourName = date.toLocaleString('default', { hour: '2-digit', minute: '2-digit' });
+          
+          // Generate values
+          const lockValue = 100 + Math.floor(Math.random() * 50);
+          const bsvValue = 0.000005 + (Math.random() * 0.000003);
+          const priceValue = 35 + (Math.random() * 5);
+          
+          sampleData.push({
+            name: hourName,
+            locks: lockValue,
+            bsv: bsvValue,
+            price: priceValue
+          });
+        }
+      } else if (timeRange === 'week') {
+        // For week, create daily data points for the last 7 days
+        for (let i = 7; i >= 0; i--) {
+          const date = new Date(now);
+          date.setDate(date.getDate() - i);
+          
+          // Format the day
+          const dayName = date.toLocaleString('default', { day: 'numeric', month: 'short' });
+          
+          // Generate values
+          const lockValue = 100 + Math.floor(Math.random() * 100);
+          const bsvValue = 0.000005 + (Math.random() * 0.000005);
+          const priceValue = 35 + (Math.random() * 7);
+          
+          sampleData.push({
+            name: dayName,
+            locks: lockValue,
+            bsv: bsvValue,
+            price: priceValue
+          });
+        }
+      } else if (timeRange === 'month') {
+        // For month, create data points every 3 days for the last month
+        for (let i = 30; i >= 0; i -= 3) {
+          const date = new Date(now);
+          date.setDate(date.getDate() - i);
+          
+          // Format the day
+          const dayName = date.toLocaleString('default', { day: 'numeric', month: 'short' });
+          
+          // Generate values
+          const lockValue = 100 + Math.floor(Math.random() * 150);
+          const bsvValue = 0.000005 + (Math.random() * 0.000007);
+          const priceValue = 35 + (Math.random() * 8);
+          
+          sampleData.push({
+            name: dayName,
+            locks: lockValue,
+            bsv: bsvValue,
+            price: priceValue
+          });
+        }
+      } else {
+        // For all time, create monthly data points for the last 7 months
+        for (let i = 6; i >= 0; i--) {
+          const date = new Date(now);
+          date.setMonth(date.getMonth() - i);
+          
+          // Format the month name
+          const monthName = date.toLocaleString('default', { month: 'short' });
+          
+          // Generate values
+          const lockValue = 100 + Math.floor(Math.random() * 150) + (i * 20);
+          const bsvValue = 0.000005 + (Math.random() * 0.000008) + (i * 0.000001);
+          const priceValue = 35 + (Math.random() * 10);
+          
+          sampleData.push({
+            name: monthName,
+            locks: lockValue,
+            bsv: bsvValue,
+            price: priceValue
+          });
+        }
       }
       
       return sampleData;
