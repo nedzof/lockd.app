@@ -1,18 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { HODLTransaction } from '../types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { HODLTransaction, VoteOption } from '../types';
 import { useWallet } from '../providers/WalletProvider';
 import toast from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
-
-// Define the VoteOption type
-interface VoteOption {
-  id: string;
-  txid: string;
-  content: string;
-  lock_amount: number;
-  total_locked: number;
-  created_at: string;
-}
 
 interface VoteOptionsDisplayProps {
   transaction: HODLTransaction;
@@ -32,11 +22,39 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
 
   console.log('VoteOptionsDisplay rendering for txid:', transaction.txid);
 
+  // Calculate and notify parent of total locked amount
+  const updateTotalLocked = useCallback((options: VoteOption[]) => {
+    const totalLocked = options.reduce((sum: number, option: VoteOption) => 
+      sum + (option.total_locked || 0), 0);
+    
+    console.log('Calculated total locked amount:', totalLocked);
+    
+    if (onTotalLockedAmountChange) {
+      onTotalLockedAmountChange(totalLocked);
+    }
+  }, [onTotalLockedAmountChange]);
+
   useEffect(() => {
     console.log('VoteOptionsDisplay useEffect running for txid:', transaction.txid);
     
     const fetchVoteOptions = async () => {
       try {
+        // If we already have vote options in the transaction, use those
+        if (transaction.vote_options && transaction.vote_options.length > 0) {
+          console.log('[Frontend] Using vote options from transaction:', transaction.vote_options);
+          
+          // Ensure each vote option has a total_locked property
+          const processedOptions = transaction.vote_options.map(option => ({
+            ...option,
+            total_locked: option.total_locked || option.lock_amount || 0
+          }));
+          
+          setVoteOptions(processedOptions);
+          updateTotalLocked(processedOptions);
+          setLoading(false);
+          return;
+        }
+        
         console.log(`[Frontend] Fetching vote options for txid: ${transaction.txid}`);
         console.log(`[Frontend] API URL: ${API_URL}/api/votes/${transaction.txid}/options`);
         
@@ -55,14 +73,14 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
           console.log('[Frontend] No vote options found in response');
         }
         
-        setVoteOptions(data);
+        // Ensure each vote option has a total_locked property
+        const processedOptions = data.map((option: VoteOption) => ({
+          ...option,
+          total_locked: option.total_locked || option.lock_amount || 0
+        }));
         
-        // Calculate and notify parent of total locked amount
-        const totalLocked = data.reduce((sum: number, option: VoteOption) => 
-          sum + (option.total_locked || 0), 0);
-        if (onTotalLockedAmountChange) {
-          onTotalLockedAmountChange(totalLocked);
-        }
+        setVoteOptions(processedOptions);
+        updateTotalLocked(processedOptions);
       } catch (error) {
         console.error('Error fetching vote options:', error);
         toast.error('Failed to load vote options');
@@ -74,7 +92,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
     if (transaction.txid) {
       fetchVoteOptions();
     }
-  }, [transaction.txid]);
+  }, [transaction.txid, transaction.vote_options, updateTotalLocked]);
 
   const handleLock = async (optionId: string, amount: number) => {
     console.log('Lock button clicked for option:', optionId, 'amount:', amount);
@@ -118,20 +136,14 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       toast.success(`Successfully locked ${amount} BSV`);
       
       // Update the vote option's locked amount locally
-      setVoteOptions(prev => 
-        prev.map(opt => 
-          opt.id === optionId 
-            ? { ...opt, total_locked: (opt.total_locked || 0) + amount } 
-            : opt
-        )
+      const updatedOptions = voteOptions.map(opt => 
+        opt.id === optionId 
+          ? { ...opt, total_locked: (opt.total_locked || 0) + amount } 
+          : opt
       );
       
-      // Calculate and notify parent of new total locked amount
-      const newTotalLocked = voteOptions.reduce((sum, opt) => 
-        sum + (opt.id === optionId ? (opt.total_locked || 0) + amount : (opt.total_locked || 0)), 0);
-      if (onTotalLockedAmountChange) {
-        onTotalLockedAmountChange(newTotalLocked);
-      }
+      setVoteOptions(updatedOptions);
+      updateTotalLocked(updatedOptions);
       
       // Refresh wallet balance
       refreshBalance();
@@ -148,7 +160,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
     return <div className="mt-4 p-4 text-gray-300">Loading vote options...</div>;
   }
 
-  if (voteOptions.length === 0) {
+  if (!voteOptions || voteOptions.length === 0) {
     console.log('No vote options found');
     return null;
   }
@@ -156,29 +168,6 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
   // Calculate total locked amount across all options
   const totalLockedAmount = voteOptions.reduce((sum, option) => sum + (option.total_locked || 0), 0);
   console.log('VoteOptionsDisplay - Total locked amount:', totalLockedAmount);
-  console.log('VoteOptionsDisplay - Component structure before render:', {
-    voteOptions,
-    loading,
-    isLocking,
-    totalLockedAmount
-  });
-
-  // Log the rendered structure after component mounts
-  useEffect(() => {
-    console.log('VoteOptionsDisplay - Component mounted');
-    setTimeout(() => {
-      const voteOptionsElement = document.querySelector('.mt-4.space-y-4');
-      if (voteOptionsElement) {
-        console.log('VoteOptionsDisplay element structure:', voteOptionsElement.outerHTML);
-      }
-      
-      const optionElements = document.querySelectorAll('.relative.border-b');
-      if (optionElements.length > 0) {
-        console.log('VoteOptionsDisplay option elements count:', optionElements.length);
-        console.log('First option element:', optionElements[0].outerHTML);
-      }
-    }, 1000);
-  }, [voteOptions]);
 
   return (
     <div className="mt-4 space-y-4">
@@ -191,8 +180,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
         {voteOptions.map((option) => {
           console.log('Rendering option:', option.content, 'with locked amount:', option.total_locked);
           // Calculate percentage for this option
-          const totalLockedForAll = voteOptions.reduce((sum, opt) => sum + (opt.total_locked || 0), 0);
-          const percentage = totalLockedForAll > 0 ? ((option.total_locked || 0) / totalLockedForAll) * 100 : 0;
+          const percentage = totalLockedAmount > 0 ? ((option.total_locked || 0) / totalLockedAmount) * 100 : 0;
           
           return (
             <div key={option.id} className="relative border-b border-gray-700/20 p-3 mb-2 overflow-hidden">

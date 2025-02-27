@@ -12,32 +12,25 @@ const PostContent: React.FC<PostContentProps> = ({ transaction, onTotalLockedAmo
     console.log('PostContent rendered with txid:', transaction.txid);
     console.log('Content type:', transaction.content_type);
     console.log('Is vote:', transaction.is_vote);
-    console.log('Metadata:', transaction.metadata);
-    
-    // Check if this is a vote post based on multiple criteria
-    const isVotePost = transaction.is_vote || 
-                      transaction.content_type === 'vote' || 
-                      (transaction.metadata && 
-                        (transaction.metadata.content_type === 'vote' || 
-                         transaction.metadata.isVote));
-    
-    console.log('Is vote post (calculated):', isVotePost);
+    console.log('Vote options:', transaction.vote_options);
   }, [transaction]);
 
-  // Handle vote type posts
-  if (transaction.content_type === 'vote' || 
-      transaction.is_vote || 
-      (transaction.metadata && 
-        (transaction.metadata.content_type === 'vote' || 
-         transaction.metadata.isVote))) {
-    console.log('Rendering VoteOptionsDisplay for vote post');
+  // Determine if this is a vote post with actual vote options
+  const isVotePostWithOptions = 
+    (transaction.is_vote || transaction.content_type === 'vote') && 
+    transaction.vote_options && 
+    transaction.vote_options.length > 0;
+  
+  // Handle vote type posts with actual options
+  if (isVotePostWithOptions) {
+    console.log('Rendering VoteOptionsDisplay for vote post with options');
     return <VoteOptionsDisplay 
       transaction={transaction} 
       onTotalLockedAmountChange={onTotalLockedAmountChange}
     />;
   }
 
-  // Handle regular posts
+  // Handle regular posts (including vote posts without options)
   console.log('Rendering regular post content');
   return (
     <div className="whitespace-pre-wrap break-words text-gray-900 dark:text-white">

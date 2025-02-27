@@ -31,47 +31,21 @@ const timeSincePost = (transaction: HODLTransaction) => {
 export default function PostComponent({ transaction, postTxid }: PostProps) {
   const [totalLockedAmount, setTotalLockedAmount] = React.useState(0);
 
+  // Determine if this is a vote post with actual vote options
+  const isVotePostWithOptions = React.useMemo(() => {
+    return (transaction.is_vote || transaction.content_type === 'vote') && 
+           transaction.vote_options && 
+           transaction.vote_options.length > 0;
+  }, [transaction]);
+
   React.useEffect(() => {
-    console.log('======== POST COMPONENT DEBUG ========');
     console.log('PostComponent rendered with txid:', transaction.txid);
     console.log('Transaction type:', transaction.content_type);
-    console.log('Transaction content:', transaction.content);
     console.log('Transaction is_vote:', transaction.is_vote);
-    console.log('Transaction metadata:', transaction.metadata);
-    console.log('Full transaction object:', JSON.stringify(transaction, null, 2));
+    console.log('Transaction has vote options:', transaction.vote_options?.length > 0);
+    console.log('Is vote post with options:', isVotePostWithOptions);
     console.log('Total locked amount:', totalLockedAmount);
-    
-    // Check if this is a vote post based on multiple criteria
-    const isVotePost = transaction.is_vote || 
-                      transaction.content_type === 'vote' || 
-                      (transaction.metadata && 
-                        (transaction.metadata.content_type === 'vote' || 
-                         transaction.metadata.isVote));
-    
-    console.log('Is vote post (calculated):', isVotePost);
-    console.log('======================================');
-    
-    // Log the DOM structure after render
-    setTimeout(() => {
-      const postElement = document.querySelector('.bg-white.dark\\:bg-black');
-      if (postElement) {
-        console.log('Post element structure:', postElement.outerHTML);
-        console.log('Post element computed style:', window.getComputedStyle(postElement));
-      }
-      
-      const titleElement = document.querySelector('.text-base.font-medium.text-gray-900.dark\\:text-white');
-      if (titleElement) {
-        console.log('Title element:', titleElement.outerHTML);
-        console.log('Title element computed style:', window.getComputedStyle(titleElement));
-      }
-      
-      const lockedAmountElement = document.querySelector('.text-base.font-medium.text-green-500');
-      if (lockedAmountElement) {
-        console.log('Locked amount element:', lockedAmountElement.outerHTML);
-        console.log('Locked amount element computed style:', window.getComputedStyle(lockedAmountElement));
-      }
-    }, 1000);
-  }, [transaction, totalLockedAmount]);
+  }, [transaction, totalLockedAmount, isVotePostWithOptions]);
 
   const handleTotalLockedAmountChange = (amount: number) => {
     setTotalLockedAmount(amount);
@@ -84,8 +58,10 @@ export default function PostComponent({ transaction, postTxid }: PostProps) {
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center">
             <div className="text-base font-medium text-gray-900 dark:text-white">
-              {/* Don't display content in title for vote posts - it will be shown in the vote component */}
-              {(transaction.content_type === 'vote' || transaction.is_vote) ? 'Vote Post' : transaction.content}
+              {/* For vote posts with options, show "Vote Post" as title */}
+              {isVotePostWithOptions 
+                ? 'Vote Post' 
+                : transaction.content}
             </div>
             <span className="mx-2 text-gray-500 dark:text-gray-400">·</span>
             <span className="text-sm text-gray-500 dark:text-gray-400">
@@ -93,7 +69,8 @@ export default function PostComponent({ transaction, postTxid }: PostProps) {
             </span>
           </div>
           
-          {(transaction.content_type === 'vote' || transaction.is_vote) && totalLockedAmount > 0 && (
+          {/* Only show locked amount for vote posts with options */}
+          {isVotePostWithOptions && totalLockedAmount > 0 && (
             <div className="text-base font-medium text-green-500">
               {formatBSV(totalLockedAmount)} BSV locked
             </div>

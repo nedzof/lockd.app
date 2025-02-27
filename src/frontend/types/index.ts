@@ -88,6 +88,16 @@ export interface HODLTransaction {
   content_type?: string;
   metadata?: any;
   block_height?: number;
+  vote_options?: VoteOption[];
+}
+
+export interface VoteOption {
+  id: string;
+  txid: string;
+  content: string;
+  lock_amount: number;
+  total_locked: number;
+  created_at: string;
 }
 
 export interface BitcoinerSettings {
