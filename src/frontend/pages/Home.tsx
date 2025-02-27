@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { FiTrendingUp, FiClock, FiHeart, FiStar } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
@@ -65,19 +65,40 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     }
   };
 
-  const handleStatsUpdate = (stats: { totalLocked: number; participantCount: number; roundNumber: number }) => {
+  const handleStatsUpdate = useCallback((stats: { totalLocked: number; participantCount: number; roundNumber: number }) => {
     console.log('Stats updated:', stats);
-  };
+  }, []);
 
-  const handleRefreshPosts = () => {
+  const handleRefreshPosts = useCallback(() => {
     // Implement post refresh logic here
     console.log('Refreshing posts...');
-  };
+  }, []);
+
+  // Memoize the userId to prevent unnecessary re-renders
+  const memoizedUserId = useMemo(() => {
+    return connected && bsvAddress ? bsvAddress : 'anon';
+  }, [connected, bsvAddress]);
 
   const renderContent = () => {
     if (isStats) {
       return <BSVStats />;
     }
+
+    // Memoize the entire PostGrid component to prevent unnecessary re-renders
+    const memoizedPostGrid = useMemo(() => {
+      console.log('Creating memoized PostGrid instance');
+      return (
+        <PostGrid 
+          onStatsUpdate={handleStatsUpdate}
+          timeFilter={timeFilter}
+          rankingFilter={rankingFilter}
+          personalFilter={personalFilter}
+          blockFilter={blockFilter}
+          selectedTags={selectedTags}
+          userId={memoizedUserId}
+        />
+      );
+    }, [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, memoizedUserId, handleStatsUpdate]);
 
     return (
       <div className="relative min-h-screen pb-20">
@@ -191,15 +212,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           />
         </div>
 
-        <PostGrid 
-          onStatsUpdate={handleStatsUpdate}
-          timeFilter={timeFilter}
-          rankingFilter={rankingFilter}
-          personalFilter={personalFilter}
-          blockFilter={blockFilter}
-          selectedTags={selectedTags}
-          userId={connected && bsvAddress ? bsvAddress : 'anon'}
-        />
+        {memoizedPostGrid}
 
         {/* Create Post Button - Fixed at bottom center */}
         {connected && (

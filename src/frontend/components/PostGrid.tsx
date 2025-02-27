@@ -49,7 +49,7 @@ interface PostGridProps {
   personalFilter: string;
   blockFilter: string;
   selectedTags: string[];
-  userId?: string;
+  userId: string;
 }
 
 // Use environment variable for API URL
@@ -77,8 +77,49 @@ const PostGrid: React.FC<PostGridProps> = ({
   const wallet = useYoursWallet();
   // Keep track of post IDs we've already seen to prevent duplicates
   const seenPostIds = useRef<Set<string>>(new Set());
+  // Add a ref to track if initial fetch has been made
+  const initialFetchMade = useRef<boolean>(false);
+  // Add a ref to track if component is mounted
+  const isMounted = useRef<boolean>(false);
+  // Add a ref to store previous filter values for comparison
+  const prevFilters = useRef({
+    timeFilter: '',
+    rankingFilter: '',
+    personalFilter: '',
+    blockFilter: '',
+    selectedTags: [] as string[],
+    userId: ''
+  });
+
+  // Memoize the filter values for comparison
+  const currentFilters = useMemo(() => ({
+    timeFilter,
+    rankingFilter,
+    personalFilter,
+    blockFilter,
+    selectedTags,
+    userId
+  }), [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, userId]);
+
+  // Function to check if filters have changed
+  const haveFiltersChanged = useCallback(() => {
+    const prev = prevFilters.current;
+    return (
+      prev.timeFilter !== currentFilters.timeFilter ||
+      prev.rankingFilter !== currentFilters.rankingFilter ||
+      prev.personalFilter !== currentFilters.personalFilter ||
+      prev.blockFilter !== currentFilters.blockFilter ||
+      prev.userId !== currentFilters.userId ||
+      JSON.stringify(prev.selectedTags) !== JSON.stringify(currentFilters.selectedTags)
+    );
+  }, [currentFilters]);
 
   const fetchPosts = useCallback(async (reset = true) => {
+    if (!isMounted.current) {
+      console.log('VALIDATION: Component not mounted, skipping fetch');
+      return;
+    }
+
     if (reset) {
       setIsLoading(true);
       setError(null);
@@ -126,11 +167,18 @@ const PostGrid: React.FC<PostGridProps> = ({
       }
 
       console.log('VALIDATION: Fetching posts with params:', queryParams.toString());
+      console.log('VALIDATION: API URL:', `${API_URL}/api/posts?${queryParams.toString()}`);
+      
       const response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`);
+      console.log('VALIDATION: Response status:', response.status);
+      
       if (!response.ok) {
+        console.error('VALIDATION: API Error:', response.status, response.statusText);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
+      
       const data = await response.json();
+      console.log('VALIDATION: API response full data:', data);
       
       console.log('VALIDATION: API response:', {
         postsCount: data.posts.length,
@@ -275,8 +323,11 @@ const PostGrid: React.FC<PostGridProps> = ({
       } else {
         setIsFetchingMore(false);
       }
+      
+      // Update previous filters after fetch completes
+      prevFilters.current = { ...currentFilters };
     }
-  }, [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, userId, onStatsUpdate, submissions.length]);
+  }, [currentFilters, nextCursor, onStatsUpdate]);
 
   const fetchVoteOptionsForPost = async (post: any) => {
     try {
@@ -331,12 +382,38 @@ const PostGrid: React.FC<PostGridProps> = ({
     
     // Important: We're setting reset=false here to append to existing posts
     fetchPosts(false);
-  }, [hasMore, isFetchingMore, nextCursor, fetchPosts, submissions.length]);
+  }, [hasMore, isFetchingMore, nextCursor, fetchPosts]);
 
+  // Effect to handle initial mount and filter changes
   useEffect(() => {
-    console.log('PostGrid component mounted or dependencies changed');
-    fetchPosts(true);
-  }, [fetchPosts]);
+    // Set mounted flag
+    isMounted.current = true;
+    
+    // Check if this is the first mount or if filters have changed
+    const isFirstMount = !initialFetchMade.current;
+    const filtersChanged = haveFiltersChanged();
+    
+    console.log('PostGrid effect triggered:', { 
+      isFirstMount, 
+      filtersChanged,
+      currentFilters
+    });
+    
+    // Only fetch if it's the first mount or filters have changed
+    if (isFirstMount || filtersChanged) {
+      console.log('Fetching posts due to mount or filter change');
+      initialFetchMade.current = true;
+      fetchPosts(true);
+    } else {
+      console.log('Skipping fetch - no filter changes detected');
+    }
+    
+    // Cleanup function
+    return () => {
+      console.log('PostGrid component unmounting');
+      isMounted.current = false;
+    };
+  }, [fetchPosts, haveFiltersChanged, currentFilters]);
 
   useEffect(() => {
     console.log('Pagination state updated:', {
@@ -421,6 +498,18 @@ const PostGrid: React.FC<PostGridProps> = ({
 
   return (
     <div className="container mx-auto max-w-3xl px-4">
+      {/* Debug info */}
+      <div className="bg-gray-800 text-white p-2 mb-4 rounded text-xs" style={{ display: 'block' }}>
+        <p>Debug Info:</p>
+        <p>Posts Count: {submissions.length}</p>
+        <p>Loading: {isLoading ? 'true' : 'false'}</p>
+        <p>Error: {error ? error : 'none'}</p>
+        <p>Has More: {hasMore ? 'true' : 'false'}</p>
+        <p>Next Cursor: {nextCursor || 'null'}</p>
+        <p>Filters: {JSON.stringify({timeFilter, rankingFilter, personalFilter, blockFilter})}</p>
+        <p>Selected Tags: {selectedTags.join(', ') || 'none'}</p>
+      </div>
+
       {isLoading && (
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#00ffa3]"></div>
@@ -429,14 +518,14 @@ const PostGrid: React.FC<PostGridProps> = ({
 
       {error && (
         <div className="flex flex-col items-center space-y-4 min-h-[400px]">
-          <p className="text-red-500">{error}</p>
-          <button
-            onClick={fetchPosts}
-            className="px-4 py-2 text-[#00ffa3] border border-[#00ffa3] rounded-lg hover:bg-[#00ffa3] hover:text-black transition-all duration-300"
-          >
-            Try Again
-          </button>
-        </div>
+        <p className="text-red-500">{error}</p>
+        <button
+          onClick={fetchPosts}
+          className="px-4 py-2 text-[#00ffa3] border border-[#00ffa3] rounded-lg hover:bg-[#00ffa3] hover:text-black transition-all duration-300"
+        >
+          Try Again
+        </button>
+      </div>
       )}
 
       {!isLoading && !error && (
@@ -576,4 +665,16 @@ const PostGrid: React.FC<PostGridProps> = ({
   );
 };
 
-export default PostGrid;
+// Export the component wrapped with React.memo
+export default React.memo(PostGrid, (prevProps, nextProps) => {
+  // Custom comparison function to determine if the component should re-render
+  // Return true if the props are equal (no re-render needed)
+  return (
+    prevProps.timeFilter === nextProps.timeFilter &&
+    prevProps.rankingFilter === nextProps.rankingFilter &&
+    prevProps.personalFilter === nextProps.personalFilter &&
+    prevProps.blockFilter === nextProps.blockFilter &&
+    prevProps.userId === nextProps.userId &&
+    JSON.stringify(prevProps.selectedTags) === JSON.stringify(nextProps.selectedTags)
+  );
+});
