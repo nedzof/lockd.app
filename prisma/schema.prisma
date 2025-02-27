@@ -23,6 +23,7 @@ model Post {
   lock_likes     LockLike[]
   vote_options   VoteOption[]
   block_height   Int?
+  metadata       Json?
 
   @@index([txid])
   @@index([author_address])

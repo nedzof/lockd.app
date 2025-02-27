@@ -17,13 +17,17 @@ async function applyMigration() {
     console.log('Creating index on block_height column...');
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "Post_block_height_idx" ON "Post"("block_height");`;
 
+    // Execute the raw SQL to add the metadata column
+    console.log('Adding metadata column to Post table...');
+    await prisma.$executeRaw`ALTER TABLE "Post" ADD COLUMN IF NOT EXISTS "metadata" JSONB;`;
+
     console.log('Migration completed successfully!');
 
     // Generate the Prisma client to reflect the schema changes
     console.log('Generating Prisma client...');
     execSync('npx prisma generate', { stdio: 'inherit' });
 
-    console.log('All done! You can now use the block_height field in your code.');
+    console.log('All done! You can now use the block_height and metadata fields in your code.');
   } catch (error) {
     console.error('Migration failed:', error);
   } finally {
