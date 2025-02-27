@@ -46,14 +46,14 @@ export const initializeStatsUpdateJob = () => {
         // Total unique users
         prisma.post.findMany({
           where: {
-            author_address: {
+            authorAddress: {
               not: null
             }
           },
           select: {
-            author_address: true
+            authorAddress: true
           },
-          distinct: ['author_address']
+          distinct: ['authorAddress']
         }).then(users => users.length),
         
         // Total BSV locked
@@ -80,9 +80,9 @@ export const initializeStatsUpdateJob = () => {
         
         // Most active user
         prisma.post.groupBy({
-          by: ['author_address'],
+          by: ['authorAddress'],
           where: {
-            author_address: {
+            authorAddress: {
               not: null
             }
           },
@@ -110,7 +110,7 @@ export const initializeStatsUpdateJob = () => {
         total_bsv_locked: totalBsvLockedResult._sum.amount || 0,
         avg_lock_duration: avgLockDurationResult._avg.lock_duration || 0,
         most_used_tag: mostUsedTag.length > 0 ? mostUsedTag[0].name : null,
-        most_active_user: mostActiveUser.length > 0 ? mostActiveUser[0].author_address : null,
+        most_active_user: mostActiveUser.length > 0 ? mostActiveUser[0].authorAddress : null,
         last_updated: new Date()
       };
       

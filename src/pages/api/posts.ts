@@ -4,10 +4,17 @@ import { DbClient } from '../../services/dbClient';
 const dbClient = new DbClient();
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'GET') {
+  // Check method and route to appropriate handler
+  if (req.method === 'GET') {
+    return handleGetPosts(req, res);
+  } else if (req.method === 'POST') {
+    return handleCreatePost(req, res);
+  } else {
     return res.status(405).json({ message: 'Method not allowed' });
   }
+}
 
+async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
   try {
     // Log database URL (without credentials)
     const dbUrl = process.env.DATABASE_URL || '';
@@ -288,5 +295,80 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       message: 'Error fetching posts',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
+  }
+}
+
+// Add this new function to handle POST requests
+async function handleCreatePost(req: NextApiRequest, res: NextApiResponse) {
+  try {
+    console.log('Received post creation request');
+    
+    // Extract post data from request body
+    const {
+      txid,
+      postId,
+      content,
+      author_address,
+      tags = [],
+      is_vote = false,
+      vote_options = [],
+      raw_image_data,
+      media_type,
+      is_locked = false,
+      lock_duration,
+      metadata = {}
+    } = req.body;
+
+    // Validate required fields
+    if (!content && !raw_image_data) {
+      console.error('Missing required fields: content or raw_image_data');
+      return res.status(400).json({ error: 'Content or image is required' });
+    }
+
+    if (!author_address) {
+      console.error('Missing required field: author_address');
+      return res.status(400).json({ error: 'Author address is required' });
+    }
+
+    if (!txid) {
+      console.error('Missing required field: txid');
+      return res.status(400).json({ error: 'Transaction ID is required' });
+    }
+
+    // Create the post in the database
+    const post = await dbClient.prisma.post.create({
+      data: {
+        txid,
+        content,
+        author_address,
+        tags,
+        is_vote,
+        raw_image_data: raw_image_data ? Buffer.from(raw_image_data, 'base64') : null,
+        media_type,
+        is_locked,
+        lock_duration,
+        metadata: metadata || {}
+      }
+    });
+
+    // If this is a vote post, create the vote options
+    if (is_vote && vote_options && vote_options.length > 0) {
+      for (const option of vote_options) {
+        await dbClient.prisma.voteOption.create({
+          data: {
+            txid: option.txid || `${txid}_option_${option.index}`,
+            content: option.text,
+            author_address,
+            post_id: post.id,
+            option_index: option.index
+          }
+        });
+      }
+    }
+
+    return res.status(201).json(post);
+  } catch (error) {
+    console.error('Error creating post:', error);
+    return res.status(500).json({ message: 'Error creating post', error: error.message });
   }
 }

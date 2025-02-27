@@ -14,61 +14,62 @@ model Post {
   content        String
   txid           String       @unique
   author_address String?
-  created_at     DateTime     @default(now())
-  is_vote        Boolean      @default(false)
-  media_type     String?
+  createdAt      DateTime     @default(now()) @map("created_at")
+  isVote         Boolean      @default(false) @map("is_vote")
+  mediaType      String?      @map("media_type")
   tags           String[]     @default([])
-  media_url      String?
-  raw_image_data Bytes?
-  block_height   Int?
+  mediaUrl       String?      @map("media_url")
+  rawImageData   Bytes?       @map("raw_image_data")
+  blockHeight    Int?         @map("block_height")
   metadata       Json?
-  is_locked      Boolean      @default(false)
-  lock_duration  Int?
-  lock_likes     LockLike[]
-  vote_options   VoteOption[]
+  isLocked       Boolean      @default(false) @map("is_locked")
+  lockLikes      LockLike[]   @relation("PostLockLikes")
+  voteOptions    VoteOption[] @relation("PostVoteOptions")
 
   @@index([txid])
   @@index([author_address])
-  @@index([created_at])
+  @@index([blockHeight])
+  @@index([createdAt])
   @@index([tags])
-  @@index([block_height])
+  @@map("Post")
 }
 
 model VoteOption {
-  id             String     @id @default(dbgenerated("gen_random_uuid()"))
-  content        String
-  author_address String?
-  created_at     DateTime   @default(now())
-  post_id        String
-  tags           String[]   @default([])
-  txid           String     @unique
-  option_index   Int        @default(0)
-  lock_likes     LockLike[]
-  post           Post       @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  id            String     @id @default(dbgenerated("gen_random_uuid()"))
+  content       String
+  authorAddress String?    @map("author_address")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  postId        String     @map("post_id")
+  tags          String[]   @default([])
+  txid          String     @unique
+  optionIndex   Int        @default(0) @map("option_index")
+  lockLikes     LockLike[] @relation("VoteOptionLockLikes")
+  post          Post       @relation("PostVoteOptions", fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([txid])
-  @@index([post_id])
-  @@index([created_at])
-  @@index([option_index])
+  @@index([createdAt])
+  @@index([optionIndex])
+  @@index([postId])
+  @@map("VoteOption")
 }
 
 model LockLike {
-  id             String      @id @default(dbgenerated("gen_random_uuid()"))
-  txid           String      @unique
-  amount         Int
-  author_address String?
-  created_at     DateTime    @default(now())
-  lock_duration  Int
-  post_id        String
-  unlock_height  Int?
-  vote_option_id String?
-  post           Post        @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  vote_option    VoteOption? @relation(fields: [vote_option_id], references: [id], onDelete: Cascade)
+  id            String      @id @default(dbgenerated("gen_random_uuid()"))
+  txid          String      @unique
+  amount        Int
+  authorAddress String?     @map("author_address")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  postId        String      @map("post_id")
+  unlockHeight  Int?        @map("unlock_height")
+  voteOptionId  String?     @map("vote_option_id")
+  post          Post        @relation("PostLockLikes", fields: [postId], references: [id], onDelete: Cascade)
+  voteOption    VoteOption? @relation("VoteOptionLockLikes", fields: [voteOptionId], references: [id], onDelete: Cascade)
 
-  @@index([post_id])
-  @@index([author_address])
-  @@index([created_at])
-  @@index([vote_option_id])
+  @@index([authorAddress])
+  @@index([createdAt])
+  @@index([postId])
+  @@index([voteOptionId])
+  @@map("LockLike")
 }
 
 model ProcessedTransaction {

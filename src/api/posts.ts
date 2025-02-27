@@ -1,5 +1,6 @@
 import express, { Router, RequestHandler } from 'express';
 import prisma from '../db/prisma';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { validateQueryParams } from '../utils/validation';
 import type { DirectPostBody } from '../types';
 import { NextApiRequest, NextApiResponse } from 'next';
@@ -326,6 +327,22 @@ const createPost: CreatePostHandler = async (req, res, next) => {
   try {
     console.log('Received post creation request with body:', req.body);
     
+    // Log database information for debugging
+    try {
+      const dbInfo = await prisma.$queryRaw`
+        SELECT column_name, data_type 
+        FROM information_schema.columns 
+        WHERE table_name = 'Post'
+      `;
+      console.log('Post table schema:', dbInfo);
+      
+      // Debug available Prisma post fields
+      const postFields = Object.keys(prisma.post.fields || {});
+      console.log('Available Prisma post fields:', postFields);
+    } catch (e) {
+      console.error('Failed to query schema information:', e);
+    }
+    
     // Extract post data from request body
     const {
       content,
@@ -335,6 +352,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       vote_options = [],
       raw_image_data,
       media_type,
+      txid,
       postId: clientProvidedPostId // Extract postId if client provides it
     } = req.body;
 
@@ -376,53 +394,69 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       return res.status(400).json({ error: 'Vote posts require at least 2 valid options' });
     }
 
-    // Generate temporary transaction ID
-    const tempTxid = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-    const postId = clientProvidedPostId || `post_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    // Generate temporary transaction ID if not provided
+    const tempTxid = txid || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
     
-    console.log(`Creating post with ID: ${postId}, txid: ${tempTxid}`);
+    console.log(`Creating post with ID: ${tempTxid}, clientProvidedPostId: ${clientProvidedPostId}`);
     
-    // Create post data
-    const postData = {
-      id: tempTxid,
-      txid: tempTxid,
-      postId,
-      content,
-      author_address,
-      tags: tags || [],
-      raw_image_data: raw_image_data || null,
-      media_type: media_type || null,
-      is_vote: is_vote || false,
-      created_at: new Date(),
-    };
-
-    // Create post in database
-    const post = await prisma.post.create({
-      data: postData as unknown as Prisma.PostCreateInput
-    });
-
-    // If this is a vote post, create vote options
-    if (is_vote && vote_options && vote_options.length >= 2) {
-      // Create vote options
-      const voteOptionPromises = vote_options.map(async (option: any, index: number) => {
-        const voteOptionId = `vote_option_${postId}_${index}`;
-        return prisma.voteOption.create({
-          data: {
-            id: voteOptionId,
-            txid: `${tempTxid}_option_${index}`,
-            content: option.text,
-            post_id: post.id,
-            lock_amount: option.lockAmount || 0,
-            lock_duration: option.lockDuration || 0,
-          }
-        });
+    // Create a minimal post with required fields
+    try {
+      const post = await prisma.post.create({
+        data: {
+          id: tempTxid,
+          txid: tempTxid,
+          content: content,
+          author_address: author_address,
+          tags: tags || [],
+          isVote: is_vote || false, // Use camelCase as defined in schema with @map
+          metadata: clientProvidedPostId ? { postId: clientProvidedPostId } : undefined
+        }
       });
 
-      await Promise.all(voteOptionPromises);
-    }
+      // If we succeeded with minimal data, now try to update with image if provided
+      if (raw_image_data) {
+        try {
+          await prisma.post.update({
+            where: { id: post.id },
+            data: {
+              rawImageData: raw_image_data ? Buffer.from(raw_image_data, 'base64') : null, // Use camelCase
+              mediaType: media_type || null // Use camelCase
+            }
+          });
+        } catch (imageError) {
+          console.error('Error updating post with image data:', imageError);
+          // We'll continue since the post was already created
+        }
+      }
 
-    // Return the created post
-    res.status(201).json(post);
+      console.log('Post created successfully:', post);
+
+      // If this is a vote post, create vote options
+      if (is_vote && vote_options && vote_options.length >= 2) {
+        // Create vote options
+        const voteOptionPromises = vote_options.map(async (option: any, index: number) => {
+          const voteOptionId = `vote_option_${tempTxid}_${index}`;
+          return prisma.voteOption.create({
+            data: {
+              id: voteOptionId,
+              txid: `${tempTxid}_option_${index}`,
+              content: option.text,
+              postId: post.id, // Use camelCase as defined in schema with @map
+              authorAddress: author_address, // Use camelCase
+              optionIndex: index // Use camelCase
+            }
+          });
+        });
+
+        await Promise.all(voteOptionPromises);
+      }
+
+      // Return the created post
+      res.status(201).json(post);
+    } catch (error) {
+      console.error('Error creating post:', error);
+      res.status(500).json({ error: 'Internal server error', message: error.message });
+    }
   } catch (error) {
     console.error('Error creating post:', error);
     // Provide more detailed error information
