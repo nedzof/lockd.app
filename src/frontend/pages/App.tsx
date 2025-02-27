@@ -5,8 +5,6 @@ import Layout from '../components/layout/Layout';
 import Home from './Home';
 import WTF from './WTF';
 import Stats from './Stats';
-import TagGenerator from './TagGenerator';
-import PostTaggingPage from './PostTaggingPage';
 import { useWallet } from '../providers/WalletProvider';
 
 export default function App() {
@@ -30,8 +28,6 @@ export default function App() {
           <Route path="/posts" element={<Home connected={isConnected} bsvAddress={bsvAddress} />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/wtf" element={<WTF />} />
-          <Route path="/tag-generator" element={<TagGenerator />} />
-          <Route path="/post-tagging" element={<PostTaggingPage />} />
           
           {/* Catch all route - redirect to /posts */}
           <Route path="*" element={<Navigate to="/posts" replace />} />

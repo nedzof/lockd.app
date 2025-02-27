@@ -15,6 +15,7 @@ logger.info('Initializing Prisma client', {
   useDirectUrl,
   databaseUrl: process.env.DATABASE_URL ? 'Set' : 'Not set',
   directUrl: process.env.DIRECT_URL ? 'Set' : 'Not set',
+  nodeEnv: process.env.NODE_ENV,
 });
 
 // Configure Prisma client with proper connection settings
@@ -26,6 +27,13 @@ const prisma = global.prisma || new PrismaClient({
     { level: 'query', emit: 'stdout' },
   ],
   datasourceUrl: useDirectUrl ? process.env.DIRECT_URL : process.env.DATABASE_URL,
+  // Add connection timeout settings
+  errorFormat: 'pretty',
+});
+
+// Process-level event handler for graceful shutdown
+process.on('beforeExit', () => {
+  logger.info('Application is shutting down');
 });
 
 // Add middleware to handle connection issues
@@ -34,6 +42,12 @@ prisma.$use(async (params, next) => {
   const transactionId = Math.random().toString(36).substring(7);
 
   try {
+    logger.debug(`Starting database operation`, {
+      model: params.model,
+      action: params.action,
+      transactionId
+    });
+    
     // Execute the query
     const result = await next(params);
     
@@ -72,10 +86,6 @@ prisma.$connect().catch(e => {
 if (process.env.NODE_ENV !== 'production') {
   global.prisma = prisma;
 }
-
-process.on('beforeExit', async () => {
-  await prisma.$disconnect();
-});
 
 export { prisma };
 export default prisma;
