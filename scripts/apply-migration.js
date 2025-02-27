@@ -25,13 +25,17 @@ async function applyMigration() {
     console.log('Adding is_locked column to Post table...');
     await prisma.$executeRaw`ALTER TABLE "Post" ADD COLUMN IF NOT EXISTS "is_locked" BOOLEAN NOT NULL DEFAULT false;`;
 
+    // Execute the raw SQL to add the lock_duration column
+    console.log('Adding lock_duration column to Post table...');
+    await prisma.$executeRaw`ALTER TABLE "Post" ADD COLUMN IF NOT EXISTS "lock_duration" INTEGER;`;
+
     console.log('Migration completed successfully!');
 
     // Generate the Prisma client to reflect the schema changes
     console.log('Generating Prisma client...');
     execSync('npx prisma generate', { stdio: 'inherit' });
 
-    console.log('All done! You can now use the block_height, metadata, and is_locked fields in your code.');
+    console.log('All done! You can now use the block_height, metadata, is_locked, and lock_duration fields in your code.');
   } catch (error) {
     console.error('Migration failed:', error);
   } finally {

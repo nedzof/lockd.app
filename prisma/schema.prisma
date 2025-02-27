@@ -25,6 +25,7 @@ model Post {
   block_height   Int?
   metadata       Json?
   is_locked      Boolean      @default(false)
+  lock_duration  Int?
 
   @@index([txid])
   @@index([author_address])
