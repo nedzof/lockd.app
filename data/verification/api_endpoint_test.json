@@ -1,0 +1,45 @@
+{
+  "test": "api_endpoint",
+  "success": true,
+  "response": {
+    "success": true,
+    "data": {
+      "tags": [
+        "Climate Change",
+        "Renewable Energy",
+        "Tensions",
+        "Bitcoin",
+        "Innovation",
+        "Social Media",
+        "Artificial Intelligence",
+        "Developer",
+        "Sustainability",
+        "Concludes",
+        "Global Economy",
+        "Announce",
+        "Alltime",
+        "Bitcoin",
+        "Technology",
+        "Institutional",
+        "Blockchain",
+        "Conference",
+        "Summit",
+        "Global",
+        "Emissions",
+        "Climate",
+        "Teams",
+        "Initiatives",
+        "Rise",
+        "Politics",
+        "High",
+        "Expansion",
+        "Cryptocurrency",
+        "Targets"
+      ],
+      "count": 30,
+      "mode": "fallback"
+    }
+  },
+  "executionTimeMs": 47,
+  "timestamp": "2025-02-27T06:49:15.772Z"
+}

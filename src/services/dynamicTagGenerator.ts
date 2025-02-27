@@ -1,56 +1,109 @@
-import axios from 'axios';
 import natural from 'natural';
 import prisma from '../db/prisma';
 import { logger } from '../utils/logger';
+import { LocalDeepseekService } from './localDeepseekService';
+import fs from 'fs';
+import path from 'path';
 
 const TfIdf = natural.TfIdf;
 const tokenizer = new natural.WordTokenizer();
 
 export class DynamicTagGenerator {
-  private gnewsApiKey: string;
-  private newsdataApiKey: string;
+  private deepseekService: LocalDeepseekService;
+  private contentSources: string[];
   
   constructor() {
-    this.gnewsApiKey = process.env.GNEWS_API_KEY || '';
-    this.newsdataApiKey = process.env.NEWSDATA_API_KEY || '';
+    this.deepseekService = new LocalDeepseekService();
     
-    if (!this.gnewsApiKey && !this.newsdataApiKey) {
-      logger.warn('No news API keys provided. Dynamic tag generation may not work properly.');
+    // Define content sources to analyze for tags
+    // These could be local files, database content, etc.
+    this.contentSources = [
+      path.join(process.cwd(), 'data/content_sources/recent_posts.txt'),
+      path.join(process.cwd(), 'data/content_sources/trending_topics.txt')
+    ];
+    
+    // Ensure content source directories exist
+    this.ensureContentSources();
+  }
+  
+  /**
+   * Ensures content source directories and files exist
+   */
+  private ensureContentSources(): void {
+    const contentDir = path.join(process.cwd(), 'data/content_sources');
+    
+    if (!fs.existsSync(contentDir)) {
+      fs.mkdirSync(contentDir, { recursive: true });
+    }
+    
+    // Create sample content files if they don't exist
+    const samplePosts = `
+Bitcoin reaches new all-time high as institutional adoption increases.
+Tech giants announce new AI initiatives at annual developer conference.
+Global climate summit concludes with new emissions targets.
+Sports league announces expansion teams in three new cities.
+Political tensions rise as negotiations stall on key legislation.
+Healthcare innovations promise breakthrough treatments for chronic conditions.
+Financial markets react to central bank policy announcements.
+Entertainment industry adapts to streaming-first distribution models.
+`;
+    
+    const sampleTrending = `
+Cryptocurrency regulation
+Artificial intelligence ethics
+Climate change mitigation
+Sports league expansion
+Political polarization
+Healthcare innovation
+Financial market volatility
+Streaming media competition
+`;
+    
+    if (!fs.existsSync(this.contentSources[0])) {
+      fs.writeFileSync(this.contentSources[0], samplePosts);
+    }
+    
+    if (!fs.existsSync(this.contentSources[1])) {
+      fs.writeFileSync(this.contentSources[1], sampleTrending);
     }
   }
   
   /**
-   * Generates tags from current news and stores them in the database
+   * Generates tags from local content and DeepSeek V3
    * @returns Array of generated tag names
    */
   async generateTags(): Promise<string[]> {
     try {
-      logger.info('Starting tag generation process');
+      logger.info('Starting tag generation process with DeepSeek V3');
       
-      // Fetch news articles from multiple sources
-      const articles = await this.fetchNewsArticles();
+      // Get content from local sources
+      const content = await this.getLocalContent();
       
-      if (articles.length === 0) {
-        logger.warn('No articles found for tag generation');
+      if (!content) {
+        logger.warn('No content found for tag generation');
         return [];
       }
       
-      logger.info(`Processing ${articles.length} articles for tag extraction`);
+      logger.info(`Processing content for tag extraction with DeepSeek V3`);
       
-      // Extract keywords using TF-IDF
-      const keywords = this.extractKeywords(articles);
+      // Get recent posts from database to add context
+      const recentPosts = await this.getRecentPostsFromDb();
+      const combinedContent = `${content}\n\n${recentPosts}`;
       
-      // Extract named entities (people, organizations, places)
-      const namedEntities = this.extractNamedEntities(articles);
+      // Generate tags using DeepSeek V3
+      const deepseekTags = await this.deepseekService.generateTags(combinedContent);
+      
+      // Also extract keywords using TF-IDF as a fallback/supplement
+      const keywords = this.extractKeywords(combinedContent);
       
       // Combine and filter tags
-      const combinedTags = [...keywords, ...namedEntities];
+      const combinedTags = [...deepseekTags, ...keywords];
       const uniqueTags = this.filterAndNormalizeTags(combinedTags);
       
       // Store tags in database
       await this.storeTags(uniqueTags);
       
-      logger.info(`Generated ${uniqueTags.length} tags from news articles`);
+      logger.info(`Generated ${uniqueTags.length} tags using DeepSeek V3`);
       return uniqueTags;
     } catch (error) {
       logger.error('Error generating tags:', error);
@@ -59,159 +112,63 @@ export class DynamicTagGenerator {
   }
   
   /**
-   * Fetches news articles from multiple APIs
+   * Gets content from local sources
    */
-  private async fetchNewsArticles(): Promise<any[]> {
-    const articles: any[] = [];
-    
+  private async getLocalContent(): Promise<string> {
     try {
-      // Try GNews API first
-      if (this.gnewsApiKey) {
-        const gnewsArticles = await this.fetchFromGnews();
-        if (gnewsArticles.length > 0) {
-          articles.push(...gnewsArticles);
+      let combinedContent = '';
+      
+      // Read content from files
+      for (const source of this.contentSources) {
+        if (fs.existsSync(source)) {
+          const content = fs.readFileSync(source, 'utf-8');
+          combinedContent += content + '\n\n';
         }
       }
       
-      // Try NewsData.io API as fallback or additional source
-      if (this.newsdataApiKey) {
-        const newsdataArticles = await this.fetchFromNewsdata();
-        if (newsdataArticles.length > 0) {
-          articles.push(...newsdataArticles);
-        }
-      }
-      
-      return articles;
+      return combinedContent;
     } catch (error) {
-      logger.error('Error fetching news articles:', error);
-      return [];
+      logger.error('Error reading local content:', error);
+      return '';
     }
   }
   
   /**
-   * Fetches articles from GNews API
+   * Gets recent posts from the database
    */
-  private async fetchFromGnews(): Promise<any[]> {
+  private async getRecentPostsFromDb(): Promise<string> {
     try {
-      const response = await axios.get('https://gnews.io/api/v4/top-headlines', {
-        params: {
-          token: this.gnewsApiKey,
-          lang: 'en',
-          max: 20
+      const posts = await prisma.post.findMany({
+        orderBy: {
+          created_at: 'desc'
         },
-        timeout: 10000
+        take: 50,
+        select: {
+          content: true,
+          tags: true
+        }
       });
       
-      if (response.data && response.data.articles) {
-        logger.info(`Fetched ${response.data.articles.length} articles from GNews`);
-        return response.data.articles.map((article: any) => ({
-          title: article.title,
-          description: article.description,
-          content: article.content,
-          source: 'gnews'
-        }));
-      }
-      
-      return [];
+      return posts.map(post => `${post.content} ${post.tags.join(' ')}`).join('\n');
     } catch (error) {
-      logger.error('Error fetching from GNews:', error);
-      return [];
-    }
-  }
-  
-  /**
-   * Fetches articles from NewsData.io API
-   */
-  private async fetchFromNewsdata(): Promise<any[]> {
-    try {
-      const response = await axios.get('https://newsdata.io/api/1/news', {
-        params: {
-          apikey: this.newsdataApiKey,
-          language: 'en',
-          size: 20
-        },
-        timeout: 10000
-      });
-      
-      if (response.data && response.data.results) {
-        logger.info(`Fetched ${response.data.results.length} articles from NewsData.io`);
-        return response.data.results.map((article: any) => ({
-          title: article.title,
-          description: article.description,
-          content: article.content,
-          source: 'newsdata'
-        }));
-      }
-      
-      return [];
-    } catch (error) {
-      logger.error('Error fetching from NewsData.io:', error);
-      return [];
+      logger.error('Error fetching recent posts:', error);
+      return '';
     }
   }
   
   /**
    * Extracts keywords using TF-IDF algorithm
    */
-  private extractKeywords(articles: any[]): string[] {
+  private extractKeywords(text: string): string[] {
     const tfidf = new TfIdf();
     
-    // Add documents to the corpus
-    articles.forEach(article => {
-      const text = `${article.title} ${article.description || ''} ${article.content || ''}`;
-      tfidf.addDocument(text);
-    });
+    // Add document to the corpus
+    tfidf.addDocument(text);
     
-    const keywords: string[] = [];
+    // Get top terms
+    const terms = tfidf.listTerms(0).slice(0, 20);
     
-    // Extract top keywords from each document
-    for (let i = 0; i < articles.length; i++) {
-      const topTerms = tfidf.listTerms(i).slice(0, 5);
-      topTerms.forEach(term => {
-        if (term.term.length > 3 && /^[a-zA-Z]+$/.test(term.term)) {
-          keywords.push(term.term);
-        }
-      });
-    }
-    
-    return keywords;
-  }
-  
-  /**
-   * Extracts named entities from articles
-   * This is a simple implementation - in a production environment,
-   * you might want to use a more sophisticated NER library
-   */
-  private extractNamedEntities(articles: any[]): string[] {
-    const entities: string[] = [];
-    const potentialEntities: Record<string, number> = {};
-    
-    articles.forEach(article => {
-      const text = `${article.title} ${article.description || ''} ${article.content || ''}`;
-      
-      // Simple capitalized multi-word extraction
-      const words = text.split(/\s+/);
-      
-      for (let i = 0; i < words.length - 1; i++) {
-        const word = words[i].replace(/[^\w\s]/g, '');
-        const nextWord = words[i + 1].replace(/[^\w\s]/g, '');
-        
-        // Check for capitalized words that might be named entities
-        if (word.length > 1 && nextWord.length > 1 && 
-            word[0] === word[0].toUpperCase() && 
-            nextWord[0] === nextWord[0].toUpperCase()) {
-          const entity = `${word} ${nextWord}`;
-          potentialEntities[entity] = (potentialEntities[entity] || 0) + 1;
-        }
-      }
-    });
-    
-    // Filter entities that appear more than once
-    Object.entries(potentialEntities)
-      .filter(([_, count]) => count > 1)
-      .forEach(([entity]) => entities.push(entity));
-    
-    return entities;
+    return terms.map(term => term.term);
   }
   
   /**
@@ -239,7 +196,7 @@ export class DynamicTagGenerator {
       });
     
     // Remove duplicates
-    return [...new Set(normalizedTags)];
+    return [...new Set(normalizedTags)].slice(0, 30);
   }
   
   /**
@@ -247,46 +204,51 @@ export class DynamicTagGenerator {
    */
   private async storeTags(tags: string[]): Promise<void> {
     try {
-      // Process tags in batches to avoid overwhelming the database
-      const batchSize = 10;
-      const batches = [];
-      
-      for (let i = 0; i < tags.length; i += batchSize) {
-        batches.push(tags.slice(i, i + batchSize));
-      }
-      
-      for (const batch of batches) {
-        await Promise.all(batch.map(async (tagName) => {
-          // Check if tag already exists
-          const existingTag = await prisma.tag.findFirst({
-            where: { name: tagName }
-          });
-          
-          if (existingTag) {
-            // Update existing tag
-            await prisma.tag.update({
-              where: { id: existingTag.id },
-              data: {
-                updatedAt: new Date(),
-                usageCount: existingTag.usageCount // Keep the same usage count
-              }
-            });
-          } else {
-            // Create new tag
-            await prisma.tag.create({
-              data: {
-                name: tagName,
-                type: 'current_event',
-                usageCount: 0
-              }
-            });
+      // Get existing tags to avoid duplicates
+      const existingTags = await prisma.tag.findMany({
+        where: {
+          name: {
+            in: tags
           }
-        }));
+        },
+        select: {
+          name: true
+        }
+      });
+      
+      const existingTagNames = new Set(existingTags.map(tag => tag.name));
+      
+      // Filter out tags that already exist
+      const newTags = tags.filter(tag => !existingTagNames.has(tag));
+      
+      // Create new tags
+      if (newTags.length > 0) {
+        await prisma.tag.createMany({
+          data: newTags.map(name => ({
+            name,
+            type: 'current_event',
+            usageCount: 1,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          })),
+          skipDuplicates: true
+        });
       }
       
-      logger.info(`Successfully stored ${tags.length} tags in the database`);
+      // Update usage count for all tags (both new and existing)
+      for (const tag of tags) {
+        await prisma.tag.update({
+          where: { name: tag },
+          data: { 
+            usageCount: { increment: 1 },
+            updatedAt: new Date()
+          }
+        });
+      }
+      
+      logger.info(`Stored ${newTags.length} new tags, updated ${tags.length} tags total`);
     } catch (error) {
-      logger.error('Error storing tags in database:', error);
+      logger.error('Error storing tags:', error);
     }
   }
 }

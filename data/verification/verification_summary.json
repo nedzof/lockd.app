@@ -1,0 +1,103 @@
+{
+  "timestamp": "2025-02-27T06:49:15.774Z",
+  "tests": [
+    {
+      "test": "direct_service",
+      "success": true,
+      "tags": [
+        "Machine Learning",
+        "Politics",
+        "Healthcare",
+        "Technology",
+        "Concludes",
+        "Announces",
+        "Sustainability",
+        "Social Media",
+        "Announce",
+        "Global Economy",
+        "Three",
+        "High",
+        "Rise",
+        "Political",
+        "Innovation",
+        "Global",
+        "Initiatives",
+        "Reaches",
+        "Increases",
+        "Developer",
+        "Tech",
+        "Giants",
+        "Bitcoin",
+        "Artificial Intelligence",
+        "Bitcoin",
+        "Tensions",
+        "Conference",
+        "Adoption",
+        "Cities",
+        "Renewable Energy"
+      ],
+      "count": 30,
+      "mode": "fallback",
+      "executionTimeMs": 1,
+      "timestamp": "2025-02-27T06:49:15.724Z"
+    },
+    {
+      "test": "api_endpoint",
+      "success": true,
+      "response": {
+        "success": true,
+        "data": {
+          "tags": [
+            "Climate Change",
+            "Renewable Energy",
+            "Tensions",
+            "Bitcoin",
+            "Innovation",
+            "Social Media",
+            "Artificial Intelligence",
+            "Developer",
+            "Sustainability",
+            "Concludes",
+            "Global Economy",
+            "Announce",
+            "Alltime",
+            "Bitcoin",
+            "Technology",
+            "Institutional",
+            "Blockchain",
+            "Conference",
+            "Summit",
+            "Global",
+            "Emissions",
+            "Climate",
+            "Teams",
+            "Initiatives",
+            "Rise",
+            "Politics",
+            "High",
+            "Expansion",
+            "Cryptocurrency",
+            "Targets"
+          ],
+          "count": 30,
+          "mode": "fallback"
+        }
+      },
+      "executionTimeMs": 47,
+      "timestamp": "2025-02-27T06:49:15.772Z"
+    },
+    {
+      "test": "python_script",
+      "success": true,
+      "scriptPath": "/home/caruk/Music/lockd.app/scripts/run_deepseek.py",
+      "timestamp": "2025-02-27T06:49:15.773Z"
+    },
+    {
+      "test": "model_directory",
+      "success": true,
+      "modelPath": "./models/deepseek-v3-7b",
+      "timestamp": "2025-02-27T06:49:15.774Z"
+    }
+  ],
+  "overallStatus": "completed"
+}

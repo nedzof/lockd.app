@@ -7,6 +7,8 @@ import lockLikesRouter from './api/lockLikes';
 import tagsRouter from './api/tags';
 import statsRouter from './api/stats';
 import votesRouter from './api/votes';
+import tagGenerationRouter from './routes/tagGenerationRoutes';
+import postTaggingRouter from './routes/postTaggingRoutes';
 import { logger } from './utils/logger';
 import { initializeTagGenerationJob } from './jobs/tagGenerationJob';
 import { initializeStatsUpdateJob } from './jobs/statsUpdateJob';
@@ -15,7 +17,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3003;
 
 // Configure CORS
 const corsOptions = {
@@ -63,6 +65,8 @@ app.use('/api/lock-likes', lockLikesRouter);
 app.use('/api/tags', tagsRouter);
 app.use('/api/stats', statsRouter);
 app.use('/api/votes', votesRouter);
+app.use('/api', tagGenerationRouter);
+app.use('/api', postTaggingRouter);
 
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {

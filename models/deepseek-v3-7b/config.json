@@ -1,0 +1,9 @@
+{
+  "architectures": [
+    "DeepseekForCausalLM"
+  ],
+  "model_type": "deepseek",
+  "torch_dtype": "float16",
+  "transformers_version": "4.35.0",
+  "vocab_size": 128256
+}

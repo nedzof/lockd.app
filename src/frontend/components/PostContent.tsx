@@ -4,9 +4,10 @@ import VoteOptionsDisplay from './VoteOptionsDisplay';
 
 interface PostContentProps {
   transaction: HODLTransaction;
+  onTotalLockedAmountChange?: (amount: number) => void;
 }
 
-const PostContent: React.FC<PostContentProps> = ({ transaction }) => {
+const PostContent: React.FC<PostContentProps> = ({ transaction, onTotalLockedAmountChange }) => {
   useEffect(() => {
     console.log('PostContent rendered with txid:', transaction.txid);
     console.log('Content type:', transaction.content_type);
@@ -15,7 +16,10 @@ const PostContent: React.FC<PostContentProps> = ({ transaction }) => {
   // Handle vote type posts
   if (transaction.content_type === 'vote') {
     console.log('Rendering VoteOptionsDisplay for vote post');
-    return <VoteOptionsDisplay transaction={transaction} />;
+    return <VoteOptionsDisplay 
+      transaction={transaction} 
+      onTotalLockedAmountChange={onTotalLockedAmountChange}
+    />;
   }
 
   // Handle regular posts

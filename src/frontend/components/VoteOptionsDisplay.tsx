@@ -16,11 +16,15 @@ interface VoteOption {
 
 interface VoteOptionsDisplayProps {
   transaction: HODLTransaction;
+  onTotalLockedAmountChange?: (amount: number) => void;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
-const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) => {
+const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ 
+  transaction, 
+  onTotalLockedAmountChange 
+}) => {
   const [voteOptions, setVoteOptions] = useState<VoteOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [isLocking, setIsLocking] = useState<Record<string, boolean>>({});
@@ -41,6 +45,13 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
         const data = await response.json();
         console.log('Vote options received:', data);
         setVoteOptions(data);
+        
+        // Calculate and notify parent of total locked amount
+        const totalLocked = data.reduce((sum: number, option: VoteOption) => 
+          sum + (option.total_locked || 0), 0);
+        if (onTotalLockedAmountChange) {
+          onTotalLockedAmountChange(totalLocked);
+        }
       } catch (error) {
         console.error('Error fetching vote options:', error);
         toast.error('Failed to load vote options');
@@ -104,6 +115,13 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
         )
       );
       
+      // Calculate and notify parent of new total locked amount
+      const newTotalLocked = voteOptions.reduce((sum, opt) => 
+        sum + (opt.id === optionId ? (opt.total_locked || 0) + amount : (opt.total_locked || 0)), 0);
+      if (onTotalLockedAmountChange) {
+        onTotalLockedAmountChange(newTotalLocked);
+      }
+      
       // Refresh wallet balance
       refreshBalance();
     } catch (error) {
@@ -126,15 +144,33 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ transaction }) 
 
   // Calculate total locked amount across all options
   const totalLockedAmount = voteOptions.reduce((sum, option) => sum + (option.total_locked || 0), 0);
-  console.log('Total locked amount:', totalLockedAmount);
+  console.log('VoteOptionsDisplay - Total locked amount:', totalLockedAmount);
+  console.log('VoteOptionsDisplay - Component structure before render:', {
+    voteOptions,
+    loading,
+    isLocking,
+    totalLockedAmount
+  });
+
+  // Log the rendered structure after component mounts
+  useEffect(() => {
+    console.log('VoteOptionsDisplay - Component mounted');
+    setTimeout(() => {
+      const voteOptionsElement = document.querySelector('.mt-4.space-y-4');
+      if (voteOptionsElement) {
+        console.log('VoteOptionsDisplay element structure:', voteOptionsElement.outerHTML);
+      }
+      
+      const optionElements = document.querySelectorAll('.relative.border-b');
+      if (optionElements.length > 0) {
+        console.log('VoteOptionsDisplay option elements count:', optionElements.length);
+        console.log('First option element:', optionElements[0].outerHTML);
+      }
+    }, 1000);
+  }, [voteOptions]);
 
   return (
     <div className="mt-4 space-y-4">
-      {/* Display total locked amount */}
-      <div className="text-right text-base font-medium text-green-500 mb-4">
-        {formatBSV(totalLockedAmount)} BSV locked
-      </div>
-      
       <div className="space-y-4">
         {voteOptions.map((option) => {
           console.log('Rendering option:', option.content, 'with locked amount:', option.total_locked);

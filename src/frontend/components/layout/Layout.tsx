@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { FiLock, FiLogOut, FiExternalLink, FiHome, FiBarChart2, FiHelpCircle } from 'react-icons/fi';
+import { FiLock, FiLogOut, FiExternalLink, FiHome, FiBarChart2, FiHelpCircle, FiTag, FiBookmark } from 'react-icons/fi';
 import { formatBSV, formatAddress } from '../../utils/formatBSV';
 
 interface LayoutProps {
@@ -141,6 +141,18 @@ export default function Layout({
               >
                 <FiHelpCircle className={`${isActive('/wtf') ? 'text-[#00ffa3]' : ''}`} />
                 <span className="hidden sm:inline text-sm font-medium">WTF?</span>
+              </Link>
+              
+              <Link
+                to="/tag-generator"
+                className={`px-3 py-2 rounded-lg flex items-center space-x-1 transition-all duration-300 ${
+                  isActive('/tag-generator') 
+                    ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <FiTag className={`${isActive('/tag-generator') ? 'text-[#00ffa3]' : ''}`} />
+                <span className="hidden sm:inline text-sm font-medium">Tags</span>
               </Link>
             </nav>
 

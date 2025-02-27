@@ -1,0 +1,6 @@
+{
+  "test": "model_directory",
+  "success": true,
+  "modelPath": "./models/deepseek-v3-7b",
+  "timestamp": "2025-02-27T06:49:15.774Z"
+}

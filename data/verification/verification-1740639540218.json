@@ -1,0 +1,25 @@
+{
+  "timestamp": "2025-02-27T06:58:59.910Z",
+  "modelDirectory": {
+    "exists": true,
+    "files": [
+      "README.md",
+      "config.json",
+      "model.safetensors",
+      "tokenizer_config.json"
+    ]
+  },
+  "pythonScript": {
+    "exists": true,
+    "path": "/home/caruk/Music/lockd.app/scripts/run_deepseek.py"
+  },
+  "apiEndpoint": {
+    "available": false,
+    "response": null,
+    "error": "Request failed with status code 404"
+  },
+  "summary": {
+    "status": "partial",
+    "message": "Model and script exist, but API endpoint is unavailable"
+  }
+}

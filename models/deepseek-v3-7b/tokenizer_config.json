@@ -1,0 +1,5 @@
+{
+  "model_max_length": 8192,
+  "padding_side": "right",
+  "tokenizer_class": "PreTrainedTokenizerFast"
+}
