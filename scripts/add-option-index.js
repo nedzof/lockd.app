@@ -1,5 +1,5 @@
 // Script to add option_index field to existing vote options
-const { PrismaClient } = require('@prisma/client');
+import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function addOptionIndexToVoteOptions() {

@@ -273,15 +273,42 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
       return;
     }
 
-    // Set appropriate content type
-    if (post.media_type) {
-      res.setHeader('Content-Type', post.media_type);
+    // Map of content types for different formats
+    const contentTypeMap: Record<string, string> = {
+      'jpeg': 'image/jpeg',
+      'jpg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'bmp': 'image/bmp',
+      'svg': 'image/svg+xml',
+      'webp': 'image/webp',
+      'tiff': 'image/tiff'
+    };
+
+    // Determine content type
+    let contentType = post.media_type;
+    
+    // If we have an image_format but no media_type, try to determine from format
+    if (!contentType && post.image_format && contentTypeMap[post.image_format.toLowerCase()]) {
+      contentType = contentTypeMap[post.image_format.toLowerCase()];
     }
+    
+    // Default to octet-stream if we can't determine the type
+    if (!contentType) {
+      contentType = 'application/octet-stream';
+    }
+
+    // Set appropriate content type
+    res.setHeader('Content-Type', contentType);
+
+    // Add cache control headers for better performance
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+    res.setHeader('ETag', `"${req.params.id}"`);
 
     // Log information about the image data
     logger.debug('Sending image data', {
       postId: req.params.id,
-      mediaType: post.media_type,
+      mediaType: contentType,
       dataType: typeof post.raw_image_data,
       isBuffer: Buffer.isBuffer(post.raw_image_data),
       dataLength: post.raw_image_data.length
@@ -307,7 +334,8 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       is_vote = false,
       vote_options = [],
       raw_image_data,
-      media_type
+      media_type,
+      postId: clientProvidedPostId // Extract postId if client provides it
     } = req.body;
 
     // Validate required fields
@@ -321,6 +349,27 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       return res.status(400).json({ error: 'Author address is required' });
     }
 
+    // Validate image format if provided
+    if (raw_image_data && media_type) {
+      const supportedFormats = [
+        'image/jpeg', 
+        'image/jpg', 
+        'image/png', 
+        'image/gif', 
+        'image/bmp', 
+        'image/svg+xml', 
+        'image/webp', 
+        'image/tiff'
+      ];
+      
+      if (!supportedFormats.includes(media_type)) {
+        console.error('Unsupported image format:', media_type);
+        return res.status(400).json({ 
+          error: 'Unsupported image format. Please use JPEG, PNG, GIF, BMP, SVG, WEBP, or TIFF.' 
+        });
+      }
+    }
+
     // Validate vote options if this is a vote post
     if (is_vote && (!vote_options || vote_options.length < 2)) {
       console.error('Invalid vote options:', vote_options);
@@ -329,8 +378,10 @@ const createPost: CreatePostHandler = async (req, res, next) => {
 
     // Generate temporary transaction ID
     const tempTxid = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-    const postId = `post_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-
+    const postId = clientProvidedPostId || `post_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    
+    console.log(`Creating post with ID: ${postId}, txid: ${tempTxid}`);
+    
     // Create post data
     const postData = {
       id: tempTxid,
@@ -374,15 +425,38 @@ const createPost: CreatePostHandler = async (req, res, next) => {
     res.status(201).json(post);
   } catch (error) {
     console.error('Error creating post:', error);
-    next(error);
+    // Provide more detailed error information
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      console.error(`Prisma error code: ${error.code}, message: ${error.message}`);
+      
+      // Handle specific Prisma errors
+      if (error.code === 'P2002') {
+        return res.status(409).json({ 
+          error: 'Conflict error', 
+          message: 'A post with this ID already exists',
+          details: error.meta
+        });
+      }
+    }
+    
+    // For other types of errors, return a more informative response
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
+    });
   }
 };
 
 // Handler for direct post creation
-const createDirectPost: CreateDirectPostHandler = async (req, res, next): Promise<void> => {
+const createDirectPost: CreateDirectPostHandler = async (req, res) => {
   try {
-    console.log('Received direct post creation request');
-
+    console.log('Received direct post creation request with body:', {
+      ...req.body,
+      raw_image_data: req.body.raw_image_data ? `[Image data length: ${req.body.raw_image_data.length}]` : null
+    });
+    
+    // Extract post data from request body
     const {
       postId,
       content,
@@ -390,16 +464,46 @@ const createDirectPost: CreateDirectPostHandler = async (req, res, next): Promis
       raw_image_data,
       media_type,
       description,
-      tags,
+      tags = [],
       prediction_market_data,
-      isLocked,
-      lockDuration,
-      lockAmount,
-      created_at
+      isLocked = false,
+      lockDuration = 0,
+      lockAmount = 0,
+      created_at = new Date().toISOString()
     } = req.body;
 
-    // Log image data details
-    if (raw_image_data) {
+    // Validate required fields
+    if (!content && !raw_image_data) {
+      console.error('Missing required fields: content or raw_image_data');
+      return res.status(400).json({ error: 'Content or image is required' });
+    }
+
+    if (!author_address) {
+      console.error('Missing required field: author_address');
+      return res.status(400).json({ error: 'Author address is required' });
+    }
+
+    // Validate image format if provided
+    if (raw_image_data && media_type) {
+      const supportedFormats = [
+        'image/jpeg', 
+        'image/jpg', 
+        'image/png', 
+        'image/gif', 
+        'image/bmp', 
+        'image/svg+xml', 
+        'image/webp', 
+        'image/tiff'
+      ];
+      
+      if (!supportedFormats.includes(media_type)) {
+        console.error('Unsupported image format:', media_type);
+        return res.status(400).json({ 
+          error: 'Unsupported image format. Please use JPEG, PNG, GIF, BMP, SVG, WEBP, or TIFF.' 
+        });
+      }
+      
+      // Log image details for debugging
       console.log('Image upload details:', {
         hasImageData: true,
         imageDataLength: raw_image_data.length,
@@ -410,6 +514,23 @@ const createDirectPost: CreateDirectPostHandler = async (req, res, next): Promis
 
     // Create temporary txid for the post
     const tempTxid = `temp_${postId}_${Date.now()}`;
+    
+    // Prepare metadata for scanner processing
+    const metadata = {
+      prediction_market_data,
+      app: 'lockd',
+      version: '1.0.0',
+      lock: {
+        isLocked,
+        duration: lockDuration,
+        amount: lockAmount
+      },
+      // Add scanner-related metadata
+      scanner: {
+        status: 'pending',
+        processedAt: null
+      }
+    };
 
     const postData = {
       id: tempTxid,
@@ -421,16 +542,7 @@ const createDirectPost: CreateDirectPostHandler = async (req, res, next): Promis
       media_type: media_type || null,
       description,
       tags,
-      metadata: {
-        prediction_market_data,
-        app: 'lockd',
-        version: '1.0.0',
-        lock: {
-          isLocked,
-          duration: lockDuration,
-          amount: lockAmount
-        }
-      },
+      metadata,
       is_locked: isLocked,
       lock_duration: lockDuration,
       created_at: new Date(created_at),
@@ -441,12 +553,30 @@ const createDirectPost: CreateDirectPostHandler = async (req, res, next): Promis
       data: postData as unknown as Prisma.PostCreateInput
     });
 
+    console.log(`Direct post created successfully with ID: ${post.id}, ready for scanner processing`);
     res.status(201).json(post);
   } catch (error) {
     console.error('Error creating direct post:', error);
+    
+    // Provide more detailed error information
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      console.error(`Prisma error code: ${error.code}, message: ${error.message}`);
+      
+      // Handle specific Prisma errors
+      if (error.code === 'P2002') {
+        return res.status(409).json({ 
+          error: 'Conflict error', 
+          message: 'A post with this ID already exists',
+          details: error.meta
+        });
+      }
+    }
+    
+    // For other types of errors, return a more informative response
     res.status(500).json({
-      message: 'Error creating direct post',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
     });
   }
 };
