@@ -71,17 +71,10 @@ export interface DbPost {
 export interface DbVoteOption {
     id: string;
     txid: string;
-    postId: string;
-    post_txid: string;
     content: string;
-    description: string;
     author_address: string;
     created_at: Date;
-    lock_amount: number;
-    lock_duration: number;
-    unlock_height: number;
-    current_height: number;
-    lock_percentage: number;
+    post_id: string;
     option_index: number;
     tags: string[];
 }
@@ -195,17 +188,10 @@ export function createDbVoteOptions(metadata: PostMetadata, post_txid: string): 
     return metadata.vote.options.map((option, index) => ({
         id: `${metadata.postId}-option-${index}`,
         txid: '', // This will be set when the transaction is created
-        postId: metadata.postId,
-        post_txid,
         content: option.text,
-        description: '',
         author_address: '', // This will be set by the caller
         created_at: new Date(metadata.timestamp),
-        lock_amount: option.lockAmount,
-        lock_duration: option.lockDuration,
-        unlock_height: option.unlockHeight || 0,
-        current_height: option.currentHeight || 0,
-        lock_percentage: option.lockPercentage || 0,
+        post_id: metadata.postId,
         option_index: option.optionIndex,
         tags: metadata.tags
     }));
@@ -226,9 +212,13 @@ function createMapData(metadata: PostMetadata): MAP {
         version: metadata.version || '1.0.0',
         tags: JSON.stringify(metadata.tags || []),
         sequence: (metadata.sequence || 0).toString(),
-        is_locked: (metadata.is_locked !== undefined ? metadata.is_locked : false).toString(),
         is_vote: (isVote !== undefined ? isVote : false).toString()
     };
+
+    // Only include is_locked for non-vote options
+    if (metadata.type !== 'vote_option' && metadata.is_locked !== undefined) {
+        mapData.is_locked = metadata.is_locked.toString();
+    }
 
     if (metadata.parentSequence !== undefined) {
         mapData.parentSequence = metadata.parentSequence.toString();
@@ -250,7 +240,8 @@ function createMapData(metadata: PostMetadata): MAP {
         mapData.unlock_height = metadata.unlock_height.toString();
     }
 
-    if (metadata.lock_duration !== undefined) {
+    // Only include lock_duration for non-vote options
+    if (metadata.type !== 'vote_option' && metadata.lock_duration !== undefined) {
         mapData.lock_duration = metadata.lock_duration.toString();
     }
 
@@ -262,27 +253,10 @@ function createMapData(metadata: PostMetadata): MAP {
             if (metadata.vote.optionsHash) {
                 mapData.optionsHash = metadata.vote.optionsHash;
             }
-        } else if (metadata.vote.options?.[0]) {
-            const option = metadata.vote.options[0];
+        } else if (metadata.vote.optionIndex !== undefined) {
+            // For vote options, only include essential fields
             mapData.type = 'vote_option';
-            if (option.optionIndex !== undefined) {
-                mapData.optionIndex = option.optionIndex.toString();
-            }
-            if (option.lockAmount !== undefined) {
-                mapData.lockAmount = option.lockAmount.toString();
-            }
-            if (option.lockDuration !== undefined) {
-                mapData.lockDuration = option.lockDuration.toString();
-            }
-            if (option.unlockHeight !== undefined) {
-                mapData.unlockHeight = option.unlockHeight.toString();
-            }
-            if (option.currentHeight !== undefined) {
-                mapData.currentHeight = option.currentHeight.toString();
-            }
-            if (option.lockPercentage !== undefined) {
-                mapData.lockPercentage = option.lockPercentage.toString();
-            }
+            mapData.optionIndex = metadata.vote.optionIndex.toString();
         }
     }
 
@@ -420,7 +394,7 @@ async function createVoteOptionComponent(
     parentSequence: number,
     address: string
 ): Promise<InscribeRequest> {
-    // Create structured metadata for easy parsing
+    // Create minimal metadata for vote options
     const metadata: PostMetadata = {
         app: 'lockd.app',
         type: 'vote_option',
@@ -431,16 +405,10 @@ async function createVoteOptionComponent(
         sequence,
         parentSequence,
         postId,
-        is_locked: true,
-        lock_duration: option.lockDuration,
         is_vote: true,
         vote: {
             isVoteQuestion: false,
-            options: [option],
-            optionIndex: option.optionIndex,
-            optionText: option.text,
-            lockAmount: option.lockAmount,
-            lockDuration: option.lockDuration
+            optionIndex: option.optionIndex
         }
     };
 
@@ -901,10 +869,8 @@ export const createPost = async (
         if (isVotePost && metadata.vote?.options) {
             dbPost.is_vote = true;
             dbPost.vote_options = metadata.vote.options.map(option => ({
-                text: option.text,
-                lockAmount: option.lockAmount,
-                lockDuration: option.lockDuration,
-                index: option.optionIndex
+                content: option.text,
+                option_index: option.optionIndex
             }));
         }
         

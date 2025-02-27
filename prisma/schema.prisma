@@ -39,18 +39,17 @@ model VoteOption {
   content        String
   author_address String?
   created_at     DateTime   @default(now())
-  lock_amount    Int        @default(0)
-  lock_duration  Int        @default(0)
   post_id        String
   tags           String[]   @default([])
   txid           String     @unique
-  unlock_height  Int?
+  option_index   Int        @default(0)
   lock_likes     LockLike[]
   post           Post       @relation(fields: [post_id], references: [id], onDelete: Cascade)
 
   @@index([txid])
   @@index([post_id])
   @@index([created_at])
+  @@index([option_index])
 }
 
 model LockLike {
@@ -102,7 +101,14 @@ model Tag {
   @@index([usageCount])
 }
 
-model Stats {
+model bsv_price_history {
+  id         Int       @id @default(autoincrement())
+  date       DateTime  @unique @db.Date
+  price      Float
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+model stats {
   id                String   @id @default(dbgenerated("gen_random_uuid()"))
   total_posts       Int
   total_votes       Int
@@ -114,13 +120,4 @@ model Stats {
   most_active_user  String?
   last_updated      DateTime @default(now())
   current_bsv_price Float?
-
-  @@map("stats")
-}
-
-model bsv_price_history {
-  id         Int       @id @default(autoincrement())
-  date       DateTime  @unique @db.Date
-  price      Float
-  created_at DateTime? @default(now()) @db.Timestamptz(6)
 }
