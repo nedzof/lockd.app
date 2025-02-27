@@ -73,6 +73,7 @@ const PostGrid: React.FC<PostGridProps> = ({
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const imageRefs = useRef<{ [key: string]: HTMLImageElement }>({});
+  const imageUrlMap = useRef<Map<string, string>>(new Map());
   const wallet = useYoursWallet();
 
   const fetchPosts = useCallback(async (reset = true) => {
@@ -80,8 +81,10 @@ const PostGrid: React.FC<PostGridProps> = ({
       setIsLoading(true);
       setError(null);
       setNextCursor(null); // Reset cursor when fetching from the beginning
+      console.log('VALIDATION: Resetting cursor and fetching initial posts');
     } else {
       setIsFetchingMore(true);
+      console.log('VALIDATION: Fetching more posts with cursor:', nextCursor);
     }
     
     try {
@@ -115,17 +118,22 @@ const PostGrid: React.FC<PostGridProps> = ({
       queryParams.append('limit', '10'); // Fetch 10 posts at a time
       if (!reset && nextCursor) {
         queryParams.append('cursor', nextCursor);
-        console.log('Adding cursor to request:', nextCursor);
+        console.log('VALIDATION: Adding cursor to request:', nextCursor);
       }
 
-      console.log('Fetching posts with params:', queryParams.toString());
+      console.log('VALIDATION: Fetching posts with params:', queryParams.toString());
       const response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
       
-      console.log('API response:', data);
+      console.log('VALIDATION: API response:', {
+        postsCount: data.posts.length,
+        nextCursor: data.nextCursor,
+        hasMore: data.hasMore,
+        postIds: data.posts.map((post: any) => post.id)
+      });
       
       // Process posts and their images
       const processedPosts = await Promise.all(data.posts.map(async (post: ExtendedPost) => {
@@ -177,11 +185,44 @@ const PostGrid: React.FC<PostGridProps> = ({
           totalLocked
         };
       }));
-
+      
+      // VALIDATION: Log the processed posts before updating state
+      console.log('VALIDATION: Processed posts before state update:', {
+        count: processedPosts.length,
+        postIds: processedPosts.map(post => post.id)
+      });
+      
+      // VALIDATION: Log the current state before updating
+      console.log('VALIDATION: Current submissions before update:', {
+        count: submissions.length,
+        postIds: submissions.map(post => post.id)
+      });
+      
+      // Update submissions state
       if (reset) {
         setSubmissions(processedPosts);
+        console.log('VALIDATION: Reset submissions with new posts');
       } else {
-        setSubmissions(prev => [...prev, ...processedPosts]);
+        // VALIDATION: Check for duplicates before merging
+        const existingIds = new Set(submissions.map(post => post.id));
+        const newUniquePostsCount = processedPosts.filter(post => !existingIds.has(post.id)).length;
+        
+        console.log('VALIDATION: Merging posts:', {
+          existingCount: submissions.length,
+          newCount: processedPosts.length,
+          newUniqueCount: newUniquePostsCount,
+          duplicatesCount: processedPosts.length - newUniquePostsCount
+        });
+        
+        setSubmissions(prev => {
+          const merged = [...prev, ...processedPosts];
+          console.log('VALIDATION: Merged submissions:', {
+            count: merged.length,
+            firstFewIds: merged.slice(0, 3).map(post => post.id),
+            lastFewIds: merged.slice(-3).map(post => post.id)
+          });
+          return merged;
+        });
       }
       
       // Update stats
@@ -213,10 +254,128 @@ const PostGrid: React.FC<PostGridProps> = ({
 
   const handleLoadMore = useCallback(() => {
     console.log('Load more clicked, current cursor:', nextCursor);
-    if (!isFetchingMore && hasMore) {
-      fetchPosts(false);
+    if (!isFetchingMore && hasMore && nextCursor) {
+      fetchMorePosts();
+    } else {
+      console.warn('Cannot load more posts:', {
+        isFetchingMore,
+        hasMore,
+        nextCursor
+      });
     }
-  }, [fetchPosts, isFetchingMore, hasMore, nextCursor]);
+  }, [isFetchingMore, hasMore, nextCursor]);
+
+  const fetchMorePosts = () => {
+    console.log('Fetching more posts with cursor:', nextCursor);
+    setIsFetchingMore(true);
+    
+    const queryParams = new URLSearchParams();
+    
+    if (timeFilter) queryParams.append('timeFilter', timeFilter);
+    if (rankingFilter) {
+      // Map rankingFilter values to valid backend values
+      let validRankingFilter;
+      switch (rankingFilter) {
+        case 'top1':
+          validRankingFilter = 'top-1';
+          break;
+        case 'top3':
+          validRankingFilter = 'top-3';
+          break;
+        case 'top10':
+          validRankingFilter = 'top-10';
+          break;
+        default:
+          validRankingFilter = rankingFilter;
+      }
+      queryParams.append('rankingFilter', validRankingFilter);
+    }
+    if (personalFilter) queryParams.append('personalFilter', personalFilter);
+    if (blockFilter) queryParams.append('blockFilter', blockFilter);
+    if (selectedTags && selectedTags.length > 0) queryParams.append('selectedTags', JSON.stringify(selectedTags));
+    if (userId) queryParams.append('userId', userId);
+    
+    // Add pagination parameters
+    queryParams.append('limit', '10'); // Fetch 10 posts at a time
+    if (nextCursor) {
+      queryParams.append('cursor', nextCursor);
+      console.log('VALIDATION: Adding cursor to request:', nextCursor);
+    }
+
+    console.log('VALIDATION: Fetching more posts with params:', queryParams.toString());
+    
+    fetch(`${API_URL}/api/posts?${queryParams.toString()}`)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(async data => {
+        console.log('VALIDATION: API response for more posts:', {
+          postsCount: data.posts.length,
+          nextCursor: data.nextCursor,
+          hasMore: data.hasMore,
+          postIds: data.posts.map((post: any) => post.id)
+        });
+        
+        // Process posts and their images
+        const processedPosts = await Promise.all(data.posts.map(async (post: ExtendedPost) => {
+          let imageUrl = null;
+          
+          // Handle raw_image_data if present
+          if (post.raw_image_data) {
+            try {
+              const base64Data = post.raw_image_data;
+              imageUrl = `data:image/jpeg;base64,${base64Data}`;
+              imageUrlMap.current.set(post.id, imageUrl);
+            } catch (err) {
+              console.error('Error processing raw image data:', err);
+            }
+          }
+          
+          return {
+            ...post,
+            imageUrl
+          };
+        }));
+        
+        // VALIDATION: Check for duplicates before merging
+        const existingIds = new Set(submissions.map(post => post.id));
+        const uniquePosts = processedPosts.filter(post => !existingIds.has(post.id));
+        
+        console.log('VALIDATION: Unique posts to add:', {
+          totalNewPosts: processedPosts.length,
+          uniquePostsCount: uniquePosts.length,
+          duplicatesCount: processedPosts.length - uniquePosts.length
+        });
+        
+        if (uniquePosts.length > 0) {
+          setSubmissions(prev => [...prev, ...uniquePosts]);
+          
+          // Update pagination state
+          setNextCursor(data.nextCursor);
+          setHasMore(data.hasMore);
+          
+          console.log('Updated submissions with more posts:', {
+            addedCount: uniquePosts.length,
+            totalCount: submissions.length + uniquePosts.length,
+            nextCursor: data.nextCursor,
+            hasMore: data.hasMore
+          });
+        } else {
+          console.warn('No unique posts to add');
+          setHasMore(false);
+        }
+      })
+      .catch(err => {
+        console.error('Error fetching more posts:', err);
+        setError('Failed to fetch more posts. Please try again later.');
+      })
+      .finally(() => {
+        setIsFetchingMore(false);
+      });
+  };
 
   useEffect(() => {
     console.log('PostGrid component mounted or dependencies changed');

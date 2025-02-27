@@ -102,14 +102,14 @@ const listPosts: PostListHandler = async (req, res, next) => {
       excludeVotes: parsedExcludeVotes
     });
     
-    // First fetch one more item than requested to determine if there are more items
-    const posts = await prisma.post.findMany({
-      take: parsedLimit + 1, // Take one extra to check if there are more
+    // VALIDATION: Log the exact query we're about to execute
+    const queryParams = {
+      take: parsedLimit + 1,
       ...(cursor ? { 
         cursor: { 
           id: cursor as string 
         },
-        skip: 1
+        skip: 1 // Skip the cursor item
       } : {}),
       where: {
         AND: [
@@ -126,7 +126,16 @@ const listPosts: PostListHandler = async (req, res, next) => {
       orderBy: [
         { created_at: 'desc' },
         { id: 'desc' }
-      ],
+      ]
+    };
+    
+    logger.debug('Executing Prisma query with params', {
+      queryParams: JSON.stringify(queryParams, null, 2)
+    });
+    
+    // First fetch one more item than requested to determine if there are more items
+    const posts = await prisma.post.findMany({
+      ...queryParams,
       include: {
         vote_options: true,
         lock_likes: {
@@ -135,9 +144,11 @@ const listPosts: PostListHandler = async (req, res, next) => {
       }
     });
 
+    // VALIDATION: Log the IDs of posts we found to check for duplicates
     logger.debug('Found posts', {
       count: posts.length,
-      requestedLimit: parsedLimit
+      requestedLimit: parsedLimit,
+      postIds: posts.map(post => post.id)
     });
 
     // Check if there are more items
@@ -145,6 +156,12 @@ const listPosts: PostListHandler = async (req, res, next) => {
     
     // Remove the extra item if we fetched more than requested
     const postsToReturn = hasMore ? posts.slice(0, parsedLimit) : posts;
+
+    // VALIDATION: Log the IDs of posts we're returning
+    logger.debug('Posts to return', {
+      count: postsToReturn.length,
+      postIds: postsToReturn.map(post => post.id)
+    });
 
     // Process posts to handle raw_image_data
     const processedPosts = postsToReturn.map(post => {
