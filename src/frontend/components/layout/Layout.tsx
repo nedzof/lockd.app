@@ -154,6 +154,18 @@ export default function Layout({
                 <FiTag className={`${isActive('/tag-generator') ? 'text-[#00ffa3]' : ''}`} />
                 <span className="hidden sm:inline text-sm font-medium">Tags</span>
               </Link>
+              
+              <Link
+                to="/post-tagging"
+                className={`px-3 py-2 rounded-lg flex items-center space-x-1 transition-all duration-300 ${
+                  isActive('/post-tagging') 
+                    ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <FiBookmark className={`${isActive('/post-tagging') ? 'text-[#00ffa3]' : ''}`} />
+                <span className="hidden sm:inline text-sm font-medium">Post Tags</span>
+              </Link>
             </nav>
 
             {/* Wallet Section */}
