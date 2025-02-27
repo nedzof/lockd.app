@@ -32,10 +32,15 @@ export default function PostComponent({ transaction, postTxid }: PostProps) {
   const [totalLockedAmount, setTotalLockedAmount] = React.useState(0);
 
   React.useEffect(() => {
+    console.log('======== POST COMPONENT DEBUG ========');
     console.log('PostComponent rendered with txid:', transaction.txid);
     console.log('Transaction type:', transaction.content_type);
-    console.log('Full transaction object:', transaction);
+    console.log('Transaction content:', transaction.content);
+    console.log('Transaction is_vote:', transaction.is_vote);
+    console.log('Transaction metadata:', transaction.metadata);
+    console.log('Full transaction object:', JSON.stringify(transaction, null, 2));
     console.log('Total locked amount:', totalLockedAmount);
+    console.log('======================================');
     
     // Log the DOM structure after render
     setTimeout(() => {
@@ -70,7 +75,7 @@ export default function PostComponent({ transaction, postTxid }: PostProps) {
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center">
             <div className="text-base font-medium text-gray-900 dark:text-white">
-              {transaction.content_type === 'vote' ? 'Test vote post' : transaction.content}
+              {(transaction.content_type === 'vote' || transaction.is_vote) ? 'Test vote post' : transaction.content}
             </div>
             <span className="mx-2 text-gray-500 dark:text-gray-400">·</span>
             <span className="text-sm text-gray-500 dark:text-gray-400">
@@ -78,7 +83,7 @@ export default function PostComponent({ transaction, postTxid }: PostProps) {
             </span>
           </div>
           
-          {transaction.content_type === 'vote' && totalLockedAmount > 0 && (
+          {(transaction.content_type === 'vote' || transaction.is_vote) && totalLockedAmount > 0 && (
             <div className="text-base font-medium text-green-500">
               {formatBSV(totalLockedAmount)} BSV locked
             </div>

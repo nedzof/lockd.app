@@ -11,10 +11,11 @@ const PostContent: React.FC<PostContentProps> = ({ transaction, onTotalLockedAmo
   useEffect(() => {
     console.log('PostContent rendered with txid:', transaction.txid);
     console.log('Content type:', transaction.content_type);
+    console.log('Is vote:', transaction.is_vote);
   }, [transaction]);
 
   // Handle vote type posts
-  if (transaction.content_type === 'vote') {
+  if (transaction.content_type === 'vote' || transaction.is_vote) {
     console.log('Rendering VoteOptionsDisplay for vote post');
     return <VoteOptionsDisplay 
       transaction={transaction} 

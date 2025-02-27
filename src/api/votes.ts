@@ -77,14 +77,20 @@ router.get('/:id', async (req: Request, res: Response) => {
 // Get vote options for a specific post by post txid
 router.get('/:txid/options', async (req: Request, res: Response) => {
   try {
+    const txid = req.params.txid;
+    console.log(`[API] Fetching vote options for txid: ${txid}`);
+    
     // First find the post by txid
     const post = await prisma.post.findUnique({
       where: {
-        txid: req.params.txid
+        txid: txid
       }
     });
 
+    console.log(`[API] Post found for txid ${txid}:`, post);
+
     if (!post) {
+      console.log(`[API] Post not found for txid: ${txid}`);
       return res.status(404).json({ error: 'Post not found' });
     }
 
@@ -98,6 +104,8 @@ router.get('/:txid/options', async (req: Request, res: Response) => {
       }
     });
 
+    console.log(`[API] Vote options found for post ${post.id}:`, voteOptions);
+
     // Calculate total locked amount for each option
     const voteOptionsWithTotals = voteOptions.map(option => {
       const totalLocked = option.lock_likes.reduce((sum, lock) => sum + lock.amount, 0);
@@ -108,6 +116,7 @@ router.get('/:txid/options', async (req: Request, res: Response) => {
       };
     });
 
+    console.log(`[API] Vote options with totals for post ${post.id}:`, voteOptionsWithTotals);
     res.json(voteOptionsWithTotals);
   } catch (error: any) {
     logger.error('Error fetching vote options', {

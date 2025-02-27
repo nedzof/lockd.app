@@ -85,6 +85,9 @@ export interface HODLTransaction {
   locklikes: LockLike[];
   replies: HODLTransaction[];
   is_vote?: boolean;
+  content_type?: string;
+  metadata?: any;
+  block_height?: number;
 }
 
 export interface BitcoinerSettings {
@@ -148,4 +151,4 @@ export interface CreateLockParams {
   recipientAddress: string;
   amount: number;
   lockUntilHeight: number;
-} 
+}
