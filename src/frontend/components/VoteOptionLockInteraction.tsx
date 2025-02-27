@@ -2,13 +2,15 @@ import React from 'react';
 
 interface VoteOptionLockInteractionProps {
   optionId: string;
-  connected: boolean;
+  connected?: boolean;
+  isLocking?: boolean;
   onLock: (optionId: string, amount: number, duration: number) => Promise<void>;
 }
 
 const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
   optionId,
-  connected,
+  connected = false,
+  isLocking = false,
   onLock,
 }) => {
   const handleLock = () => {
@@ -20,10 +22,10 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
   return (
     <button
       onClick={handleLock}
-      disabled={!connected}
+      disabled={!connected || isLocking}
       className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-gray-800 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
     >
-      Lock BSV
+      {isLocking ? 'Locking...' : 'Lock BSV'}
     </button>
   );
 };
