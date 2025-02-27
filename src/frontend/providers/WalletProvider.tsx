@@ -1,6 +1,8 @@
 import * as React from 'react';
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useYoursWallet, YoursProviderType } from 'yours-wallet-provider';
+import { toast } from 'react-hot-toast';
+import { getBsvAddress, isWalletConnected } from '../utils/walletConnectionHelpers';
 
 interface WalletContextType {
   connect: () => Promise<void>;
@@ -90,24 +92,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const checkAndFetchBalance = async () => {
       if (wallet?.isReady) {
         try {
-          // Check if isConnected is a function or a property
-          let connected = false;
-          if (typeof wallet.isConnected === 'function') {
-            connected = await wallet.isConnected();
-            console.log('isConnected() function returned:', connected);
-          } else if (wallet.isConnected !== undefined) {
-            connected = wallet.isConnected;
-            console.log('isConnected property value:', connected);
-          } else {
-            console.log('No isConnected function or property found on wallet, assuming connected');
-            connected = true;
-          }
-          
-          if (connected) {
+          const isConnectedResult = await isWalletConnected(wallet);
+          if (isConnectedResult) {
             setIsConnected(true);
-            const addresses = await wallet.getAddresses();
-            if (addresses?.bsvAddress) {
-              setBsvAddress(addresses.bsvAddress);
+            const addresses = await getBsvAddress(wallet);
+            if (addresses) {
+              setBsvAddress(addresses);
               await refreshBalance();
             }
           }
@@ -131,9 +121,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.log('Wallet account switched');
         try {
           // Update address and balance after account switch
-          const addresses = await wallet.getAddresses();
-          if (addresses?.bsvAddress) {
-            setBsvAddress(addresses.bsvAddress);
+          const addresses = await getBsvAddress(wallet);
+          if (addresses) {
+            setBsvAddress(addresses);
             await refreshBalance();
           }
         } catch (error) {
@@ -168,25 +158,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     if (!wallet?.isReady) {
       console.log('Wallet not ready, redirecting to yours.org');
+      toast.error('Wallet not detected. Please install the Yours wallet extension.');
       window.open('https://yours.org', '_blank');
       return;
     }
 
     try {
-      // Log wallet object structure to help diagnose API differences
-      console.log('Wallet object structure:', {
-        isReady: wallet.isReady,
-        isConnected: wallet.isConnected,
-        hasConnect: typeof wallet.connect === 'function',
-        hasDisconnect: typeof wallet.disconnect === 'function',
-        hasGetAddresses: typeof wallet.getAddresses === 'function',
-        hasGetBalance: typeof wallet.getBalance === 'function',
-        hasGetPubKeys: typeof wallet.getPubKeys === 'function',
-        hasOn: typeof wallet.on === 'function',
-        methods: Object.keys(wallet).filter(key => typeof wallet[key] === 'function'),
-        properties: Object.keys(wallet).filter(key => typeof wallet[key] !== 'function')
-      });
-
       // Try to connect and log all outputs for debugging
       console.log('Calling wallet.connect()...');
       const connectResult = await wallet.connect();
@@ -194,81 +171,59 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       
       // Check if already connected
       console.log('Checking connection status...');
-      let isConnectedResult = false;
-      if (typeof wallet.isConnected === 'function') {
-        isConnectedResult = await wallet.isConnected();
-        console.log('isConnected() function returned:', isConnectedResult);
-      } else if (wallet.isConnected !== undefined) {
-        isConnectedResult = wallet.isConnected;
-        console.log('isConnected property value:', isConnectedResult);
+      const isConnectedResult = await isWalletConnected(wallet);
+      console.log('isWalletConnected() returned:', isConnectedResult);
+      
+      // Get BSV address
+      console.log('Attempting to get BSV address...');
+      const bsvAddress = await getBsvAddress(wallet);
+      console.log('getBsvAddress() returned:', bsvAddress);
+      
+      console.log('Final connection state:', {
+        isConnected: isConnectedResult,
+        bsvAddress,
+        wallet
+      });
+      
+      // Update state
+      setIsConnected(true);
+      
+      // Set BSV address if we have one
+      if (bsvAddress) {
+        setBsvAddress(bsvAddress);
+        
+        // Refresh balance after successful connection
+        try {
+          console.log('Refreshing balance...');
+          await refreshBalance();
+          console.log('Balance refreshed');
+        } catch (balanceError) {
+          console.error('Error refreshing balance:', balanceError);
+        }
       } else {
-        console.log('No isConnected function or property found, assuming connected after connect() call');
-        isConnectedResult = true; // Assume connected if we can't check
+        console.warn('No BSV address found after connection attempt');
+        toast.warning('Connected to wallet but could not retrieve address. Some features may be limited.');
       }
       
-      if (isConnectedResult) {
-        setIsConnected(true);
-        
-        // Get addresses and public keys
-        console.log('Getting addresses...');
-        try {
-          const addresses = await wallet.getAddresses();
-          console.log('wallet.getAddresses() returned:', addresses);
-          
-          if (addresses?.bsvAddress) {
-            console.log('Setting BSV address:', addresses.bsvAddress);
-            setBsvAddress(addresses.bsvAddress);
-            
-            // Fetch balance after successful connection
-            console.log('Refreshing balance...');
-            await refreshBalance();
-            console.log('Balance refreshed');
-          } else {
-            console.error('No BSV address found in wallet response');
-            resetState();
-          }
-        } catch (addressError) {
-          console.error('Error getting addresses:', addressError);
-          // Try alternative methods if available
-          if (typeof wallet.getAddress === 'function') {
-            try {
-              console.log('Trying alternative getAddress method...');
-              const address = await wallet.getAddress();
-              console.log('Alternative address method returned:', address);
-              if (address) {
-                setBsvAddress(address);
-                await refreshBalance();
-              }
-            } catch (altAddressError) {
-              console.error('Alternative address method failed:', altAddressError);
-              resetState();
-            }
-          } else {
-            resetState();
-          }
+      // Try to get public keys as well
+      try {
+        console.log('Getting public keys...');
+        const pubKeys = await wallet.getPubKeys();
+        console.log('wallet.getPubKeys() returned:', pubKeys);
+        if (pubKeys?.identityPubKey) {
+          setPublicKey(pubKeys.identityPubKey);
         }
-        
-        // Try to get public keys as well
-        try {
-          console.log('Getting public keys...');
-          const pubKeys = await wallet.getPubKeys();
-          console.log('wallet.getPubKeys() returned:', pubKeys);
-          if (pubKeys?.identityPubKey) {
-            setPublicKey(pubKeys.identityPubKey);
-          }
-        } catch (pubKeyError) {
-          console.warn('Could not get public keys:', pubKeyError);
-          // Continue anyway since this is not critical
-        }
-      } else {
-        console.error('Wallet reported not connected after connect() call');
-        resetState();
+      } catch (pubKeyError) {
+        console.warn('Could not get public keys:', pubKeyError);
+        // Continue anyway since this is not critical
       }
+      
     } catch (error) {
-      console.error('Failed to connect:', error);
-      resetState();
+      console.error('Error connecting wallet:', error);
+      toast.error('Failed to connect wallet');
+      setIsConnected(false);
     }
-  }, [wallet, resetState, refreshBalance]);
+  }, [wallet, refreshBalance]);
 
   // Cleanup on unmount
   useEffect(() => {

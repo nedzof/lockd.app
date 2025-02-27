@@ -513,58 +513,91 @@ const PostGrid: React.FC<PostGridProps> = ({
 
         {/* Posts grid */}
         {submissions.length > 0 && (
-          <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 gap-6">
             {submissions.map((post) => (
-              <div key={post.id} className="bg-gray-700 p-4 rounded-lg">
-                <p className="font-bold">Post ID: {post.id}</p>
-                <div className="mt-2 whitespace-pre-wrap bg-gray-800 p-3 rounded-lg text-white">
-                  {post.content || "No content available"}
-                </div>
-                {post.imageUrl && (
-                  <div className="mt-2">
-                    <img 
-                      src={post.imageUrl} 
-                      alt="Post image" 
-                      className="max-w-full h-auto rounded-lg"
-                      onError={(e) => {
-                        console.error('Image failed to load:', post.imageUrl);
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
+              <div key={post.id} className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-xl border border-gray-800/10 shadow-lg hover:shadow-[#00ffa3]/5 transition-all duration-300">
+                <div className="flex items-center p-4 border-b border-gray-800/10">
+                  <div className="w-10 h-10 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-full flex items-center justify-center text-gray-900 font-bold">
+                    {post.author_address ? post.author_address.substring(0, 2).toUpperCase() : "?"}
                   </div>
-                )}
+                  <div className="ml-3">
+                    <p className="text-gray-200 font-medium">
+                      {post.author_address ? 
+                        `${post.author_address.substring(0, 6)}...${post.author_address.substring(post.author_address.length - 4)}` : 
+                        "Anonymous"}
+                    </p>
+                    <p className="text-gray-400 text-xs">
+                      {new Date(post.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4">
+                  {/* Post content */}
+                  {post.content && (
+                    <div className="mb-4 whitespace-pre-wrap text-gray-100 leading-relaxed">
+                      {post.content}
+                    </div>
+                  )}
+                  
+                  {/* Post image */}
+                  {post.imageUrl && (
+                    <div className="mb-4">
+                      <div className="relative rounded-lg overflow-hidden bg-gray-900/30">
+                        <img 
+                          src={post.imageUrl} 
+                          alt="Post image" 
+                          className="w-full h-auto object-contain max-h-[500px]"
+                          onError={(e) => {
+                            console.error('Image failed to load:', post.imageUrl);
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Tags Section */}
+                  {post.tags && post.tags.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {post.tags.map(tag => (
+                        <span key={tag} className="bg-white/5 text-gray-300 text-xs px-2.5 py-1 rounded-md">
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 
                 {/* Vote Options Section */}
                 {post.is_vote && post.vote_options && post.vote_options.length > 0 && (
-                  <div className="mt-4 border-t border-gray-600 pt-3">
-                    <h3 className="font-bold text-lg mb-2">Vote Options:</h3>
+                  <div className="mt-2 p-4 pt-0">
+                    <h3 className="font-bold text-lg mb-3 text-gray-200 flex items-center">
+                      <FiBarChart2 className="mr-2" /> Vote Options
+                    </h3>
                     <div className="space-y-3">
                       {post.vote_options.map((option: VoteOption) => (
-                        <div key={option.id} className="bg-gray-800 p-3 rounded">
-                          <p className="font-medium">{option.content}</p>
-                          <div className="mt-2 flex items-center justify-between">
-                            <span>Locked: {formatBSV(option.lock_amount)} BSV</span>
-                            <span>Duration: {option.lock_duration} days</span>
+                        <div key={option.id} className="bg-white/5 p-4 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
+                          <p className="font-medium text-white">{option.content}</p>
+                          <div className="mt-2 flex items-center justify-between text-sm text-gray-400">
+                            <span className="flex items-center">
+                              <FiLock className="mr-1" /> {formatBSV(option.lock_amount)} BSV
+                            </span>
+                            <span className="flex items-center">
+                              <FiZap className="mr-1" /> {option.lock_duration} days
+                            </span>
                           </div>
-                          <VoteOptionLockInteraction 
-                            optionId={option.id} 
-                            onLock={handleVoteOptionLock}
-                            isLocking={isLocking}
-                          />
+                          <div className="mt-3">
+                            <VoteOptionLockInteraction 
+                              optionId={option.id} 
+                              onLock={handleVoteOptionLock}
+                              isLocking={isLocking}
+                              connected={wallet.connected}
+                            />
+                          </div>
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-                
-                {/* Tags Section */}
-                {post.tags && post.tags.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {post.tags.map(tag => (
-                      <span key={tag} className="bg-blue-600 text-white text-xs px-2 py-1 rounded">
-                        {tag}
-                      </span>
-                    ))}
                   </div>
                 )}
               </div>
@@ -574,13 +607,23 @@ const PostGrid: React.FC<PostGridProps> = ({
 
         {/* Load more button */}
         {hasMore && submissions.length > 0 && (
-          <div className="mt-4 text-center">
+          <div className="mt-6 text-center">
             <button
               onClick={handleLoadMore}
               disabled={isFetchingMore}
-              className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg disabled:opacity-50"
+              className="px-6 py-3 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 transform hover:scale-105 text-gray-900 flex items-center mx-auto disabled:opacity-50"
             >
-              Load More Posts
+              {isFetchingMore ? (
+                <>
+                  <FiLoader className="animate-spin mr-2" />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  <FiPlus className="mr-2" />
+                  Load More Posts
+                </>
+              )}
             </button>
           </div>
         )}

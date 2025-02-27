@@ -1,15 +1,16 @@
-import * as React from 'react';
 import { toast } from 'react-hot-toast';
 import type { useYoursWallet } from 'yours-wallet-provider';
 import { OrdiNFTP2PKH } from 'scrypt-ord';
 import { bsv, Addr, PandaSigner } from 'scrypt-ts';
 import { OrdiProvider } from 'scrypt-ord';
 import { YoursWalletAdapter } from '../utils/YoursWalletAdapter';
-import { MimeTypes, MAP } from 'yours-wallet-provider';
+import { MimeTypes, MAP, InscribeRequest } from 'yours-wallet-provider';
 import { getFeeRate } from '../../shared/utils/whatsOnChain';
 import { FiExternalLink } from 'react-icons/fi';
+import { Post } from '../types/post';
+import { getBsvAddress } from '../utils/walletConnectionHelpers';
 
-// Add API base URL configuration at the top of the file
+// Define API base URL configuration
 const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:3003';
 
 // Base interfaces
@@ -212,15 +213,15 @@ function createMapData(metadata: PostMetadata): MAP {
                   (metadata.vote?.options && metadata.vote.options.length > 0);
 
     const mapData: Record<string, string> = {
-        app: metadata.app,
-        type: metadata.type,
-        content: metadata.content,
-        timestamp: metadata.timestamp,
-        version: metadata.version,
-        tags: JSON.stringify(metadata.tags),
-        sequence: metadata.sequence.toString(),
-        is_locked: metadata.is_locked.toString(),
-        is_vote: isVote.toString()
+        app: metadata.app || 'lockd.app',
+        type: metadata.type || 'content',
+        content: metadata.content || '',
+        timestamp: metadata.timestamp || new Date().toISOString(),
+        version: metadata.version || '1.0.0',
+        tags: JSON.stringify(metadata.tags || []),
+        sequence: (metadata.sequence || 0).toString(),
+        is_locked: (metadata.is_locked !== undefined ? metadata.is_locked : false).toString(),
+        is_vote: (isVote !== undefined ? isVote : false).toString()
     };
 
     if (metadata.parentSequence !== undefined) {
@@ -231,19 +232,19 @@ function createMapData(metadata: PostMetadata): MAP {
         mapData.postId = metadata.postId;
     }
 
-    if (metadata.block_height) {
+    if (metadata.block_height !== undefined) {
         mapData.block_height = metadata.block_height.toString();
     }
 
-    if (metadata.amount) {
+    if (metadata.amount !== undefined) {
         mapData.amount = metadata.amount.toString();
     }
 
-    if (metadata.unlock_height) {
+    if (metadata.unlock_height !== undefined) {
         mapData.unlock_height = metadata.unlock_height.toString();
     }
 
-    if (metadata.lock_duration) {
+    if (metadata.lock_duration !== undefined) {
         mapData.lock_duration = metadata.lock_duration.toString();
     }
 
@@ -251,38 +252,50 @@ function createMapData(metadata: PostMetadata): MAP {
         // Always set type to vote_question if we have vote options
         if (metadata.vote.isVoteQuestion || (metadata.vote.options && metadata.vote.options.length > 0)) {
             mapData.type = 'vote_question';
-            mapData.totalOptions = (metadata.vote.options?.length || metadata.vote.totalOptions || 0).toString();
+            mapData.totalOptions = ((metadata.vote.options?.length || metadata.vote.totalOptions || 0)).toString();
             if (metadata.vote.optionsHash) {
                 mapData.optionsHash = metadata.vote.optionsHash;
             }
         } else if (metadata.vote.options?.[0]) {
             const option = metadata.vote.options[0];
             mapData.type = 'vote_option';
-            mapData.optionIndex = option.optionIndex.toString();
-            mapData.lockAmount = option.lockAmount.toString();
-            mapData.lockDuration = option.lockDuration.toString();
-            if (option.unlockHeight) {
+            if (option.optionIndex !== undefined) {
+                mapData.optionIndex = option.optionIndex.toString();
+            }
+            if (option.lockAmount !== undefined) {
+                mapData.lockAmount = option.lockAmount.toString();
+            }
+            if (option.lockDuration !== undefined) {
+                mapData.lockDuration = option.lockDuration.toString();
+            }
+            if (option.unlockHeight !== undefined) {
                 mapData.unlockHeight = option.unlockHeight.toString();
             }
-            if (option.currentHeight) {
+            if (option.currentHeight !== undefined) {
                 mapData.currentHeight = option.currentHeight.toString();
             }
-            if (option.lockPercentage) {
+            if (option.lockPercentage !== undefined) {
                 mapData.lockPercentage = option.lockPercentage.toString();
             }
         }
     }
 
     if (metadata.image) {
-        mapData.contentType = metadata.image.contentType;
-        mapData.format = metadata.image.format;
+        mapData.contentType = metadata.image.contentType || '';
+        mapData.format = metadata.image.format || '';
         if (metadata.image.source) {
             mapData.imageSource = metadata.image.source;
         }
         if (metadata.image.metadata) {
-            mapData.imageWidth = metadata.image.metadata.width.toString();
-            mapData.imageHeight = metadata.image.metadata.height.toString();
-            mapData.imageSize = metadata.image.metadata.size.toString();
+            if (metadata.image.metadata.width !== undefined) {
+                mapData.imageWidth = metadata.image.metadata.width.toString();
+            }
+            if (metadata.image.metadata.height !== undefined) {
+                mapData.imageHeight = metadata.image.metadata.height.toString();
+            }
+            if (metadata.image.metadata.size !== undefined) {
+                mapData.imageSize = metadata.image.metadata.size.toString();
+            }
         }
         if (metadata.image.description) {
             mapData.description = metadata.image.description;
@@ -576,174 +589,260 @@ function fileToBase64(file: File): Promise<string> {
 
 // Main post creation function
 export const createPost = async (
+    wallet: any,
     content: string,
-    authorAddress: string,
-    wallet: NonNullable<ReturnType<typeof useYoursWallet>>,
-    imageFile?: File,
-    description?: string,
-    tags?: string[],
-    lockData?: {
-        isLocked: boolean;
-        duration?: number;
-        amount?: number;
-        isPoll?: boolean;
-        options?: Array<{ text: string; lockDuration: number; lockAmount: number }>;
-    }
+    imageData?: string | File,
+    imageMimeType?: string
 ): Promise<Post> => {
+    console.log('Creating post with wallet:', wallet ? 'Wallet provided' : 'No wallet');
+  
+    if (!wallet) {
+        console.error('No wallet provided to createPost');
+        throw new Error('Wallet is required to create a post');
+    }
+
+    // Get BSV address using our helper function
+    let bsvAddress;
     try {
-        const postId = generatePostId();
-        const sequence = createSequence();
-        const components: InscribeRequest[] = [];
+        bsvAddress = await getBsvAddress(wallet);
+        if (!bsvAddress) {
+            console.error('Failed to get BSV address for post creation');
+            throw new Error('Could not retrieve wallet address. Please ensure your wallet is connected.');
+        }
+        console.log('Using BSV address for post creation:', bsvAddress);
+    } catch (walletError) {
+        console.error('Error getting BSV address:', walletError);
+        throw new Error(`Wallet connection error: ${walletError.message || 'Could not connect to wallet'}`);
+    }
 
-        // Show pending toast
-        const pendingToast = toast.loading('Creating post...', {
-            style: {
-                background: '#1A1B23',
-                color: '#fff',
-                border: '1px solid rgba(255, 255, 255, 0.1)'
-            }
-        });
+    const postId = generatePostId();
+    const sequence = createSequence();
+    const components: InscribeRequest[] = [];
 
-        try {
-            // Create main content metadata
-            const metadata: PostMetadata = {
-                app: 'lockd.app',
-                type: 'content',
-                content,
-                timestamp: new Date().toISOString(),
-                version: '1.0.0',
-                tags: tags || [],
-                sequence: sequence.next(),
-                postId,
-                is_locked: lockData?.isLocked || false,
-                is_vote: !!(lockData?.isPoll || lockData?.options?.length), // Set is_vote true if isPoll or has options
-                lock_duration: lockData?.duration
-            };
+    // Show pending toast
+    const pendingToast = toast.loading('Creating post...', {
+        style: {
+            background: '#1A1B23',
+            color: '#fff',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '0.375rem'
+        }
+    });
 
-            if (lockData?.isLocked) {
-                const currentHeight = await getCurrentBlockHeight();
-                metadata.block_height = currentHeight;
-                metadata.amount = lockData.amount;
-                metadata.unlock_height = currentHeight + (lockData.duration || 0);
-            }
+    try {
+        // Create main content metadata
+        const metadata: PostMetadata = {
+            app: 'lockd.app',
+            type: 'content',
+            content,
+            timestamp: new Date().toISOString(),
+            version: '1.0.0',
+            tags: [],
+            sequence: sequence.next(),
+            postId,
+            is_locked: false,
+            is_vote: false
+        };
 
-            // Add image if present
-            if (imageFile) {
-                const { base64Data, metadata: imageMetadata } = await processImage(imageFile);
-                const imageData: ImageData = {
+        console.log('Created post metadata:', { ...metadata, content: content.substring(0, 50) + (content.length > 50 ? '...' : '') });
+
+        // Add image if present
+        if (imageData) {
+            try {
+                console.log('Processing image data of type:', typeof imageData);
+                if (imageData instanceof File) {
+                    console.log('Image is a File object:', { 
+                        name: imageData.name, 
+                        type: imageData.type, 
+                        size: imageData.size 
+                    });
+                } else if (typeof imageData === 'string') {
+                    console.log('Image is a string, length:', imageData.length);
+                    console.log('Image string preview:', imageData.substring(0, 50) + '...');
+                }
+
+                let processedImage;
+                let imageFile: File;
+                
+                // Handle different imageData types
+                if (imageData instanceof File) {
+                    // If imageData is already a File
+                    imageFile = imageData;
+                    processedImage = await processImage(imageFile);
+                } else if (typeof imageData === 'string') {
+                    // If imageData is a string (base64 or data URL)
+                    if (!imageMimeType) {
+                        console.warn('No MIME type provided for image data string, defaulting to image/png');
+                        imageMimeType = 'image/png';
+                    }
+                    
+                    try {
+                        const blob = dataURItoBlob(imageData);
+                        console.log('Successfully converted string to blob:', { 
+                            type: blob.type, 
+                            size: blob.size 
+                        });
+                        
+                        imageFile = new File([blob], 'image', { type: imageMimeType });
+                        processedImage = await processImage(imageFile);
+                    } catch (error) {
+                        console.error('Error processing image string:', error);
+                        throw new Error(`Failed to process image: ${error.message}`);
+                    }
+                } else {
+                    console.error('Invalid image data format:', imageData);
+                    throw new Error('Invalid image data format');
+                }
+                
+                console.log('Image processed successfully:', { 
+                    hasBase64Data: !!processedImage.base64Data,
+                    base64Length: processedImage.base64Data?.length,
+                    metadata: processedImage.metadata
+                });
+                
+                const { base64Data, metadata: imageMetadata } = processedImage;
+                
+                const imageDataObj: ImageData = {
                     file: imageFile,
                     contentType: `image/${imageMetadata.format}`,
                     base64Data,
-                    description,
                     metadata: imageMetadata
                 };
+                
                 metadata.image = {
-                    ...imageData,
+                    ...imageDataObj,
                     format: imageMetadata.format
                 };
 
+                console.log('Added image to metadata:', { 
+                    contentType: imageDataObj.contentType,
+                    format: imageMetadata.format,
+                    dimensions: `${imageMetadata.width}x${imageMetadata.height}`
+                });
+
                 // Create image component
+                console.log('Creating image inscription request...');
                 const imageComponent = createInscriptionRequest(
-                    authorAddress,
+                    bsvAddress,
                     base64Data,
                     createMapData({ ...metadata, type: 'image' }),
                     await calculateOutputSatoshis(base64Data.length),
-                    imageData.contentType
+                    imageDataObj.contentType
                 );
                 components.push(imageComponent);
-            }
-
-            // Add vote data if present
-            if (lockData?.isPoll || lockData?.options?.length) {
-                metadata.vote = {
-                    isVoteQuestion: true,
-                    question: content,
-                    options: lockData.options?.map((opt, idx) => ({
-                        text: opt.text,
-                        lockAmount: opt.lockAmount,
-                        lockDuration: opt.lockDuration,
-                        optionIndex: idx
-                    })) || [],
-                    totalOptions: lockData.options?.length || 0,
-                    optionsHash: await hashContent(JSON.stringify(lockData.options || []))
-                };
-
-                // Create vote option components
-                if (metadata.vote.options?.length) {
-                    for (const option of metadata.vote.options) {
-                        const optionComponent = createVoteOptionComponent(
-                            option,
-                            postId,
-                            sequence.next(),
-                            0,
-                            authorAddress
-                        );
-                        components.push(optionComponent);
+                console.log('Image component created successfully');
+            } catch (imageError) {
+                console.error('Error processing image:', imageError);
+                toast.error(`Error processing image: ${imageError.message}`, { 
+                    id: pendingToast,
+                    style: {
+                        background: '#1A1B23',
+                        color: '#f87171',
+                        border: '1px solid rgba(248, 113, 113, 0.3)',
+                        borderRadius: '0.375rem'
                     }
-                }
+                });
+                // Continue without the image
+                console.log('Continuing post creation without image');
             }
-
-            // Create main content component
-            const contentComponent = createInscriptionRequest(
-                authorAddress,
-                content,
-                createMapData(metadata),
-                await calculateOutputSatoshis(content.length)
-            );
-            components.push(contentComponent);
-
-            // Send to wallet
-            const response = await wallet.inscribe(components);
-            const txid = response.txid || response.id;
-
-            if (!txid) {
-                throw new Error('Failed to create inscription - no transaction ID returned');
-            }
-
-            // Create post in database
-            const dbPost = createDbPost(metadata, txid);
-            dbPost.author_address = authorAddress;
-
-            const dbResponse = await fetch(`${API_BASE_URL}/api/posts`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(dbPost)
-            });
-
-            if (!dbResponse.ok) {
-                throw new Error(`Failed to create post in database: ${dbResponse.statusText}`);
-            }
-
-            const createdPost = await dbResponse.json();
-
-            // Update toast
-            toast.success('Post created successfully!', {
-                id: pendingToast,
-                style: {
-                    background: '#1A1B23',
-                    color: '#fff',
-                    border: '1px solid rgba(255, 255, 255, 0.1)'
-                }
-            });
-
-            return createdPost;
-
-        } catch (error) {
-            console.error('Error in post creation:', error);
-            toast.error('Failed to create post', {
-                id: pendingToast,
-                style: {
-                    background: '#1A1B23',
-                    color: '#fff',
-                    border: '1px solid rgba(255, 255, 255, 0.1)'
-                }
-            });
-            throw error;
         }
+
+        // Create main content component
+        console.log('Creating main content inscription request...');
+        const contentComponent = createInscriptionRequest(
+            bsvAddress,
+            content,
+            createMapData(metadata),
+            await calculateOutputSatoshis(content.length)
+        );
+        components.push(contentComponent);
+        console.log('Content component created successfully');
+
+        // Send to wallet
+        console.log('Sending inscription request to wallet...');
+        const response = await wallet.inscribe(components);
+        console.log('Wallet inscription response:', response);
+        
+        const txid = response.txid || response.id;
+        if (!txid) {
+            throw new Error('Failed to create inscription - no transaction ID returned');
+        }
+        console.log('Inscription successful with txid:', txid);
+
+        // Create post in database
+        const dbPost = createDbPost(metadata, txid);
+        dbPost.author_address = bsvAddress;
+        console.log('Created database post object:', { ...dbPost, content: dbPost.content.substring(0, 50) + '...' });
+
+        // Function to attempt the database post creation with retry logic
+        const attemptDatabasePost = async (retries = 2): Promise<any> => {
+            try {
+                console.log(`Attempting to create post in database (retries left: ${retries})`, dbPost);
+                
+                const dbResponse = await fetch(`${API_BASE_URL}/api/posts`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(dbPost)
+                });
+
+                if (!dbResponse.ok) {
+                    const errorText = await dbResponse.text();
+                    console.error('Database error response:', {
+                        status: dbResponse.status,
+                        statusText: dbResponse.statusText,
+                        body: errorText
+                    });
+                    
+                    // If we have retries left, wait and try again
+                    if (retries > 0) {
+                        console.log(`Retrying database post creation in 1 second...`);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        return attemptDatabasePost(retries - 1);
+                    }
+                    
+                    throw new Error(`Failed to create post in database: ${dbResponse.statusText}`);
+                }
+                
+                return dbResponse.json();
+            } catch (error) {
+                if (retries > 0) {
+                    console.log(`Network error, retrying database post creation in 1 second...`, error);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    return attemptDatabasePost(retries - 1);
+                }
+                throw error;
+            }
+        };
+        
+        // Attempt to create the post with retry logic
+        const createdPost = await attemptDatabasePost();
+
+        // Update toast
+        toast.success('Post created successfully!', {
+            id: pendingToast,
+            style: {
+                background: '#1A1B23',
+                color: '#34d399',
+                border: '1px solid rgba(52, 211, 153, 0.3)',
+                borderRadius: '0.375rem'
+            }
+        });
+
+        return createdPost;
+
     } catch (error) {
-        console.error('Top-level error in createPost:', error);
+        console.error('Error in post creation:', error);
+        toast.error(`Failed to create post: ${error.message}`, {
+            id: pendingToast,
+            style: {
+                background: '#1A1B23',
+                color: '#f87171',
+                border: '1px solid rgba(248, 113, 113, 0.3)',
+                borderRadius: '0.375rem'
+            }
+        });
         throw error;
     }
 };
@@ -762,6 +861,47 @@ async function getImageMetadata(file: File): Promise<ImageData['metadata']> {
         };
         img.src = URL.createObjectURL(file);
     });
+}
+
+// Helper function to convert data URI or base64 string to blob
+function dataURItoBlob(dataURI: string): Blob {
+    // Check if it's a data URI (starts with data:)
+    if (dataURI.startsWith('data:')) {
+        // Split the data URI
+        const parts = dataURI.split(',');
+        const mime = parts[0].split(':')[1].split(';')[0];
+        const isBase64 = parts[0].indexOf('base64') !== -1;
+        const data = parts[1];
+        
+        // Decode base64 if needed
+        const binary = isBase64 ? atob(data) : decodeURIComponent(data);
+        const arrayBuffer = new ArrayBuffer(binary.length);
+        const uint8Array = new Uint8Array(arrayBuffer);
+        
+        for (let i = 0; i < binary.length; i++) {
+            uint8Array[i] = binary.charCodeAt(i);
+        }
+        
+        return new Blob([arrayBuffer], { type: mime });
+    } else {
+        // Assume it's a base64 string without data URI prefix
+        try {
+            // Try to decode as base64
+            const binary = atob(dataURI.replace(/\s/g, ''));
+            const arrayBuffer = new ArrayBuffer(binary.length);
+            const uint8Array = new Uint8Array(arrayBuffer);
+            
+            for (let i = 0; i < binary.length; i++) {
+                uint8Array[i] = binary.charCodeAt(i);
+            }
+            
+            // Default to png if we can't determine the type
+            return new Blob([arrayBuffer], { type: 'image/png' });
+        } catch (error) {
+            console.error('Error converting string to blob:', error);
+            throw new Error('Invalid base64 string');
+        }
+    }
 }
 
 // Helper types for post creation

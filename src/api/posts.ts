@@ -27,6 +27,7 @@ interface CreatePostBody {
   content: string;
   author_address: string;
   media_type?: string;
+  raw_image_data?: string | null;
   description?: string;
   tags?: string[];
   metadata?: Record<string, any>;
@@ -294,70 +295,86 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
   }
 };
 
-const createPost: CreatePostHandler = async (req, res, next): Promise<void> => {
+const createPost: CreatePostHandler = async (req, res, next) => {
   try {
-    const { content, author_address, tags, is_vote, vote_options } = req.body;
+    console.log('Received post creation request with body:', req.body);
     
-    if (!content || !author_address) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    // Extract post data from request body
+    const {
+      content,
+      author_address,
+      tags = [],
+      is_vote = false,
+      vote_options = [],
+      raw_image_data,
+      media_type
+    } = req.body;
+
+    // Validate required fields
+    if (!content && !raw_image_data) {
+      console.error('Missing required fields: content or raw_image_data');
+      return res.status(400).json({ error: 'Content or image is required' });
     }
 
-    // Generate a unique txid for the post
-    const txid = `${author_address}_${Date.now()}`;
+    if (!author_address) {
+      console.error('Missing required field: author_address');
+      return res.status(400).json({ error: 'Author address is required' });
+    }
 
-    // Create the post
+    // Validate vote options if this is a vote post
+    if (is_vote && (!vote_options || vote_options.length < 2)) {
+      console.error('Invalid vote options:', vote_options);
+      return res.status(400).json({ error: 'Vote posts require at least 2 valid options' });
+    }
+
+    // Generate temporary transaction ID
+    const tempTxid = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    const postId = `post_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+
+    // Create post data
+    const postData = {
+      id: tempTxid,
+      txid: tempTxid,
+      postId,
+      content,
+      author_address,
+      tags: tags || [],
+      raw_image_data: raw_image_data || null,
+      media_type: media_type || null,
+      is_vote: is_vote || false,
+      created_at: new Date(),
+    };
+
+    // Create post in database
     const post = await prisma.post.create({
-      data: {
-        txid,
-        content,
-        author_address,
-        created_at: new Date(),
-        tags: tags || [],
-        is_vote: is_vote || false
-      }
+      data: postData as unknown as Prisma.PostCreateInput
     });
 
-    // If this is a vote post, create the vote options
-    if (is_vote && vote_options && Array.isArray(vote_options) && vote_options.length >= 2) {
+    // If this is a vote post, create vote options
+    if (is_vote && vote_options && vote_options.length >= 2) {
       // Create vote options
-      const voteOptionPromises = vote_options.map(option => {
-        if (!option || typeof option !== 'string' || !option.trim()) {
-          return null; // Skip empty options
-        }
-        
+      const voteOptionPromises = vote_options.map(async (option: any, index: number) => {
+        const voteOptionId = `vote_option_${postId}_${index}`;
         return prisma.voteOption.create({
           data: {
-            txid: `${post.id}_option_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-            content: option.trim(),
-            author_address,
-            created_at: new Date(),
-            post_id: post.id
+            id: voteOptionId,
+            txid: `${tempTxid}_option_${index}`,
+            content: option.text,
+            post_id: post.id,
+            lock_amount: option.lockAmount || 0,
+            lock_duration: option.lockDuration || 0,
           }
         });
       });
 
-      await Promise.all(voteOptionPromises.filter(Boolean));
+      await Promise.all(voteOptionPromises);
     }
 
-    res.status(201).json({
-      success: true,
-      data: post
-    });
-  } catch (error: any) {
-    logger.error('Error creating post', {
-      error: error.message,
-      code: error.code
-    });
-
-    if (error.code === 'P2010' || error.message.includes('prepared statement')) {
-      return res.status(503).json({ 
-        error: 'Database connection error, please try again',
-        retryAfter: 1
-      });
-    }
-
+    // Return the created post
+    res.status(201).json(post);
+  } catch (error) {
     console.error('Error creating post:', error);
-    res.status(500).json({ error: 'Failed to create post' });
+    next(error);
   }
 };
 
