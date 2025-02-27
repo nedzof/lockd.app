@@ -288,25 +288,23 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     }
   };
 
-  const handleTagClick = (tag: string) => {
-    if (selectedTags.includes(tag)) {
-      setSelectedTags(selectedTags.filter(t => t !== tag));
-    } else {
-      setSelectedTags([...selectedTags, tag]);
-    }
-  };
-
-  const handleAddNewTag = () => {
+  const handleAddTag = () => {
     if (newTag.trim() && !selectedTags.includes(newTag.trim())) {
       setSelectedTags([...selectedTags, newTag.trim()]);
       setNewTag('');
     }
   };
 
+  const handleRemoveTag = (index: number) => {
+    const newTags = [...selectedTags];
+    newTags.splice(index, 1);
+    setSelectedTags(newTags);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter') {
       e.preventDefault();
-      handleAddNewTag();
+      handleAddTag();
     }
   };
 
@@ -340,16 +338,16 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-80">
       <div 
         ref={modalRef}
-        className="bg-gray-800 rounded-xl shadow-2xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto relative border border-gray-700"
+        className="bg-[#1A1B23] rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto relative border border-gray-800"
       >
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold text-white">Create a Post</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
+            className="text-gray-400 hover:text-green-500 transition-colors"
           >
             <FiX size={24} />
           </button>
@@ -400,9 +398,8 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               ref={textareaRef}
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              className="w-full p-4 border border-gray-600 rounded-xl bg-gray-900 text-white resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               placeholder="What's on your mind?"
-              rows={4}
+              className="w-full p-4 bg-[#13141B] border border-gray-800 rounded-lg text-gray-200 focus:outline-none focus:border-green-500 min-h-[120px] mb-4"
             />
             
             {/* Image preview overlay */}
@@ -426,74 +423,74 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
             {/* Post controls toolbar */}
             <div className="flex items-center mt-2 space-x-2">
               {/* Image upload button */}
-              <button
-                type="button"
-                onClick={handleClickUpload}
-                className="p-2 text-gray-400 hover:text-blue-400 hover:bg-gray-700 rounded-full transition-colors"
-                title="Upload image"
-              >
-                <FiImage size={20} />
-              </button>
-              
-              {/* Hidden file input */}
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleImageUpload}
-                className="hidden"
-                accept="image/*"
-              />
+              <div className="relative">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  className="sr-only"
+                  id="image-upload"
+                />
+                <label
+                  htmlFor="image-upload"
+                  className="flex items-center justify-center p-2 text-green-500 hover:text-green-400 focus:outline-none cursor-pointer"
+                  title="Upload image"
+                >
+                  <FiImage size={20} />
+                </label>
+              </div>
               
               {/* Vote post toggle */}
-              <button
-                type="button"
-                onClick={() => setIsVotePost(!isVotePost)}
-                className={`p-2 rounded-full transition-colors ${
-                  isVotePost 
-                    ? 'text-blue-400 bg-gray-700' 
-                    : 'text-gray-400 hover:text-blue-400 hover:bg-gray-700'
-                }`}
-                title="Create a vote"
-              >
-                <FiBarChart2 size={20} />
-              </button>
+              <div className="flex items-center mt-4 mb-2">
+                <div 
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    isVotePost ? 'bg-green-600' : 'bg-gray-700'
+                  }`}
+                  onClick={() => setIsVotePost(!isVotePost)}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      isVotePost ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </div>
+                <span className="ml-2 text-sm text-gray-300">
+                  {isVotePost ? 'Vote Post' : 'Regular Post'}
+                </span>
+              </div>
             </div>
           </div>
           
           {/* Vote options section */}
           {isVotePost && (
-            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-white font-medium">Vote Options</h3>
-              </div>
-              
+            <div className="mt-4 space-y-3">
+              <h3 className="text-sm font-medium text-gray-300">Vote Options</h3>
               {voteOptions.map((option, index) => (
                 <div key={index} className="flex items-center space-x-2">
                   <input
                     type="text"
                     value={option}
                     onChange={(e) => handleVoteOptionChange(index, e.target.value)}
-                    className="flex-grow p-2 border border-gray-600 rounded-lg bg-gray-800 text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder={`Option ${index + 1}`}
+                    className="flex-grow px-3 py-2 bg-[#13141B] border border-gray-800 rounded-md text-gray-200 focus:outline-none focus:border-green-500"
                   />
-                  {voteOptions.length > 2 && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveVoteOption(index)}
-                      className="p-1 text-red-400 hover:text-red-300"
-                    >
-                      <FiX size={18} />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveVoteOption(index)}
+                    className="p-1 text-gray-400 hover:text-red-400 focus:outline-none"
+                    disabled={voteOptions.length <= 2}
+                  >
+                    <FiTrash2 size={16} />
+                  </button>
                 </div>
               ))}
-              
               <button
                 type="button"
                 onClick={handleAddVoteOption}
-                className="flex items-center text-sm text-blue-400 hover:text-blue-300 mt-2"
+                className="flex items-center px-3 py-2 text-sm text-green-500 hover:text-green-400 focus:outline-none"
               >
-                <FiPlusCircle size={16} className="mr-1" /> Add Option
+                <FiPlus size={16} className="mr-1" /> Add Option
               </button>
             </div>
           )}
@@ -505,33 +502,36 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               <button
                 type="button"
                 onClick={() => generateTags()}
-                disabled={isGeneratingTags || !content.trim()}
-                className={`text-xs flex items-center ${
-                  isGeneratingTags || !content.trim()
-                    ? 'text-gray-500 cursor-not-allowed'
+                disabled={!content.trim() || isGeneratingTags}
+                className={`flex items-center px-3 py-2 text-sm ${
+                  !content.trim() || isGeneratingTags 
+                    ? 'text-gray-500 cursor-not-allowed' 
                     : 'text-green-500 hover:text-green-400'
-                }`}
+                } focus:outline-none`}
               >
                 <FiRefreshCw className={`mr-1 ${isGeneratingTags ? 'animate-spin' : ''}`} />
-                Auto-tag with AI
+                {isGeneratingTags ? 'Generating...' : 'Auto-tag'}
               </button>
             </div>
             
             {/* Selected tags display */}
             {selectedTags.length > 0 && (
-              <div className="mb-2">
-                <div className="flex flex-wrap gap-2">
-                  {selectedTags.map((tag) => (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {selectedTags.map((tag, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center bg-[#13141B] border border-gray-800 rounded-md px-2 py-1"
+                  >
+                    <span className="text-sm text-gray-300 mr-1">{tag}</span>
                     <button
-                      key={tag}
                       type="button"
-                      onClick={() => handleTagClick(tag)}
-                      className="px-2 py-1 text-xs rounded-full bg-blue-500 text-white hover:bg-blue-600 transition-colors"
+                      onClick={() => handleRemoveTag(index)}
+                      className="text-gray-400 hover:text-red-400 focus:outline-none"
                     >
-                      {tag} <FiX size={12} className="inline ml-1" />
+                      <FiX size={14} />
                     </button>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
             )}
             
@@ -543,11 +543,11 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 onChange={(e) => setNewTag(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Add a new tag"
-                className="flex-grow px-3 py-2 bg-gray-800 border border-gray-700 rounded-l-md text-gray-300 focus:outline-none"
+                className="flex-grow px-3 py-2 bg-[#13141B] border border-gray-800 rounded-l-md text-gray-200 focus:outline-none focus:border-green-500"
               />
               <button
                 type="button"
-                onClick={handleAddNewTag}
+                onClick={handleAddTag}
                 className="px-3 py-2 bg-green-600 text-white rounded-r-md hover:bg-green-700 focus:outline-none"
               >
                 <FiCheck />
@@ -556,19 +556,20 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           </div>
           
           {/* Action buttons */}
-          <div className="flex justify-end mt-4">
+          <div className="flex justify-end space-x-3 mt-6">
             <button
               type="button"
-              className="px-4 py-2 mr-2 text-sm font-medium text-gray-300 bg-gray-800 border border-gray-700 rounded-md hover:bg-gray-700 focus:outline-none"
-              onClick={() => onClose()}
-              disabled={isSubmitting}
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-700 text-gray-300 rounded-md hover:bg-gray-600 focus:outline-none"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !content.trim()}
+              className={`px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none ${
+                (isSubmitting || !content.trim()) ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             >
               {isSubmitting ? 'Posting...' : 'Post'}
             </button>
