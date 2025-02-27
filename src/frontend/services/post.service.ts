@@ -477,12 +477,12 @@ async function calculateOutputSatoshis(contentSize: number, isVoteOption: boolea
         // For vote options, use a more aggressive calculation
         // Especially for short content
         
-        // Base value that scales with content length - more aggressive for short content
+        // Base value that scales with content length
         const baseValue = Math.max(contentSize * 100);
         console.log(`Base value (contentSize * 100): ${baseValue}`);
         
         // Scale based on fee rate too
-        const feeMultiplier = Math.max(2, Math.ceil(feeRate / 0.5)); 
+        const feeMultiplier = Math.max(Math.ceil(feeRate / 0.5)); 
         const feeBasedValue = calculatedFee * feeMultiplier;
         console.log(`Fee-based value (calculatedFee * ${feeMultiplier}): ${feeBasedValue}`);
         
@@ -497,7 +497,7 @@ async function calculateOutputSatoshis(contentSize: number, isVoteOption: boolea
     }
     
     // For regular content, ensure minimum dust limit
-    return Math.max(1000, calculatedFee);
+    return Math.max(calculatedFee);
 }
 
 // Helper function to hash content
@@ -896,7 +896,23 @@ export const createPost = async (
         // Create post in database
         const dbPost = createDbPost(metadata, txid);
         dbPost.author_address = bsvAddress;
-        console.log('Created database post object:', { ...dbPost, content: dbPost.content.substring(0, 50) + '...' });
+        
+        // Add vote options if this is a vote post
+        if (isVotePost && metadata.vote?.options) {
+            dbPost.is_vote = true;
+            dbPost.vote_options = metadata.vote.options.map(option => ({
+                text: option.text,
+                lockAmount: option.lockAmount,
+                lockDuration: option.lockDuration,
+                index: option.optionIndex
+            }));
+        }
+        
+        console.log('Created database post object:', { 
+            ...dbPost, 
+            content: dbPost.content.substring(0, 50) + '...',
+            vote_options: dbPost.vote_options
+        });
 
         // Function to attempt the database post creation with retry logic
         const attemptDatabasePost = async (retries = 2): Promise<any> => {
@@ -913,10 +929,17 @@ export const createPost = async (
 
                 if (!dbResponse.ok) {
                     const errorText = await dbResponse.text();
+                    let errorDetails;
+                    try {
+                        errorDetails = JSON.parse(errorText);
+                    } catch (e) {
+                        errorDetails = errorText;
+                    }
+                    
                     console.error('Database error response:', {
                         status: dbResponse.status,
                         statusText: dbResponse.statusText,
-                        body: errorText
+                        body: errorDetails
                     });
                     
                     // If we have retries left, wait and try again
