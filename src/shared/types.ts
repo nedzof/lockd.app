@@ -101,15 +101,15 @@ export interface PostWithVoteOptions extends Post {
 }
 
 export interface ProcessedTransaction {
-    id: string;
-    txid: string;
-    blockHeight: number;  // Maps to block_height in database
-    blockTime: number;    // Maps to block_time in database (BigInt in DB, Number in TS)
-    type: string;
-    protocol: string;
-    metadata: Record<string, any>;
-    createdAt: Date;      // Maps to created_at in database
-    updatedAt: Date;      // Maps to updated_at in database
+    id?: string;
+    txid: string;  // Only required field
+    blockHeight?: number;  // Maps to block_height in database
+    blockTime?: number;    // Maps to block_time in database (BigInt in DB, Number in TS)
+    type?: string;
+    protocol?: string;
+    metadata?: Record<string, any>;
+    createdAt?: Date;      // Maps to created_at in database
+    updatedAt?: Date;      // Maps to updated_at in database
 }
 
 export interface JungleBusTransaction {

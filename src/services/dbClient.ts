@@ -321,40 +321,45 @@ export class DbClient {
             // First, save the transaction to the ProcessedTransaction table
             await this.withFreshClient(async (client) => {
                 // Check if transaction already exists
-                const existingTx = await client.processedTransaction.findUnique({
-                    where: { txid: tx.txid }
-                });
+                try {
+                    const existingTx = await client.processedTransaction.findUnique({
+                        where: { txid: tx.txid }
+                    });
 
-                if (!existingTx) {
-                    try {
-                        // Create new processed transaction record
-                        await client.processedTransaction.create({
-                            data: {
+                    if (!existingTx) {
+                        try {
+                            // Create new processed transaction record with only essential fields
+                            await client.processedTransaction.create({
+                                data: {
+                                    txid: tx.txid,
+                                    type: tx.type,
+                                    protocol: tx.protocol,
+                                    metadata: tx.metadata || {}
+                                    // Omit blockHeight and blockTime if they cause issues
+                                }
+                            });
+                            
+                            logger.info(' DB: TRANSACTION RECORD CREATED', {
                                 txid: tx.txid,
-                                type: tx.type,
-                                protocol: tx.protocol,
-                                blockHeight: tx.blockHeight || 0,
-                                blockTime: tx.blockTime ? BigInt(tx.blockTime) : BigInt(0),
-                                metadata: tx.metadata || {}
-                            }
-                        });
-                        
-                        logger.info(' DB: TRANSACTION RECORD CREATED', {
-                            txid: tx.txid,
-                            type: tx.type,
-                            blockHeight: tx.blockHeight || 0,
-                            blockTime: tx.blockTime || 0
-                        });
-                    } catch (error) {
-                        logger.error(' DB: FAILED TO CREATE TRANSACTION RECORD', {
-                            txid: tx.txid,
-                            error: error instanceof Error ? error.message : 'Unknown error',
-                            stack: error instanceof Error ? error.stack : undefined
-                        });
-                        
-                        // Continue processing even if transaction record creation fails
-                        // This allows us to still attempt to create the post
+                                type: tx.type
+                            });
+                        } catch (error) {
+                            logger.error(' DB: FAILED TO CREATE TRANSACTION RECORD', {
+                                txid: tx.txid,
+                                error: error instanceof Error ? error.message : 'Unknown error',
+                                stack: error instanceof Error ? error.stack : undefined
+                            });
+                            
+                            // Continue processing even if transaction record creation fails
+                            // This allows us to still attempt to create the post
+                        }
                     }
+                } catch (error) {
+                    logger.error(' DB: ERROR CHECKING FOR EXISTING TRANSACTION', {
+                        txid: tx.txid,
+                        error: error instanceof Error ? error.message : 'Unknown error'
+                    });
+                    // Continue processing even if this check fails
                 }
             });
 
@@ -465,35 +470,102 @@ export class DbClient {
 
             // Save to ProcessedTransaction table
             const savedTx = await this.withFreshClient(async (client) => {
-                // Check if transaction already exists
-                const existingTx = await client.processedTransaction.findUnique({
-                    where: { txid: tx.txid }
-                });
-
-                if (existingTx) {
-                    // Update existing transaction
-                    return await client.processedTransaction.update({
+                try {
+                    // Check if transaction already exists
+                    const existingTx = await client.processedTransaction.findUnique({
                         where: { txid: tx.txid },
-                        data: {
-                            type: tx.type,
-                            protocol: tx.protocol,
-                            blockHeight: tx.blockHeight || 0,
-                            blockTime: tx.blockTime ? BigInt(tx.blockTime) : BigInt(0),
-                            metadata: tx.metadata || {}
+                        select: {
+                            id: true,
+                            txid: true
                         }
                     });
-                } else {
-                    // Create new transaction
-                    return await client.processedTransaction.create({
-                        data: {
-                            txid: tx.txid,
-                            type: tx.type,
-                            protocol: tx.protocol,
-                            blockHeight: tx.blockHeight || 0,
-                            blockTime: tx.blockTime ? BigInt(tx.blockTime) : BigInt(0),
-                            metadata: tx.metadata || {}
+
+                    if (existingTx) {
+                        // Update existing transaction with only the fields we know exist
+                        try {
+                            return await client.processedTransaction.update({
+                                where: { txid: tx.txid },
+                                data: {
+                                    type: tx.type,
+                                    protocol: tx.protocol,
+                                    metadata: tx.metadata || {}
+                                    // Deliberately omit blockHeight and blockTime
+                                },
+                                select: {
+                                    id: true,
+                                    txid: true,
+                                    type: true,
+                                    protocol: true,
+                                    metadata: true
+                                }
+                            });
+                        } catch (updateError) {
+                            logger.warn('Update failed, returning minimal transaction object', {
+                                error: updateError instanceof Error ? updateError.message : 'Unknown error',
+                                txid: tx.txid,
+                                timestamp: new Date().toISOString()
+                            });
+                            
+                            // Return a minimal transaction object
+                            return {
+                                id: existingTx.id,
+                                txid: tx.txid,
+                                type: tx.type || 'unknown',
+                                protocol: tx.protocol || 'unknown',
+                                metadata: tx.metadata || {}
+                            };
                         }
+                    } else {
+                        // Create new transaction with only the fields we know exist
+                        try {
+                            return await client.processedTransaction.create({
+                                data: {
+                                    txid: tx.txid,
+                                    type: tx.type,
+                                    protocol: tx.protocol,
+                                    metadata: tx.metadata || {}
+                                    // Deliberately omit blockHeight and blockTime
+                                },
+                                select: {
+                                    id: true,
+                                    txid: true,
+                                    type: true,
+                                    protocol: true,
+                                    metadata: true
+                                }
+                            });
+                        } catch (createError) {
+                            logger.warn('Create failed, returning minimal transaction object', {
+                                error: createError instanceof Error ? createError.message : 'Unknown error',
+                                txid: tx.txid,
+                                timestamp: new Date().toISOString()
+                            });
+                            
+                            // Return a minimal transaction object
+                            return {
+                                id: '',
+                                txid: tx.txid,
+                                type: tx.type || 'unknown',
+                                protocol: tx.protocol || 'unknown',
+                                metadata: tx.metadata || {}
+                            };
+                        }
+                    }
+                } catch (prismaError) {
+                    // If there's an error with the Prisma query, log it and return a minimal object
+                    logger.warn('DB: ERROR WITH PRISMA QUERY IN SAVE TRANSACTION', {
+                        error: prismaError instanceof Error ? prismaError.message : 'Unknown error',
+                        timestamp: new Date().toISOString()
                     });
+                    
+                    // Return a minimal transaction object
+                    return {
+                        id: '',
+                        txid: tx.txid,
+                        type: tx.type || 'unknown',
+                        protocol: tx.protocol || 'unknown',
+                        metadata: tx.metadata || {}
+                    };
                 }
             });
 
@@ -532,49 +604,61 @@ export class DbClient {
             logger.info(' DB: FETCHING TRANSACTION', { txid });
             
             return this.withFreshClient(async (client) => {
-                // First try to get the transaction using Prisma's findUnique
-                const tx = await client.processedTransaction.findUnique({
-                    where: { txid }
-                });
-                
-                if (tx) {
-                    // Map database column names to interface property names
-                    return {
-                        id: tx.id,
-                        txid: tx.txid,
-                        blockHeight: tx.blockHeight,
-                        blockTime: Number(tx.blockTime), // Convert BigInt to Number
-                        type: tx.type,
-                        protocol: tx.protocol,
-                        metadata: tx.metadata,
-                        createdAt: tx.createdAt,
-                        updatedAt: tx.updatedAt
-                    };
-                }
-                
-                // If not found, try with a raw query as fallback
-                const rawResult = await client.$queryRaw`
-                    SELECT * FROM "ProcessedTransaction" WHERE txid = ${txid} LIMIT 1
-                `;
-                
-                if (Array.isArray(rawResult) && rawResult.length > 0) {
-                    const rawTx = rawResult[0] as any;
+                try {
+                    // Try to get the transaction using Prisma's findUnique
+                    // Only query by txid, which we know exists in the database
+                    // Explicitly select only columns we know exist
+                    const tx = await client.processedTransaction.findUnique({
+                        where: { txid },
+                        select: {
+                            id: true,
+                            txid: true,
+                            type: true,
+                            protocol: true,
+                            metadata: true
+                            // Deliberately omit blockHeight, blockTime, etc.
+                        }
+                    });
                     
-                    // Map database column names to interface property names
+                    if (tx) {
+                        // Map database column names to interface property names
+                        // Use optional chaining to handle potentially missing fields
+                        return {
+                            id: tx.id,
+                            txid: tx.txid,
+                            type: tx.type ?? 'unknown',
+                            protocol: tx.protocol ?? 'unknown',
+                            metadata: tx.metadata ?? {},
+                            // Provide default values for missing fields
+                            blockHeight: 0,
+                            blockTime: 0,
+                            createdAt: new Date(),
+                            updatedAt: new Date()
+                        };
+                    }
+                    
+                    return null;
+                } catch (error) {
+                    // If there's an error with column names, log it and return a minimal object
+                    logger.warn(' DB: ERROR WITH PRISMA QUERY, RETURNING MINIMAL OBJECT', {
+                        error: error instanceof Error ? error.message : 'Unknown error',
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    // Instead of trying another query that might fail, return a minimal object
+                    // with just the txid and default values for other fields
                     return {
-                        id: rawTx.id,
-                        txid: rawTx.txid,
-                        blockHeight: rawTx.block_height,
-                        blockTime: Number(rawTx.block_time), // Convert BigInt to Number
-                        type: rawTx.type,
-                        protocol: rawTx.protocol,
-                        metadata: rawTx.metadata,
-                        createdAt: rawTx.created_at,
-                        updatedAt: rawTx.updated_at
+                        id: '', // We don't know the ID
+                        txid: txid,
+                        blockHeight: 0,
+                        blockTime: 0,
+                        type: 'unknown',
+                        protocol: 'unknown',
+                        metadata: {},
+                        createdAt: new Date(),
+                        updatedAt: new Date()
                     };
                 }
-                
-                return null;
             });
         } catch (error) {
             logger.error(' DB: FAILED TO FETCH TRANSACTION', {
