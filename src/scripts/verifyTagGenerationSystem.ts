@@ -42,7 +42,7 @@ Entertainment industry adapts to streaming-first distribution models.
       success: true,
       tags: serviceTags,
       count: serviceTags.length,
-      mode: deepseekService.isUsingFallback() ? 'fallback' : 'ai',
+      mode: deepseekService.is_using_fallback() ? 'fallback' : 'ai',
       executionTimeMs: serviceEndTime - serviceStartTime,
       timestamp: new Date().toISOString()
     };

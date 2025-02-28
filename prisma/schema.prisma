@@ -54,13 +54,13 @@ model Post {
 model ProcessedTransaction {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
   txid        String   @unique @map("txid")
-  blockHeight Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now())
+  blockHeight Int      @default(0) @map("block_height")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
   protocol    String   @default("MAP") @map("protocol")
   type        String   @default("unknown") @map("type")
   metadata    Json     @map("metadata")
-  blockTime   BigInt   @default(0)
+  blockTime   BigInt   @default(0) @map("block_time")
 
   @@index([protocol])
   @@index([txid])

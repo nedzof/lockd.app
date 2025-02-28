@@ -18,9 +18,9 @@ const prisma = new PrismaClient({
 const TX_ID = 'a043fbcdc79628136708f88fad1e33f367037aa3d1bb0bff4bfffe818ec4b598';
 
 interface ImageOutput {
-    mimeType: string;
-    rawData: string;
-    dataURL: string;
+    mime_type: string;
+    raw_data: string;
+    data_url: string;
 }
 
 async function fetchTransaction(txid: string) {
@@ -74,9 +74,9 @@ async function extractImageFromTransaction(tx: any): Promise<ImageOutput | null>
         const dataURL = `data:${mimeType};base64,${base64Data}`;
 
         return {
-            mimeType,
-            rawData: base64Data,
-            dataURL
+            mime_type: mimeType,
+            raw_data: base64Data,
+            data_url: dataURL
         };
 
     } catch (error) {
@@ -118,29 +118,27 @@ async function processSpecificTransaction() {
         const lockDuration = parseInt(parsedData.lockduration || '0', 10);
         const totalOptions = parseInt(parsedData.totaloptions || '0', 10);
 
-        // Create or update the post with image data if present
+        // Create or update the post in the database
         const post = await prisma.post.upsert({
             where: { txid: TX_ID },
             create: {
                 txid: TX_ID,
                 content: content,
-                authorAddress: tx.addresses[0],
-                blockHeight: 0,
-                createdAt: timestamp,
+                author_address: tx.addresses[0],
+                created_at: timestamp,
                 tags: tags,
-                isVote: totalOptions > 0,
-                mediaType: imageData?.mimeType,
-                rawImageData: imageData?.rawData
+                is_vote: totalOptions > 0,
+                media_type: imageData?.mime_type,
+                raw_image_data: imageData?.raw_data
             },
             update: {
                 content: content,
-                authorAddress: tx.addresses[0],
-                blockHeight: 0,
-                createdAt: timestamp,
+                author_address: tx.addresses[0],
+                created_at: timestamp,
                 tags: tags,
-                isVote: totalOptions > 0,
-                mediaType: imageData?.mimeType,
-                rawImageData: imageData?.rawData
+                is_vote: totalOptions > 0,
+                media_type: imageData?.mime_type,
+                raw_image_data: imageData?.raw_data
             }
         });
 
@@ -159,17 +157,17 @@ async function processSpecificTransaction() {
                     create: {
                         txid: optionTxid,
                         content: optionContent,
-                        authorAddress: tx.addresses[0],
-                        createdAt: timestamp,
-                        postId: post.id,
-                        optionIndex: i
+                        author_address: tx.addresses[0],
+                        created_at: timestamp,
+                        post_id: post.id,
+                        option_index: i
                     },
                     update: {
                         content: optionContent,
-                        authorAddress: tx.addresses[0],
-                        createdAt: timestamp,
-                        postId: post.id,
-                        optionIndex: i
+                        author_address: tx.addresses[0],
+                        created_at: timestamp,
+                        post_id: post.id,
+                        option_index: i
                     }
                 });
                 

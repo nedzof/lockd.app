@@ -46,7 +46,7 @@ Entertainment industry adapts to streaming-first distribution models.
       const deepseekService = new LocalDeepseekService();
       const tags = await deepseekService.generateTags(sampleContent);
       
-      logger.info(`Generated ${tags.length} tags using direct service call (${deepseekService.isUsingFallback() ? 'fallback' : 'AI'} mode)`);
+      logger.info(`Generated ${tags.length} tags using direct service call (${deepseekService.is_using_fallback() ? 'fallback' : 'AI'} mode)`);
       logger.info('Tags:', tags.join(', '));
       
       // Save results to a file
@@ -66,7 +66,7 @@ Entertainment industry adapts to streaming-first distribution models.
           content: sampleContent,
           tags: tags,
           count: tags.length,
-          mode: deepseekService.isUsingFallback() ? 'fallback' : 'AI'
+          mode: deepseekService.is_using_fallback() ? 'fallback' : 'AI'
         }, null, 2)
       );
       

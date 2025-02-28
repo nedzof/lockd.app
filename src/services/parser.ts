@@ -176,7 +176,8 @@ export class TransactionParser {
                 image_metadata: {
                     filename: '',
                     content_type: '',
-                }
+                },
+                tags: [] // Initialize tags array
             };
 
             // Check if this is a vote transaction
@@ -230,6 +231,12 @@ export class TransactionParser {
                             metadata.is_vote = true;
                             metadata.content_type = 'vote';
                         }
+                        break;
+                    case 'tags':
+                        if (!metadata.tags) {
+                            metadata.tags = [];
+                        }
+                        metadata.tags.push(value);
                         break;
                     // Image related fields
                     case 'contenttype':
