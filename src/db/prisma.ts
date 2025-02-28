@@ -6,9 +6,8 @@ declare global {
 }
 
 // Determine if we should use direct connection
-const useDirectUrl = process.env.DIRECT_URL && ['findMany', 'create', 'update', 'delete'].some(op => 
-  process.env.NODE_ENV === 'production' || process.env.USE_DIRECT_URL === 'true'
-);
+const useDirectUrl = process.env.DIRECT_URL && 
+  (process.env.NODE_ENV === 'production' || process.env.USE_DIRECT_URL === 'true');
 
 // Log connection details
 logger.info('Initializing Prisma client', {

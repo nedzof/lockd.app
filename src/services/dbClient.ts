@@ -1,7 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import { PrismaClient } from '@prisma/client';
-import type { Post, LockLike, VoteOption } from '@prisma/client';
-import { Post as SharedPost, ParsedTransaction, DbError, PostWithVoteOptions, ProcessedTxMetadata } from '../shared/types.js';
+import type { Post } from '@prisma/client';
+import { ParsedTransaction, DbError, PostWithVoteOptions, ProcessedTxMetadata } from '../shared/types.js';
 import { logger } from '../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
@@ -121,14 +121,14 @@ export class DbClient {
         const postData = {
             txid: tx.txid,
             content: tx.metadata.content,
-            authorAddress: tx.metadata.senderAddress,
-            blockHeight: tx.blockHeight,
-            createdAt: this.createBlockTimeDate(tx.blockTime),
+            authorAddress: tx.metadata.sender_address,
+            blockHeight: tx.block_height,
+            createdAt: this.createBlockTimeDate(tx.block_time),
             rawImageData: imageBuffer,
             tags: tx.metadata.tags || [],
             metadata: tx.metadata || {},
             isLocked: tx.type === 'lock',
-            isVote: tx.type === 'vote' || !!tx.metadata.voteOptions || tx.metadata.contentType === 'vote'
+            isVote: tx.type === 'vote' || !!tx.metadata.vote_options || tx.metadata.content_type === 'vote'
         };
 
         return this.withFreshClient(async (client) => {
@@ -152,7 +152,7 @@ export class DbClient {
             }
 
             // Process vote options if present
-            if (tx.metadata.voteOptions && Array.isArray(tx.metadata.voteOptions) && tx.metadata.voteOptions.length > 0) {
+            if (tx.metadata.vote_options && Array.isArray(tx.metadata.vote_options) && tx.metadata.vote_options.length > 0) {
                 await this.processVoteOptions(post.id, tx);
             }
 
@@ -161,16 +161,14 @@ export class DbClient {
     }
 
     private async processVoteOptions(postId: string, tx: ParsedTransaction): Promise<void> {
-        if (!tx.metadata.voteOptions || !Array.isArray(tx.metadata.voteOptions)) {
+        if (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options)) {
             return;
         }
 
         return this.withFreshClient(async (client) => {
             // Process each vote option
-            for (let i = 0; i < tx.metadata.voteOptions.length; i++) {
-                const optionContent = tx.metadata.voteOptions[i];
-                const lockAmount = tx.metadata.lockAmount || 0;
-                const lockDuration = tx.metadata.lockDuration || 0;
+            for (let i = 0; i < tx.metadata.vote_options.length; i++) {
+                const optionContent = tx.metadata.vote_options[i];
                 
                 // Generate a unique txid for each option by appending the index to the original txid
                 const optionTxid = `${tx.txid}-option-${i}`;
@@ -186,8 +184,8 @@ export class DbClient {
                         data: {
                             txid: optionTxid,
                             content: optionContent,
-                            authorAddress: tx.metadata.senderAddress,
-                            createdAt: this.createBlockTimeDate(tx.blockTime),
+                            authorAddress: tx.metadata.sender_address,
+                            createdAt: this.createBlockTimeDate(tx.block_time),
                             tags: tx.metadata.tags || [],
                             postId: postId,
                             optionIndex: i
@@ -220,8 +218,8 @@ export class DbClient {
                             txid: tx.txid,
                             type: tx.type,
                             protocol: tx.protocol,
-                            blockHeight: tx.blockHeight || 0,
-                            blockTime: tx.blockTime || 0,
+                            blockHeight: tx.block_height || 0,
+                            blockTime: tx.block_time || 0,
                             metadata: tx.metadata || {}
                         }
                     });
@@ -229,16 +227,20 @@ export class DbClient {
                     logger.info('Transaction saved to ProcessedTransaction table', {
                         txid: tx.txid,
                         type: tx.type,
-                        blockHeight: tx.blockHeight
+                        blockHeight: tx.block_height
                     });
                 }
             });
 
             // Process image if present
             let imageBuffer: Buffer | null = null;
-            if (tx.metadata?.image) {
+            if (tx.metadata.image) {
                 try {
-                    imageBuffer = await this.processImage(tx.metadata.image);
+                    // We need to implement this method or use a different approach
+                    // imageBuffer = await this.processImage(tx.metadata.image);
+                    logger.warn('Image processing not implemented', {
+                        txid: tx.txid
+                    });
                 } catch (error) {
                     logger.error('Failed to process image', {
                         error: error instanceof Error ? error.message : 'Unknown error',
@@ -248,20 +250,20 @@ export class DbClient {
             }
 
             // Ensure vote posts have content_type set
-            if (tx.type === 'vote' && !tx.metadata.contentType) {
-                tx.metadata.contentType = 'vote';
-                logger.debug('Set contentType for vote post', { txid: tx.txid });
+            if (tx.type === 'vote' && !tx.metadata.content_type) {
+                tx.metadata.content_type = 'vote';
+                logger.debug('Set content_type for vote post', { txid: tx.txid });
             }
 
             const post = await this.upsertPost(tx, imageBuffer);
 
             // For vote posts, ensure they have vote options
-            if ((tx.type === 'vote' || post.isVote) && (!tx.metadata.voteOptions || !Array.isArray(tx.metadata.voteOptions) || tx.metadata.voteOptions.length === 0)) {
+            if ((tx.type === 'vote' || post.isVote) && (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options) || tx.metadata.vote_options.length === 0)) {
                 logger.info('Creating default vote options for vote post', { postId: post.id, txid: tx.txid });
                 
                 // Create default vote options
                 const defaultOptions = ['Yes', 'No', 'Maybe'];
-                tx.metadata.voteOptions = defaultOptions;
+                tx.metadata.vote_options = defaultOptions;
                 
                 // Process the default vote options
                 await this.processVoteOptions(post.id, tx);
@@ -272,23 +274,22 @@ export class DbClient {
                         where: { id: post.id },
                         data: {
                             metadata: {
-                                ...post.metadata,
-                                voteOptions: defaultOptions,
-                                contentType: 'vote'
+                                ...(post.metadata as Record<string, any>),
+                                vote_options: defaultOptions,
+                                content_type: 'vote'
                             }
                         }
                     });
                 });
             }
 
-            const action = post.createdAt === this.createBlockTimeDate(tx.blockTime) ? 'created' : 'updated';
+            const action = post.createdAt === this.createBlockTimeDate(tx.block_time) ? 'created' : 'updated';
             logger.info(`✅ Post ${action} successfully`, {
                 txid: post.txid,
                 hasImage: !!imageBuffer,
-                imageSize: imageBuffer?.length,
                 tags: post.tags,
                 isVote: post.isVote,
-                contentType: tx.metadata.contentType
+                contentType: tx.metadata.content_type
             });
 
             return post;
@@ -314,7 +315,7 @@ export class DbClient {
             logger.debug('Saving transaction to database', { 
                 txid: tx.txid,
                 type: tx.type,
-                blockHeight: tx.blockHeight
+                block_height: tx.block_height
             });
 
             // Save to ProcessedTransaction table
@@ -331,8 +332,8 @@ export class DbClient {
                         data: {
                             type: tx.type,
                             protocol: tx.protocol,
-                            blockHeight: tx.blockHeight || 0,
-                            blockTime: tx.blockTime || 0,
+                            blockHeight: tx.block_height || 0,
+                            blockTime: tx.block_time || 0,
                             metadata: tx.metadata || {}
                         }
                     });
@@ -343,8 +344,8 @@ export class DbClient {
                             txid: tx.txid,
                             type: tx.type,
                             protocol: tx.protocol,
-                            blockHeight: tx.blockHeight || 0,
-                            blockTime: tx.blockTime || 0,
+                            blockHeight: tx.block_height || 0,
+                            blockTime: tx.block_time || 0,
                             metadata: tx.metadata || {}
                         }
                     });
@@ -520,11 +521,11 @@ export class DbClient {
                 txid: string;
                 type: string;
                 protocol: string;
-                blockHeight: number;
-                blockTime: bigint;
+                block_height: number;
+                block_time: bigint;
                 metadata: any;
             }>>`
-                SELECT txid, type, protocol, "blockHeight", "blockTime", metadata
+                SELECT txid, type, protocol, "block_height", "block_time", metadata
                 FROM "ProcessedTransaction"
                 WHERE txid = ${txid}
                 LIMIT 1
@@ -538,8 +539,8 @@ export class DbClient {
                 txid: transaction.txid,
                 type: transaction.type,
                 protocol: transaction.protocol,
-                blockHeight: transaction.blockHeight,
-                blockTime: Number(transaction.blockTime),
+                block_height: transaction.block_height,
+                block_time: Number(transaction.block_time),
                 metadata: transaction.metadata
             };
         } catch (error) {
@@ -552,14 +553,52 @@ export class DbClient {
     }
 
     public async getPostWithVoteOptions(postId: string): Promise<PostWithVoteOptions | null> {
-        return await prisma.post.findUnique({
-            where: { postId: postId },
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
             include: {
                 voteOptions: true,
-                voteQuestion: true,
                 lockLikes: true
             }
         });
+
+        if (!post) return null;
+
+        // Transform the Prisma Post into our custom PostWithVoteOptions type
+        return {
+            id: post.id,
+            postId: post.id,
+            type: post.isVote ? 'vote' : 'post',
+            content: post.content,
+            blockTime: post.createdAt,
+            sequence: 0, // Default value
+            parentSequence: 0, // Default value
+            createdAt: post.createdAt,
+            updatedAt: post.createdAt, // Using createdAt as updatedAt
+            protocol: 'MAP', // Default protocol
+            senderAddress: post.authorAddress,
+            blockHeight: post.blockHeight,
+            txid: post.txid,
+            image: post.rawImageData,
+            lockLikes: post.lockLikes.map(like => ({
+                id: like.id,
+                txid: like.txid,
+                lock_amount: like.amount,
+                lock_duration: 0, // Default value
+                created_at: like.createdAt,
+                updated_at: like.createdAt, // Using createdAt as updatedAt
+                post_id: like.postId
+            })),
+            voteOptions: post.voteOptions.map(option => ({
+                id: option.id,
+                post_id: option.postId,
+                content: option.content,
+                index: option.optionIndex,
+                created_at: option.createdAt,
+                updated_at: option.createdAt, // Using createdAt as updatedAt
+                question_id: option.id // Using option.id as question_id
+            })),
+            voteQuestion: null // We don't have a voteQuestion model in Prisma
+        };
     }
 
     async cleanupTestData(): Promise<void> {
@@ -568,7 +607,6 @@ export class DbClient {
         }
         await this.withRetry(async () => {
             await prisma.voteOption.deleteMany();
-            await prisma.voteQuestion.deleteMany();
             await prisma.lockLike.deleteMany();
             await prisma.post.deleteMany();
             await prisma.processedTransaction.deleteMany();
@@ -576,10 +614,89 @@ export class DbClient {
         });
     }
 
-    private chunk<T>(arr: T[], size: number): T[][] {
-        return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
-            arr.slice(i * size, (i + 1) * size)
-        );
+    async verifyDatabaseContents(txid: string, testOutputDir: string) {
+        // Get the processed transaction
+        const processedTx = await this.getTransaction(txid);
+        if (!processedTx) {
+            throw new Error(`No processed transaction found for txid ${txid}`);
+        }
+
+        const metadata = processedTx.metadata as ProcessedTxMetadata;
+
+        // Get the post with vote data
+        const post = await this.getPostWithVoteOptions(metadata.post_id);
+        if (!post) {
+            throw new Error(`No post found for post_id ${metadata.post_id}`);
+        }
+
+        // Prepare verification results
+        const results = {
+            hasPost: true,
+            hasImage: !!post.image,
+            hasVoteQuestion: post.voteQuestion !== null,
+            voteOptionsCount: post.voteOptions?.length || 0,
+            hasLockLikes: post.lockLikes?.length > 0 || false,
+            txid,
+            postId: post.id,
+            contentType: post.image ? 'Image + Text' : 'Text Only',
+            voteQuestion: post.voteQuestion ? {
+                question: post.voteQuestion.question,
+                total_options: post.voteQuestion.total_options,
+                options_hash: post.voteQuestion.options_hash
+            } : undefined,
+            voteOptions: post.voteOptions?.map(opt => ({
+                content: opt.content,
+                index: opt.index
+            })).sort((a, b) => a.index - b.index)
+        };
+
+        // Log verification results
+        logger.info('Database verification results', results);
+
+        // Save image if present
+        if (post.image) {
+            const ext = (metadata.image_metadata?.content_type?.split('/')[1] || 'jpg');
+            const imagePath = path.join(testOutputDir, `${txid}_image.${ext}`);
+            await fs.promises.writeFile(imagePath, post.image);
+            logger.info('Saved image to file', { path: imagePath });
+        }
+
+        // Write verification results to file
+        const outputPath = path.join(testOutputDir, `${txid}_verification.txt`);
+        const outputContent = [
+            `Transaction ID: ${txid}`,
+            `Post ID: ${post.id}`,
+            `Content Type: ${results.contentType}`,
+            `Block Time: ${post.createdAt.toISOString()}`,
+            `Sender Address: ${post.senderAddress || 'Not specified'}`,
+            '\nContent:',
+            post.content,
+            '\nTransaction Details:',
+            `- Has Image: ${results.hasImage}`,
+            `- Has Vote Question: ${results.hasVoteQuestion}`,
+            `- Vote Options Count: ${results.voteOptionsCount}`,
+            `- Has Lock Likes: ${results.hasLockLikes}`,
+            results.hasImage ? [
+                '\nImage Metadata:',
+                `- Content Type: ${metadata.image_metadata?.content_type || 'Not specified'}`,
+                `- Filename: ${metadata.image_metadata?.filename || 'Not specified'}`,
+                `- Size: ${metadata.image_metadata?.size || 'Not specified'}`,
+                `- Dimensions: ${metadata.image_metadata?.width || '?'}x${metadata.image_metadata?.height || '?'}`
+            ].join('\n') : '',
+            results.hasVoteQuestion ? [
+                '\nVote Details:',
+                `Question: ${post.voteQuestion?.question}`,
+                `Total Options: ${post.voteQuestion?.total_options}`,
+                `Options Hash: ${post.voteQuestion?.options_hash}`,
+                '\nVote Options:',
+                ...post.voteOptions
+                    .sort((a, b) => a.index - b.index)
+                    .map((opt, i) => `${i + 1}. ${opt.content} (Index: ${opt.index})`)
+            ].join('\n') : '\nNo Vote Data'
+        ].join('\n');
+
+        await fs.promises.writeFile(outputPath, outputContent);
+        logger.info('Saved verification results to file', { path: outputPath });
     }
 
     /**
@@ -590,26 +707,14 @@ export class DbClient {
         try {
             logger.debug('Getting current block height');
             
-            // Try to get the latest block height from the blockchain_state table
-            const blockchainState = await prisma.blockchain_state.findFirst({
-                orderBy: {
-                    updatedAt: 'desc'
-                }
-            });
-            
-            if (blockchainState?.currentHeight) {
-                logger.debug(`Found current block height: ${blockchainState.currentHeight}`);
-                return blockchainState.currentHeight;
-            }
-            
-            // If no blockchain_state record, try to get the height from the latest transaction
-            const latestTx = await prisma.transaction.findFirst({
+            // Try to get the latest block height from processed transactions
+            const latestTx = await prisma.processedTransaction.findFirst({
                 orderBy: {
                     blockHeight: 'desc'
                 },
                 where: {
                     blockHeight: {
-                        not: null
+                        gt: 0
                     }
                 }
             });
@@ -628,93 +733,6 @@ export class DbClient {
             });
             return null;
         }
-    }
-
-    async verifyDatabaseContents(txid: string, testOutputDir: string) {
-        // Get the processed transaction
-        const processedTx = await this.getTransaction(txid);
-        if (!processedTx) {
-            throw new Error(`No processed transaction found for txid ${txid}`);
-        }
-
-        const metadata = processedTx.metadata as ProcessedTxMetadata;
-
-        // Get the post with vote data
-        const post = await this.getPostWithVoteOptions(metadata.postId);
-        if (!post) {
-            throw new Error(`No post found for postId ${metadata.postId}`);
-        }
-
-        // Prepare verification results
-        const results = {
-            hasPost: true,
-            hasImage: !!post.image,
-            hasVoteQuestion: post.voteQuestion !== null,
-            voteOptionsCount: post.voteOptions?.length || 0,
-            hasLockLikes: post.lockLikes?.length > 0 || false,
-            txid,
-            postId: post.postId,
-            contentType: post.image ? 'Image + Text' : 'Text Only',
-            voteQuestion: post.voteQuestion ? {
-                question: post.voteQuestion.question,
-                totalOptions: post.voteQuestion.totalOptions,
-                optionsHash: post.voteQuestion.optionsHash
-            } : undefined,
-            voteOptions: post.voteOptions?.map(opt => ({
-                content: opt.text,
-                index: opt.optionIndex
-            })).sort((a, b) => a.index - b.index)
-        };
-
-        // Log verification results
-        logger.info('Database verification results', results);
-
-        // Save image if present
-        if (post.image) {
-            const ext = (metadata.imageMetadata?.contentType?.split('/')[1] || 'jpg');
-            const imagePath = path.join(testOutputDir, `${txid}_image.${ext}`);
-            await fs.promises.writeFile(imagePath, post.image);
-            logger.info('Saved image to file', { path: imagePath });
-        }
-
-        // Write verification results to file
-        const outputPath = path.join(testOutputDir, `${txid}_verification.txt`);
-        const outputContent = [
-            `Transaction ID: ${txid}`,
-            `Post ID: ${post.postId}`,
-            `Content Type: ${results.contentType}`,
-            `Block Time: ${post.blockTime.toISOString()}`,
-            `Sender Address: ${post.authorAddress || 'Not specified'}`,
-            '\nContent:',
-            post.content,
-            '\nTransaction Details:',
-            `- Has Image: ${results.hasImage}`,
-            `- Has Vote Question: ${results.hasVoteQuestion}`,
-            `- Vote Options Count: ${results.voteOptionsCount}`,
-            `- Has Lock Likes: ${results.hasLockLikes}`,
-            results.hasImage ? [
-                '\nImage Metadata:',
-                `- Content Type: ${metadata.imageMetadata?.contentType || 'Not specified'}`,
-                `- Filename: ${metadata.imageMetadata?.filename || 'Not specified'}`,
-                `- Size: ${metadata.imageMetadata?.size || 'Not specified'}`,
-                `- Dimensions: ${metadata.imageMetadata?.width || '?'}x${metadata.imageMetadata?.height || '?'}`
-            ].join('\n') : '',
-            results.hasVoteQuestion ? [
-                '\nVote Details:',
-                `Question: ${post.voteQuestion?.question}`,
-                `Total Options: ${post.voteQuestion?.totalOptions}`,
-                `Options Hash: ${post.voteQuestion?.optionsHash}`,
-                '\nVote Options:',
-                ...post.voteOptions
-                    .sort((a, b) => a.optionIndex - b.optionIndex)
-                    .map((opt, i) => `${i + 1}. ${opt.text} (Index: ${opt.optionIndex})`)
-            ].join('\n') : '\nNo Vote Data'
-        ].join('\n');
-
-        await fs.promises.writeFile(outputPath, outputContent);
-        logger.info('Saved verification results to', { path: outputPath });
-
-        return results;
     }
 
     // Save image data to database
@@ -796,5 +814,11 @@ export class DbClient {
                 throw error;
             }
         });
+    }
+
+    private chunk<T>(arr: T[], size: number): T[][] {
+        return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+            arr.slice(i * size, (i + 1) * size)
+        );
     }
 }
