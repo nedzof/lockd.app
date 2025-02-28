@@ -263,13 +263,13 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     const post = await prisma.post.findUnique({
       where: { id: req.params.id },
       select: {
-        media_type: true,
-        raw_image_data: true,
+        mediaType: true,
+        rawImageData: true,
         imageFormat: true
       }
     });
 
-    if (!post || !post.raw_image_data) {
+    if (!post || !post.rawImageData) {
       res.status(404).json({ message: 'Media not found' });
       return;
     }
@@ -287,7 +287,7 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     };
 
     // Determine content type
-    let contentType = post.media_type;
+    let contentType = post.mediaType;
     
     // If we have an imageFormat but no mediaType, try to determine from format
     if (!contentType && post.imageFormat && contentTypeMap[post.imageFormat.toLowerCase()]) {
@@ -310,13 +310,13 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     logger.debug('Sending image data', {
       postId: req.params.id,
       mediaType: contentType,
-      dataType: typeof post.raw_image_data,
-      isBuffer: Buffer.isBuffer(post.raw_image_data),
-      dataLength: post.raw_image_data.length
+      dataType: typeof post.rawImageData,
+      isBuffer: Buffer.isBuffer(post.rawImageData),
+      dataLength: post.rawImageData.length
     });
 
     // Send the raw image data - it's already a Buffer in the database
-    res.send(post.raw_image_data);
+    res.send(post.rawImageData);
   } catch (error) {
     logger.error('Error fetching media:', error);
     res.status(500).json({ message: 'Error fetching media' });
@@ -406,10 +406,10 @@ const createPost: CreatePostHandler = async (req, res, next) => {
           id: tempTxid,
           txid: tempTxid,
           content: content,
-          author_address: authorAddress,
+          authorAddress: authorAddress,
           tags: tags || [],
-          is_vote: isVote || false,
-          metadata: clientProvidedPostId ? { post_id: clientProvidedPostId } : undefined
+          isVote: isVote || false,
+          metadata: clientProvidedPostId ? { postId: clientProvidedPostId } : undefined
         }
       });
 
@@ -419,8 +419,8 @@ const createPost: CreatePostHandler = async (req, res, next) => {
           await prisma.post.update({
             where: { id: post.id },
             data: {
-              raw_image_data: rawImageData ? Buffer.from(rawImageData, 'base64') : null,
-              media_type: mediaType || null
+              rawImageData: rawImageData ? Buffer.from(rawImageData, 'base64') : null,
+              mediaType: mediaType || null
             }
           });
         } catch (imageError) {
@@ -441,9 +441,9 @@ const createPost: CreatePostHandler = async (req, res, next) => {
               id: voteOptionId,
               txid: `${tempTxid}_option_${index}`,
               content: option.text,
-              post_id: post.id,
-              author_address: authorAddress,
-              option_index: index
+              postId: post.id,
+              authorAddress: authorAddress,
+              optionIndex: index
             }
           });
         });
@@ -581,14 +581,14 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
         id: postData.id,
         txid: postData.txid,
         content: postData.content,
-        author_address: postData.authorAddress,
-        raw_image_data: postData.rawImageData ? Buffer.from(postData.rawImageData) : null,
-        media_type: postData.mediaType,
+        authorAddress: postData.authorAddress,
+        rawImageData: postData.rawImageData ? Buffer.from(postData.rawImageData) : null,
+        mediaType: postData.mediaType,
         tags: postData.tags,
         metadata: postData.metadata,
-        is_locked: postData.isLocked,
-        created_at: postData.createdAt,
-        block_height: postData.blockHeight
+        isLocked: postData.isLocked,
+        createdAt: postData.createdAt,
+        blockHeight: postData.blockHeight
       }
     });
 

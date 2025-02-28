@@ -28,7 +28,7 @@ export interface Database {
           created_at: string;
           author_address: string;
           is_locked: boolean;
-          blockHeight: number | null;
+          block_height: number | null;
           tags: string[];
         };
         Insert: {
@@ -36,7 +36,7 @@ export interface Database {
           author_address: string;
           is_locked?: boolean;
           created_at?: string;
-          blockHeight?: number | null;
+          block_height?: number | null;
           tags?: string[];
         };
         Update: {
@@ -44,7 +44,7 @@ export interface Database {
           author_address?: string;
           is_locked?: boolean;
           created_at?: string;
-          blockHeight?: number | null;
+          block_height?: number | null;
           tags?: string[];
         };
       };

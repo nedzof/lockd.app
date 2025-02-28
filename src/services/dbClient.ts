@@ -145,8 +145,6 @@ export class DbClient {
             tags: tx.metadata.tags || [],
             isVote: tx.type === 'vote',
             isLocked: !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0 || !!tx.metadata.lockAmount && tx.metadata.lockAmount > 0,
-            lockAmount: tx.metadata.lock_amount || tx.metadata.lockAmount || 0,
-            lockDuration: tx.metadata.lock_duration || tx.metadata.lockDuration || 0,
             metadata: tx.metadata
         };
         
@@ -210,8 +208,6 @@ export class DbClient {
                         tags: postData.tags,
                         isVote: postData.isVote,
                         isLocked: postData.isLocked,
-                        lockAmount: postData.lockAmount,
-                        lockDuration: postData.lockDuration,
                         metadata: postData.metadata,
                         ...(imageBuffer ? {
                             rawImageData: postData.rawImageData,

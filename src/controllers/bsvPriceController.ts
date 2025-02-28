@@ -20,19 +20,19 @@ export const getBsvPrice = async (req: Request, res: Response) => {
     // First try to get the price from the database
     const latestStats = await prisma.stats.findFirst({
       orderBy: {
-        last_updated: 'desc'
+        lastUpdated: 'desc'
       }
     });
     
     // If we have a price in the database and it's less than 1 hour old, use it
-    if (latestStats && (latestStats as any).current_bsv_price) {
-      const priceAge = Date.now() - new Date(latestStats.last_updated).getTime();
+    if (latestStats && latestStats.currentBsvPrice) {
+      const priceAge = Date.now() - new Date(latestStats.lastUpdated).getTime();
       if (priceAge < 60 * 60 * 1000) { // Less than 1 hour old
-        logger.info(`Using BSV price from database: $${(latestStats as any).current_bsv_price}`);
+        logger.info(`Using BSV price from database: $${latestStats.currentBsvPrice}`);
         return res.json({
-          price: (latestStats as any).current_bsv_price,
+          price: latestStats.currentBsvPrice,
           source: 'database',
-          timestamp: latestStats.last_updated
+          timestamp: latestStats.lastUpdated
         });
       }
     }

@@ -441,7 +441,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         body: JSON.stringify({
           vote_option_id: optionId,
           amount,
-          duration,
+          lock_duration: duration,
           author_address: wallet.address,
         }),
       });

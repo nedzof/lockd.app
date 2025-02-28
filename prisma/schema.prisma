@@ -65,16 +65,16 @@ model ProcessedTransaction {
   @@index([protocol])
   @@index([txid])
   @@index([type])
-  @@index([blockHeight])
+  @@index([blockHeight], map: "processed_transaction_block_height_idx")
 }
 
 model Tag {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
   name       String   @unique @map("name")
   type       String   @default("user_created") @map("type")
-  usageCount Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now())
+  usageCount Int      @default(0) @map("usage_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @map("updated_at")
 
   @@index([name])
   @@index([type])

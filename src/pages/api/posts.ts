@@ -315,7 +315,6 @@ async function handleCreatePost(req: NextApiRequest, res: NextApiResponse) {
       raw_image_data,
       media_type,
       is_locked = false,
-      lock_duration,
       metadata = {}
     } = req.body;
 
@@ -346,7 +345,6 @@ async function handleCreatePost(req: NextApiRequest, res: NextApiResponse) {
         raw_image_data: raw_image_data ? Buffer.from(raw_image_data, 'base64') : null,
         media_type,
         is_locked,
-        lock_duration,
         metadata: metadata || {}
       }
     });

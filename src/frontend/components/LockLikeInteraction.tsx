@@ -168,10 +168,10 @@ export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike 
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          postTxid: postTxid || replyTxid,
-          handle: addresses.identityAddress,
+          post_id: postTxid || replyTxid,
+          author_address: addresses.identityAddress,
           amount: parsedAmount * SATS_PER_BSV,
-          nLockTime,
+          lock_duration: nLockTime,
           txid: lockResponse.txid,
         }),
       });

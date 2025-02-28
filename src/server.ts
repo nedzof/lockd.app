@@ -3,7 +3,7 @@ import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import postsRouter from './api/posts';
-import lockLikesRouter from './api/lockLikes';
+import lockLikesRouter from './api/lock-likes';
 import tagsRouter from './api/tags';
 import statsRouter from './api/stats';
 import votesRouter from './api/votes';

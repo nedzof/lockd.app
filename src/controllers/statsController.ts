@@ -51,7 +51,7 @@ export const getStats = async (req: Request, res: Response) => {
     // Get the latest stats record
     const stats = await prisma.stats.findFirst({
       orderBy: {
-        last_updated: 'desc'
+        lastUpdated: 'desc'
       }
     });
 
@@ -61,16 +61,16 @@ export const getStats = async (req: Request, res: Response) => {
       // Create sample data
       const sampleData = {
         id: 'sample-stats',
-        total_posts: 125,
-        total_votes: 350,
-        total_lock_likes: 280,
-        total_users: 75,
-        total_bsv_locked: 1250.5,
-        avg_lock_duration: 30,
-        most_used_tag: 'bitcoin',
-        most_active_user: '1PkQ63EaZ1SJibu1fVHQULZVsU99LoKJh1',
-        current_bsv_price: 45.75,
-        last_updated: new Date()
+        totalPosts: 125,
+        totalVotes: 350,
+        totalLockLikes: 280,
+        totalUsers: 75,
+        totalBsvLocked: 1250.5,
+        avgLockDuration: 30,
+        mostUsedTag: 'bitcoin',
+        mostActiveUser: '1PkQ63EaZ1SJibu1fVHQULZVsU99LoKJh1',
+        currentBsvPrice: 45.75,
+        lastUpdated: new Date()
       };
       
       // Create sample data for charts
@@ -320,19 +320,19 @@ export const getStats = async (req: Request, res: Response) => {
       const statsData = { ...stats };
       
       // If current_bsv_price doesn't exist in the stats object, add it with a default value
-      if (statsData.current_bsv_price === undefined || statsData.current_bsv_price === null) {
+      if (statsData.currentBsvPrice === undefined || statsData.currentBsvPrice === null) {
         // Try to fetch the current price
         try {
           const currentPrice = await fetchBsvPrice();
           if (currentPrice !== null) {
-            statsData.current_bsv_price = currentPrice;
+            statsData.currentBsvPrice = currentPrice;
           } else {
-            statsData.current_bsv_price = priceData.length > 0 ? 
+            statsData.currentBsvPrice = priceData.length > 0 ? 
               priceData[priceData.length - 1].price : 45.0;
           }
         } catch (error) {
           logger.error('Error fetching current BSV price', { error });
-          statsData.current_bsv_price = priceData.length > 0 ? 
+          statsData.currentBsvPrice = priceData.length > 0 ? 
             priceData[priceData.length - 1].price : 45.0;
         }
       }
@@ -377,16 +377,16 @@ export const updateStats = async (req: Request, res: Response) => {
     // Create sample data for our charts
     const sampleData = {
       id: 'current-stats',
-      total_posts: 125,
-      total_votes: 350,
-      total_lock_likes: 280,
-      total_users: 75,
-      total_bsv_locked: 1250.5,
-      avg_lock_duration: 30,
-      most_used_tag: 'bitcoin',
-      most_active_user: '1PkQ63EaZ1SJibu1fVHQULZVsU99LoKJh1',
-      current_bsv_price: 45.75,
-      last_updated: new Date()
+      totalPosts: 125,
+      totalVotes: 350,
+      totalLockLikes: 280,
+      totalUsers: 75,
+      totalBsvLocked: 1250.5,
+      avgLockDuration: 30,
+      mostUsedTag: 'bitcoin',
+      mostActiveUser: '1PkQ63EaZ1SJibu1fVHQULZVsU99LoKJh1',
+      currentBsvPrice: 45.75,
+      lastUpdated: new Date()
     };
     
     // Create or update the stats record
@@ -463,7 +463,7 @@ function generateSamplePriceData(stats: any) {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
   
   // Use the current_bsv_price if it exists, otherwise use a default value
-  const currentPrice = (stats as any)?.current_bsv_price || 45.0;
+  const currentPrice = (stats as any)?.currentBsvPrice || 45.0;
   
   return months.map((month, index) => {
     // Generate a price that fluctuates around the current price
