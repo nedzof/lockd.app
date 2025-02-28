@@ -15,15 +15,15 @@ model LockLike {
   amount        Int         @map("amount")
   author_address String?     @map("author_address")
   created_at     DateTime    @default(now()) @map("created_at")
-  postId        String      @map("post_id")
+  post_id        String      @map("post_id")
   unlock_height  Int?        @map("unlock_height")
   vote_option_id  String?     @map("vote_option_id")
-  post          Post        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post          Post        @relation(fields: [post_id], references: [id], onDelete: Cascade)
   vote_option    vote_option? @relation(fields: [vote_option_id], references: [id], onDelete: Cascade)
 
   @@index([author_address])
   @@index([created_at])
-  @@index([postId])
+  @@index([post_id])
   @@index([vote_option_id])
 }
 
@@ -34,13 +34,13 @@ model Post {
   author_address String?      @map("author_address")
   created_at     DateTime     @default(now()) @map("created_at")
   isVote        Boolean      @default(false) @map("is_vote")
-  mediaType     String?      @map("media_type")
+  media_type     String?      @map("media_type")
   tags          String[]     @default([]) @map("tags")
   mediaUrl      String?      @map("media_url")
-  rawImageData  Bytes?       @map("raw_image_data")
+  raw_image_data  Bytes?       @map("raw_image_data")
   blockHeight   Int?         @map("block_height")
   metadata      Json?        @map("metadata")
-  isLocked      Boolean      @default(false) @map("is_locked")
+  is_locked      Boolean      @default(false) @map("is_locked")
   lockLikes     LockLike[]
   vote_options   vote_option[]
 
@@ -86,16 +86,16 @@ model vote_option {
   content       String     @map("content")
   author_address String?    @map("author_address")
   created_at     DateTime   @default(now()) @map("created_at")
-  postId        String     @map("post_id")
+  post_id        String     @map("post_id")
   tags          String[]   @default([]) @map("tags")
   tx_id          String     @unique @map("tx_id")
   optionIndex   Int        @default(0) @map("option_index")
   lockLikes     LockLike[]
-  post          Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post          Post       @relation(fields: [post_id], references: [id], onDelete: Cascade)
 
   @@index([created_at])
   @@index([optionIndex])
-  @@index([postId])
+  @@index([post_id])
   @@index([tx_id])
 }
 

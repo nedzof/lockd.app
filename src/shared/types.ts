@@ -103,8 +103,8 @@ export interface PostWithvote_options extends Post {
 export interface ProcessedTransaction {
     id?: string;
     tx_id: string;  // Only required field
-    blockHeight?: number;  // Maps to block_height in database
-    blockTime?: number;    // Maps to block_time in database (BigInt in DB, Number in TS)
+    block_height?: number;  // Maps to block_height in database
+    block_time?: number;    // Maps to block_time in database (BigInt in DB, Number in TS)
     type?: string;
     protocol?: string;
     metadata?: Record<string, any>;
@@ -164,7 +164,14 @@ export interface ParsedTransaction {
         lock_amount?: number;
         lock_duration?: number;
         timestamp?: number;
-        [key: string]: any;
+        sender_address?: string;
+        block_height?: number;  // snake_case for consistency in database
+        block_time?: number;    // snake_case for consistency in database
+        sequence?: number;
+        parent_sequence?: number;
+        lock_like?: LockLike;
+        vote_question?: VoteQuestion;
+        vote_option?: vote_option;
     };
     post_id?: string;
     content?: string;
@@ -172,8 +179,8 @@ export interface ParsedTransaction {
     lock_duration?: number;
     timestamp?: number;
     sender_address?: string;
-    blockHeight?: number;  // camelCase for consistency in code
-    blockTime?: number;    // camelCase for consistency in code
+    block_height?: number;  // snake_case for consistency in database
+    block_time?: number;    // snake_case for consistency in database
     sequence?: number;
     parent_sequence?: number;
     lock_like?: LockLike;
@@ -226,9 +233,15 @@ export interface LockProtocolData {
 export interface TransactionMetadata {
     post_id: string;
     content: string;
-    lock_amount: number;
-    lock_duration: number;
-    timestamp: number;
+    lock_amount?: number;
+    lock_duration?: number;
+    timestamp?: number;
+    sender_address?: string;
+    block_height?: number;  // snake_case for consistency in database
+    block_time?: number;    // snake_case for consistency in database
+    sequence?: number;
+    parent_sequence?: number;
+    protocol?: string;
     vote_options?: string[];
     vote_question?: string;
     image?: Buffer;
@@ -236,9 +249,6 @@ export interface TransactionMetadata {
         filename: string;
         content_type: string;
     };
-    sequence?: number;
-    parent_sequence?: number;
-    protocol?: string;
     [key: string]: any;
 }
 

@@ -132,7 +132,7 @@ export class DbClient {
         logger.debug(' DB: PREPARING POST DATA', {
             tx_id: tx.tx_id,
             metadataKeys: Object.keys(tx.metadata || {}),
-            hasImage: !!imageBuffer,
+            has_image: !!imageBuffer,
             imageSize: imageBuffer?.length || 0
         });
         
@@ -144,7 +144,7 @@ export class DbClient {
             created_at: this.createBlockTimeDate(tx.blockTime),
             tags: tx.metadata.tags || [],
             isVote: tx.type === 'vote',
-            isLocked: !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0 || !!tx.metadata.lockAmount && tx.metadata.lockAmount > 0,
+            is_locked: !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0 || !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0,
             metadata: tx.metadata
         };
         
@@ -154,14 +154,14 @@ export class DbClient {
             postDataKeys: Object.keys(postData),
             author_address: postData.author_address,
             isVote: postData.isVote,
-            isLocked: postData.isLocked,
+            is_locked: postData.is_locked,
             hasMetadata: !!postData.metadata
         });
 
         // Add image data if available
         if (imageBuffer) {
-            postData.rawImageData = imageBuffer;
-            postData.mediaType = tx.metadata.media_type || tx.metadata.mediaType || 'image/png';
+            postData.raw_image_data = imageBuffer;
+            postData.media_type = tx.metadata.media_type || tx.metadata.media_type || 'image/png';
         }
 
         // Check if this is a reply to another post
@@ -197,7 +197,7 @@ export class DbClient {
             if (existingPost) {
                 logger.info(' DB: UPDATING EXISTING POST', { 
                     tx_id: tx.tx_id, 
-                    postId: existingPost.id 
+                    post_id: existingPost.id 
                 });
                 
                 // Update existing post
@@ -207,11 +207,11 @@ export class DbClient {
                         content: postData.content,
                         tags: postData.tags,
                         isVote: postData.isVote,
-                        isLocked: postData.isLocked,
+                        is_locked: postData.is_locked,
                         metadata: postData.metadata,
                         ...(imageBuffer ? {
-                            rawImageData: postData.rawImageData,
-                            mediaType: postData.mediaType
+                            raw_image_data: postData.raw_image_data,
+                            media_type: postData.media_type
                         } : {})
                     }
                 });
@@ -227,13 +227,13 @@ export class DbClient {
         });
     }
 
-    private async processvote_options(postId: string, tx: ParsedTransaction): Promise<void> {
+    private async processvote_options(post_id: string, tx: ParsedTransaction): Promise<void> {
         if (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options)) {
             return;
         }
 
         logger.info(' DB: PROCESSING VOTE OPTIONS', { 
-            postId, 
+            post_id, 
             optionCount: tx.metadata.vote_options.length 
         });
 
@@ -259,7 +259,7 @@ export class DbClient {
                             author_address: tx.metadata.sender_address || tx.metadata.author_address,
                             created_at: this.createBlockTimeDate(tx.blockTime),
                             tags: tx.metadata.tags || [],
-                            postId: postId,
+                            post_id: post_id,
                             optionIndex: i
                         }
                     });
@@ -267,7 +267,7 @@ export class DbClient {
             }
 
             logger.info(' DB: VOTE OPTIONS CREATED', {
-                postId,
+                post_id,
                 optionCount: tx.metadata.vote_options.length
             });
         });
@@ -298,9 +298,9 @@ export class DbClient {
         const fieldMappings: [string, string][] = [
             ['block_height', 'blockHeight'],
             ['block_time', 'blockTime'],
-            ['post_id', 'postId'],
-            ['lock_amount', 'lockAmount'],
-            ['lock_duration', 'lockDuration'],
+            ['post_id', 'post_id'],
+            ['lock_amount', 'lock_amount'],
+            ['lock_duration', 'lock_duration'],
             ['sender_address', 'author_address'],
             ['author_address', 'author_address'],
             ['created_at', 'created_at'],
@@ -308,8 +308,8 @@ export class DbClient {
             ['vote_options', 'vote_options'],
             ['vote_question', 'voteQuestion'],
             ['content_type', 'contentType'],
-            ['media_type', 'mediaType'],
-            ['raw_image_data', 'rawImageData'],
+            ['media_type', 'media_type'],
+            ['raw_image_data', 'raw_image_data'],
             ['image_metadata', 'imageMetadata']
         ];
         
@@ -437,7 +437,7 @@ export class DbClient {
             logger.info(' DB: CREATING POST', {
                 tx_id: tx.tx_id,
                 type: tx.type,
-                hasImage: !!imageBuffer
+                has_image: !!imageBuffer
             });
 
             const post = await this.upsertPost(tx, imageBuffer);
@@ -445,7 +445,7 @@ export class DbClient {
             // Process vote options if present
             if (tx.metadata.vote_options && Array.isArray(tx.metadata.vote_options) && tx.metadata.vote_options.length > 0) {
                 logger.info(' DB: PROCESSING EXISTING VOTE OPTIONS', { 
-                    postId: post.id, 
+                    post_id: post.id, 
                     optionCount: tx.metadata.vote_options.length 
                 });
                 await this.processvote_options(post.id, tx);
@@ -453,7 +453,7 @@ export class DbClient {
             // For vote posts, ensure they have vote options
             else if ((tx.type === 'vote' || post.isVote) && (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options) || tx.metadata.vote_options.length === 0)) {
                 logger.info(' DB: CREATING DEFAULT VOTE OPTIONS', { 
-                    postId: post.id, 
+                    post_id: post.id, 
                     tx_id: tx.tx_id 
                 });
                 
@@ -482,7 +482,7 @@ export class DbClient {
             const action = post.created_at === this.createBlockTimeDate(tx.blockTime) ? 'created' : 'updated';
             logger.info(` DB: POST ${action.toUpperCase()}`, {
                 tx_id: post.tx_id,
-                postId: post.id,
+                post_id: post.id,
                 type: tx.type,
                 isVote: post.isVote,
                 tagCount: post.tags.length
@@ -868,9 +868,9 @@ export class DbClient {
         }
     }
 
-    async getPostWithvote_options(postId: string): Promise<PostWithvote_options | null> {
+    async getPostWithvote_options(post_id: string): Promise<PostWithvote_options | null> {
         const post = await prisma.post.findUnique({
-            where: { id: postId },
+            where: { id: post_id },
             include: {
                 vote_options: true,
                 lockLikes: true
@@ -894,7 +894,7 @@ export class DbClient {
             sender_address: post.author_address,
             block_height: post.blockHeight,
             tx_id: post.tx_id,
-            image: post.rawImageData,
+            image: post.raw_image_data,
             lock_likes: post.lockLikes.map(like => ({
                 id: like.id,
                 tx_id: like.tx_id,
@@ -902,11 +902,11 @@ export class DbClient {
                 lock_duration: 0, // Default value
                 created_at: like.created_at,
                 updated_at: like.created_at, // Using created_at as updated_at
-                post_id: like.postId
+                post_id: like.post_id
             })),
             vote_options: post.vote_options.map(option => ({
                 id: option.id,
-                post_id: option.postId,
+                post_id: option.post_id,
                 content: option.content,
                 index: option.optionIndex,
                 created_at: option.created_at,
@@ -1105,14 +1105,14 @@ export class DbClient {
                 await client.post.upsert({
                     where: { tx_id: params.tx_id },
                     update: {
-                        rawImageData: imageBuffer,
-                        mediaType: params.contentType
+                        raw_image_data: imageBuffer,
+                        media_type: params.contentType
                     },
                     create: {
                         tx_id: params.tx_id,
                         content: '',  // Required field, can be updated later
-                        rawImageData: imageBuffer,
-                        mediaType: params.contentType,
+                        raw_image_data: imageBuffer,
+                        media_type: params.contentType,
                         created_at: new Date()
                     }
                 });

@@ -28,7 +28,7 @@ interface Post {
 }
 
 interface TaggingResult {
-  postId: string;
+  post_id: string;
   previousTags: string[];
   newTags: string[];
   count: number;
@@ -41,7 +41,7 @@ const PostTagger: React.FC = () => {
   const [batchLoading, setBatchLoading] = useState<boolean>(false);
   const [result, setResult] = useState<TaggingResult | null>(null);
   const [error, setError] = useState<string>('');
-  const [postId, setPostId] = useState<string>('');
+  const [post_id, setpost_id] = useState<string>('');
   const [batchResults, setBatchResults] = useState<any[]>([]);
 
   // Fetch recent posts
@@ -66,7 +66,7 @@ const PostTagger: React.FC = () => {
 
   // Generate tags for a specific post
   const generateTagsForPost = async () => {
-    if (!postId) {
+    if (!post_id) {
       setError('Please enter a post ID');
       return;
     }
@@ -76,7 +76,7 @@ const PostTagger: React.FC = () => {
       setError('');
       setResult(null);
 
-      const response = await axios.post(`${API_URL}/api/post-tagging/${postId}`);
+      const response = await axios.post(`${API_URL}/api/post-tagging/${post_id}`);
       
       if (response.data.success) {
         setResult(response.data.data);
@@ -116,7 +116,7 @@ const PostTagger: React.FC = () => {
   // Handle post selection
   const handlePostSelect = (post: Post) => {
     setSelectedPost(post);
-    setPostId(post.id);
+    setpost_id(post.id);
   };
 
   return (
@@ -141,15 +141,15 @@ const PostTagger: React.FC = () => {
             label="Post ID"
             variant="outlined"
             fullWidth
-            value={postId}
-            onChange={(e) => setPostId(e.target.value)}
+            value={post_id}
+            onChange={(e) => setpost_id(e.target.value)}
             sx={{ mr: 2 }}
           />
           <Button
             variant="contained"
             color="primary"
             onClick={generateTagsForPost}
-            disabled={loading || !postId}
+            disabled={loading || !post_id}
             startIcon={loading ? <CircularProgress size={20} /> : null}
           >
             Generate Tags
@@ -166,7 +166,7 @@ const PostTagger: React.FC = () => {
           <Box sx={{ mt: 3 }}>
             <Typography variant="h6">Results:</Typography>
             <Typography variant="body2" color="textSecondary">
-              Post ID: {result.postId}
+              Post ID: {result.post_id}
             </Typography>
             
             <Box sx={{ mt: 2 }}>
@@ -276,7 +276,7 @@ const PostTagger: React.FC = () => {
                     <Card key={index} variant="outlined" sx={{ mb: 1 }}>
                       <CardContent sx={{ py: 1 }}>
                         <Typography variant="caption" color="textSecondary">
-                          Post ID: {result.postId}
+                          Post ID: {result.post_id}
                         </Typography>
                         <Typography variant="body2">
                           Added {result.tags.length} tags

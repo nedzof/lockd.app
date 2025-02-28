@@ -92,30 +92,30 @@ export class TagDatabaseService {
   
   /**
    * Applies generated tags to a post
-   * @param postId The ID of the post to apply tags to
+   * @param post_id The ID of the post to apply tags to
    * @param content The content to generate tags from
    * @returns Array of applied tags
    */
-  async applyTagsToPost(postId: string, content: string): Promise<string[]> {
+  async applyTagsToPost(post_id: string, content: string): Promise<string[]> {
     try {
       // Generate tags
       const tags = await this.generateAndStoreTags(content);
       
       if (tags.length === 0) {
-        logger.warn(`No tags generated for post ${postId}`);
+        logger.warn(`No tags generated for post ${post_id}`);
         return [];
       }
       
       // Update post with new tags
       await prisma.post.update({
-        where: { id: postId },
+        where: { id: post_id },
         data: { tags }
       });
       
-      logger.info(`Applied ${tags.length} tags to post ${postId}`);
+      logger.info(`Applied ${tags.length} tags to post ${post_id}`);
       return tags;
     } catch (error) {
-      logger.error(`Error applying tags to post ${postId}:`, error);
+      logger.error(`Error applying tags to post ${post_id}:`, error);
       return [];
     }
   }

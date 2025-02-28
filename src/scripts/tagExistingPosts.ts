@@ -28,7 +28,7 @@ async function tagExistingPosts() {
         ]
       },
       orderBy: {
-        created_at: 'desc'  // Using camelCase for Prisma query, which maps to snake_case in DB
+        created_at: 'desc'  // Using snake_case for Prisma query to match the field name in the schema
       },
       select: {
         id: true,
@@ -62,7 +62,7 @@ async function tagExistingPosts() {
         if (post.content.length < 20) {
           logger.info(`Skipping post ${post.id} due to short content (${post.content.length} chars)`);
           results.push({
-            postId: post.id,
+            post_id: post.id,
             status: 'skipped',
             reason: 'Content too short',
             previousTags: post.tags,
@@ -77,7 +77,7 @@ async function tagExistingPosts() {
         const endTime = Date.now();
         
         results.push({
-          postId: post.id,
+          post_id: post.id,
           status: 'tagged',
           previousTags: post.tags,
           newTags: tags,

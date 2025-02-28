@@ -5,11 +5,11 @@ import { useTags } from '../hooks/useTags';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 interface TagPreferencesProps {
-  selectedTags: string[];
+  selected_tags: string[];
   onTagsChange: (tags: string[]) => void;
 }
 
-export const TagPreferences: React.FC<TagPreferencesProps> = ({ selectedTags, onTagsChange }) => {
+export const TagPreferences: React.FC<TagPreferencesProps> = ({ selected_tags, onTagsChange }) => {
   const { 
     tags, 
     currentEventTags, 
@@ -23,10 +23,10 @@ export const TagPreferences: React.FC<TagPreferencesProps> = ({ selectedTags, on
   const [newTag, setNewTag] = useState('');
 
   const handleTagClick = (tag: string) => {
-    if (selectedTags.includes(tag)) {
-      onTagsChange(selectedTags.filter(t => t !== tag));
+    if (selected_tags.includes(tag)) {
+      onTagsChange(selected_tags.filter(t => t !== tag));
     } else {
-      onTagsChange([...selectedTags, tag]);
+      onTagsChange([...selected_tags, tag]);
     }
   };
 
@@ -37,8 +37,8 @@ export const TagPreferences: React.FC<TagPreferencesProps> = ({ selectedTags, on
     await addTag(newTag.trim());
     
     // Add to selected tags
-    if (!selectedTags.includes(newTag.trim())) {
-      onTagsChange([...selectedTags, newTag.trim()]);
+    if (!selected_tags.includes(newTag.trim())) {
+      onTagsChange([...selected_tags, newTag.trim()]);
     }
     
     // Clear input
@@ -76,7 +76,7 @@ export const TagPreferences: React.FC<TagPreferencesProps> = ({ selectedTags, on
                     type="button"
                     onClick={() => handleTagClick(tag.name)}
                     className={`px-3 py-1 text-sm rounded-full ${
-                      selectedTags.includes(tag.name)
+                      selected_tags.includes(tag.name)
                         ? 'bg-green-500 text-white'
                         : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
                     }`}
@@ -98,7 +98,7 @@ export const TagPreferences: React.FC<TagPreferencesProps> = ({ selectedTags, on
                   type="button"
                   onClick={() => handleTagClick(tag)}
                   className={`px-3 py-1 text-sm rounded-full ${
-                    selectedTags.includes(tag)
+                    selected_tags.includes(tag)
                       ? 'bg-blue-500 text-white'
                       : 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
                   }`}
@@ -113,8 +113,8 @@ export const TagPreferences: React.FC<TagPreferencesProps> = ({ selectedTags, on
           <div className="mb-4">
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Your Selected Tags</h3>
             <div className="flex flex-wrap gap-2">
-              {selectedTags.length > 0 ? (
-                selectedTags.map((tag) => (
+              {selected_tags.length > 0 ? (
+                selected_tags.map((tag) => (
                   <div
                     key={tag}
                     className="flex items-center px-3 py-1 bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 rounded-full text-sm"

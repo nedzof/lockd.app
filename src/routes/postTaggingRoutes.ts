@@ -9,11 +9,11 @@ import {
 const router = express.Router();
 
 /**
- * @route POST /api/post-tagging/:postId
+ * @route POST /api/post-tagging/:post_id
  * @desc Generate tags for a specific post
  * @access Private
  */
-router.post('/post-tagging/:postId', generateTagsForPost);
+router.post('/post-tagging/:post_id', generateTagsForPost);
 
 /**
  * @route POST /api/post-tagging/generate

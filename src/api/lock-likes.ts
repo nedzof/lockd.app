@@ -132,7 +132,7 @@ const handlevote_optionLock = async (
         id: vote_option_id
       },
       data: {
-        lockAmount: {
+        lock_amount: {
           increment: amount
         }
       }

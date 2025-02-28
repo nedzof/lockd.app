@@ -44,12 +44,12 @@ interface ExtendedPost {
 
 interface PostGridProps {
   onStatsUpdate: (stats: { totalLocked: number; participantCount: number; roundNumber: number }) => void;
-  timeFilter: string;
-  rankingFilter: string;
-  personalFilter: string;
-  blockFilter: string;
-  selectedTags: string[];
-  userId: string;
+  time_filter: string;
+  ranking_filter: string;
+  personal_filter: string;
+  block_filter: string;
+  selected_tags: string[];
+  user_id: string;
 }
 
 // Use environment variable for API URL or default to localhost:3003
@@ -58,12 +58,12 @@ console.log('VALIDATION: Using API URL:', API_URL);
 
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
-  timeFilter,
-  rankingFilter,
-  personalFilter,
-  blockFilter,
-  selectedTags,
-  userId
+  time_filter,
+  ranking_filter,
+  personal_filter,
+  block_filter,
+  selected_tags,
+  user_id
 }) => {
   const [submissions, setSubmissions] = useState<ExtendedPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,41 +77,41 @@ const PostGrid: React.FC<PostGridProps> = ({
   const imageUrlMap = useRef<Map<string, string>>(new Map());
   const wallet = useYoursWallet();
   // Keep track of post IDs we've already seen to prevent duplicates
-  const seenPostIds = useRef<Set<string>>(new Set());
+  const seenpost_ids = useRef<Set<string>>(new Set());
   // Add a ref to track if initial fetch has been made
   const initialFetchMade = useRef<boolean>(false);
   // Add a ref to track if component is mounted
   const isMounted = useRef<boolean>(false);
   // Add a ref to store previous filter values for comparison
   const prevFilters = useRef({
-    timeFilter: '',
-    rankingFilter: '',
-    personalFilter: '',
-    blockFilter: '',
-    selectedTags: [] as string[],
-    userId: ''
+    time_filter: '',
+    ranking_filter: '',
+    personal_filter: '',
+    block_filter: '',
+    selected_tags: [] as string[],
+    user_id: ''
   });
 
   // Memoize the filter values for comparison
   const currentFilters = useMemo(() => ({
-    timeFilter,
-    rankingFilter,
-    personalFilter,
-    blockFilter,
-    selectedTags,
-    userId
-  }), [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, userId]);
+    time_filter,
+    ranking_filter,
+    personal_filter,
+    block_filter,
+    selected_tags,
+    user_id
+  }), [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
 
   // Function to check if filters have changed
   const haveFiltersChanged = useCallback(() => {
     const prev = prevFilters.current;
     return (
-      prev.timeFilter !== currentFilters.timeFilter ||
-      prev.rankingFilter !== currentFilters.rankingFilter ||
-      prev.personalFilter !== currentFilters.personalFilter ||
-      prev.blockFilter !== currentFilters.blockFilter ||
-      prev.userId !== currentFilters.userId ||
-      JSON.stringify(prev.selectedTags) !== JSON.stringify(currentFilters.selectedTags)
+      prev.time_filter !== currentFilters.time_filter ||
+      prev.ranking_filter !== currentFilters.ranking_filter ||
+      prev.personal_filter !== currentFilters.personal_filter ||
+      prev.block_filter !== currentFilters.block_filter ||
+      prev.user_id !== currentFilters.user_id ||
+      JSON.stringify(prev.selected_tags) !== JSON.stringify(currentFilters.selected_tags)
     );
   }, [currentFilters]);
 
@@ -126,7 +126,7 @@ const PostGrid: React.FC<PostGridProps> = ({
       setError(null);
       setNextCursor(null); // Reset cursor when fetching from the beginning
       // Clear the set of seen post IDs when resetting
-      seenPostIds.current = new Set();
+      seenpost_ids.current = new Set();
       console.log('VALIDATION: Resetting cursor and fetching initial posts');
     } else {
       setIsFetchingMore(true);
@@ -145,21 +145,21 @@ const PostGrid: React.FC<PostGridProps> = ({
       queryParams.append('limit', '10');
       
       // Add filters
-      if (timeFilter) queryParams.append('timeFilter', timeFilter);
-      if (rankingFilter) queryParams.append('rankingFilter', rankingFilter);
-      if (personalFilter) queryParams.append('personalFilter', personalFilter);
-      if (blockFilter) queryParams.append('blockFilter', blockFilter);
+      if (time_filter) queryParams.append('time_filter', time_filter);
+      if (ranking_filter) queryParams.append('ranking_filter', ranking_filter);
+      if (personal_filter) queryParams.append('personal_filter', personal_filter);
+      if (block_filter) queryParams.append('block_filter', block_filter);
       
       // Add tags if selected
-      if (selectedTags.length > 0) {
-        selectedTags.forEach(tag => {
+      if (selected_tags.length > 0) {
+        selected_tags.forEach(tag => {
           queryParams.append('tags', tag);
         });
       }
       
-      // Add userId if available
-      if (userId) {
-        queryParams.append('userId', userId);
+      // Add user_id if available
+      if (user_id) {
+        queryParams.append('user_id', user_id);
       }
       
       console.log('VALIDATION: Query parameters:', queryParams.toString());
@@ -188,7 +188,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         postsCount: data.posts.length,
         nextCursor: data.nextCursor,
         hasMore: data.hasMore,
-        postIds: data.posts.map((post: any) => post.id)
+        post_ids: data.posts.map((post: any) => post.id)
       });
       
       // Log the content of the first post for debugging
@@ -235,18 +235,18 @@ const PostGrid: React.FC<PostGridProps> = ({
       if (processedPosts.length > 0) {
         console.log('VALIDATION: First processed post:', {
           id: processedPosts[0].id,
-          hasImageUrl: !!processedPosts[0].imageUrl,
+          has_imageUrl: !!processedPosts[0].imageUrl,
           content: processedPosts[0].content?.substring(0, 30)
         });
       }
       
       // Filter out duplicates using the seen post IDs
       const uniqueNewPosts = processedPosts.filter((post: any) => {
-        if (seenPostIds.current.has(post.id)) {
+        if (seenpost_ids.current.has(post.id)) {
           console.log('VALIDATION: Filtering out duplicate post:', post.id);
           return false;
         }
-        seenPostIds.current.add(post.id);
+        seenpost_ids.current.add(post.id);
         return true;
       });
       
@@ -350,7 +350,7 @@ const PostGrid: React.FC<PostGridProps> = ({
       hasMore,
       isFetchingMore,
       currentPostCount: submissions.length,
-      seenPostIds: seenPostIds.current.size
+      seenpost_ids: seenpost_ids.current.size
     });
     
     if (!hasMore || isFetchingMore) {
@@ -472,7 +472,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         <p>Has More: {hasMore.toString()}</p>
         <p>Next Cursor: {nextCursor || 'none'}</p>
         <p>Filters: {JSON.stringify(currentFilters)}</p>
-        <p>Selected Tags: {selectedTags.length > 0 ? selectedTags.join(', ') : 'none'}</p>
+        <p>Selected Tags: {selected_tags.length > 0 ? selected_tags.join(', ') : 'none'}</p>
         <p>First Post ID: {submissions.length > 0 ? submissions[0].id : 'none'}</p>
         
         {/* Post details */}
@@ -637,11 +637,11 @@ export default React.memo(PostGrid, (prevProps, nextProps) => {
   // Custom comparison function to determine if the component should re-render
   // Return true if the props are equal (no re-render needed)
   return (
-    prevProps.timeFilter === nextProps.timeFilter &&
-    prevProps.rankingFilter === nextProps.rankingFilter &&
-    prevProps.personalFilter === nextProps.personalFilter &&
-    prevProps.blockFilter === nextProps.blockFilter &&
-    prevProps.userId === nextProps.userId &&
-    JSON.stringify(prevProps.selectedTags) === JSON.stringify(nextProps.selectedTags)
+    prevProps.time_filter === nextProps.time_filter &&
+    prevProps.ranking_filter === nextProps.ranking_filter &&
+    prevProps.personal_filter === nextProps.personal_filter &&
+    prevProps.block_filter === nextProps.block_filter &&
+    prevProps.user_id === nextProps.user_id &&
+    JSON.stringify(prevProps.selected_tags) === JSON.stringify(nextProps.selected_tags)
   );
 });

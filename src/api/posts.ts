@@ -13,32 +13,32 @@ interface PostParams {
 
 // Define query parameter types
 interface PostQueryParams {
-  timeFilter?: string;
-  rankingFilter?: string;
-  personalFilter?: string;
-  blockFilter?: string;
-  selectedTags?: string;
-  userId?: string;
+  time_filter?: string;
+  ranking_filter?: string;
+  personal_filter?: string;
+  block_filter?: string;
+  selected_tags?: string;
+  user_id?: string;
 }
 
 // Define request body type for post creation
 interface CreatePostBody {
   tx_id: string;
-  postId: string;
+  post_id: string;
   content: string;
   author_address: string;
-  mediaType?: string;
-  rawImageData?: string | null;
+  media_type?: string;
+  raw_image_data?: string | null;
   description?: string;
   tags?: string[];
   metadata?: Record<string, any>;
-  isLocked?: boolean;
-  lockDuration?: number;
+  is_locked?: boolean;
+  lock_duration?: number;
   isVote?: boolean;
   vote_options?: Array<{
     text: string;
-    lockAmount: number;
-    lockDuration: number;
+    lock_amount: number;
+    lock_duration: number;
     index: number;
   }>;
   [key: string]: any; // Add index signature for dynamic field access
@@ -46,17 +46,17 @@ interface CreatePostBody {
 
 // Define request body type for direct post creation
 interface DirectPostBody {
-  postId: string;
+  post_id: string;
   content: string;
   author_address: string;
-  rawImageData?: string | null;
-  mediaType?: string | null;
+  raw_image_data?: string | null;
+  media_type?: string | null;
   description?: string;
   tags?: string[];
   predictionMarketData?: any;
-  isLocked: boolean;
-  lockDuration?: number;
-  lockAmount?: number;
+  is_locked: boolean;
+  lock_duration?: number;
+  lock_amount?: number;
   created_at: string;
 }
 
@@ -74,8 +74,8 @@ interface PostResponse {
   author_address: string;
   created_at: Date;
   tags: string[];
-  mediaType?: string | null;
-  rawImageData?: Buffer | null;
+  media_type?: string | null;
+  raw_image_data?: Buffer | null;
 }
 
 interface vote_optionResponse {
@@ -84,11 +84,11 @@ interface vote_optionResponse {
   content: string;
   author_address: string | null;
   created_at: Date;
-  lockAmount: number;
-  lockDuration: number;
+  lock_amount: number;
+  lock_duration: number;
   unlock_height: number | null;
   tags: string[];
-  postId: string;
+  post_id: string;
 }
 
 const listPosts: PostListHandler = async (req, res, next) => {
@@ -150,7 +150,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
     logger.debug('Found posts', {
       count: posts.length,
       requestedLimit: parsedLimit,
-      postIds: posts.map(post => post.id)
+      post_ids: posts.map(post => post.id)
     });
 
     // Check if there are more items
@@ -162,24 +162,24 @@ const listPosts: PostListHandler = async (req, res, next) => {
     // VALIDATION: Log the IDs of posts we're returning
     logger.debug('Posts to return', {
       count: postsToReturn.length,
-      postIds: postsToReturn.map(post => post.id)
+      post_ids: postsToReturn.map(post => post.id)
     });
 
-    // Process posts to handle rawImageData
+    // Process posts to handle raw_image_data
     const processedPosts = postsToReturn.map(post => {
-      // Process rawImageData to ensure it's in the correct format for the frontend
-      if (post.rawImageData) {
+      // Process raw_image_data to ensure it's in the correct format for the frontend
+      if (post.raw_image_data) {
         try {
           // Convert Bytes to base64 string for frontend use
-          post.rawImageData = Buffer.from(post.rawImageData).toString('base64');
-          logger.debug('Converted rawImageData from Bytes to base64 string', {
-            postId: post.id,
-            dataLength: post.rawImageData.length
+          post.raw_image_data = Buffer.from(post.raw_image_data).toString('base64');
+          logger.debug('Converted raw_image_data from Bytes to base64 string', {
+            post_id: post.id,
+            dataLength: post.raw_image_data.length
           });
         } catch (e) {
-          logger.error('Error processing rawImageData', {
+          logger.error('Error processing raw_image_data', {
             error: e instanceof Error ? e.message : 'Unknown error',
-            postId: post.id
+            post_id: post.id
           });
         }
       }
@@ -234,19 +234,19 @@ const getPost: PostDetailHandler = async (req, res, next) => {
       return;
     }
 
-    // Process rawImageData to ensure it's in the correct format for the frontend
-    if (post.rawImageData) {
+    // Process raw_image_data to ensure it's in the correct format for the frontend
+    if (post.raw_image_data) {
       try {
         // Convert Bytes to base64 string for frontend use
-        post.rawImageData = Buffer.from(post.rawImageData).toString('base64');
-        logger.debug('Converted rawImageData from Bytes to base64 string', {
-          postId: post.id,
-          dataLength: post.rawImageData.length
+        post.raw_image_data = Buffer.from(post.raw_image_data).toString('base64');
+        logger.debug('Converted raw_image_data from Bytes to base64 string', {
+          post_id: post.id,
+          dataLength: post.raw_image_data.length
         });
       } catch (e) {
-        logger.error('Error processing rawImageData', {
+        logger.error('Error processing raw_image_data', {
           error: e instanceof Error ? e.message : 'Unknown error',
-          postId: post.id
+          post_id: post.id
         });
       }
     }
@@ -263,13 +263,13 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     const post = await prisma.post.findUnique({
       where: { id: req.params.id },
       select: {
-        mediaType: true,
-        rawImageData: true,
+        media_type: true,
+        raw_image_data: true,
         imageFormat: true
       }
     });
 
-    if (!post || !post.rawImageData) {
+    if (!post || !post.raw_image_data) {
       res.status(404).json({ message: 'Media not found' });
       return;
     }
@@ -287,9 +287,9 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     };
 
     // Determine content type
-    let contentType = post.mediaType;
+    let contentType = post.media_type;
     
-    // If we have an imageFormat but no mediaType, try to determine from format
+    // If we have an imageFormat but no media_type, try to determine from format
     if (!contentType && post.imageFormat && contentTypeMap[post.imageFormat.toLowerCase()]) {
       contentType = contentTypeMap[post.imageFormat.toLowerCase()];
     }
@@ -308,15 +308,15 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
 
     // Log information about the image data
     logger.debug('Sending image data', {
-      postId: req.params.id,
-      mediaType: contentType,
-      dataType: typeof post.rawImageData,
-      isBuffer: Buffer.isBuffer(post.rawImageData),
-      dataLength: post.rawImageData.length
+      post_id: req.params.id,
+      media_type: contentType,
+      dataType: typeof post.raw_image_data,
+      isBuffer: Buffer.isBuffer(post.raw_image_data),
+      dataLength: post.raw_image_data.length
     });
 
     // Send the raw image data - it's already a Buffer in the database
-    res.send(post.rawImageData);
+    res.send(post.raw_image_data);
   } catch (error) {
     logger.error('Error fetching media:', error);
     res.status(500).json({ message: 'Error fetching media' });
@@ -350,15 +350,15 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       tags = [],
       isVote = false,
       vote_options = [],
-      rawImageData,
-      mediaType,
+      raw_image_data,
+      media_type,
       tx_id,
-      postId: clientProvidedPostId // Extract postId if client provides it
+      post_id: clientProvidedpost_id // Extract post_id if client provides it
     } = req.body;
 
     // Validate required fields
-    if (!content && !rawImageData) {
-      console.error('Missing required fields: content or rawImageData');
+    if (!content && !raw_image_data) {
+      console.error('Missing required fields: content or raw_image_data');
       return res.status(400).json({ error: 'Content or image is required' });
     }
 
@@ -368,7 +368,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
     }
 
     // Validate image format if provided
-    if (rawImageData && mediaType) {
+    if (raw_image_data && media_type) {
       const supportedFormats = [
         'image/jpeg', 
         'image/jpg', 
@@ -380,8 +380,8 @@ const createPost: CreatePostHandler = async (req, res, next) => {
         'image/tiff'
       ];
       
-      if (!supportedFormats.includes(mediaType)) {
-        console.error('Unsupported image format:', mediaType);
+      if (!supportedFormats.includes(media_type)) {
+        console.error('Unsupported image format:', media_type);
         return res.status(400).json({ 
           error: 'Unsupported image format. Please use JPEG, PNG, GIF, BMP, SVG, WEBP, or TIFF.' 
         });
@@ -397,7 +397,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
     // Generate temporary transaction ID if not provided
     const temptx_id = tx_id || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
     
-    console.log(`Creating post with ID: ${temptx_id}, clientProvidedPostId: ${clientProvidedPostId}`);
+    console.log(`Creating post with ID: ${temptx_id}, clientProvidedpost_id: ${clientProvidedpost_id}`);
     
     // Create a minimal post with required fields
     try {
@@ -409,18 +409,18 @@ const createPost: CreatePostHandler = async (req, res, next) => {
           author_address: author_address,
           tags: tags || [],
           isVote: isVote || false,
-          metadata: clientProvidedPostId ? { postId: clientProvidedPostId } : undefined
+          metadata: clientProvidedpost_id ? { post_id: clientProvidedpost_id } : undefined
         }
       });
 
       // If we succeeded with minimal data, now try to update with image if provided
-      if (rawImageData) {
+      if (raw_image_data) {
         try {
           await prisma.post.update({
             where: { id: post.id },
             data: {
-              rawImageData: rawImageData ? Buffer.from(rawImageData, 'base64') : null,
-              mediaType: mediaType || null
+              raw_image_data: raw_image_data ? Buffer.from(raw_image_data, 'base64') : null,
+              media_type: media_type || null
             }
           });
         } catch (imageError) {
@@ -441,7 +441,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
               id: vote_option_id,
               tx_id: `${temptx_id}_option_${index}`,
               content: option.text,
-              postId: post.id,
+              post_id: post.id,
               author_address: author_address,
               optionIndex: index
             }
@@ -487,25 +487,25 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
   try {
     console.log('Received direct post creation request with body:', {
       ...req.body,
-      rawImageData: req.body.rawImageData ? `[Image data length: ${req.body.rawImageData.length}]` : null
+      raw_image_data: req.body.raw_image_data ? `[Image data length: ${req.body.raw_image_data.length}]` : null
     });
     
     // Extract post data from request body
     const {
-      postId,
+      post_id,
       content,
       author_address,
-      rawImageData,
-      mediaType,
+      raw_image_data,
+      media_type,
       tags = [],
-      isLocked = false,
-      lockAmount = 0,
+      is_locked = false,
+      lock_amount = 0,
       created_at = new Date().toISOString()
     } = req.body;
 
     // Validate required fields
-    if (!content && !rawImageData) {
-      console.error('Missing required fields: content or rawImageData');
+    if (!content && !raw_image_data) {
+      console.error('Missing required fields: content or raw_image_data');
       return res.status(400).json({ error: 'Content or image is required' });
     }
 
@@ -515,7 +515,7 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
     }
 
     // Validate image format if provided
-    if (rawImageData && mediaType) {
+    if (raw_image_data && media_type) {
       const supportedFormats = [
         'image/jpeg', 
         'image/jpg', 
@@ -527,8 +527,8 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
         'image/tiff'
       ];
       
-      if (!supportedFormats.includes(mediaType)) {
-        console.error('Unsupported image format:', mediaType);
+      if (!supportedFormats.includes(media_type)) {
+        console.error('Unsupported image format:', media_type);
         return res.status(400).json({ 
           error: 'Unsupported image format. Please use JPEG, PNG, GIF, BMP, SVG, WEBP, or TIFF.' 
         });
@@ -536,15 +536,15 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       
       // Log image details for debugging
       console.log('Image upload details:', {
-        hasImageData: true,
-        imageDataLength: rawImageData.length,
-        mediaType: mediaType,
-        imageDataPreview: rawImageData.substring(0, 100) + '...'
+        has_imageData: true,
+        imageDataLength: raw_image_data.length,
+        media_type: media_type,
+        imageDataPreview: raw_image_data.substring(0, 100) + '...'
       });
     }
 
     // Create temporary tx_id for the post
-    const temptx_id = `temp_${postId}_${Date.now()}`;
+    const temptx_id = `temp_${post_id}_${Date.now()}`;
     
     // Prepare metadata for scanner processing
     const metadata = {
@@ -552,8 +552,8 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       app: 'lockd',
       version: '1.0.0',
       lock: {
-        isLocked,
-        amount: lockAmount
+        is_locked,
+        amount: lock_amount
       },
       // Add scanner-related metadata
       scanner: {
@@ -567,11 +567,11 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       tx_id: temptx_id,
       content,
       author_address,
-      rawImageData: rawImageData || null,
-      mediaType: mediaType || null,
+      raw_image_data: raw_image_data || null,
+      media_type: media_type || null,
       tags,
       metadata,
-      isLocked,
+      is_locked,
       created_at: new Date(created_at),
       blockHeight: null
     } as const;
@@ -582,11 +582,11 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
         tx_id: postData.tx_id,
         content: postData.content,
         author_address: postData.author_address,
-        rawImageData: postData.rawImageData ? Buffer.from(postData.rawImageData) : null,
-        mediaType: postData.mediaType,
+        raw_image_data: postData.raw_image_data ? Buffer.from(postData.raw_image_data) : null,
+        media_type: postData.media_type,
         tags: postData.tags,
         metadata: postData.metadata,
-        isLocked: postData.isLocked,
+        is_locked: postData.is_locked,
         created_at: postData.created_at,
         blockHeight: postData.blockHeight
       }

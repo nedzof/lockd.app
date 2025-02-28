@@ -110,12 +110,12 @@ async function processSpecificTransaction() {
         console.log('Parsed data:', parsedData);
 
         // Extract post data
-        const postId = parsedData.postid;
+        const post_id = parsedData.post_id;
         const content = parsedData.content;
         const timestamp = new Date(parsedData.timestamp);
         const tags = JSON.parse(parsedData.tags || '[]');
-        const lockAmount = parseInt(parsedData.lockamount || '0', 10);
-        const lockDuration = parseInt(parsedData.lockduration || '0', 10);
+        const lock_amount = parseInt(parsedData.lock_amount || '0', 10);
+        const lock_duration = parseInt(parsedData.lock_duration || '0', 10);
         const totalOptions = parseInt(parsedData.totaloptions || '0', 10);
 
         // Create or update the post in the database
@@ -128,8 +128,8 @@ async function processSpecificTransaction() {
                 created_at: timestamp,
                 tags: tags,
                 isVote: totalOptions > 0,
-                mediaType: imageData?.mime_type,
-                rawImageData: imageData?.raw_data
+                media_type: imageData?.mime_type,
+                raw_image_data: imageData?.raw_data
             },
             update: {
                 content: content,
@@ -137,8 +137,8 @@ async function processSpecificTransaction() {
                 created_at: timestamp,
                 tags: tags,
                 isVote: totalOptions > 0,
-                mediaType: imageData?.mime_type,
-                rawImageData: imageData?.raw_data
+                media_type: imageData?.mime_type,
+                raw_image_data: imageData?.raw_data
             }
         });
 
@@ -159,14 +159,14 @@ async function processSpecificTransaction() {
                         content: optionContent,
                         author_address: tx.addresses[0],
                         created_at: timestamp,
-                        postId: post.id,
+                        post_id: post.id,
                         optionIndex: i
                     },
                     update: {
                         content: optionContent,
                         author_address: tx.addresses[0],
                         created_at: timestamp,
-                        postId: post.id,
+                        post_id: post.id,
                         optionIndex: i
                     }
                 });

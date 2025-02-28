@@ -25,24 +25,24 @@ async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
     console.log('Headers:', req.headers);
 
     const {
-      timeFilter,
-      rankingFilter,
-      personalFilter,
-      blockFilter,
-      selectedTags,
-      userId
+      time_filter,
+      ranking_filter,
+      personal_filter,
+      block_filter,
+      selected_tags,
+      user_id
     } = req.query;
 
-    console.log('userId type:', typeof userId, 'value:', userId);
+    console.log('user_id type:', typeof user_id, 'value:', user_id);
 
-    // Parse selectedTags
+    // Parse selected_tags
     let parsedTags: string[] = [];
     try {
-      parsedTags = selectedTags ? JSON.parse(selectedTags as string) : [];
+      parsedTags = selected_tags ? JSON.parse(selected_tags as string) : [];
       console.log('Parsed tags:', parsedTags);
     } catch (e) {
-      console.error('Failed to parse selectedTags:', e);
-      return res.status(400).json({ message: 'Invalid selectedTags format' });
+      console.error('Failed to parse selected_tags:', e);
+      return res.status(400).json({ message: 'Invalid selected_tags format' });
     }
 
     // Check database connection with timeout
@@ -69,17 +69,17 @@ async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
 
     try {
       // Apply ranking filter
-      if (rankingFilter) {
-        console.log('Applying ranking filter:', rankingFilter);
+      if (ranking_filter) {
+        console.log('Applying ranking filter:', ranking_filter);
         
         // Determine the number of top posts to fetch
         let topCount = 1; // Default to 1
         
-        if (rankingFilter === 'top-1' || rankingFilter === 'top1') {
+        if (ranking_filter === 'top-1' || ranking_filter === 'top1') {
           topCount = 1;
-        } else if (rankingFilter === 'top-3' || rankingFilter === 'top3') {
+        } else if (ranking_filter === 'top-3' || ranking_filter === 'top3') {
           topCount = 3;
-        } else if (rankingFilter === 'top-10' || rankingFilter === 'top10') {
+        } else if (ranking_filter === 'top-10' || ranking_filter === 'top10') {
           topCount = 10;
         }
         
@@ -117,41 +117,41 @@ async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
       }
 
       // Apply personal filters
-      if (personalFilter) {
-        console.log('Applying personal filter:', personalFilter);
+      if (personal_filter) {
+        console.log('Applying personal filter:', personal_filter);
         
-        if (personalFilter === 'mylocks' && userId) {
+        if (personal_filter === 'mylocks' && user_id) {
           // Show only posts created by the current user
-          where.author_address = userId;
-          console.log(`Filtering posts by author: ${userId}`);
-        } else if (personalFilter === 'locked') {
+          where.author_address = user_id;
+          console.log(`Filtering posts by author: ${user_id}`);
+        } else if (personal_filter === 'locked') {
           // Show only posts that have lock_likes
           where.lock_likes = {
             some: {} // At least one lock_like
           };
           console.log('Filtering posts with lock_likes');
         }
-      } else if (userId) {
-        // If no personal filter but userId is provided, filter by that user
-        if (userId === 'anon') {
+      } else if (user_id) {
+        // If no personal filter but user_id is provided, filter by that user
+        if (user_id === 'anon') {
           where.author_address = {
             isNull: true
           };
         } else {
-          where.author_address = userId;
+          where.author_address = user_id;
         }
       }
 
       // Apply time filter
-      if (timeFilter) {
-        console.log('Applying time filter:', timeFilter);
+      if (time_filter) {
+        console.log('Applying time filter:', time_filter);
         const now = new Date();
-        const timeFilters: { [key: string]: number } = {
+        const time_filters: { [key: string]: number } = {
           '1d': 1,
           '7d': 7,
           '30d': 30
         };
-        const days = timeFilters[timeFilter as string];
+        const days = time_filters[time_filter as string];
         if (days) {
           const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
           where.created_at = { gte: startDate };
@@ -159,17 +159,17 @@ async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
       }
 
       // Apply block filter
-      if (blockFilter) {
-        console.log('Applying block filter:', blockFilter);
+      if (block_filter) {
+        console.log('Applying block filter:', block_filter);
         
         // Determine the number of blocks to look back
         let blockCount = 1; // Default to 1
         
-        if (blockFilter === 'last-block') {
+        if (block_filter === 'last-block') {
           blockCount = 1;
-        } else if (blockFilter === 'last-5-blocks') {
+        } else if (block_filter === 'last-5-blocks') {
           blockCount = 5;
-        } else if (blockFilter === 'last-10-blocks') {
+        } else if (block_filter === 'last-10-blocks') {
           blockCount = 10;
         }
         
@@ -193,7 +193,7 @@ async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
 
       // Apply tag filter
       if (parsedTags.length > 0) {
-        console.log('Processing selectedTags:', parsedTags);
+        console.log('Processing selected_tags:', parsedTags);
         where.tags = { hasEvery: parsedTags };
       }
 
@@ -306,7 +306,7 @@ async function handleCreatePost(req: NextApiRequest, res: NextApiResponse) {
     // Extract post data from request body
     const {
       tx_id,
-      postId,
+      post_id,
       content,
       author_address,
       tags = [],

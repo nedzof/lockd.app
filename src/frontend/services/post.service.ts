@@ -16,14 +16,14 @@ const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:3003';
 // Base interfaces
 export interface vote_option {
     text: string;
-    lockAmount: number;
-    lockDuration: number;
+    lock_amount: number;
+    lock_duration: number;
     optionIndex: number;
     feeSatoshis?: number;
 }
 
 export interface VoteData {
-    isVoteQuestion: boolean;
+    is_vote_question: boolean;
     question?: string;
     options?: vote_option[];
     totalOptions?: number;
@@ -48,7 +48,7 @@ export interface ImageData {
 export interface DbPost {
     id: string;
     tx_id: string;
-    postId: string;
+    post_id: string;
     content: string;
     author_address: string;
     media_type?: string;
@@ -89,7 +89,7 @@ export interface PostMetadata {
     tags: string[];
     sequence: number;
     parentSequence?: number;
-    postId: string;
+    post_id: string;
     block_height?: number;
     amount?: number;
     unlock_height?: number;
@@ -97,12 +97,12 @@ export interface PostMetadata {
     lock_duration?: number;
     is_vote: boolean;
     vote?: {
-        isVoteQuestion: boolean;
+        is_vote_question: boolean;
         question?: string;
         options?: Array<{
             text: string;
-            lockAmount: number;
-            lockDuration: number;
+            lock_amount: number;
+            lock_duration: number;
             optionIndex: number;
             unlock_height?: number;
             currentHeight?: number;
@@ -113,8 +113,8 @@ export interface PostMetadata {
         optionsHash?: string;
         optionIndex?: number;
         optionText?: string;
-        lockAmount?: number;
-        lockDuration?: number;
+        lock_amount?: number;
+        lock_duration?: number;
     };
     image?: {
         file: File;
@@ -135,9 +135,9 @@ export interface PostMetadata {
 // Helper function to convert PostMetadata to database Post object
 export function createDbPost(metadata: PostMetadata, tx_id: string): DbPost {
     const post: DbPost = {
-        id: metadata.postId,
+        id: metadata.post_id,
         tx_id,
-        postId: metadata.postId,
+        post_id: metadata.post_id,
         content: metadata.content,
         author_address: '', // This will be set by the caller
         created_at: new Date(metadata.timestamp),
@@ -186,12 +186,12 @@ export function createDbvote_options(metadata: PostMetadata, post_tx_id: string)
     }
 
     return metadata.vote.options.map((option, index) => ({
-        id: `${metadata.postId}-option-${index}`,
+        id: `${metadata.post_id}-option-${index}`,
         tx_id: '', // This will be set when the transaction is created
         content: option.text,
         author_address: '', // This will be set by the caller
         created_at: new Date(metadata.timestamp),
-        post_id: metadata.postId,
+        post_id: metadata.post_id,
         option_index: option.optionIndex,
         tags: metadata.tags
     }));
@@ -201,7 +201,7 @@ export function createDbvote_options(metadata: PostMetadata, post_tx_id: string)
 function createMapData(metadata: PostMetadata): MAP {
     // Check if this is a vote based on metadata
     const isVote = metadata.is_vote || 
-                  metadata.vote?.isVoteQuestion || 
+                  metadata.vote?.is_vote_question || 
                   (metadata.vote?.options && metadata.vote.options.length > 0);
 
     const mapData: Record<string, string> = {
@@ -224,8 +224,8 @@ function createMapData(metadata: PostMetadata): MAP {
         mapData.parentSequence = metadata.parentSequence.toString();
     }
 
-    if (metadata.postId) {
-        mapData.postId = metadata.postId;
+    if (metadata.post_id) {
+        mapData.post_id = metadata.post_id;
     }
 
     if (metadata.block_height !== undefined) {
@@ -247,7 +247,7 @@ function createMapData(metadata: PostMetadata): MAP {
 
     if (metadata.vote) {
         // Always set type to vote_question if we have vote options
-        if (metadata.vote.isVoteQuestion || (metadata.vote.options && metadata.vote.options.length > 0)) {
+        if (metadata.vote.is_vote_question || (metadata.vote.options && metadata.vote.options.length > 0)) {
             mapData.type = 'vote_question';
             mapData.totalOptions = ((metadata.vote.options?.length || metadata.vote.totalOptions || 0)).toString();
             if (metadata.vote.optionsHash) {
@@ -313,7 +313,7 @@ function createInscriptionRequest(
 // Create image component
 async function createImageComponent(
     imageData: ImageData,
-    postId: string,
+    post_id: string,
     sequence: number,
     parentSequence: number,
     address: string
@@ -327,7 +327,7 @@ async function createImageComponent(
         tags: [],
         sequence,
         parentSequence,
-        postId,
+        post_id,
         is_locked: false,
         is_vote: false,
         image: {
@@ -352,7 +352,7 @@ async function createImageComponent(
 async function createVoteQuestionComponent(
     question: string,
     options: vote_option[],
-    postId: string,
+    post_id: string,
     sequence: number,
     parentSequence: number,
     address: string
@@ -368,11 +368,11 @@ async function createVoteQuestionComponent(
         tags: [],
         sequence,
         parentSequence,
-        postId,
+        post_id,
         is_locked: false,
         is_vote: true,
         vote: {
-            isVoteQuestion: true,
+            is_vote_question: true,
             question,
             options,
             totalOptions: options.length,
@@ -389,7 +389,7 @@ async function createVoteQuestionComponent(
 // Create vote option component
 async function createvote_optionComponent(
     option: vote_option,
-    postId: string,
+    post_id: string,
     sequence: number,
     parentSequence: number,
     address: string
@@ -404,10 +404,10 @@ async function createvote_optionComponent(
         tags: [],
         sequence,
         parentSequence,
-        postId,
+        post_id,
         is_vote: true,
         vote: {
-            isVoteQuestion: false,
+            is_vote_question: false,
             optionIndex: option.optionIndex
         }
     };
@@ -422,7 +422,7 @@ async function createvote_optionComponent(
 }
 
 // Helper function to calculate output satoshis
-async function calculateOutputSatoshis(contentSize: number, isvote_option: boolean = false): Promise<number> {
+async function calculateOutputSatoshis(contentSize: number, is_vote_option: boolean = false): Promise<number> {
     // Get current fee rate from WhatsOnChain
     const feeRate = await getFeeRate();
     console.log(`Current fee rate: ${feeRate} sat/vbyte`);
@@ -441,7 +441,7 @@ async function calculateOutputSatoshis(contentSize: number, isvote_option: boole
     
     // For vote options, ensure we have enough satoshis for the lock amount
     // This ensures each vote option has its own UTXO with sufficient value
-    if (isvote_option) {
+    if (is_vote_option) {
         // For vote options, use a more aggressive calculation
         // Especially for short content
         
@@ -479,7 +479,7 @@ async function hashContent(data: string): Promise<string> {
 }
 
 // Helper function to generate a unique post ID
-function generatePostId(): string {
+function generatepost_id(): string {
     return [
         Date.now().toString(36),
         Math.random().toString(36).substr(2, 9)
@@ -647,7 +647,7 @@ export const createPost = async (
         throw new Error(`Wallet connection error: ${walletError.message || 'Could not connect to wallet'}`);
     }
 
-    const postId = generatePostId();
+    const post_id = generatepost_id();
     const sequence = createSequence();
     const components: InscribeRequest[] = [];
 
@@ -671,7 +671,7 @@ export const createPost = async (
             version: '1.0.0',
             tags: [],
             sequence: sequence.next(),
-            postId,
+            post_id,
             is_locked: false,
             is_vote: isVotePost
         };
@@ -827,8 +827,8 @@ export const createPost = async (
             const vote_optionObjects: vote_option[] = await Promise.all(
                 validOptions.map(async (text, index) => ({
                     text,
-                    lockAmount: 1000, // Base lock amount in satoshis
-                    lockDuration: 144, // Default to 1 day (144 blocks)
+                    lock_amount: 1000, // Base lock amount in satoshis
+                    lock_duration: 144, // Default to 1 day (144 blocks)
                     optionIndex: index,
                     feeSatoshis: await calculateOutputSatoshis(text.length, true)
                 }))
@@ -836,7 +836,7 @@ export const createPost = async (
             
             // Add vote data to metadata
             metadata.vote = {
-                isVoteQuestion: true,
+                is_vote_question: true,
                 question: content,
                 options: vote_optionObjects,
                 totalOptions: vote_optionObjects.length,
@@ -848,7 +848,7 @@ export const createPost = async (
             const voteQuestionComponent = await createVoteQuestionComponent(
                 content,
                 vote_optionObjects,
-                postId,
+                post_id,
                 sequence.next(),
                 metadata.sequence,
                 bsvAddress
@@ -861,7 +861,7 @@ export const createPost = async (
                 console.log(`Creating vote option component for "${option.text}"...`);
                 const vote_optionComponent = await createvote_optionComponent(
                     option,
-                    postId,
+                    post_id,
                     sequence.next(),
                     metadata.sequence,
                     bsvAddress
@@ -1062,14 +1062,14 @@ interface InscribeRequest {
 interface PostCreationData {
     content: string;
     author_address: string;
-    postId: string;
+    post_id: string;
     media_url?: string | null;
     media_type?: string;
     description?: string;
     tags?: string[];
-    isLocked: boolean;
-    lockDuration?: number;
-    lockAmount?: number;
+    is_locked: boolean;
+    lock_duration?: number;
+    lock_amount?: number;
     unlock_height?: number;
 }
 

@@ -101,7 +101,7 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                 created_at: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
                 tags: parsedTx.metadata.tags,
                 isVote: parsedTx.metadata.isVote,
-                mediaType: parsedTx.metadata.contentType
+                media_type: parsedTx.metadata.contentType
             },
             update: {
                 content: parsedTx.metadata.content,
@@ -109,7 +109,7 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                 blockHeight: parsedTx.blockHeight,
                 tags: parsedTx.metadata.tags,
                 isVote: parsedTx.metadata.isVote,
-                mediaType: parsedTx.metadata.contentType
+                media_type: parsedTx.metadata.contentType
             }
         });
         
@@ -125,13 +125,13 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                         content: option.content,
                         author_address: parsedTx.author_address,
                         created_at: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
-                        postId: post.id,
+                        post_id: post.id,
                         optionIndex: option.index
                     },
                     update: {
                         content: option.content,
                         author_address: parsedTx.author_address,
-                        postId: post.id,
+                        post_id: post.id,
                         optionIndex: option.index
                     }
                 });

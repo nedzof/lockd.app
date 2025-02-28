@@ -35,16 +35,16 @@ export function extractVoteData(tx: { data: string[] }): {
         } = {};
 
         // Check if this is a vote transaction
-        const isVoteQuestion = tx.data.some((d: string) => d.startsWith('type=vote_question'));
-        const isvote_option = tx.data.some((d: string) => d.startsWith('type=vote_option'));
-        const isVoteType = tx.data.some((d: string) => d.startsWith('content_type=vote'));
+        const is_vote_question = tx.data.some((d: string) => d.startsWith('type=vote_question'));
+        const is_vote_option = tx.data.some((d: string) => d.startsWith('type=vote_option'));
+        const is_vote_type = tx.data.some((d: string) => d.startsWith('content_type=vote'));
         
-        if (!isVoteQuestion && !isvote_option && !isVoteType) {
+        if (!is_vote_question && !is_vote_option && !is_vote_type) {
             return {};
         }
         
         // Extract vote question
-        if (isVoteQuestion) {
+        if (is_vote_question) {
             const questionContent = tx.data.find((d: string) => d.startsWith('content='))?.split('=')[1];
             if (questionContent) {
                 voteData.question = questionContent;
@@ -52,7 +52,7 @@ export function extractVoteData(tx: { data: string[] }): {
         }
         
         // Extract total options
-        if (isVoteQuestion) {
+        if (is_vote_question) {
             const totalOptionsStr = tx.data.find((d: string) => d.startsWith('totaloptions='))?.split('=')[1];
             if (totalOptionsStr) {
                 voteData.total_options = parseInt(totalOptionsStr, 10);
@@ -65,7 +65,7 @@ export function extractVoteData(tx: { data: string[] }): {
         }
         
         // Extract vote options
-        if (isvote_option) {
+        if (is_vote_option) {
             const optionIndices = tx.data.filter((d: string) => d.startsWith('optionindex=')).map((d: string) => parseInt(d.split('=')[1]));
             
             // Extract option text
@@ -75,8 +75,8 @@ export function extractVoteData(tx: { data: string[] }): {
             
             voteData.options = optionIndices.map((index: number) => ({
                 text: optionTexts[0] || '',
-                lock_amount: parseInt(tx.data.find((d: string) => d.startsWith('lockamount='))?.split('=')[1] || '0'),
-                lock_duration: parseInt(tx.data.find((d: string) => d.startsWith('lockduration='))?.split('=')[1] || '0'),
+                lock_amount: parseInt(tx.data.find((d: string) => d.startsWith('lock_amount='))?.split('=')[1] || '0'),
+                lock_duration: parseInt(tx.data.find((d: string) => d.startsWith('lock_duration='))?.split('=')[1] || '0'),
                 option_index: index
             }));
         }
@@ -115,7 +115,7 @@ export class TransactionParser {
         try {
             logger.debug('Starting image processing', {
                 tx_id,
-                hasImageData: !!imageData,
+                has_imageData: !!imageData,
                 metadataKeys: metadata ? Object.keys(metadata) : [],
                 contentType: metadata?.contentType
             });
@@ -260,63 +260,124 @@ export class TransactionParser {
                                 decodedSample: decoded.substring(0, 200)
                             });
                             
-                            // First, try to extract key-value pairs using tab characters as separators
-                            // This pattern seems common in the logs: "app\tlockd.app\u0007content\u0007Arsenal"
-                            const tabPattern = /([a-zA-Z0-9_]+)\t([^\t]+)/g;
-                            let match;
-                            let foundTabSeparatedPairs = false;
-                            
-                            while ((match = tabPattern.exec(decoded)) !== null) {
-                                foundTabSeparatedPairs = true;
-                                const [, key, value] = match;
+                            // Process tab-separated key-value pairs
+                            const tabPairs = decoded.split('\t');
+                            for (let i = 0; i < tabPairs.length; i++) {
+                                const pair = tabPairs[i];
                                 
-                                logger.debug('🔑 Found tab-separated key-value pair', {
-                                    key,
-                                    value
-                                });
-                                
-                                // Normalize the key (camelCase to snake_case)
-                                const normalizedKey = key
-                                    .replace(/([A-Z])/g, '_$1')
-                                    .toLowerCase()
-                                    .replace(/^_/, '');
-                                
-                                // Check if value contains control characters that might separate additional key-value pairs
-                                if (value.match(/[\x00-\x1F]/)) {
-                                    // Split the value by control characters
-                                    const subPairs = value.split(/[\x00-\x1F]/).filter(Boolean);
-                                    
-                                    // Process the first part as the value for the current key
-                                    if (normalizedKey === 'app' && subPairs[0] === 'lockd.app') {
-                                        // Special handling for app=lockd.app
-                                        // Process the rest of the subPairs as potential key-value pairs
-                                        for (let i = 1; i < subPairs.length; i += 2) {
-                                            if (i + 1 < subPairs.length) {
-                                                const subKey = subPairs[i];
-                                                const subValue = subPairs[i + 1];
-                                                
-                                                logger.debug('🔑 Found sub key-value pair', {
-                                                    key: subKey,
-                                                    value: subValue
-                                                });
-                                                
-                                                // Normalize the sub key
-                                                const normalizedSubKey = subKey
+                                // Check if this pair contains embedded key-value pairs
+                                if (pair.includes('\u0007')) {
+                                    const embeddedPairs = pair.split('\u0007');
+                                    for (let j = 0; j < embeddedPairs.length; j++) {
+                                        const embeddedPair = embeddedPairs[j];
+                                        if (embeddedPair.length === 0) continue;
+                                        
+                                        // Handle the case where the first part might be a value from the previous key
+                                        if (j === 0 && i > 0) {
+                                            // This is a value for the previous key
+                                            const prevKey = tabPairs[i-1].split('\u0007').pop() || tabPairs[i-1];
+                                            if (prevKey && prevKey.length > 0) {
+                                                const normalizedPrevKey = prevKey
                                                     .replace(/([A-Z])/g, '_$1')
                                                     .toLowerCase()
                                                     .replace(/^_/, '');
                                                 
-                                                // Process the sub key-value pair
-                                                this.processKeyValuePair(normalizedSubKey, subValue, metadata);
+                                                logger.debug('🔑 Found embedded value for previous key', {
+                                                    key: normalizedPrevKey,
+                                                    value: embeddedPair
+                                                });
+                                                
+                                                this.processKeyValuePair(normalizedPrevKey, embeddedPair, metadata);
+                                            }
+                                        } else if (embeddedPair.includes('=')) {
+                                            // This is a key=value pair
+                                            const [embeddedKey, embeddedValue] = embeddedPair.split('=');
+                                            if (embeddedKey && embeddedKey.length > 0) {
+                                                const normalizedEmbeddedKey = embeddedKey
+                                                    .replace(/([A-Z])/g, '_$1')
+                                                    .toLowerCase()
+                                                    .replace(/^_/, '');
+                                                
+                                                logger.debug('🔑 Found embedded key-value pair', {
+                                                    key: normalizedEmbeddedKey,
+                                                    value: embeddedValue
+                                                });
+                                                
+                                                this.processKeyValuePair(normalizedEmbeddedKey, embeddedValue, metadata);
+                                            }
+                                        } else if (j < embeddedPairs.length - 1) {
+                                            // This is likely a key with the next item being its value
+                                            const embeddedKey = embeddedPair;
+                                            const embeddedValue = embeddedPairs[j+1];
+                                            
+                                            if (embeddedKey && embeddedKey.length > 0) {
+                                                const normalizedEmbeddedKey = embeddedKey
+                                                    .replace(/([A-Z])/g, '_$1')
+                                                    .toLowerCase()
+                                                    .replace(/^_/, '');
+                                                
+                                                logger.debug('🔑 Found embedded key with next value', {
+                                                    key: normalizedEmbeddedKey,
+                                                    value: embeddedValue
+                                                });
+                                                
+                                                this.processKeyValuePair(normalizedEmbeddedKey, embeddedValue, metadata);
+                                                j++; // Skip the next item as we've used it as a value
                                             }
                                         }
-                                    } else {
-                                        // For other keys, just use the first part as the value
-                                        this.processKeyValuePair(normalizedKey, subPairs[0], metadata);
                                     }
-                                } else {
-                                    // Process the key-value pair normally
-                                    this.processKeyValuePair(normalizedKey, value, metadata);
+                                } else if (pair.includes('=')) {
+                                    const [key, value] = pair.split('=');
+                                    if (!key) continue;
+                                    
+                                    logger.debug('🔑 Found tab-separated key-value pair', {
+                                        key,
+                                        value
+                                    });
+                                    
+                                    // Normalize the key (camelCase to snake_case)
+                                    const normalizedKey = key
+                                        .replace(/([A-Z])/g, '_$1')
+                                        .toLowerCase()
+                                        .replace(/^_/, '');
+                                    
+                                    // Check if value contains control characters that might separate additional key-value pairs
+                                    if (value.match(/[\x00-\x1F]/)) {
+                                        // Split the value by control characters
+                                        const subPairs = value.split(/[\x00-\x1F]/).filter(Boolean);
+                                        
+                                        // Process the first part as the value for the current key
+                                        if (normalizedKey === 'app' && subPairs[0] === 'lockd.app') {
+                                            // Special handling for app=lockd.app
+                                            // Process the rest of the subPairs as potential key-value pairs
+                                            for (let i = 1; i < subPairs.length; i += 2) {
+                                                if (i + 1 < subPairs.length) {
+                                                    const subKey = subPairs[i];
+                                                    const subValue = subPairs[i + 1];
+                                                    
+                                                    logger.debug('🔑 Found sub key-value pair', {
+                                                        key: subKey,
+                                                        value: subValue
+                                                    });
+                                                    
+                                                    // Normalize the sub key
+                                                    const normalizedSubKey = subKey
+                                                        .replace(/([A-Z])/g, '_$1')
+                                                        .toLowerCase()
+                                                        .replace(/^_/, '');
+                                                    
+                                                    // Process the sub key-value pair
+                                                    this.processKeyValuePair(normalizedSubKey, subValue, metadata);
+                                                }
+                                            }
+                                        } else {
+                                            // For other keys, just use the first part as the value
+                                            this.processKeyValuePair(normalizedKey, subPairs[0], metadata);
+                                        }
+                                    } else {
+                                        // Process the key-value pair normally
+                                        this.processKeyValuePair(normalizedKey, value, metadata);
+                                    }
                                 }
                             }
                             
@@ -505,8 +566,8 @@ export class TransactionParser {
                 // Validate required fields
                 if (!metadata.content && !metadata.image) {
                     logger.debug('Missing required content', {
-                        hasContent: !!metadata.content,
-                        hasImage: !!metadata.image
+                        has_content: !!metadata.content,
+                        has_image: !!metadata.image
                     });
                     return null;
                 }
@@ -532,6 +593,112 @@ export class TransactionParser {
         }
     }
 
+    private extractVoteData(data: any[], tx: any): LockProtocolData | null {
+        try {
+            // Initialize metadata structure with default values
+            const metadata: LockProtocolData = {
+                post_id: '',
+                created_at: null,
+                content: '',
+                tags: [],
+                is_vote: false,
+                is_locked: false,
+                lock_amount: 0,
+                lock_duration: 0,
+                raw_image_data: null,
+                media_type: null,
+                vote_options: null,
+                vote_question: null,
+                total_options: null,
+                options_hash: null,
+                image: null,
+                image_metadata: {
+                    filename: '',
+                    content_type: '',
+                    is_image: false
+                }
+            };
+            
+            logger.debug('🏗️ Created initial metadata structure', {
+                metadata: JSON.stringify(metadata)
+            });
+            
+            // Log the full data array for debugging
+            logger.debug('📊 FULL DATA ARRAY FOR EXTRACTION', {
+                dataLength: data.length,
+                fullData: JSON.stringify(data).substring(0, 1000)
+            });
+            
+            // First, check for vote-specific data
+            for (const item of data) {
+                if (typeof item !== 'string') continue;
+                
+                // Check for vote options
+                if (item.includes('vote_options=') || item.includes('voteOptions=')) {
+                    try {
+                        const optionsMatch = item.match(/vote_options=(\[.*?\])|voteOptions=(\[.*?\])/);
+                        if (optionsMatch && (optionsMatch[1] || optionsMatch[2])) {
+                            const optionsJson = optionsMatch[1] || optionsMatch[2];
+                            metadata.vote_options = JSON.parse(optionsJson);
+                            metadata.is_vote = true;
+                            logger.debug('✅ Found vote options', {
+                                count: metadata.vote_options.length,
+                                options: metadata.vote_options
+                            });
+                        }
+                    } catch (e) {
+                        logger.debug('❌ Failed to parse vote options', {
+                            error: e instanceof Error ? e.message : 'Unknown error'
+                        });
+                    }
+                }
+                
+                // Check for vote question
+                if (item.includes('vote_question=') || item.includes('voteQuestion=')) {
+                    try {
+                        const questionMatch = item.match(/vote_question="(.*?)"|voteQuestion="(.*?)"/);
+                        if (questionMatch && (questionMatch[1] || questionMatch[2])) {
+                            metadata.vote_question = questionMatch[1] || questionMatch[2];
+                            metadata.is_vote = true;
+                            logger.debug('✅ Found vote question', {
+                                question: metadata.vote_question
+                            });
+                        }
+                    } catch (e) {
+                        logger.debug('❌ Failed to parse vote question', {
+                            error: e instanceof Error ? e.message : 'Unknown error'
+                        });
+                    }
+                }
+                
+                // Check for is_vote flag
+                if (item.includes('is_vote=true') || item.includes('isVote=true')) {
+                    metadata.is_vote = true;
+                    logger.debug('✅ Found is_vote flag');
+                }
+                
+                // Check for content_type=vote
+                if (item.includes('content_type=vote') || item.includes('contentType=vote')) {
+                    metadata.is_vote = true;
+                    logger.debug('✅ Found content_type=vote');
+                }
+            }
+            
+            // If we found vote options or question, return the metadata
+            if (metadata.vote_options || metadata.vote_question) {
+                return metadata;
+            }
+            
+            // If we didn't find any vote-specific data, return null
+            return null;
+        } catch (error) {
+            logger.error('Failed to extract vote data', { 
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            return null;
+        }
+    }
+
     // Helper function to process key-value pairs
     private processKeyValuePair(key: string, value: string, metadata: LockProtocolData): void {
         switch (key) {
@@ -542,7 +709,7 @@ export class TransactionParser {
                 metadata.content = value;
                 break;
             case 'post_id':
-            case 'postid':
+            case 'post_id':
                 metadata.post_id = value;
                 break;
             case 'is_vote':
@@ -550,15 +717,15 @@ export class TransactionParser {
                 metadata.is_vote = value.toLowerCase() === 'true';
                 break;
             case 'is_locked':
-            case 'islocked':
+            case 'is_locked':
                 metadata.is_locked = value.toLowerCase() === 'true';
                 break;
             case 'lock_amount':
-            case 'lockamount':
+            case 'lock_amount':
                 metadata.lock_amount = parseInt(value, 10) || 0;
                 break;
             case 'lock_duration':
-            case 'lockduration':
+            case 'lock_duration':
                 metadata.lock_duration = parseInt(value, 10) || 0;
                 break;
             case 'vote_question':
@@ -693,8 +860,8 @@ export class TransactionParser {
                 tx_id,
                 type: txType,
                 protocol: 'LOCK',
-                blockHeight: tx.block_height, // Use camelCase to match the interface
-                blockTime: tx.block_time,     // Use camelCase to match the interface
+                block_height: tx.block_height, // Use snake_case for consistency
+                block_time: tx.block_time,     // Use snake_case for consistency
                 metadata: {
                     post_id: parsedTx.post_id,
                     content: parsedTx.content,
@@ -714,7 +881,7 @@ export class TransactionParser {
             logger.info('📤 SENDING TO DATABASE', { 
                 tx_id,
                 type: txType,
-                blockHeight: tx.block_height
+                block_height: tx.block_height
             });
 
             // Process the transaction in the database

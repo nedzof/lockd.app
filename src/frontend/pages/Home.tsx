@@ -18,51 +18,51 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const location = useLocation();
   const isPosts = location.pathname === '/posts' || location.pathname === '/';
   const isStats = location.pathname === '/stats';
-  const [timeFilter, setTimeFilter] = useState('');
-  const [rankingFilter, setRankingFilter] = useState('top-1');
-  const [personalFilter, setPersonalFilter] = useState('');
-  const [blockFilter, setBlockFilter] = useState('');
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [time_filter, settime_filter] = useState('');
+  const [ranking_filter, setranking_filter] = useState('top-1');
+  const [personal_filter, setpersonal_filter] = useState('');
+  const [block_filter, setblock_filter] = useState('');
+  const [selected_tags, setselected_tags] = useState<string[]>([]);
 
-  const handleTimeFilter = (filter: string) => {
+  const handletime_filter = (filter: string) => {
     // If the same filter is clicked again, clear it
-    if (timeFilter === filter) {
-      setTimeFilter('');
+    if (time_filter === filter) {
+      settime_filter('');
     } else {
       // Otherwise, set the new filter and clear other filter types
-      setTimeFilter(filter);
-      setBlockFilter(''); // Clear block filter when time filter is set
+      settime_filter(filter);
+      setblock_filter(''); // Clear block filter when time filter is set
     }
   };
 
-  const handleBlockFilter = (filter: string) => {
+  const handleblock_filter = (filter: string) => {
     // If the same filter is clicked again, clear it
-    if (blockFilter === filter) {
-      setBlockFilter('');
+    if (block_filter === filter) {
+      setblock_filter('');
     } else {
       // Otherwise, set the new filter and clear other filter types
-      setBlockFilter(filter);
-      setTimeFilter(''); // Clear time filter when block filter is set
+      setblock_filter(filter);
+      settime_filter(''); // Clear time filter when block filter is set
     }
   };
 
-  const handleRankingFilter = (filter: string) => {
+  const handleranking_filter = (filter: string) => {
     // If the same filter is clicked again, clear it
-    if (rankingFilter === filter) {
-      setRankingFilter('');
+    if (ranking_filter === filter) {
+      setranking_filter('');
     } else {
       // Otherwise, set the new filter
-      setRankingFilter(filter);
+      setranking_filter(filter);
     }
   };
 
-  const handlePersonalFilter = (filter: string) => {
+  const handlepersonal_filter = (filter: string) => {
     // If the same filter is clicked again, clear it
-    if (personalFilter === filter) {
-      setPersonalFilter('');
+    if (personal_filter === filter) {
+      setpersonal_filter('');
     } else {
       // Otherwise, set the new filter
-      setPersonalFilter(filter);
+      setpersonal_filter(filter);
     }
   };
 
@@ -75,8 +75,8 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     console.log('Refreshing posts...');
   }, []);
 
-  // Memoize the userId to prevent unnecessary re-renders
-  const memoizedUserId = useMemo(() => {
+  // Memoize the user_id to prevent unnecessary re-renders
+  const memoizeduser_id = useMemo(() => {
     return connected && bsvAddress ? bsvAddress : 'anon';
   }, [connected, bsvAddress]);
 
@@ -91,15 +91,15 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       return (
         <PostGrid 
           onStatsUpdate={handleStatsUpdate}
-          timeFilter={timeFilter}
-          rankingFilter={rankingFilter}
-          personalFilter={personalFilter}
-          blockFilter={blockFilter}
-          selectedTags={selectedTags}
-          userId={memoizedUserId}
+          time_filter={time_filter}
+          ranking_filter={ranking_filter}
+          personal_filter={personal_filter}
+          block_filter={block_filter}
+          selected_tags={selected_tags}
+          user_id={memoizeduser_id}
         />
       );
-    }, [timeFilter, rankingFilter, personalFilter, blockFilter, selectedTags, memoizedUserId, handleStatsUpdate]);
+    }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, memoizeduser_id, handleStatsUpdate]);
 
     return (
       <div className="relative min-h-screen pb-20">
@@ -112,9 +112,9 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 {['1d', '7d', '30d'].map((filter) => (
                   <button
                     key={filter}
-                    onClick={() => handleTimeFilter(filter)}
+                    onClick={() => handletime_filter(filter)}
                     className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                      timeFilter === filter
+                      time_filter === filter
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
@@ -136,9 +136,9 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 ].map(({ id, label }) => (
                   <button
                     key={id}
-                    onClick={() => handleBlockFilter(id)}
+                    onClick={() => handleblock_filter(id)}
                     className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                      blockFilter === id
+                      block_filter === id
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
@@ -160,9 +160,9 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 ].map(({ id, label }) => (
                   <button
                     key={id}
-                    onClick={() => handleRankingFilter(id)}
+                    onClick={() => handleranking_filter(id)}
                     className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                      rankingFilter === id
+                      ranking_filter === id
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
@@ -183,9 +183,9 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 ].map(({ id, label }) => (
                   <button
                     key={id}
-                    onClick={() => handlePersonalFilter(id)}
+                    onClick={() => handlepersonal_filter(id)}
                     className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                      personalFilter === id
+                      personal_filter === id
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
@@ -207,9 +207,9 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
           {/* Tag Filter */}
           <TagFilter
-            selectedTags={selectedTags}
-            onTagsChange={setSelectedTags}
-            userId={bsvAddress || undefined}
+            selected_tags={selected_tags}
+            onTagsChange={setselected_tags}
+            user_id={bsvAddress || undefined}
           />
         </div>
 

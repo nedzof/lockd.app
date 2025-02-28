@@ -18,7 +18,7 @@ interface CreatePostProps {
 const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose }) => {
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selected_tags, setselected_tags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [isVotePost, setIsVotePost] = useState(false);
   const [vote_options, setvote_options] = useState<string[]>(['', '']);
@@ -303,16 +303,16 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   };
 
   const handleAddTag = () => {
-    if (newTag.trim() && !selectedTags.includes(newTag.trim())) {
-      setSelectedTags([...selectedTags, newTag.trim()]);
+    if (newTag.trim() && !selected_tags.includes(newTag.trim())) {
+      setselected_tags([...selected_tags, newTag.trim()]);
       setNewTag('');
     }
   };
 
   const handleRemoveTag = (index: number) => {
-    const newTags = [...selectedTags];
+    const newTags = [...selected_tags];
     newTags.splice(index, 1);
-    setSelectedTags(newTags);
+    setselected_tags(newTags);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -528,9 +528,9 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
             </div>
             
             {/* Selected tags display */}
-            {selectedTags.length > 0 && (
+            {selected_tags.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-3">
-                {selectedTags.map((tag, index) => (
+                {selected_tags.map((tag, index) => (
                   <div
                     key={index}
                     className="flex items-center bg-[#13141B] border border-gray-800 rounded-md px-2 py-1"

@@ -58,7 +58,7 @@ export interface PostExtended {
   vote_options?: Array<{
     id: string;
     tx_id: string;
-    postId: string;
+    post_id: string;
     post_tx_id: string;
     content: string;
     author_address: string;

@@ -15,7 +15,7 @@ const prisma = new PrismaClient();
 /**
  * Get the current BSV price
  */
-export const getBsvPrice = async (req: Request, res: Response) => {
+export const get_bsv_price = async (req: Request, res: Response) => {
   try {
     // First try to get the price from the database
     const latestStats = await prisma.stats.findFirst({
@@ -65,7 +65,7 @@ export const getBsvPrice = async (req: Request, res: Response) => {
 /**
  * Get BSV price history
  */
-export const getBsvPriceHistory = async (req: Request, res: Response) => {
+export const get_bsv_price_history = async (req: Request, res: Response) => {
   try {
     const period = req.query.period as string || 'all';
     const format = req.query.format as string || 'daily';

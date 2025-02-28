@@ -9,13 +9,13 @@ interface TagCount {
 
 interface TagFilterProps {
   onTagSelect: (tags: string[]) => void;
-  selectedTags: string[];
+  selected_tags: string[];
 }
 
 // Use environment variable for API URL
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
-const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selectedTags }) => {
+const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => {
   const [tags, setTags] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,10 +43,10 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selectedTags }) => {
   }, [fetchTags]);
 
   const handleTagClick = (tag: string) => {
-    const newSelectedTags = selectedTags.includes(tag)
-      ? selectedTags.filter(t => t !== tag)
-      : [...selectedTags, tag];
-    onTagSelect(newSelectedTags);
+    const newselected_tags = selected_tags.includes(tag)
+      ? selected_tags.filter(t => t !== tag)
+      : [...selected_tags, tag];
+    onTagSelect(newselected_tags);
   };
 
   if (isLoading) {
@@ -79,7 +79,7 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selectedTags }) => {
           onClick={() => handleTagClick(tag)}
           className={`
             px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-300
-            ${selectedTags.includes(tag)
+            ${selected_tags.includes(tag)
               ? 'bg-[#00ffa3] text-black hover:bg-[#00ff9d]'
               : 'bg-[#2A2B33] text-gray-300 hover:bg-[#3A3B43]'
             }

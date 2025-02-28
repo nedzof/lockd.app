@@ -9,11 +9,11 @@ const tagService = new TagDatabaseService();
  * Generate tags for a post and apply them
  */
 export const generateTagsForPost = async (req: Request, res: Response) => {
-  const { postId } = req.params;
+  const { post_id } = req.params;
   
   try {
     // Validate post ID
-    if (!postId) {
+    if (!post_id) {
       return res.status(400).json({ 
         success: false, 
         error: 'Post ID is required' 
@@ -22,7 +22,7 @@ export const generateTagsForPost = async (req: Request, res: Response) => {
     
     // Find the post
     const post = await prisma.post.findUnique({
-      where: { id: postId },
+      where: { id: post_id },
       select: {
         id: true,
         content: true,
@@ -38,20 +38,20 @@ export const generateTagsForPost = async (req: Request, res: Response) => {
     }
     
     // Generate and apply tags
-    const tags = await tagService.applyTagsToPost(postId, post.content);
+    const tags = await tagService.applyTagsToPost(post_id, post.content);
     
     // Return the updated post with new tags
     res.json({
       success: true,
       data: {
-        postId,
+        post_id,
         previousTags: post.tags,
         newTags: tags,
         count: tags.length
       }
     });
   } catch (error: any) {
-    logger.error(`Error generating tags for post ${postId}:`, error);
+    logger.error(`Error generating tags for post ${post_id}:`, error);
     res.status(500).json({ 
       success: false, 
       error: 'Failed to generate tags for post' 
@@ -117,7 +117,7 @@ export const generateTagsForRecentPosts = async (req: Request, res: Response) =>
     for (const post of recentPosts) {
       const tags = await tagService.applyTagsToPost(post.id, post.content);
       results.push({
-        postId: post.id,
+        post_id: post.id,
         tagCount: tags.length,
         tags
       });
