@@ -12,8 +12,7 @@ export class Scanner {
 
     constructor(parser: TransactionParser, dbClient: DbClient) {
         this.parser = parser;
-        this.jungleBus = new JungleBusClient("https://junglebus.gorillapool.io", {
-            protocol: "json", // Add the required protocol property
+        this.jungleBus = new JungleBusClient("junglebus.gorillapool.io", {
             useSSL: true,
             onConnected: (ctx) => {
                 logger.info("🔌 JungleBus CONNECTED", ctx);
@@ -102,12 +101,12 @@ export class Scanner {
 
     private async fetchSubscriptionDetails() {
         try {
-            const response = await fetch(`https://junglebus.gorillapool.io/v1/subscription/${this.subscriptionId}`);
+            const response = await fetch(`${this.jungleBus.url}/v1/subscription/${this.subscriptionId}`);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            logger.info("📋 SUBSCRIPTION DETAILS", { data });
+            logger.info("📋 SUBSCRIPTIO N DETAILS", { data });
             return data;
         } catch (error) {
             logger.warn("⚠️ Failed to fetch subscription details", {
@@ -121,13 +120,16 @@ export class Scanner {
     public async start(): Promise<void> {
         try {
             logger.info(`🚀 Starting scanner from block ${this.startBlock} with subscription ID ${this.subscriptionId}`);
-            await this.jungleBus.Subscribe({
-                id: this.subscriptionId,
-                fromBlock: this.startBlock,
-                onTransaction: (tx: any) => this.handleTransaction(tx),
-                onStatus: (status: any) => this.handleStatus(status),
-                onError: (error: any) => this.handleError(error)
-            });
+            
+            // Use the direct parameter approach instead of an object
+            await this.jungleBus.Subscribe(
+                this.subscriptionId,
+                this.startBlock,
+                (tx: any) => this.handleTransaction(tx),
+                (status: any) => this.handleStatus(status),
+                (error: any) => this.handleError(error)
+            );
+            
             logger.info(`✅ Scanner subscription ${this.subscriptionId} started successfully`);
         } catch (error) {
             logger.error(`❌ Failed to start scanner`, {

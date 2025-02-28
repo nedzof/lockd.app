@@ -128,7 +128,7 @@ export class DbClient {
             tags: tx.metadata.tags || [],
             metadata: tx.metadata || {},
             isLocked: tx.type === 'lock',
-            isVote: tx.type === 'vote' || !!tx.metadata.voteOptions || tx.metadata.content_type === 'vote'
+            isVote: tx.type === 'vote' || !!tx.metadata.voteOptions || tx.metadata.contentType === 'vote'
         };
 
         return this.withFreshClient(async (client) => {
@@ -206,6 +206,34 @@ export class DbClient {
 
     public async processTransaction(tx: ParsedTransaction): Promise<Post> {
         try {
+            // First, save the transaction to the ProcessedTransaction table
+            await this.withFreshClient(async (client) => {
+                // Check if transaction already exists
+                const existingTx = await client.processedTransaction.findUnique({
+                    where: { txid: tx.txid }
+                });
+
+                if (!existingTx) {
+                    // Create new processed transaction record
+                    await client.processedTransaction.create({
+                        data: {
+                            txid: tx.txid,
+                            type: tx.type,
+                            protocol: tx.protocol,
+                            blockHeight: tx.blockHeight || 0,
+                            blockTime: tx.blockTime || 0,
+                            metadata: tx.metadata || {}
+                        }
+                    });
+                    
+                    logger.info('Transaction saved to ProcessedTransaction table', {
+                        txid: tx.txid,
+                        type: tx.type,
+                        blockHeight: tx.blockHeight
+                    });
+                }
+            });
+
             // Process image if present
             let imageBuffer: Buffer | null = null;
             if (tx.metadata?.image) {
@@ -266,6 +294,86 @@ export class DbClient {
             return post;
         } catch (error) {
             logger.error('Failed to process transaction', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                txid: tx.txid
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Save a transaction to the ProcessedTransaction table
+     * @param tx The transaction to save
+     * @returns The saved transaction with post data if available
+     */
+    public async saveTransaction(tx: ParsedTransaction): Promise<{ 
+        transaction: any; 
+        post?: Post;
+    }> {
+        try {
+            logger.debug('Saving transaction to database', { 
+                txid: tx.txid,
+                type: tx.type,
+                blockHeight: tx.blockHeight
+            });
+
+            // Save to ProcessedTransaction table
+            const savedTx = await this.withFreshClient(async (client) => {
+                // Check if transaction already exists
+                const existingTx = await client.processedTransaction.findUnique({
+                    where: { txid: tx.txid }
+                });
+
+                if (existingTx) {
+                    // Update existing transaction
+                    return await client.processedTransaction.update({
+                        where: { txid: tx.txid },
+                        data: {
+                            type: tx.type,
+                            protocol: tx.protocol,
+                            blockHeight: tx.blockHeight || 0,
+                            blockTime: tx.blockTime || 0,
+                            metadata: tx.metadata || {}
+                        }
+                    });
+                } else {
+                    // Create new transaction
+                    return await client.processedTransaction.create({
+                        data: {
+                            txid: tx.txid,
+                            type: tx.type,
+                            protocol: tx.protocol,
+                            blockHeight: tx.blockHeight || 0,
+                            blockTime: tx.blockTime || 0,
+                            metadata: tx.metadata || {}
+                        }
+                    });
+                }
+            });
+
+            // Process the transaction to create/update post if needed
+            let post: Post | undefined;
+            try {
+                post = await this.processTransaction(tx);
+            } catch (error) {
+                logger.error('Failed to process post for transaction', {
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    txid: tx.txid
+                });
+                // Continue even if post processing fails
+            }
+
+            logger.info('Transaction saved successfully', { 
+                txid: tx.txid,
+                hasPost: !!post
+            });
+
+            return {
+                transaction: savedTx,
+                post
+            };
+        } catch (error) {
+            logger.error('Failed to save transaction', {
                 error: error instanceof Error ? error.message : 'Unknown error',
                 txid: tx.txid
             });
@@ -407,37 +515,45 @@ export class DbClient {
     }
 
     async getTransaction(txid: string): Promise<ParsedTransaction | null> {
-        const [transaction] = await prisma.$queryRaw<Array<{
-            txid: string;
-            type: string;
-            protocol: string;
-            blockHeight: number;
-            blockTime: bigint;
-            metadata: any;
-        }>>`
-            SELECT txid, type, protocol, "blockHeight", "blockTime", metadata
-            FROM "ProcessedTransaction"
-            WHERE txid = ${txid}
-            LIMIT 1
-        `;
+        try {
+            const [transaction] = await prisma.$queryRaw<Array<{
+                txid: string;
+                type: string;
+                protocol: string;
+                blockHeight: number;
+                blockTime: bigint;
+                metadata: any;
+            }>>`
+                SELECT txid, type, protocol, "blockHeight", "blockTime", metadata
+                FROM "ProcessedTransaction"
+                WHERE txid = ${txid}
+                LIMIT 1
+            `;
 
-        if (!transaction) {
+            if (!transaction) {
+                return null;
+            }
+
+            return {
+                txid: transaction.txid,
+                type: transaction.type,
+                protocol: transaction.protocol,
+                blockHeight: transaction.blockHeight,
+                blockTime: Number(transaction.blockTime),
+                metadata: transaction.metadata
+            };
+        } catch (error) {
+            logger.error('Error in getTransaction', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                txid
+            });
             return null;
         }
-
-        return {
-            txid: transaction.txid,
-            type: transaction.type,
-            protocol: transaction.protocol,
-            blockHeight: transaction.blockHeight,
-            blockTime: Number(transaction.blockTime),
-            metadata: transaction.metadata
-        };
     }
 
     public async getPostWithVoteOptions(postId: string): Promise<PostWithVoteOptions | null> {
         return await prisma.post.findUnique({
-            where: { postId },
+            where: { postId: postId },
             include: {
                 voteOptions: true,
                 voteQuestion: true,
@@ -514,7 +630,6 @@ export class DbClient {
         }
     }
 
-    // Verify database contents and generate verification files
     async verifyDatabaseContents(txid: string, testOutputDir: string) {
         // Get the processed transaction
         const processedTx = await this.getTransaction(txid);
@@ -569,7 +684,7 @@ export class DbClient {
             `Post ID: ${post.postId}`,
             `Content Type: ${results.contentType}`,
             `Block Time: ${post.blockTime.toISOString()}`,
-            `Sender Address: ${post.senderAddress || 'Not specified'}`,
+            `Sender Address: ${post.authorAddress || 'Not specified'}`,
             '\nContent:',
             post.content,
             '\nTransaction Details:',

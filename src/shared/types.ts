@@ -14,22 +14,22 @@ export interface ParsedContent {
 
 export interface VoteOption {
   id: string;
-  postId: string;
+  post_id: string;
   content: string;
   index: number;
-  createdAt: Date;
-  updatedAt?: Date;
-  questionId?: string;
+  created_at: Date;
+  updated_at?: Date;
+  question_id?: string;
 }
 
 export interface VoteQuestion {
   id: string;
-  postId: string;
+  post_id: string;
   question: string;
-  totalOptions: number;
-  optionsHash: string;
-  createdAt: Date;
-  updatedAt?: Date;
+  total_options: number;
+  options_hash: string;
+  created_at: Date;
+  updated_at?: Date;
   protocol?: string;
 }
 
@@ -42,11 +42,11 @@ export interface Vote {
 export interface LockLike {
   id?: string;
   txid?: string;
-  lockAmount: number;
-  lockDuration: number;
-  createdAt?: Date;
-  updatedAt?: Date;
-  postId?: string;
+  lock_amount: number;
+  lock_duration: number;
+  created_at?: Date;
+  updated_at?: Date;
+  post_id?: string;
 }
 
 export interface Post {
@@ -72,31 +72,31 @@ export interface Post {
 export interface PostWithVoteOptions extends Post {
     voteQuestion: {
         id: string;
-        postId: string;
+        post_id: string;
         protocol: string;
-        createdAt: Date;
-        updatedAt: Date;
+        created_at: Date;
+        updated_at: Date;
         question: string;
-        totalOptions: number;
-        optionsHash: string;
+        total_options: number;
+        options_hash: string;
     } | null;
     voteOptions: {
         id: string;
-        postId: string;
+        post_id: string;
         content: string;
         index: number;
-        createdAt: Date;
-        updatedAt: Date;
-        voteQuestionId: string;
+        created_at: Date;
+        updated_at: Date;
+        question_id: string;
     }[];
     lockLikes: {
         id: string;
         txid: string;
-        lockAmount: number;
-        lockDuration: number;
-        createdAt: Date;
-        updatedAt: Date;
-        postId: string;
+        lock_amount: number;
+        lock_duration: number;
+        created_at: Date;
+        updated_at: Date;
+        post_id: string;
     }[];
 }
 
@@ -159,21 +159,21 @@ export interface ParsedTransaction {
     protocol: string;
     content?: any;
     metadata: {
-        postId: string;
+        post_id: string;
         content: string;
-        lockAmount?: number;
-        lockDuration?: number;
+        lock_amount?: number;
+        lock_duration?: number;
         timestamp?: number;
         [key: string]: any;
     };
-    senderAddress?: string;
-    blockHeight?: number;
-    blockTime?: number | bigint;
+    sender_address?: string;
+    block_height?: number;
+    block_time?: number | bigint;
     sequence?: number;
-    parentSequence?: number;
-    lockLike?: LockLike;
-    voteQuestion?: VoteQuestion;
-    voteOption?: VoteOption;
+    parent_sequence?: number;
+    lock_like?: LockLike;
+    vote_question?: VoteQuestion;
+    vote_option?: VoteOption;
 }
 
 export interface DecodedTransaction {
@@ -194,39 +194,45 @@ export interface DecodedTransaction {
 }
 
 export interface LockProtocolData {
-    postId: string;
-    lockAmount: number;
-    lockDuration: number;
+    post_id: string;
+    lock_amount: number;
+    lock_duration: number;
     content: string;
-    voteOptions: string[];
-    voteQuestion: string;
+    vote_options: string[];
+    vote_question: string;
     image: Buffer | null;
-    imageMetadata: {
+    image_metadata: {
         filename: string;
-        contentType: string;
+        content_type: string;
         width?: number;
         height?: number;
         size?: number;
         encoding?: string;
         format?: string;
-    } | null;
+        is_image?: boolean;
+    };
+    is_vote?: boolean;
+    content_type?: string;
+    options_hash?: string;
+    tags?: string[];
+    total_options?: number;
 }
 
 export interface TransactionMetadata {
-    postId: string;
+    post_id: string;
     content: string;
-    lockAmount: number;
-    lockDuration: number;
+    lock_amount: number;
+    lock_duration: number;
     timestamp: number;
-    voteOptions?: string[];
-    voteQuestion?: string;
+    vote_options?: string[];
+    vote_question?: string;
     image?: Buffer;
-    imageMetadata?: {
+    image_metadata?: {
         filename: string;
-        contentType: string;
+        content_type: string;
     };
     sequence?: number;
-    parentSequence?: number;
+    parent_sequence?: number;
     protocol?: string;
     [key: string]: any;
 }
@@ -294,11 +300,11 @@ export interface VerificationResults {
     voteOptionsCount: number;
     hasLockLikes: boolean;
     txid: string;
-    postId: string;
+    post_id: string;
     voteQuestion?: {
         question: string;
-        totalOptions: number;
-        optionsHash: string;
+        total_options: number;
+        options_hash: string;
     };
     voteOptions?: Array<{
         index: number;
@@ -307,17 +313,17 @@ export interface VerificationResults {
 }
 
 export interface ProcessedTxMetadata {
-    postId: string;
+    post_id: string;
     content: string;
     image?: Buffer | null;
-    imageMetadata?: {
-        contentType: string;
+    image_metadata?: {
+        content_type: string;
         filename: string;
         width?: number;
         height?: number;
         size?: number;
         encoding: string;
     };
-    rawTx: JungleBusResponse;
+    raw_tx: JungleBusResponse;
     [key: string]: any;
 }

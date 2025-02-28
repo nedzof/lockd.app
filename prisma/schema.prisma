@@ -54,27 +54,27 @@ model Post {
 model ProcessedTransaction {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
   txid        String   @unique @map("txid")
-  blockHeight Int      @default(0) @map("block_height")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @default(now()) @map("updated_at")
+  blockHeight Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
   protocol    String   @default("MAP") @map("protocol")
   type        String   @default("unknown") @map("type")
   metadata    Json     @map("metadata")
-  blockTime   BigInt   @default(0) @map("block_time")
+  blockTime   BigInt   @default(0)
 
-  @@index([blockHeight])
   @@index([protocol])
   @@index([txid])
   @@index([type])
+  @@index([blockHeight])
 }
 
 model Tag {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
   name       String   @unique @map("name")
   type       String   @default("user_created") @map("type")
-  usageCount Int      @default(0) @map("usage_count")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @default(now()) @map("updated_at")
+  usageCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now())
 
   @@index([name])
   @@index([type])
@@ -101,7 +101,7 @@ model VoteOption {
 
 model BsvPriceHistory {
   id        Int       @id @default(autoincrement()) @map("id")
-  date      DateTime  @unique @db.Date @map("date")
+  date      DateTime  @unique @map("date") @db.Date
   price     Float     @map("price")
   createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -109,17 +109,17 @@ model BsvPriceHistory {
 }
 
 model Stats {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
-  totalPosts       Int      @map("total_posts")
-  totalVotes       Int      @map("total_votes")
-  totalLockLikes   Int      @map("total_lock_likes")
-  totalUsers       Int      @map("total_users")
-  totalBsvLocked   Float    @map("total_bsv_locked")
-  avgLockDuration  Float    @map("avg_lock_duration")
-  mostUsedTag      String?  @map("most_used_tag")
-  mostActiveUser   String?  @map("most_active_user")
-  lastUpdated      DateTime @default(now()) @map("last_updated")
-  currentBsvPrice  Float?   @map("current_bsv_price")
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
+  totalPosts      Int      @map("total_posts")
+  totalVotes      Int      @map("total_votes")
+  totalLockLikes  Int      @map("total_lock_likes")
+  totalUsers      Int      @map("total_users")
+  totalBsvLocked  Float    @map("total_bsv_locked")
+  avgLockDuration Float    @map("avg_lock_duration")
+  mostUsedTag     String?  @map("most_used_tag")
+  mostActiveUser  String?  @map("most_active_user")
+  lastUpdated     DateTime @default(now()) @map("last_updated")
+  currentBsvPrice Float?   @map("current_bsv_price")
 
   @@map("stats")
 }

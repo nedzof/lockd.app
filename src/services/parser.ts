@@ -1,91 +1,83 @@
-import { DbClient } from './dbClient.js';
 import { logger } from '../utils/logger.js';
-import * as bsv from 'bsv';
-import { ParsedTransaction, LockProtocolData, JungleBusResponse } from '../shared/types.js';
+import { DbClient } from './dbClient.js';
 import { JungleBusClient } from '@gorillapool/js-junglebus';
-
-// Helper function to extract text content from transactions
-export function extractTextContent(tx: JungleBusResponse): string[] {
-    const contents: string[] = [];
-    tx.data.forEach(item => {
-        if (item.startsWith('content=')) {
-            const content = item.split('=')[1];
-            if (content) {
-                contents.push(content);
-            }
-        }
-    });
-    return contents;
-}
+import { LockProtocolData } from '../shared/types.js';
 
 // Helper function to extract vote data from transactions
-export function extractVoteData(tx: JungleBusResponse): { 
+export function extractVoteData(tx: { data: string[] }): { 
     question?: string, 
     options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
     totalOptions?: number,
-    optionsHash?: string,
-    contentType?: string 
+    optionsHash?: string
 } {
-    const voteData: { 
-        question?: string, 
-        options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
-        totalOptions?: number,
-        optionsHash?: string,
-        contentType?: string 
-    } = {};
-    
-    // Check if this is a vote transaction
-    const isVoteQuestion = tx.data.some(d => d.startsWith('type=vote_question'));
-    const isVoteOption = tx.data.some(d => d.startsWith('type=vote_option'));
-    const isVoteType = tx.data.some(d => d.startsWith('content_type=vote'));
-    
-    if (isVoteQuestion || isVoteOption || isVoteType) {
-        // Set content_type for vote posts
-        voteData.contentType = 'vote';
+    try {
+        const voteData: { 
+            question?: string, 
+            options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
+            totalOptions?: number,
+            optionsHash?: string
+        } = {};
+
+        // Check if this is a vote transaction
+        const isVoteQuestion = tx.data.some((d: string) => d.startsWith('type=vote_question'));
+        const isVoteOption = tx.data.some((d: string) => d.startsWith('type=vote_option'));
+        const isVoteType = tx.data.some((d: string) => d.startsWith('content_type=vote'));
+        
+        if (!isVoteQuestion && !isVoteOption && !isVoteType) {
+            return {};
+        }
         
         // Extract vote question
-        const questionContent = tx.data.find(d => d.startsWith('content='))?.split('=')[1];
-        if (questionContent) {
-            voteData.question = questionContent;
+        if (isVoteQuestion) {
+            const questionContent = tx.data.find((d: string) => d.startsWith('content='))?.split('=')[1];
+            if (questionContent) {
+                voteData.question = questionContent;
+            }
         }
-
-        // Extract total options and hash
-        const totalOptionsStr = tx.data.find(d => d.startsWith('totaloptions='))?.split('=')[1];
-        if (totalOptionsStr) {
-            voteData.totalOptions = parseInt(totalOptionsStr);
+        
+        // Extract total options
+        if (isVoteQuestion) {
+            const totalOptionsStr = tx.data.find((d: string) => d.startsWith('totaloptions='))?.split('=')[1];
+            if (totalOptionsStr) {
+                voteData.totalOptions = parseInt(totalOptionsStr, 10);
+            }
+            
+            const optionsHash = tx.data.find((d: string) => d.startsWith('optionshash='))?.split('=')[1];
+            if (optionsHash) {
+                voteData.optionsHash = optionsHash;
+            }
         }
-
-        const optionsHash = tx.data.find(d => d.startsWith('optionshash='))?.split('=')[1];
-        if (optionsHash) {
-            voteData.optionsHash = optionsHash;
-        }
-
+        
         // Extract vote options
-        const optionIndices = tx.data.filter(d => d.startsWith('optionindex=')).map(d => parseInt(d.split('=')[1]));
-        if (optionIndices.length > 0) {
-            // Get all content items
-            const contents = tx.data
-                .filter(d => d.startsWith('content='))
-                .map(d => d.split('=')[1]);
-
-            voteData.options = optionIndices.map(index => ({
-                text: contents[index + 1] || contents[0] || '', // index + 1 because first content is the question
-                lockAmount: parseInt(tx.data.find(d => d.startsWith('lockamount='))?.split('=')[1] || '0'),
-                lockDuration: parseInt(tx.data.find(d => d.startsWith('lockduration='))?.split('=')[1] || '0'),
+        if (isVoteOption) {
+            const optionIndices = tx.data.filter((d: string) => d.startsWith('optionindex=')).map((d: string) => parseInt(d.split('=')[1]));
+            
+            // Extract option text
+            const optionTexts = tx.data
+                .filter((d: string) => d.startsWith('content='))
+                .map((d: string) => d.split('=')[1]);
+            
+            voteData.options = optionIndices.map((index: number) => ({
+                text: optionTexts[0] || '',
+                lockAmount: parseInt(tx.data.find((d: string) => d.startsWith('lockamount='))?.split('=')[1] || '0'),
+                lockDuration: parseInt(tx.data.find((d: string) => d.startsWith('lockduration='))?.split('=')[1] || '0'),
                 optionIndex: index
             }));
         }
+        
+        return voteData;
+    } catch (error) {
+        return {};
     }
-    
-    return voteData;
 }
 
 export class TransactionParser {
+    private dbClient: DbClient;
     private jungleBus: JungleBusClient;
-    private imageData: Buffer | null = null;
-    private metadata: any = {};
 
-    constructor(private dbClient: DbClient) {
+    constructor(dbClient: DbClient) {
+        this.dbClient = dbClient;
+        
         logger.info('TransactionParser initialized', {
             bmapAvailable: true,
             bmapExports: [],
@@ -93,7 +85,13 @@ export class TransactionParser {
         });
 
         // Initialize JungleBus client
-        this.jungleBus = new JungleBusClient('https://junglebus.gorillapool.io');
+        this.jungleBus = new JungleBusClient('junglebus.gorillapool.io', {
+            useSSL: true,
+            protocol: 'json',
+            onError: (ctx) => {
+                logger.error("❌ JungleBus Parser ERROR", ctx);
+            }
+        });
     }
 
     // Process image data and save to database
@@ -142,277 +140,6 @@ export class TransactionParser {
         }
     }
 
-    private extractImageFromBsvTx(tx: any): { imageData: Buffer; metadata: any } | null {
-        try {
-            logger.debug('📦 Processing transaction for image:', {
-                hasData: !!tx.data,
-                dataType: tx.data ? typeof tx.data : 'undefined',
-                isArray: Array.isArray(tx.data),
-                dataLength: tx.data?.length,
-                txKeys: Object.keys(tx),
-                firstFewItems: tx.data?.slice(0, 3)
-            });
-
-            if (!tx.data || !Array.isArray(tx.data)) {
-                logger.debug('❌ Invalid transaction data structure');
-                return null;
-            }
-
-            let imageData: Buffer | null = null;
-            let metadata: any = {};
-            let foundImage = false;
-            let rawImageData: string | null = null;
-
-            // Known image format headers
-            const imageHeaders = {
-                jpeg: { header: [0xFF, 0xD8, 0xFF], contentType: 'image/jpeg', maxSize: 20 * 1024 * 1024 },
-                png: { header: [0x89, 0x50, 0x4E, 0x47], contentType: 'image/png', maxSize: 20 * 1024 * 1024 },
-                gif: { header: [0x47, 0x49, 0x46, 0x38], contentType: 'image/gif', maxSize: 10 * 1024 * 1024 },
-                webp: { header: [0x52, 0x49, 0x46, 0x46], contentType: 'image/webp', maxSize: 15 * 1024 * 1024 },
-                bmp: { header: [0x42, 0x4D], contentType: 'image/bmp', maxSize: 10 * 1024 * 1024 },
-                tiff: { header: [0x49, 0x49, 0x2A, 0x00], contentType: 'image/tiff', maxSize: 20 * 1024 * 1024 }
-            };
-
-            // Enhanced base64 validation
-            const isValidBase64 = (str: string): boolean => {
-                if (str.length % 4 !== 0) return false;
-                const base64Regex = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
-                return base64Regex.test(str);
-            };
-
-            // Enhanced image data validation
-            const validateImageData = (buffer: Buffer, format: string): boolean => {
-                if (!buffer || buffer.length === 0) return false;
-                const formatInfo = imageHeaders[format as keyof typeof imageHeaders];
-                if (!formatInfo) return false;
-                
-                // Check size limits
-                if (buffer.length > formatInfo.maxSize) {
-                    logger.warn(`Image size ${buffer.length} bytes exceeds limit of ${formatInfo.maxSize} bytes for ${format}`);
-                    return false;
-                }
-                
-                return true;
-            };
-
-            // Try to extract image data from different sources in order of preference
-            const extractImageFromBuffer = (buffer: Buffer): Buffer | null => {
-                if (!buffer || buffer.length === 0) {
-                    logger.debug('❌ Empty buffer provided');
-                    return null;
-                }
-
-                for (const [format, { header, contentType }] of Object.entries(imageHeaders)) {
-                    for (let i = 0; i < Math.min(buffer.length - header.length, 1024); i++) {
-                        if (header.every((byte, j) => buffer[i + j] === byte)) {
-                            const extractedData = buffer.slice(i);
-                            
-                            if (!validateImageData(extractedData, format)) {
-                                logger.debug(`❌ Invalid ${format} image data`, {
-                                    size: extractedData.length,
-                                    startPosition: i
-                                });
-                                continue;
-                            }
-
-                            if (!metadata.contentType) {
-                                metadata.contentType = contentType;
-                            }
-                            
-                            logger.debug(`✅ Found valid ${format.toUpperCase()} image`, {
-                                size: extractedData.length,
-                                startPosition: i,
-                                contentType
-                            });
-                            
-                            return extractedData;
-                        }
-                    }
-                }
-                return null;
-            };
-
-            // First pass: collect metadata and image indicators
-            for (const item of tx.data) {
-                if (typeof item !== 'string') continue;
-
-                if (item.includes('=')) {
-                    const [key, value] = item.split('=');
-                    const keyLower = key.toLowerCase();
-
-                    // Handle both regular and MAP protocol fields
-                    switch(keyLower) {
-                        case 'contenttype':
-                        case 'map_content_type':
-                            if (value.startsWith('image/')) {
-                                metadata.contentType = value;
-                                foundImage = true;
-                                logger.debug('🖼️ Found image content type', { contentType: value });
-                            }
-                            break;
-                        case 'map_content':
-                            // Store map_content regardless of current foundImage status
-                            // We might find out it's an image later when we see map_content_type
-                            rawImageData = value;
-                            logger.debug('📦 Found map_content data');
-                            break;
-                        case 'filename':
-                        case 'map_file_name':
-                            metadata.filename = value;
-                            break;
-                        case 'imagewidth':
-                        case 'map_image_width':
-                            metadata.width = parseInt(value);
-                            break;
-                        case 'imageheight':
-                        case 'map_image_height':
-                            metadata.height = parseInt(value);
-                            break;
-                        case 'imagesize':
-                        case 'map_file_size':
-                            metadata.size = parseInt(value);
-                            break;
-                        case 'type':
-                            if (value === 'image') {
-                                foundImage = true;
-                                logger.debug('🖼️ Found image type indicator');
-                            }
-                            break;
-                        case 'map_type':
-                            if (value === 'image') {
-                                foundImage = true;
-                                logger.debug('🖼️ Found MAP image indicator');
-                            }
-                            break;
-                        case 'imagedata':
-                        case 'map_image_data':
-                            rawImageData = value;
-                            logger.debug('📸 Found image data in field', { field: key });
-                            break;
-                        default:
-                            // Check if this is base64 encoded image data
-                            if (item.match(/^[A-Za-z0-9+/=]+$/)) {
-                                try {
-                                    // Try to decode as base64
-                                    Buffer.from(item, 'base64');
-                                    imageData = item;
-                                } catch (e) {
-                                    // Not valid base64, ignore
-                                }
-                            }
-                    }
-                }
-            }
-
-            // Log the final state before attempting extraction
-            logger.debug('🎯 Pre-extraction state:', {
-                foundImage,
-                hasRawData: !!rawImageData,
-                contentType: metadata.contentType,
-                rawDataLength: rawImageData?.length
-            });
-
-            // Try to extract image data from different sources in order of preference
-            // 1. Try imagedata/map_content field first
-            if (!imageData && rawImageData && foundImage) {
-                try {
-                    let base64Data = rawImageData;
-                    
-                    // Handle different base64 formats
-                    if (rawImageData.startsWith('data:')) {
-                        const matches = rawImageData.match(/^data:([^;]+);base64,(.+)$/);
-                        if (matches) {
-                            metadata.contentType = matches[1];
-                            base64Data = matches[2];
-                        }
-                    }
-
-                    // Try to decode base64 even if it doesn't have the data: prefix
-                    if (!isValidBase64(base64Data)) {
-                        // Try to clean up the base64 string
-                        base64Data = base64Data.replace(/[^A-Za-z0-9+/=]/g, '');
-                        if (!isValidBase64(base64Data)) {
-                            logger.debug('❌ Invalid base64 data format after cleanup');
-                            return null;
-                        }
-                    }
-
-                    // Ensure we're working with a Buffer
-                    const buffer = Buffer.from(base64Data, 'base64');
-                    imageData = extractImageFromBuffer(buffer);
-                    
-                    if (imageData) {
-                        logger.debug('✅ Successfully extracted image from data field', {
-                            size: imageData.length,
-                            type: metadata.contentType
-                        });
-                    } else {
-                        logger.debug('❌ Failed to validate extracted image data');
-                    }
-                } catch (e) {
-                    logger.debug('❌ Failed to process image data field:', e);
-                }
-            }
-
-            // 2. Try transaction field
-            if (!imageData && tx.transaction && foundImage) {
-                try {
-                    const buffer = Buffer.from(tx.transaction, 'base64');
-                    imageData = extractImageFromBuffer(buffer);
-                } catch (e) {
-                    logger.debug('❌ Failed to process transaction field:', e);
-                }
-            }
-
-            // 3. Try outputs field
-            if (!imageData && tx.outputs && foundImage) {
-                try {
-                    for (const output of tx.outputs) {
-                        if (output.script?.asm) {
-                            // Try to extract base64 data from script
-                            const matches = output.script.asm.match(/OP_RETURN ([A-Za-z0-9+/=]+)/);
-                            if (matches) {
-                                const buffer = Buffer.from(matches[1], 'base64');
-                                imageData = extractImageFromBuffer(buffer);
-                                if (imageData) break;
-                            }
-                        }
-                    }
-                } catch (e) {
-                    logger.debug('❌ Failed to process outputs:', e);
-                }
-            }
-
-            // Log final result
-            logger.debug('🎯 Image extraction result:', {
-                foundImage,
-                hasImageData: !!imageData,
-                hasContentType: !!metadata.contentType,
-                metadata
-            });
-
-            if (imageData && metadata.contentType) {
-                return {
-                    imageData,
-                    metadata: {
-                        ...metadata,
-                        encoding: 'base64',
-                        size: imageData.length
-                    }
-                };
-            }
-
-            if (foundImage && !imageData) {
-                logger.warn('Could not find image data in transaction', {
-                    contentType: metadata.contentType
-                });
-            }
-        } catch (error) {
-            logger.error('Error extracting image from transaction:', error);
-        }
-        return null;
-    }
-
     private extractLockProtocolData(data: string[], tx: any): LockProtocolData | null {
         try {
             if (!Array.isArray(data)) {
@@ -438,29 +165,19 @@ export class TransactionParser {
             }
 
             // Extract metadata
-            const metadata: any = {
-                postId: null,
-                lockAmount: 0,  
-                lockDuration: 0,  
-                content: null,
-                voteOptions: [],
-                voteQuestion: null,
+            const metadata: LockProtocolData = {
+                post_id: '',
+                lock_amount: 0,  
+                lock_duration: 0,  
+                content: '',
+                vote_options: [],
+                vote_question: '',
                 image: null,
-                imageMetadata: null,
-                optionsHash: null,
-                contentType: null
+                image_metadata: {
+                    filename: '',
+                    content_type: '',
+                }
             };
-
-            // Try to extract image from BSV transaction
-            const imageResult = this.extractImageFromBsvTx(tx);
-            if (imageResult) {
-                metadata.image = imageResult.imageData;
-                metadata.imageMetadata = imageResult.metadata;
-            }
-
-            // Initialize image metadata if needed
-            let imageData: string | null = null;
-            let imageMetadata: { [key: string]: any } = {};
 
             // Check if this is a vote transaction
             const isVoteQuestion = data.some(item => item.startsWith('type=vote_question'));
@@ -469,8 +186,8 @@ export class TransactionParser {
             
             // If this is a vote transaction, set the type accordingly
             if (isVoteQuestion || isVoteOption || isVoteType) {
-                metadata.isVote = true;
-                metadata.contentType = 'vote';
+                metadata.is_vote = true;
+                metadata.content_type = 'vote';
             }
 
             // Process each data item
@@ -480,74 +197,74 @@ export class TransactionParser {
 
                 switch (key.toLowerCase()) {
                     case 'postid':
-                        metadata.postId = value;
+                        metadata.post_id = value;
                         break;
                     case 'lockamount':
-                        metadata.lockAmount = parseInt(value, 10) || 0;  
+                        metadata.lock_amount = parseInt(value, 10) || 0;  
                         break;
                     case 'lockduration':
-                        metadata.lockDuration = parseInt(value, 10) || 0;  
+                        metadata.lock_duration = parseInt(value, 10) || 0;  
                         break;
                     case 'content':
-                        if (isVoteQuestion && !metadata.voteQuestion) {
-                            metadata.voteQuestion = value;
+                        if (isVoteQuestion && !metadata.vote_question) {
+                            metadata.vote_question = value;
                         } else if (isVoteOption) {
-                            metadata.voteOptions.push(value);
+                            metadata.vote_options.push(value);
                         }
                         metadata.content = value;
                         break;
                     case 'totaloptions':
-                        metadata.totalOptions = parseInt(value, 10);
+                        metadata.total_options = parseInt(value, 10);
                         break;
                     case 'optionshash':
-                        metadata.optionsHash = value;
+                        metadata.options_hash = value;
                         break;
                     case 'content_type':
-                        metadata.contentType = value;
+                        metadata.content_type = value;
                         if (value === 'vote') {
-                            metadata.isVote = true;
+                            metadata.is_vote = true;
                         }
                         break;
                     case 'type':
                         if (value === 'vote' || value === 'vote_question' || value === 'vote_option') {
-                            metadata.isVote = true;
-                            metadata.contentType = 'vote';
+                            metadata.is_vote = true;
+                            metadata.content_type = 'vote';
                         }
                         break;
                     // Image related fields
                     case 'contenttype':
-                        imageMetadata.contentType = value;
+                        metadata.image_metadata.content_type = value;
                         break;
                     case 'imageheight':
-                        imageMetadata.height = parseInt(value, 10);
+                        metadata.image_metadata.height = parseInt(value, 10);
                         break;
                     case 'imagewidth':
-                        imageMetadata.width = parseInt(value, 10);
+                        metadata.image_metadata.width = parseInt(value, 10);
                         break;
                     case 'imagesize':
-                        imageMetadata.size = parseInt(value, 10);
+                        metadata.image_metadata.size = parseInt(value, 10);
                         break;
                     case 'filename':
-                        imageMetadata.filename = value;
+                        metadata.image_metadata.filename = value;
                         break;
                     case 'format':
-                        imageMetadata.format = value;
+                        metadata.image_metadata.format = value;
                         break;
                     case 'encoding':
-                        imageMetadata.encoding = value;
+                        metadata.image_metadata.encoding = value;
                         break;
                     case 'type':
                         if (value === 'image') {
-                            imageMetadata.isImage = true;
+                            metadata.image_metadata.is_image = true;
                         }
                         break;
                     default:
                         // Check if this is base64 encoded image data
-                        if (item.match(/^[A-Za-z0-9+/=]+$/)) {
+                        if (item.length > 100) {
                             try {
                                 // Try to decode as base64
-                                Buffer.from(item, 'base64');
-                                imageData = item;
+                                const imageBuffer = Buffer.from(item, 'base64');
+                                metadata.image = imageBuffer;
                             } catch (e) {
                                 // Not valid base64, ignore
                             }
@@ -556,7 +273,7 @@ export class TransactionParser {
             });
 
             // Handle image data
-            if (imageMetadata.isImage && tx.transaction) {
+            if (metadata.image_metadata.is_image && tx.transaction) {
                 try {
                     // Get raw transaction data
                     const buffer = Buffer.from(tx.transaction, 'base64');
@@ -564,7 +281,7 @@ export class TransactionParser {
                     // Find image data markers based on content type
                     let imageBuffer: Buffer | null = null;
                     
-                    if (imageMetadata.contentType?.includes('jpeg') || imageMetadata.contentType?.includes('jpg')) {
+                    if (metadata.image_metadata.content_type?.includes('jpeg') || metadata.image_metadata.content_type?.includes('jpg')) {
                         // Look for JPEG marker (FF D8 FF)
                         const jpegMarker = Buffer.from([0xFF, 0xD8, 0xFF]);
                         for (let i = 0; i < buffer.length - jpegMarker.length; i++) {
@@ -575,7 +292,7 @@ export class TransactionParser {
                                 break;
                             }
                         }
-                    } else if (imageMetadata.contentType?.includes('png')) {
+                    } else if (metadata.image_metadata.content_type?.includes('png')) {
                         // Look for PNG marker (89 50 4E 47)
                         const pngMarker = Buffer.from([0x89, 0x50, 0x4E, 0x47]);
                         for (let i = 0; i < buffer.length - pngMarker.length; i++) {
@@ -587,7 +304,7 @@ export class TransactionParser {
                                 break;
                             }
                         }
-                    } else if (imageMetadata.contentType?.includes('gif')) {
+                    } else if (metadata.image_metadata.content_type?.includes('gif')) {
                         // Look for GIF marker (47 49 46 38)
                         const gifMarker = Buffer.from([0x47, 0x49, 0x46, 0x38]);
                         for (let i = 0; i < buffer.length - gifMarker.length; i++) {
@@ -603,21 +320,21 @@ export class TransactionParser {
 
                     if (imageBuffer) {
                         metadata.image = imageBuffer;
-                        metadata.imageMetadata = {
-                            contentType: imageMetadata.contentType || 'image/jpeg',
-                            filename: imageMetadata.filename || `image.${imageMetadata.format || 'jpg'}`,
-                            width: imageMetadata.width,
-                            height: imageMetadata.height,
-                            size: imageMetadata.size,
+                        metadata.image_metadata = {
+                            content_type: metadata.image_metadata.content_type || 'image/jpeg',
+                            filename: metadata.image_metadata.filename || `image.${metadata.image_metadata.format || 'jpg'}`,
+                            width: metadata.image_metadata.width,
+                            height: metadata.image_metadata.height,
+                            size: metadata.image_metadata.size,
                             encoding: 'binary'
                         };
                         logger.debug('Successfully extracted image data', {
                             size: metadata.image.length,
-                            metadata: metadata.imageMetadata
+                            metadata: metadata.image_metadata
                         });
                     } else {
                         logger.warn('Could not find image data markers in transaction', {
-                            contentType: imageMetadata.contentType
+                            contentType: metadata.image_metadata.content_type
                         });
                     }
                 } catch (error) {
@@ -634,10 +351,10 @@ export class TransactionParser {
                     .map(item => item.split('=')[1]);
                 
                 if (contents.length > 1) {
-                    metadata.voteOptions = contents.slice(1);
+                    metadata.vote_options = contents.slice(1);
                     logger.debug('Found vote options', { 
-                        count: metadata.voteOptions.length,
-                        options: metadata.voteOptions
+                        count: metadata.vote_options.length,
+                        options: metadata.vote_options
                     });
                 }
             }
@@ -660,83 +377,86 @@ export class TransactionParser {
 
     public async parseTransaction(txid: string): Promise<void> {
         try {
-            // Check if transaction already exists
-            const existingTx = await this.dbClient.getTransaction(txid);
-            if (existingTx) {
+            if (!txid || typeof txid !== 'string') {
+                logger.error('Invalid transaction ID', { txid });
                 return;
             }
 
-            const tx = await this.jungleBus.GetTransaction(txid);
+            const tx: any = await this.jungleBus.GetTransaction(txid);
             if (!tx) {
                 return;
             }
 
-            const parsedTx = this.extractLockProtocolData(tx.data, tx);
+            // For JungleBus JSON protocol, we need to handle the data differently
+            // than for the protobuf protocol
+            const txData = tx.outputs || [];
+            const parsedTx = this.extractLockProtocolData(txData, tx);
             if (!parsedTx) {
                 return;
             }
 
             if (parsedTx.image) {
-                await this.processImage(parsedTx.image, parsedTx.imageMetadata, txid);
+                await this.processImage(parsedTx.image, parsedTx.image_metadata, txid);
             }
 
             // Determine transaction type
             let txType = 'lock';
-            if (parsedTx.isVote || (parsedTx.voteOptions && parsedTx.voteOptions.length > 0) || parsedTx.contentType === 'vote') {
+            if (parsedTx.is_vote || (parsedTx.vote_options && parsedTx.vote_options.length > 0) || parsedTx.content_type === 'vote') {
                 txType = 'vote';
                 logger.debug('Processing vote transaction', {
                     txid,
-                    voteOptions: parsedTx.voteOptions,
-                    isVote: parsedTx.isVote,
-                    contentType: parsedTx.contentType
+                    voteOptions: parsedTx.vote_options,
+                    isVote: parsedTx.is_vote,
+                    contentType: parsedTx.content_type
                 });
                 
                 // Ensure we have vote options
-                if (!parsedTx.voteOptions || parsedTx.voteOptions.length === 0) {
+                if (!parsedTx.vote_options || parsedTx.vote_options.length === 0) {
                     // Create default vote options if none exist
                     logger.info('Creating default vote options for vote post', { txid });
-                    parsedTx.voteOptions = ['Yes', 'No', 'Maybe'];
+                    parsedTx.vote_options = ['Yes', 'No', 'Maybe'];
                 }
             }
 
-            // Ensure content_type is set for vote posts
-            if (txType === 'vote' && !parsedTx.contentType) {
-                parsedTx.contentType = 'vote';
+            // Set content type for vote transactions
+            if (txType === 'vote' && !parsedTx.content_type) {
+                parsedTx.content_type = 'vote';
             }
 
             await this.dbClient.processTransaction({
-                txid: tx.id,
+                txid,
                 type: txType,
                 protocol: 'LOCK',
                 block_height: tx.block_height,
                 block_time: tx.block_time,
                 metadata: {
-                    sender_address: tx.addresses?.[0] || null,
-                    post_id: parsedTx.postId,
-                    lock_amount: parsedTx.lockAmount,
-                    lock_duration: parsedTx.lockDuration,
+                    post_id: parsedTx.post_id,
                     content: parsedTx.content,
-                    vote_options: parsedTx.voteOptions,
-                    vote_question: parsedTx.voteQuestion,
+                    lock_amount: parsedTx.lock_amount,
+                    lock_duration: parsedTx.lock_duration,
+                    vote_options: parsedTx.vote_options,
+                    vote_question: parsedTx.vote_question,
                     image: parsedTx.image,
-                    image_metadata: parsedTx.imageMetadata,
-                    options_hash: parsedTx.optionsHash,
-                    content_type: parsedTx.contentType
+                    image_metadata: parsedTx.image_metadata,
+                    options_hash: parsedTx.options_hash,
+                    content_type: parsedTx.content_type,
+                    tags: parsedTx.tags || [],
+                    sender_address: tx.addresses?.[0] || null
                 }
             });
-            logger.info('✅ Transaction saved to database', { 
+            
+            logger.info('Transaction processed successfully', {
                 txid,
-                block_height: tx.block_height,
+                blockHeight: tx.block_height,
                 type: txType,
-                hasVoteOptions: parsedTx.voteOptions && parsedTx.voteOptions.length > 0,
-                content_type: parsedTx.contentType
+                hasVoteOptions: parsedTx.vote_options && parsedTx.vote_options.length > 0,
+                contentType: parsedTx.content_type
             });
         } catch (error) {
             logger.error('❌ Failed to parse transaction', {
                 txid,
-                error: error instanceof Error ? error.message : 'Unknown error'
+                error
             });
-            throw error;
         }
     }
 }
