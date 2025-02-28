@@ -25,15 +25,15 @@ export function extractVoteData(data: string[]): {
     isVote: boolean;
     question?: string;
     options?: string[];
-    totalOptions?: number;
-    optionsHash?: string;
+    total_options?: number;
+    options_hash?: string;
 } {
     const result = {
         isVote: false,
         question: undefined,
         options: undefined,
-        totalOptions: undefined,
-        optionsHash: undefined
+        total_options: undefined,
+        options_hash: undefined
     };
     
     // Check vote indicators
@@ -91,28 +91,28 @@ export function extractVoteData(data: string[]): {
                         // Otherwise split by comma
                         result.options = optionsMatch[1].split(',').map(opt => opt.trim());
                     }
-                    result.totalOptions = result.options.length;
+                    result.total_options = result.options.length;
                 } catch {
                     // If parsing fails, just use the raw value
                     result.options = [optionsMatch[1]];
-                    result.totalOptions = 1;
+                    result.total_options = 1;
                 }
             }
         }
         
         // Extract options hash
-        if (decoded.includes('options_hash=') || decoded.includes('optionsHash=')) {
-            const hashMatch = decoded.match(/(?:options_hash|optionsHash)=([^&\s]+)/);
+        if (decoded.includes('options_hash=') || decoded.includes('options_hash=')) {
+            const hashMatch = decoded.match(/(?:options_hash|options_hash)=([^&\s]+)/);
             if (hashMatch && hashMatch[1]) {
-                result.optionsHash = hashMatch[1];
+                result.options_hash = hashMatch[1];
             }
         }
         
         // Extract total options
-        if (decoded.includes('total_options=') || decoded.includes('totalOptions=')) {
-            const totalMatch = decoded.match(/(?:total_options|totalOptions)=(\d+)/);
+        if (decoded.includes('total_options=') || decoded.includes('total_options=')) {
+            const totalMatch = decoded.match(/(?:total_options|total_options)=(\d+)/);
             if (totalMatch && totalMatch[1]) {
-                result.totalOptions = parseInt(totalMatch[1], 10);
+                result.total_options = parseInt(totalMatch[1], 10);
             }
         }
     }
@@ -718,15 +718,15 @@ export class TransactionParser {
                 lockData.is_vote = voteData.isVote;
                 lockData.vote_question = voteData.question;
                 lockData.vote_options = voteData.options;
-                lockData.total_options = voteData.totalOptions;
-                lockData.options_hash = voteData.optionsHash;
+                lockData.total_options = voteData.total_options;
+                lockData.options_hash = voteData.options_hash;
             }
 
             // Create transaction record
             const txRecord: ParsedTransaction = {
                 tx_id,
                 block_height: tx.block_height || 0,
-                block_time: tx.block_time ? new Date(tx.block_time * 1000) : new Date(),
+                block_time: tx.block_time ? BigInt(tx.block_time) : BigInt(Math.floor(Date.now() / 1000)),
                 author_address: tx.inputs && tx.inputs[0] ? tx.inputs[0].address : '',
                 metadata: lockData
             };

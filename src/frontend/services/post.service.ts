@@ -26,8 +26,8 @@ export interface VoteData {
     is_vote_question: boolean;
     question?: string;
     options?: vote_option[];
-    totalOptions?: number;
-    optionsHash?: string;
+    total_options?: number;
+    options_hash?: string;
     selectedOption?: vote_option;
 }
 
@@ -109,8 +109,8 @@ export interface PostMetadata {
             lockPercentage?: number;
             feeSatoshis?: number;
         }>;
-        totalOptions?: number;
-        optionsHash?: string;
+        total_options?: number;
+        options_hash?: string;
         optionIndex?: number;
         optionText?: string;
         lock_amount?: number;
@@ -249,9 +249,9 @@ function createMapData(metadata: PostMetadata): MAP {
         // Always set type to vote_question if we have vote options
         if (metadata.vote.is_vote_question || (metadata.vote.options && metadata.vote.options.length > 0)) {
             mapData.type = 'vote_question';
-            mapData.totalOptions = ((metadata.vote.options?.length || metadata.vote.totalOptions || 0)).toString();
-            if (metadata.vote.optionsHash) {
-                mapData.optionsHash = metadata.vote.optionsHash;
+            mapData.total_options = ((metadata.vote.options?.length || metadata.vote.total_options || 0)).toString();
+            if (metadata.vote.options_hash) {
+                mapData.options_hash = metadata.vote.options_hash;
             }
         } else if (metadata.vote.optionIndex !== undefined) {
             // For vote options, only include essential fields
@@ -357,7 +357,7 @@ async function createVoteQuestionComponent(
     parentSequence: number,
     address: string
 ): Promise<InscribeRequest> {
-    const optionsHash = await hashContent(JSON.stringify(options));
+    const options_hash = await hashContent(JSON.stringify(options));
     
     const metadata: PostMetadata = {
         app: 'lockd.app',
@@ -375,8 +375,8 @@ async function createVoteQuestionComponent(
             is_vote_question: true,
             question,
             options,
-            totalOptions: options.length,
-            optionsHash
+            total_options: options.length,
+            options_hash
         }
     };
 
@@ -839,8 +839,8 @@ export const createPost = async (
                 is_vote_question: true,
                 question: content,
                 options: vote_optionObjects,
-                totalOptions: vote_optionObjects.length,
-                optionsHash: await hashContent(JSON.stringify(vote_optionObjects))
+                total_options: vote_optionObjects.length,
+                options_hash: await hashContent(JSON.stringify(vote_optionObjects))
             };
             
             // Create main vote question component

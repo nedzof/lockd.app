@@ -116,7 +116,7 @@ async function processSpecificTransaction() {
         const tags = JSON.parse(parsedData.tags || '[]');
         const lock_amount = parseInt(parsedData.lock_amount || '0', 10);
         const lock_duration = parseInt(parsedData.lock_duration || '0', 10);
-        const totalOptions = parseInt(parsedData.totaloptions || '0', 10);
+        const total_options = parseInt(parsedData.total_options || '0', 10);
 
         // Create or update the post in the database
         const post = await prisma.post.upsert({
@@ -127,7 +127,7 @@ async function processSpecificTransaction() {
                 author_address: tx.addresses[0],
                 created_at: timestamp,
                 tags: tags,
-                isVote: totalOptions > 0,
+                isVote: total_options > 0,
                 media_type: imageData?.mime_type,
                 raw_image_data: imageData?.raw_data
             },
@@ -136,7 +136,7 @@ async function processSpecificTransaction() {
                 author_address: tx.addresses[0],
                 created_at: timestamp,
                 tags: tags,
-                isVote: totalOptions > 0,
+                isVote: total_options > 0,
                 media_type: imageData?.mime_type,
                 raw_image_data: imageData?.raw_data
             }
@@ -145,10 +145,10 @@ async function processSpecificTransaction() {
         console.log('Post created/updated:', post);
 
         // If this is a vote post, create vote options
-        if (totalOptions > 0) {
-            console.log(`Creating ${totalOptions} vote options...`);
+        if (total_options > 0) {
+            console.log(`Creating ${total_options} vote options...`);
             
-            for (let i = 0; i < totalOptions; i++) {
+            for (let i = 0; i < total_options; i++) {
                 const optionContent = parsedData[`option${i}`] || `Option ${i+1}`;
                 const optiontx_id = `${TX_ID}-option-${i}`;
                 

@@ -155,37 +155,13 @@ export interface JungleBusBlockHeader {
 
 export interface ParsedTransaction {
     tx_id: string;
-    type: string;
-    protocol: string;
+    type?: string;
+    protocol?: string;
     content?: any;
-    metadata: {
-        post_id: string;
-        content: string;
-        lock_amount?: number;
-        lock_duration?: number;
-        timestamp?: number;
-        sender_address?: string;
-        block_height?: number;  // snake_case for consistency in database
-        block_time?: number;    // snake_case for consistency in database
-        sequence?: number;
-        parent_sequence?: number;
-        lock_like?: LockLike;
-        vote_question?: VoteQuestion;
-        vote_option?: vote_option;
-    };
-    post_id?: string;
-    content?: string;
-    lock_amount?: number;
-    lock_duration?: number;
-    timestamp?: number;
-    sender_address?: string;
-    block_height?: number;  // snake_case for consistency in database
-    block_time?: number;    // snake_case for consistency in database
-    sequence?: number;
-    parent_sequence?: number;
-    lock_like?: LockLike;
-    vote_question?: VoteQuestion;
-    vote_option?: vote_option;
+    metadata: LockProtocolData;
+    block_height?: number;
+    block_time?: bigint;
+    author_address?: string;
 }
 
 export interface DecodedTransaction {
