@@ -2,7 +2,7 @@ import { logger } from '../utils/logger.js';
 import { DbClient } from './dbClient.js';
 import { JungleBusClient } from '@gorillapool/js-junglebus';
 import { LockProtocolData, ParsedTransaction } from '../shared/types.js';
-import * as bsv from 'bsv';
+import bsv from 'bsv';
 
 // Helper function to extract tags from transaction data
 export function extractTags(data: string[]): string[] {
@@ -600,7 +600,7 @@ export class TransactionParser {
             try {
                 // Parse the raw transaction using BSV
                 const rawTx = Buffer.from(tx.transaction, 'base64');
-                const bsvTx = new bsv.Transaction(rawTx);
+                const bsvTx = bsv.Transaction.fromBuffer(rawTx);
                 
                 // Process each output
                 for (let i = 0; i < bsvTx.outputs.length; i++) {
