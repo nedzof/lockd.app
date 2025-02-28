@@ -61,13 +61,13 @@ export const getStats = async (req: Request, res: Response) => {
       // Create sample data
       const sampleData = {
         id: 'sample-stats',
-        totalPosts: 125,
-        totalVotes: 350,
-        totalLockLikes: 280,
-        totalUsers: 75,
-        totalBsvLocked: 1250.5,
-        avgLockDuration: 30,
-        mostUsedTag: 'bitcoin',
+        total_posts: 125,
+        total_votes: 350,
+        total_lock_likes: 280,
+        total_users: 75,
+        total_bsv_locked: 1250.5,
+        avg_lock_duration: 30,
+        most_used_tag: 'bitcoin',
         mostActiveUser: '1PkQ63EaZ1SJibu1fVHQULZVsU99LoKJh1',
         currentBsvPrice: 45.75,
         lastUpdated: new Date()
@@ -377,13 +377,13 @@ export const updateStats = async (req: Request, res: Response) => {
     // Create sample data for our charts
     const sampleData = {
       id: 'current-stats',
-      totalPosts: 125,
-      totalVotes: 350,
-      totalLockLikes: 280,
-      totalUsers: 75,
-      totalBsvLocked: 1250.5,
-      avgLockDuration: 30,
-      mostUsedTag: 'bitcoin',
+      total_posts: 125,
+      total_votes: 350,
+      total_lock_likes: 280,
+      total_users: 75,
+      total_bsv_locked: 1250.5,
+      avg_lock_duration: 30,
+      most_used_tag: 'bitcoin',
       mostActiveUser: '1PkQ63EaZ1SJibu1fVHQULZVsU99LoKJh1',
       currentBsvPrice: 45.75,
       lastUpdated: new Date()

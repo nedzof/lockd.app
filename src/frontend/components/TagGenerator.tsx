@@ -25,7 +25,7 @@ interface Tag {
   name: string;
   count: number;
   type: string;
-  createdAt: string;
+  created_at: string;
 }
 
 const TagGenerator: React.FC = () => {

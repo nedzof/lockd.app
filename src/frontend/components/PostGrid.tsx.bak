@@ -8,9 +8,9 @@ import { toast } from 'react-hot-toast';
 import LockLikeInteraction from './LockLikeInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
 
-interface VoteOption {
+interface vote_option {
   id: string;
-  txid: string;
+  tx_id: string;
   content: string;
   author_address?: string;
   created_at: string;
@@ -22,7 +22,7 @@ interface VoteOption {
 
 interface LockLike {
   id: string;
-  txid: string;
+  tx_id: string;
   author_address?: string;
   amount: number;
   lock_duration: number;
@@ -32,7 +32,7 @@ interface LockLike {
 
 interface ExtendedPost {
   id: string;
-  txid: string;
+  tx_id: string;
   content: string;
   author_address?: string;
   media_type?: string;
@@ -46,7 +46,7 @@ interface ExtendedPost {
   is_locked: boolean;
   lock_duration?: number;
   is_vote: boolean;
-  vote_options: VoteOption[];
+  vote_options: vote_option[];
   lock_likes: LockLike[];
   imageUrl?: string;
   totalLocked?: number;
@@ -175,7 +175,7 @@ const PostGrid: React.FC<PostGridProps> = ({
           postId: post.id,
           amount,
           duration,
-          authorAddress: wallet.bsvAddress
+          author_address: wallet.bsvAddress
         }),
       });
 

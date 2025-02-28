@@ -6,7 +6,7 @@ export interface Bitcoiner {
 }
 
 export interface LockLike {
-  txid: string;
+  tx_id: string;
   handle_id: string;
   amount: number;
   locked_until: number;
@@ -14,7 +14,7 @@ export interface LockLike {
 }
 
 export interface Post {
-  txid: string;
+  tx_id: string;
   amount: number;
   handle_id: string;
   content: string;
@@ -57,9 +57,9 @@ export interface PostExtended {
   is_vote?: boolean;
   vote_options?: Array<{
     id: string;
-    txid: string;
+    tx_id: string;
     postId: string;
-    post_txid: string;
+    post_tx_id: string;
     content: string;
     author_address: string;
     created_at: string;
@@ -73,7 +73,7 @@ export interface PostExtended {
 }
 
 export interface HODLTransaction {
-  txid: string;
+  tx_id: string;
   handle_id: string;
   content: string;
   media_url?: string;
@@ -88,12 +88,12 @@ export interface HODLTransaction {
   content_type?: string;
   metadata?: any;
   block_height?: number;
-  vote_options?: VoteOption[];
+  vote_options?: vote_option[];
 }
 
-export interface VoteOption {
+export interface vote_option {
   id: string;
-  txid: string;
+  tx_id: string;
   content: string;
   lock_amount: number;
   total_locked: number;
@@ -127,38 +127,38 @@ export enum TxStatus {
 }
 
 export interface PolymarketData {
-  marketId: string;
+  market_id: string;
   question: string;
   description: string;
-  closeTime: string;
+  close_time: string;
   probability: number;
   status: 'open' | 'closed' | 'resolved';
-  resolvedOutcome?: string;
+  resolved_outcome?: string;
 }
 
 export interface Lock {
   id: string;
-  txId: string;
+  tx_id: string;
   amount: number;
   status: LockStatus;
-  lockUntilHeight: number;
-  createdAt: string;
+  lock_until_height: number;
+  created_at: string;
   metadata?: Record<string, any>;
-  polymarketData?: PolymarketData;
+  polymarket_data?: PolymarketData;
 }
 
 export interface Transaction {
   id: string;
-  txId: string;
+  tx_id: string;
   type: TxType;
   status: TxStatus;
   amount: number;
-  createdAt: string;
+  created_at: string;
   metadata?: Record<string, any>;
 }
 
 export interface CreateLockParams {
-  recipientAddress: string;
+  recipient_address: string;
   amount: number;
-  lockUntilHeight: number;
+  lock_until_height: number;
 }

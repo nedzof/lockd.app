@@ -79,7 +79,7 @@ export class TagDatabaseService {
           where: { name: tag },
           data: { 
             usageCount: { increment: 1 },
-            updatedAt: new Date()
+            updated_at: new Date()
           }
         });
       }
@@ -174,13 +174,13 @@ export class TagDatabaseService {
   async updateTagStatistics(): Promise<void> {
     try {
       // Get the most used tag
-      const mostUsedTag = await prisma.tag.findFirst({
+      const most_used_tag = await prisma.tag.findFirst({
         orderBy: {
           usageCount: 'desc'
         }
       });
       
-      if (!mostUsedTag) {
+      if (!most_used_tag) {
         logger.warn('No tags found for statistics update');
         return;
       }
@@ -188,12 +188,12 @@ export class TagDatabaseService {
       // Update the stats table
       await prisma.stats.updateMany({
         data: {
-          most_used_tag: mostUsedTag.name,
+          most_used_tag: most_used_tag.name,
           last_updated: new Date()
         }
       });
       
-      logger.info(`Updated tag statistics, most used tag: ${mostUsedTag.name}`);
+      logger.info(`Updated tag statistics, most used tag: ${most_used_tag.name}`);
     } catch (error) {
       logger.error('Error updating tag statistics:', error);
     }

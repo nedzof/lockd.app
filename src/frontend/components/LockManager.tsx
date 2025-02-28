@@ -6,7 +6,7 @@ import { Lock, LockStatus } from '../types';
 import { WalletError } from '../../shared/utils/errors';
 
 interface LockManagerProps {
-  onSuccess?: (txId: string) => void;
+  onSuccess?: (tx_id: string) => void;
   onError?: (error: Error) => void;
 }
 
@@ -51,13 +51,13 @@ export const LockManager: React.FC<LockManagerProps> = ({ onSuccess, onError }) 
       setLoading(true);
       setError(null);
 
-      const txId = await createLock({
+      const tx_id = await createLock({
         recipientAddress,
         amount: parseInt(amount),
-        lockUntilHeight: parseInt(lockHeight)
+        lock_until_height: parseInt(lockHeight)
       });
 
-      onSuccess?.(txId);
+      onSuccess?.(tx_id);
       await loadLocks();
       
       // Reset form
@@ -83,8 +83,8 @@ export const LockManager: React.FC<LockManagerProps> = ({ onSuccess, onError }) 
       setLoading(true);
       setError(null);
 
-      const txId = await unlock(lockId);
-      onSuccess?.(txId);
+      const tx_id = await unlock(lockId);
+      onSuccess?.(tx_id);
       await loadLocks();
     } catch (err) {
       const errorMessage = err instanceof WalletError ? err.message : 'Failed to unlock';
@@ -149,10 +149,10 @@ export const LockManager: React.FC<LockManagerProps> = ({ onSuccess, onError }) 
         {locks.map((lock) => (
           <div key={lock.id} className="lock-item">
             <div className="lock-info">
-              <p>TxID: {lock.txId}</p>
+              <p>tx_id: {lock.tx_id}</p>
               <p>Amount: {lock.amount} satoshis</p>
               <p>Status: {lock.status}</p>
-              <p>Locked Until: Block {lock.lockUntilHeight}</p>
+              <p>Locked Until: Block {lock.lock_until_height}</p>
             </div>
             {lock.status === LockStatus.CONFIRMED && (
               <button

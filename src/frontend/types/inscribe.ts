@@ -11,13 +11,13 @@ export type MimeTypes =
 
 export interface InscribeRequest {
   address: string;
-  base64Data: string;
-  mimeType: MimeTypes;
+  base64_data: string;
+  mime_type: MimeTypes;
   map?: Record<string, string>;
   satoshis?: number;
 }
 
 export interface SendResponse {
-  txid: string;
+  tx_id: string;
   rawtx: string;
 } 

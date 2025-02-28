@@ -6,7 +6,7 @@ import { formatBSV } from '../utils/formatBSV';
 
 interface PostProps {
   transaction: HODLTransaction;
-  postTxid?: string;
+  posttx_id?: string;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
@@ -28,7 +28,7 @@ const timeSincePost = (transaction: HODLTransaction) => {
   return `${Math.floor(months / 12)}y`;
 };
 
-export default function PostComponent({ transaction, postTxid }: PostProps) {
+export default function PostComponent({ transaction, posttx_id }: PostProps) {
   const [totalLockedAmount, setTotalLockedAmount] = React.useState(0);
 
   // Determine if this is a vote post with actual vote options
@@ -39,7 +39,7 @@ export default function PostComponent({ transaction, postTxid }: PostProps) {
   }, [transaction]);
 
   React.useEffect(() => {
-    console.log('PostComponent rendered with txid:', transaction.txid);
+    console.log('PostComponent rendered with tx_id:', transaction.tx_id);
     console.log('Transaction type:', transaction.content_type);
     console.log('Transaction is_vote:', transaction.is_vote);
     console.log('Transaction has vote options:', transaction.vote_options?.length > 0);
@@ -77,7 +77,7 @@ export default function PostComponent({ transaction, postTxid }: PostProps) {
           )}
           
           <a
-            href={`https://whatsonchain.com/tx/${transaction.txid}`}
+            href={`https://whatsonchain.com/tx/${transaction.tx_id}`}
             target="_blank"
             rel="noopener noreferrer"
             className="ml-2 text-gray-500 hover:text-orange-500 dark:text-gray-400 dark:hover:text-orange-400"

@@ -11,22 +11,22 @@ import { createPortal } from 'react-dom';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 interface LockLikeInteractionProps {
-  postTxid?: string;
-  replyTxid?: string;
+  posttx_id?: string;
+  replytx_id?: string;
   postLockLike: (
-    txid: string,
+    tx_id: string,
     amount: number,
     nLockTime: number,
     handle: string,
-    postTxid?: string,
-    replyTxid?: string
+    posttx_id?: string,
+    replytx_id?: string
   ) => Promise<LockLike>;
 }
 
 const SATS_PER_BSV = 100000000;
 const MIN_SATS = 1;
 
-export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike }: LockLikeInteractionProps) {
+export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLike }: LockLikeInteractionProps) {
   const { wallet, connect, isConnected, isWalletDetected, balance, refreshBalance } = useWallet();
   const [loading, setLoading] = React.useState(false);
   const [showInput, setShowInput] = React.useState(false);
@@ -168,11 +168,11 @@ export default function LockLikeInteraction({ postTxid, replyTxid, postLockLike 
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          post_id: postTxid || replyTxid,
+          post_id: posttx_id || replytx_id,
           author_address: addresses.identityAddress,
           amount: parsedAmount * SATS_PER_BSV,
           lock_duration: nLockTime,
-          txid: lockResponse.txid,
+          tx_id: lockResponse.tx_id,
         }),
       });
 

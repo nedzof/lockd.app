@@ -39,7 +39,7 @@ async function main() {
       const imageDataType = post.raw_image_data ? typeof post.raw_image_data : 'null';
       const isBuffer = post.raw_image_data ? Buffer.isBuffer(post.raw_image_data) : false;
       
-      logger.info(`Post ${post.id} (${post.txid}):`, {
+      logger.info(`Post ${post.id} (${post.tx_id}):`, {
         media_type: post.media_type,
         image_data_length: imageDataLength,
         image_data_type: imageDataType,

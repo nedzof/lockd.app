@@ -87,7 +87,7 @@ function checkImages() {
                                 }
                             },
                             select: {
-                                txid: true,
+                                tx_id: true,
                                 media_type: true,
                                 image_format: true,
                                 image_source: true,

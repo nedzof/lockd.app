@@ -50,7 +50,7 @@ export interface Database {
       };
       LockLike: {
         Row: {
-          txid: string;
+          tx_id: string;
           amount: number;
           handle_id: string;
           locked_until: number;
@@ -58,7 +58,7 @@ export interface Database {
           post_id: string;
         };
         Insert: {
-          txid: string;
+          tx_id: string;
           amount: number;
           handle_id: string;
           locked_until?: number;
@@ -66,7 +66,7 @@ export interface Database {
           post_id: string;
         };
         Update: {
-          txid?: string;
+          tx_id?: string;
           amount?: number;
           handle_id?: string;
           locked_until?: number;

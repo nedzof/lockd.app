@@ -14,7 +14,7 @@ import { getBsvAddress } from '../utils/walletConnectionHelpers';
 const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:3003';
 
 // Base interfaces
-export interface VoteOption {
+export interface vote_option {
     text: string;
     lockAmount: number;
     lockDuration: number;
@@ -25,10 +25,10 @@ export interface VoteOption {
 export interface VoteData {
     isVoteQuestion: boolean;
     question?: string;
-    options?: VoteOption[];
+    options?: vote_option[];
     totalOptions?: number;
     optionsHash?: string;
-    selectedOption?: VoteOption;
+    selectedOption?: vote_option;
 }
 
 export interface ImageData {
@@ -47,7 +47,7 @@ export interface ImageData {
 // Database-aligned interfaces
 export interface DbPost {
     id: string;
-    txid: string;
+    tx_id: string;
     postId: string;
     content: string;
     author_address: string;
@@ -65,12 +65,12 @@ export interface DbPost {
     image_format?: string;
     image_source?: string;
     is_vote: boolean;
-    vote_options?: DbVoteOption[];
+    vote_options?: Dbvote_option[];
 }
 
-export interface DbVoteOption {
+export interface Dbvote_option {
     id: string;
-    txid: string;
+    tx_id: string;
     content: string;
     author_address: string;
     created_at: Date;
@@ -104,7 +104,7 @@ export interface PostMetadata {
             lockAmount: number;
             lockDuration: number;
             optionIndex: number;
-            unlockHeight?: number;
+            unlock_height?: number;
             currentHeight?: number;
             lockPercentage?: number;
             feeSatoshis?: number;
@@ -133,10 +133,10 @@ export interface PostMetadata {
 }
 
 // Helper function to convert PostMetadata to database Post object
-export function createDbPost(metadata: PostMetadata, txid: string): DbPost {
+export function createDbPost(metadata: PostMetadata, tx_id: string): DbPost {
     const post: DbPost = {
         id: metadata.postId,
-        txid,
+        tx_id,
         postId: metadata.postId,
         content: metadata.content,
         author_address: '', // This will be set by the caller
@@ -179,15 +179,15 @@ export function createDbPost(metadata: PostMetadata, txid: string): DbPost {
     return post;
 }
 
-// Helper function to convert PostMetadata to database VoteOption objects
-export function createDbVoteOptions(metadata: PostMetadata, post_txid: string): DbVoteOption[] {
+// Helper function to convert PostMetadata to database vote_option objects
+export function createDbvote_options(metadata: PostMetadata, post_tx_id: string): Dbvote_option[] {
     if (!metadata.vote?.options) {
         return [];
     }
 
     return metadata.vote.options.map((option, index) => ({
         id: `${metadata.postId}-option-${index}`,
-        txid: '', // This will be set when the transaction is created
+        tx_id: '', // This will be set when the transaction is created
         content: option.text,
         author_address: '', // This will be set by the caller
         created_at: new Date(metadata.timestamp),
@@ -351,7 +351,7 @@ async function createImageComponent(
 // Create vote question component
 async function createVoteQuestionComponent(
     question: string,
-    options: VoteOption[],
+    options: vote_option[],
     postId: string,
     sequence: number,
     parentSequence: number,
@@ -387,8 +387,8 @@ async function createVoteQuestionComponent(
 }
 
 // Create vote option component
-async function createVoteOptionComponent(
-    option: VoteOption,
+async function createvote_optionComponent(
+    option: vote_option,
     postId: string,
     sequence: number,
     parentSequence: number,
@@ -422,7 +422,7 @@ async function createVoteOptionComponent(
 }
 
 // Helper function to calculate output satoshis
-async function calculateOutputSatoshis(contentSize: number, isVoteOption: boolean = false): Promise<number> {
+async function calculateOutputSatoshis(contentSize: number, isvote_option: boolean = false): Promise<number> {
     // Get current fee rate from WhatsOnChain
     const feeRate = await getFeeRate();
     console.log(`Current fee rate: ${feeRate} sat/vbyte`);
@@ -441,7 +441,7 @@ async function calculateOutputSatoshis(contentSize: number, isVoteOption: boolea
     
     // For vote options, ensure we have enough satoshis for the lock amount
     // This ensures each vote option has its own UTXO with sufficient value
-    if (isVoteOption) {
+    if (isvote_option) {
         // For vote options, use a more aggressive calculation
         // Especially for short content
         
@@ -455,13 +455,13 @@ async function calculateOutputSatoshis(contentSize: number, isVoteOption: boolea
         console.log(`Fee-based value (calculatedFee * ${feeMultiplier}): ${feeBasedValue}`);
         
         // Ensure we have a good minimum value that varies by content
-        const recommendedVoteOptionSats = Math.max(baseValue, feeBasedValue);
+        const recommendedvote_optionSats = Math.max(baseValue, feeBasedValue);
         
-        console.log(`Final vote option satoshis: ${recommendedVoteOptionSats}`);
+        console.log(`Final vote option satoshis: ${recommendedvote_optionSats}`);
         
         // Force the value to be different for each option by adding the content length
         // This ensures even identical options have slightly different values
-        return recommendedVoteOptionSats + contentSize;
+        return recommendedvote_optionSats + contentSize;
     }
     
     // For regular content, ensure minimum dust limit
@@ -623,10 +623,10 @@ export const createPost = async (
     imageData?: string | File,
     imageMimeType?: string,
     isVotePost: boolean = false,
-    voteOptions: string[] = []
+    vote_options: string[] = []
 ): Promise<Post> => {
     console.log('Creating post with wallet:', wallet ? 'Wallet provided' : 'No wallet');
-    console.log('Is vote post:', isVotePost, 'Vote options:', voteOptions);
+    console.log('Is vote post:', isVotePost, 'Vote options:', vote_options);
   
     if (!wallet) {
         console.error('No wallet provided to createPost');
@@ -809,11 +809,11 @@ export const createPost = async (
         }
 
         // Handle vote post
-        if (isVotePost && voteOptions.length >= 2) {
-            console.log('Creating vote post with options:', voteOptions);
+        if (isVotePost && vote_options.length >= 2) {
+            console.log('Creating vote post with options:', vote_options);
             
             // Filter out empty options
-            const validOptions = voteOptions.filter(opt => opt.trim() !== '');
+            const validOptions = vote_options.filter(opt => opt.trim() !== '');
             
             if (validOptions.length < 2) {
                 throw new Error('Vote posts require at least 2 valid options');
@@ -824,7 +824,7 @@ export const createPost = async (
             console.log('Current block height:', currentBlockHeight);
             
             // Create vote options objects
-            const voteOptionObjects: VoteOption[] = await Promise.all(
+            const vote_optionObjects: vote_option[] = await Promise.all(
                 validOptions.map(async (text, index) => ({
                     text,
                     lockAmount: 1000, // Base lock amount in satoshis
@@ -838,16 +838,16 @@ export const createPost = async (
             metadata.vote = {
                 isVoteQuestion: true,
                 question: content,
-                options: voteOptionObjects,
-                totalOptions: voteOptionObjects.length,
-                optionsHash: await hashContent(JSON.stringify(voteOptionObjects))
+                options: vote_optionObjects,
+                totalOptions: vote_optionObjects.length,
+                optionsHash: await hashContent(JSON.stringify(vote_optionObjects))
             };
             
             // Create main vote question component
             console.log('Creating vote question component...');
             const voteQuestionComponent = await createVoteQuestionComponent(
                 content,
-                voteOptionObjects,
+                vote_optionObjects,
                 postId,
                 sequence.next(),
                 metadata.sequence,
@@ -857,16 +857,16 @@ export const createPost = async (
             
             // Create individual components for each vote option
             // Each with its own transaction output for easy parsing
-            for (const option of voteOptionObjects) {
+            for (const option of vote_optionObjects) {
                 console.log(`Creating vote option component for "${option.text}"...`);
-                const voteOptionComponent = await createVoteOptionComponent(
+                const vote_optionComponent = await createvote_optionComponent(
                     option,
                     postId,
                     sequence.next(),
                     metadata.sequence,
                     bsvAddress
                 );
-                components.push(voteOptionComponent);
+                components.push(vote_optionComponent);
             }
             
             console.log(`Created ${components.length} components for vote post`);
@@ -888,14 +888,14 @@ export const createPost = async (
         const response = await wallet.inscribe(components);
         console.log('Wallet inscription response:', response);
         
-        const txid = response.txid || response.id;
-        if (!txid) {
+        const tx_id = response.tx_id || response.id;
+        if (!tx_id) {
             throw new Error('Failed to create inscription - no transaction ID returned');
         }
-        console.log('Inscription successful with txid:', txid);
+        console.log('Inscription successful with tx_id:', tx_id);
 
         // Create post in database
-        const dbPost = createDbPost(metadata, txid);
+        const dbPost = createDbPost(metadata, tx_id);
         dbPost.author_address = bsvAddress;
         
         // Add vote options if this is a vote post
@@ -1070,11 +1070,11 @@ interface PostCreationData {
     isLocked: boolean;
     lockDuration?: number;
     lockAmount?: number;
-    unlockHeight?: number;
+    unlock_height?: number;
 }
 
 interface Post extends PostCreationData {
-    txid: string;
+    tx_id: string;
     created_at: string;
 }
 

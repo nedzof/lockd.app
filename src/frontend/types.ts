@@ -4,8 +4,8 @@ export interface LockLike {
   amount: number;
   handle: string;
   lockPeriod: number;
-  createdAt: Date;
-  updatedAt: Date;
+  created_at: Date;
+  updated_at: Date;
 }
 
 export const DEFAULT_LOCKLIKE_AMOUNT = 0.001; // Default amount in BSV
@@ -22,12 +22,12 @@ export interface Post {
   format: string;
   fileUrl: string;
   thumbnailUrl: string;
-  txId: string;
+  tx_id: string;
   locks: number;
   status: 'minted';
   tags: string[];
-  createdAt: Date;
-  updatedAt: Date;
+  created_at: Date;
+  updated_at: Date;
   totalLocked: number;
   threshold: number;
   isTop10Percent: boolean;

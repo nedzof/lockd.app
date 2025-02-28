@@ -30,7 +30,7 @@ const TestApiComponent: React.FC = () => {
             contentLength: data.posts[0].content ? data.posts[0].content.length : 0,
             contentType: typeof data.posts[0].content,
             isVote: data.posts[0].is_vote,
-            hasVoteOptions: data.posts[0].vote_options && data.posts[0].vote_options.length > 0
+            hasvote_options: data.posts[0].vote_options && data.posts[0].vote_options.length > 0
           });
         }
         

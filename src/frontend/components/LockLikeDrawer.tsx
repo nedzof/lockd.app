@@ -57,7 +57,7 @@ export default function LockLikeDrawer({ transaction }: LockLikeDrawerProps) {
                 .slice()
                 .sort((a, b) => b.amount - a.amount)
                 .map((locklike) => (
-                  <div key={locklike.txid} className="mb-4 last:mb-0">
+                  <div key={locklike.tx_id} className="mb-4 last:mb-0">
                     <div className="flex items-center">
                       <Link to={`/${locklike.handle_id}`} className="flex items-center">
                         <img
@@ -87,7 +87,7 @@ export default function LockLikeDrawer({ transaction }: LockLikeDrawerProps) {
                         </div>
                       </div>
                       <Link
-                        to={`https://whatsonchain.com/tx/${locklike.txid}`}
+                        to={`https://whatsonchain.com/tx/${locklike.tx_id}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-gray-500 hover:text-orange-500 dark:text-gray-400 dark:hover:text-orange-400"

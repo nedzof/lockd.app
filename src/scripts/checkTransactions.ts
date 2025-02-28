@@ -17,7 +17,7 @@ async function main() {
     try {
         const posts = await prisma.post.findMany({
             select: {
-                txid: true,
+                tx_id: true,
                 content: true,
                 author_address: true,
                 media_type: true,
@@ -38,7 +38,7 @@ async function main() {
         console.log('Found posts:', posts.length);
         posts.forEach(post => {
             console.log('\nPost:', {
-                txid: post.txid,
+                tx_id: post.tx_id,
                 content: post.content?.substring(0, 100) + '...',
                 author_address: post.author_address,
                 media_type: post.media_type,

@@ -30,9 +30,9 @@ export class Scanner {
     }
 
     private async handleTransaction(tx: any): Promise<void> {
-        // Try different ways to get the txid
-        const txid = tx?.transaction?.hash || tx?.hash || tx?.id || tx?.txid;
-        if (!txid) {
+        // Try different ways to get the tx_id
+        const tx_id = tx?.transaction?.hash || tx?.hash || tx?.id || tx?.tx_id;
+        if (!tx_id) {
             return;
         }
 
@@ -40,39 +40,39 @@ export class Scanner {
 
         // Clear transaction detection log
         logger.info('🔍 TRANSACTION DETECTED', {
-            txid,
+            tx_id,
             block,
             type: 'incoming'
         });
 
         // Process all transactions
         try {
-            await this.parser.parseTransaction(txid);
+            await this.parser.parseTransaction(tx_id);
         } catch (error) {
             // Check if this is a prepared statement error
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
             if (errorMessage.includes('prepared statement') || errorMessage.includes('P2010')) {
                 logger.warn('⚠️ Prepared statement error, will retry later', {
-                    txid,
+                    tx_id,
                     block
                 });
                 
-                // For target txids, retry with a delay
+                // For target tx_ids, retry with a delay
                 setTimeout(async () => {
                     try {
-                        logger.info('🔄 Retrying transaction', { txid });
-                        await this.parser.parseTransaction(txid);
-                        logger.info('✅ Successfully processed transaction on retry', { txid });
+                        logger.info('🔄 Retrying transaction', { tx_id });
+                        await this.parser.parseTransaction(tx_id);
+                        logger.info('✅ Successfully processed transaction on retry', { tx_id });
                     } catch (retryError) {
                         logger.error('❌ Failed to process transaction on retry', {
-                            txid,
+                            tx_id,
                             error: retryError instanceof Error ? retryError.message : 'Unknown error'
                         });
                     }
                 }, 30000); // Retry after 30 seconds
             } else {
                 logger.error('❌ Error processing transaction', {
-                    txid,
+                    tx_id,
                     block,
                     error: errorMessage
                 });

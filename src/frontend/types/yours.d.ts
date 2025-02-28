@@ -24,20 +24,20 @@ declare module 'yours-wallet-provider' {
 
   export interface InscriptionParams {
     address: string;
-    base64Data: string;
-    mimeType: string;
+    base64_data: string;
+    mime_type: string;
     map?: MetadataMap;
     satoshis?: number;
   }
 
   export interface LockParams {
     address: string;
-    blockHeight: number;
+    block_height: number;
     sats: number;
   }
 
   export interface SendResponse {
-    txid: string;
+    tx_id: string;
     rawtx: string;
   }
 
@@ -55,7 +55,7 @@ declare module 'yours-wallet-provider' {
     getPaymentUtxos: () => Promise<Array<{
       satoshis: number;
       script: string;
-      txid: string;
+      tx_id: string;
       vout: number;
     }>>;
   }

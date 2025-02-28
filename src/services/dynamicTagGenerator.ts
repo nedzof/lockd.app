@@ -228,8 +228,8 @@ Streaming media competition
             name,
             type: 'current_event',
             usageCount: 1,
-            createdAt: new Date(),
-            updatedAt: new Date()
+            created_at: new Date(),
+            updated_at: new Date()
           })),
           skipDuplicates: true
         });
@@ -241,7 +241,7 @@ Streaming media competition
           where: { name: tag },
           data: { 
             usageCount: { increment: 1 },
-            updatedAt: new Date()
+            updated_at: new Date()
           }
         });
       }

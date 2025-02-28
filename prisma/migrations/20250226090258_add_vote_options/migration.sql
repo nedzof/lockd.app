@@ -10,7 +10,7 @@
 
 */
 -- DropIndex
-DROP INDEX "LockLike_txid_idx";
+DROP INDEX "LockLike_tx_id_idx";
 
 -- DropIndex
 DROP INDEX "Post_block_height_idx";
@@ -46,7 +46,7 @@ CREATE INDEX "LockLike_vote_option_id_idx" ON "LockLike"("vote_option_id");
 CREATE INDEX "Post_tags_idx" ON "Post"("tags");
 
 -- CreateIndex
-CREATE INDEX "VoteOption_created_at_idx" ON "VoteOption"("created_at");
+CREATE INDEX "vote_option_created_at_idx" ON "vote_option"("created_at");
 
 -- AddForeignKey
-ALTER TABLE "LockLike" ADD CONSTRAINT "LockLike_vote_option_id_fkey" FOREIGN KEY ("vote_option_id") REFERENCES "VoteOption"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "LockLike" ADD CONSTRAINT "LockLike_vote_option_id_fkey" FOREIGN KEY ("vote_option_id") REFERENCES "vote_option"("id") ON DELETE CASCADE ON UPDATE CASCADE;

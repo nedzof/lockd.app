@@ -1,9 +1,9 @@
 /**
  * Fetches transaction data from WhatsOnChain API
  */
-export async function fetchTransactionData(txid: string): Promise<any> {
+export async function fetchTransactionData(tx_id: string): Promise<any> {
     try {
-        const response = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`);
+        const response = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${tx_id}/hex`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }

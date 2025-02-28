@@ -9,8 +9,8 @@ async function testGetTransaction() {
     await dbClient.connect();
     
     // Test with a sample transaction ID
-    const txid = '1b446b7fe364a132cb7b497b9fe828f6cb1c2fd115d5c9abf15a813c4e9fd183';
-    const transaction = await dbClient.getTransaction(txid);
+    const tx_id = '1b446b7fe364a132cb7b497b9fe828f6cb1c2fd115d5c9abf15a813c4e9fd183';
+    const transaction = await dbClient.getTransaction(tx_id);
     
     if (transaction) {
       logger.info('Transaction found:', transaction);

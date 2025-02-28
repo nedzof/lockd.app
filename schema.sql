@@ -8,8 +8,8 @@ CREATE TABLE IF NOT EXISTS "Post" (
     "timestamp" TIMESTAMP NOT NULL,
     "sequence" INTEGER NOT NULL,
     "parentSequence" INTEGER NOT NULL,
-    "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP NOT NULL
+    "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS "VoteQuestion" (
@@ -19,20 +19,20 @@ CREATE TABLE IF NOT EXISTS "VoteQuestion" (
     "totalOptions" INTEGER NOT NULL,
     "optionsHash" TEXT NOT NULL,
     "protocol" TEXT NOT NULL DEFAULT 'MAP',
-    "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP NOT NULL,
+    "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP NOT NULL,
     FOREIGN KEY ("postId") REFERENCES "Post"("postId") ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS "VoteOption" (
+CREATE TABLE IF NOT EXISTS "vote_option" (
     "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     "postId" TEXT NOT NULL,
     "voteQuestionId" UUID NOT NULL,
     "index" INTEGER NOT NULL,
     "content" TEXT NOT NULL,
     "protocol" TEXT NOT NULL DEFAULT 'MAP',
-    "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP NOT NULL,
+    "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP NOT NULL,
     UNIQUE("voteQuestionId", "index"),
     FOREIGN KEY ("postId") REFERENCES "Post"("postId") ON DELETE CASCADE,
     FOREIGN KEY ("voteQuestionId") REFERENCES "VoteQuestion"("id") ON DELETE CASCADE
@@ -40,32 +40,32 @@ CREATE TABLE IF NOT EXISTS "VoteOption" (
 
 CREATE TABLE IF NOT EXISTS "LockLike" (
     "id" TEXT PRIMARY KEY,
-    "txid" TEXT UNIQUE NOT NULL,
+    "tx_id" TEXT UNIQUE NOT NULL,
     "amount" INTEGER NOT NULL,
     "lockPeriod" INTEGER NOT NULL,
     "isProcessed" BOOLEAN NOT NULL DEFAULT FALSE,
-    "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP NOT NULL,
+    "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP NOT NULL,
     "postId" UUID,
-    "voteOptionId" UUID,
+    "vote_option_id" UUID,
     FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE SET NULL,
-    FOREIGN KEY ("voteOptionId") REFERENCES "VoteOption"("id") ON DELETE SET NULL
+    FOREIGN KEY ("vote_option_id") REFERENCES "vote_option"("id") ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS "ProcessedTransaction" (
     "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "txid" TEXT UNIQUE NOT NULL,
+    "tx_id" TEXT UNIQUE NOT NULL,
     "timestamp" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create indexes
 CREATE INDEX IF NOT EXISTS "Post_postId_idx" ON "Post"("postId");
 CREATE INDEX IF NOT EXISTS "VoteQuestion_postId_idx" ON "VoteQuestion"("postId");
-CREATE INDEX IF NOT EXISTS "VoteOption_voteQuestionId_idx" ON "VoteOption"("voteQuestionId");
-CREATE INDEX IF NOT EXISTS "VoteOption_postId_idx" ON "VoteOption"("postId");
-CREATE INDEX IF NOT EXISTS "LockLike_createdAt_idx" ON "LockLike"("createdAt");
+CREATE INDEX IF NOT EXISTS "vote_option_voteQuestionId_idx" ON "vote_option"("voteQuestionId");
+CREATE INDEX IF NOT EXISTS "vote_option_postId_idx" ON "vote_option"("postId");
+CREATE INDEX IF NOT EXISTS "LockLike_created_at_idx" ON "LockLike"("created_at");
 CREATE INDEX IF NOT EXISTS "LockLike_postId_idx" ON "LockLike"("postId");
-CREATE INDEX IF NOT EXISTS "LockLike_voteOptionId_idx" ON "LockLike"("voteOptionId");
+CREATE INDEX IF NOT EXISTS "LockLike_vote_option_id_idx" ON "LockLike"("vote_option_id");
 CREATE INDEX IF NOT EXISTS "LockLike_isProcessed_idx" ON "LockLike"("isProcessed");
-CREATE INDEX IF NOT EXISTS "ProcessedTransaction_txid_idx" ON "ProcessedTransaction"("txid");
+CREATE INDEX IF NOT EXISTS "ProcessedTransaction_tx_id_idx" ON "ProcessedTransaction"("tx_id");
 CREATE INDEX IF NOT EXISTS "ProcessedTransaction_timestamp_idx" ON "ProcessedTransaction"("timestamp");

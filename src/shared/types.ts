@@ -12,7 +12,7 @@ export interface ParsedContent {
   data: any;
 }
 
-export interface VoteOption {
+export interface vote_option {
   id: string;
   post_id: string;
   content: string;
@@ -36,12 +36,12 @@ export interface VoteQuestion {
 export interface Vote {
   options_hash: string;
   total_options: number;
-  options: VoteOption[];
+  options: vote_option[];
 }
 
 export interface LockLike {
   id?: string;
-  txid?: string;
+  tx_id?: string;
   lock_amount: number;
   lock_duration: number;
   created_at?: Date;
@@ -62,14 +62,14 @@ export interface Post {
     protocol: string;
     sender_address?: string | null;
     block_height?: number | null;
-    txid?: string | null;
+    tx_id?: string | null;
     image?: Buffer | null;
     lock_likes?: LockLike[];
-    vote_options?: VoteOption[];
+    vote_options?: vote_option[];
     vote_question?: VoteQuestion | null;
 }
 
-export interface PostWithVoteOptions extends Post {
+export interface PostWithvote_options extends Post {
     vote_question: {
         id: string;
         post_id: string;
@@ -91,7 +91,7 @@ export interface PostWithVoteOptions extends Post {
     }[];
     lock_likes: {
         id: string;
-        txid: string;
+        tx_id: string;
         lock_amount: number;
         lock_duration: number;
         created_at: Date;
@@ -102,14 +102,14 @@ export interface PostWithVoteOptions extends Post {
 
 export interface ProcessedTransaction {
     id?: string;
-    txid: string;  // Only required field
+    tx_id: string;  // Only required field
     blockHeight?: number;  // Maps to block_height in database
     blockTime?: number;    // Maps to block_time in database (BigInt in DB, Number in TS)
     type?: string;
     protocol?: string;
     metadata?: Record<string, any>;
-    createdAt?: Date;      // Maps to created_at in database
-    updatedAt?: Date;      // Maps to updated_at in database
+    created_at?: Date;      // Maps to created_at in database
+    updated_at?: Date;      // Maps to updated_at in database
 }
 
 export interface JungleBusTransaction {
@@ -154,7 +154,7 @@ export interface JungleBusBlockHeader {
 }
 
 export interface ParsedTransaction {
-    txid: string;
+    tx_id: string;
     type: string;
     protocol: string;
     content?: any;
@@ -178,11 +178,11 @@ export interface ParsedTransaction {
     parent_sequence?: number;
     lock_like?: LockLike;
     vote_question?: VoteQuestion;
-    vote_option?: VoteOption;
+    vote_option?: vote_option;
 }
 
 export interface DecodedTransaction {
-    txid: string;
+    tx_id: string;
     inputs: {
         input_index: number;
         input_script: string;
@@ -286,7 +286,7 @@ export interface JungleBusResponse {
 }
 
 export interface TransactionTestCase {
-    txid: string;
+    tx_id: string;
     description?: string;
     expected_post_id?: string;
     expected_sender_address?: string;
@@ -304,7 +304,7 @@ export interface VerificationResults {
     has_vote_question: boolean;
     vote_options_count: number;
     has_lock_likes: boolean;
-    txid: string;
+    tx_id: string;
     post_id: string;
     vote_question?: {
         question: string;

@@ -19,9 +19,9 @@ export function useLockup() {
       setError(null);
 
       const lockupService = new LockupService(wallet);
-      const txId = await lockupService.createLock(params);
+      const tx_id = await lockupService.createLock(params);
 
-      return txId;
+      return tx_id;
     } catch (err) {
       const errorMessage = err instanceof WalletError ? err.message : 'Failed to create lock';
       setError(errorMessage);
@@ -63,9 +63,9 @@ export function useLockup() {
       setError(null);
 
       const lockupService = new LockupService(wallet);
-      const txId = await lockupService.unlock(lockId);
+      const tx_id = await lockupService.unlock(lockId);
 
-      return txId;
+      return tx_id;
     } catch (err) {
       const errorMessage = err instanceof WalletError ? err.message : 'Failed to unlock';
       setError(errorMessage);

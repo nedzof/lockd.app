@@ -128,7 +128,7 @@ export const incrementTagUsage = async (req: Request, res: Response) => {
         where: { id: tag.id },
         data: { 
           usageCount: { increment: 1 },
-          updatedAt: new Date()
+          updated_at: new Date()
         }
       });
       

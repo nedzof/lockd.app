@@ -100,7 +100,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                 <div>
                   <span className="font-medium">{getTypeLabel(tx.type)}</span>
                   <span className="text-sm text-gray-500 ml-2">
-                    {formatDate(tx.createdAt)}
+                    {formatDate(tx.created_at)}
                   </span>
                 </div>
                 <span className={`text-sm font-medium ${getStatusColor(tx.status)}`}>
@@ -113,7 +113,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                   Amount: {tx.amount} satoshis
                 </p>
                 <p className="text-sm text-gray-600 font-mono">
-                  TxID: {tx.txId.substring(0, 8)}...{tx.txId.substring(tx.txId.length - 8)}
+                  tx_id: {tx.tx_id.substring(0, 8)}...{tx.tx_id.substring(tx.tx_id.length - 8)}
                 </p>
               </div>
 

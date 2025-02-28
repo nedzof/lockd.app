@@ -16,7 +16,7 @@ type Post = Prisma.PostGetPayload<{
 async function testSimplePost() {
   console.log('\nTesting simple post creation...');
   const tx: JungleBusTransaction = {
-    txid: 'test_simple_post',
+    tx_id: 'test_simple_post',
     block_hash: 'test_block_hash',
     block_height: 1000,
     timestamp: '2025-02-16T05:37:14.259Z',
@@ -46,7 +46,7 @@ async function testSimplePost() {
 async function testVotePost() {
   console.log('\nTesting vote post creation...');
   const tx: JungleBusTransaction = {
-    txid: 'test_vote_post',
+    tx_id: 'test_vote_post',
     block_hash: 'test_block_hash',
     block_height: 1000,
     timestamp: '2025-02-16T05:37:14.259Z',
@@ -94,7 +94,7 @@ async function verifyDatabase() {
   // Check posts
   const posts = await prisma.post.findMany({
     where: {
-      txid: {
+      tx_id: {
         in: ['test_simple_post', 'test_vote_post']
       }
     },
@@ -106,7 +106,7 @@ async function verifyDatabase() {
   console.log('Found posts:', posts.length);
   posts.forEach((post: Post) => {
     console.log('\nPost:', {
-      txid: post.txid,
+      tx_id: post.tx_id,
       post_id: post.post_id,
       content: post.content,
       is_vote: post.is_vote,
@@ -119,13 +119,13 @@ async function verifyDatabase() {
   });
 
   // Check vote options
-  const voteOptions = await prisma.voteOption.findMany({
+  const vote_options = await prisma.vote_option.findMany({
     where: {
-      post_txid: 'test_vote_post'
+      post_tx_id: 'test_vote_post'
     }
   });
 
-  console.log('\nVote options:', voteOptions);
+  console.log('\nVote options:', vote_options);
 }
 
 async function runTests() {

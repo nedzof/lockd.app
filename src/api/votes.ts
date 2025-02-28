@@ -74,33 +74,33 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Get vote options for a specific post by post txid
-router.get('/:txid/options', async (req: Request, res: Response) => {
+// Get vote options for a specific post by post tx_id
+router.get('/:tx_id/options', async (req: Request, res: Response) => {
   try {
-    const txid = req.params.txid;
-    console.log(`[API] Fetching vote options for txid: ${txid}`);
+    const tx_id = req.params.tx_id;
+    console.log(`[API] Fetching vote options for tx_id: ${tx_id}`);
     
-    // First find the post by txid
+    // First find the post by tx_id
     const post = await prisma.post.findUnique({
       where: {
-        txid: txid
+        tx_id: tx_id
       }
     });
 
-    console.log(`[API] Post found for txid ${txid}:`, post);
+    console.log(`[API] Post found for tx_id ${tx_id}:`, post);
 
     if (!post) {
-      console.log(`[API] Post not found for txid: ${txid}`);
+      console.log(`[API] Post not found for tx_id: ${tx_id}`);
       return res.status(404).json({ error: 'Post not found' });
     }
 
     // Check if this is a vote post
     if (!post.is_vote && (!post.metadata || post.metadata.content_type !== 'vote')) {
-      console.log(`[API] Post ${txid} is not a vote post. is_vote=${post.is_vote}, metadata=${JSON.stringify(post.metadata)}`);
+      console.log(`[API] Post ${tx_id} is not a vote post. is_vote=${post.is_vote}, metadata=${JSON.stringify(post.metadata)}`);
       
       // If it's not marked as a vote post but should be, update it
-      if (post.metadata && (post.metadata.voteOptions || post.metadata.content_type === 'vote' || post.metadata.isVote)) {
-        console.log(`[API] Updating post ${txid} to mark it as a vote post`);
+      if (post.metadata && (post.metadata.vote_options || post.metadata.content_type === 'vote' || post.metadata.isVote)) {
+        console.log(`[API] Updating post ${tx_id} to mark it as a vote post`);
         await prisma.post.update({
           where: { id: post.id },
           data: { 
@@ -118,7 +118,7 @@ router.get('/:txid/options', async (req: Request, res: Response) => {
     }
 
     // Get the vote options with their total locked amounts
-    const voteOptions = await prisma.voteOption.findMany({
+    const vote_options = await prisma.vote_option.findMany({
       where: {
         post_id: post.id
       },
@@ -127,20 +127,20 @@ router.get('/:txid/options', async (req: Request, res: Response) => {
       }
     });
 
-    console.log(`[API] Vote options found for post ${post.id}:`, voteOptions);
+    console.log(`[API] Vote options found for post ${post.id}:`, vote_options);
 
     // If no vote options found, create default ones
-    if (voteOptions.length === 0) {
+    if (vote_options.length === 0) {
       console.log(`[API] No vote options found for post ${post.id}, creating default options`);
       
       const defaultOptions = ['Yes', 'No', 'Maybe'];
       const createdOptions = [];
       
       for (let i = 0; i < defaultOptions.length; i++) {
-        const optionTxid = `${post.txid}-option-${i}`;
-        const newOption = await prisma.voteOption.create({
+        const optiontx_id = `${post.tx_id}-option-${i}`;
+        const newOption = await prisma.vote_option.create({
           data: {
-            txid: optionTxid,
+            tx_id: optiontx_id,
             content: defaultOptions[i],
             post_id: post.id,
             author_address: post.author_address || '',
@@ -155,7 +155,7 @@ router.get('/:txid/options', async (req: Request, res: Response) => {
       }
       
       // Calculate total locked amount for each option
-      const voteOptionsWithTotals = createdOptions.map(option => {
+      const vote_optionsWithTotals = createdOptions.map(option => {
         return {
           ...option,
           total_locked: 0,
@@ -163,7 +163,7 @@ router.get('/:txid/options', async (req: Request, res: Response) => {
         };
       });
       
-      console.log(`[API] Created default vote options for post ${post.id}:`, voteOptionsWithTotals);
+      console.log(`[API] Created default vote options for post ${post.id}:`, vote_optionsWithTotals);
       
       // Update the post to ensure it's marked as a vote post
       await prisma.post.update({
@@ -178,11 +178,11 @@ router.get('/:txid/options', async (req: Request, res: Response) => {
         }
       });
       
-      return res.json(voteOptionsWithTotals);
+      return res.json(vote_optionsWithTotals);
     }
 
     // Calculate total locked amount for each option
-    const voteOptionsWithTotals = voteOptions.map(option => {
+    const vote_optionsWithTotals = vote_options.map(option => {
       const totalLocked = option.lock_likes.reduce((sum, lock) => sum + lock.amount, 0);
       return {
         ...option,
@@ -191,8 +191,8 @@ router.get('/:txid/options', async (req: Request, res: Response) => {
       };
     });
 
-    console.log(`[API] Vote options with totals for post ${post.id}:`, voteOptionsWithTotals);
-    res.json(voteOptionsWithTotals);
+    console.log(`[API] Vote options with totals for post ${post.id}:`, vote_optionsWithTotals);
+    res.json(vote_optionsWithTotals);
   } catch (error: any) {
     logger.error('Error fetching vote options', {
       error: error.message,

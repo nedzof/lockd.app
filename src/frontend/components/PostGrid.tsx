@@ -5,12 +5,12 @@ import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
 import type { Post } from '../types';
 import { toast } from 'react-hot-toast';
-import VoteOptionLockInteraction from './VoteOptionLockInteraction';
+import vote_optionLockInteraction from './vote_optionLockInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
 
-interface VoteOption {
+interface vote_option {
   id: string;
-  txid: string;
+  tx_id: string;
   content: string;
   author_address?: string;
   created_at: string;
@@ -22,7 +22,7 @@ interface VoteOption {
 
 interface ExtendedPost {
   id: string;
-  txid: string;
+  tx_id: string;
   content: string;
   author_address?: string;
   media_type?: string;
@@ -36,7 +36,7 @@ interface ExtendedPost {
   is_locked: boolean;
   lock_duration?: number;
   is_vote: boolean;
-  vote_options: VoteOption[];
+  vote_options: vote_option[];
   imageUrl?: string;
   totalLocked?: number;
   media_url?: string;
@@ -198,7 +198,7 @@ const PostGrid: React.FC<PostGridProps> = ({
           content: data.posts[0].content,
           contentLength: data.posts[0].content ? data.posts[0].content.length : 0,
           isVote: data.posts[0].is_vote,
-          hasVoteOptions: data.posts[0].vote_options && data.posts[0].vote_options.length > 0
+          hasvote_options: data.posts[0].vote_options && data.posts[0].vote_options.length > 0
         });
       }
       
@@ -225,7 +225,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         if (post.is_vote && (!post.vote_options || post.vote_options.length === 0)) {
           console.log('VALIDATION: Post is a vote, fetching vote options:', post.id);
           // We'll fetch vote options after setting state
-          setTimeout(() => fetchVoteOptionsForPost(post), 0);
+          setTimeout(() => fetchvote_optionsForPost(post), 0);
         }
         
         return post;
@@ -320,22 +320,22 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
   }, [currentFilters, nextCursor, onStatsUpdate]);
 
-  const fetchVoteOptionsForPost = useCallback(async (post: any) => {
+  const fetchvote_optionsForPost = useCallback(async (post: any) => {
     try {
-      console.log(`Fetching vote options for post ${post.id} with txid ${post.txid}`);
-      const response = await fetch(`${API_URL}/api/vote-options/${post.txid}`);
+      console.log(`Fetching vote options for post ${post.id} with tx_id ${post.tx_id}`);
+      const response = await fetch(`${API_URL}/api/vote-options/${post.tx_id}`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch vote options: ${response.status}`);
       }
       
-      const voteOptions = await response.json();
-      console.log(`Retrieved ${voteOptions.length} vote options for post ${post.id}`, voteOptions);
+      const vote_options = await response.json();
+      console.log(`Retrieved ${vote_options.length} vote options for post ${post.id}`, vote_options);
       
       // Update the post with the vote options
       setSubmissions(prevSubmissions => 
         prevSubmissions.map(p => 
-          p.id === post.id ? { ...p, vote_options: voteOptions } : p
+          p.id === post.id ? { ...p, vote_options: vote_options } : p
         )
       );
     } catch (error) {
@@ -391,7 +391,7 @@ const PostGrid: React.FC<PostGridProps> = ({
       console.log('PostGrid component unmounting');
       isMounted.current = false;
     };
-  }, [fetchPosts, haveFiltersChanged, currentFilters, fetchVoteOptionsForPost]);
+  }, [fetchPosts, haveFiltersChanged, currentFilters, fetchvote_optionsForPost]);
 
   // Add a separate effect to force an initial fetch when the component mounts
   useEffect(() => {
@@ -420,7 +420,7 @@ const PostGrid: React.FC<PostGridProps> = ({
     };
   }, [submissions]);
 
-  const handleVoteOptionLock = async (optionId: string, amount: number, duration: number) => {
+  const handlevote_optionLock = async (optionId: string, amount: number, duration: number) => {
     if (!wallet.connected) {
       toast.error('Please connect your wallet first');
       return;
@@ -576,7 +576,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                       <FiBarChart2 className="mr-2" /> Vote Options
                     </h3>
                     <div className="space-y-3">
-                      {post.vote_options.map((option: VoteOption) => (
+                      {post.vote_options.map((option: vote_option) => (
                         <div key={option.id} className="bg-white/5 p-4 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
                           <p className="font-medium text-white">{option.content}</p>
                           <div className="mt-2 flex items-center justify-between text-sm text-gray-400">
@@ -588,9 +588,9 @@ const PostGrid: React.FC<PostGridProps> = ({
                             </span>
                           </div>
                           <div className="mt-3">
-                            <VoteOptionLockInteraction 
+                            <vote_optionLockInteraction 
                               optionId={option.id} 
-                              onLock={handleVoteOptionLock}
+                              onLock={handlevote_optionLock}
                               isLocking={isLocking}
                               connected={wallet.connected}
                             />

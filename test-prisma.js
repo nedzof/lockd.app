@@ -7,13 +7,13 @@ async function testPrismaQuery() {
     console.log('Testing Prisma query...');
     
     // Test with a sample transaction ID
-    const txid = '1b446b7fe364a132cb7b497b9fe828f6cb1c2fd115d5c9abf15a813c4e9fd183';
+    const tx_id = '1b446b7fe364a132cb7b497b9fe828f6cb1c2fd115d5c9abf15a813c4e9fd183';
     
     // Using the raw query with the corrected column names
     const [transaction] = await prisma.$queryRaw`
-      SELECT txid, type, protocol, "blockHeight", "blockTime", metadata
+      SELECT tx_id, type, protocol, "blockHeight", "blockTime", metadata
       FROM "ProcessedTransaction"
-      WHERE txid = ${txid}
+      WHERE tx_id = ${tx_id}
       LIMIT 1
     `;
     

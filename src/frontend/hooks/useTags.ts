@@ -8,7 +8,7 @@ export interface Tag {
   name: string;
   type?: string;
   usageCount?: number;
-  createdAt?: string;
+  created_at?: string;
 }
 
 export const useTags = () => {

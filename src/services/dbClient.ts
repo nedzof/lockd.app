@@ -1,7 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import { PrismaClient } from '@prisma/client';
 import type { Post } from '@prisma/client';
-import { ParsedTransaction, DbError, PostWithVoteOptions, ProcessedTxMetadata, ProcessedTransaction } from '../shared/types.js';
+import { ParsedTransaction, DbError, PostWithvote_options, ProcessedTxMetadata, ProcessedTransaction } from '../shared/types.js';
 import { logger } from '../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
@@ -130,7 +130,7 @@ export class DbClient {
     private async upsertPost(tx: ParsedTransaction, imageBuffer: Buffer | null = null): Promise<Post> {
         // Log the transaction data before preparing post data
         logger.debug(' DB: PREPARING POST DATA', {
-            txid: tx.txid,
+            tx_id: tx.tx_id,
             metadataKeys: Object.keys(tx.metadata || {}),
             hasImage: !!imageBuffer,
             imageSize: imageBuffer?.length || 0
@@ -138,10 +138,10 @@ export class DbClient {
         
         // Prepare the post data
         const postData: Prisma.PostCreateInput = {
-            txid: tx.txid,
+            tx_id: tx.tx_id,
             content: tx.metadata.content || '',
-            authorAddress: tx.metadata.sender_address || tx.metadata.authorAddress,
-            createdAt: this.createBlockTimeDate(tx.blockTime),
+            author_address: tx.metadata.sender_address || tx.metadata.author_address,
+            created_at: this.createBlockTimeDate(tx.blockTime),
             tags: tx.metadata.tags || [],
             isVote: tx.type === 'vote',
             isLocked: !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0 || !!tx.metadata.lockAmount && tx.metadata.lockAmount > 0,
@@ -150,9 +150,9 @@ export class DbClient {
         
         // Log the prepared post data
         logger.debug(' DB: POST DATA PREPARED', {
-            txid: tx.txid,
+            tx_id: tx.tx_id,
             postDataKeys: Object.keys(postData),
-            authorAddress: postData.authorAddress,
+            author_address: postData.author_address,
             isVote: postData.isVote,
             isLocked: postData.isLocked,
             hasMetadata: !!postData.metadata
@@ -167,14 +167,14 @@ export class DbClient {
         // Check if this is a reply to another post
         if (tx.metadata.reply_to || tx.metadata.replyTo) {
             logger.info(' DB: PROCESSING REPLY POST', { 
-                txid: tx.txid, 
+                tx_id: tx.tx_id, 
                 replyTo: tx.metadata.reply_to || tx.metadata.replyTo 
             });
             
             // Find the parent post
             const parentPost = await this.withFreshClient(async (client) => {
                 return client.post.findUnique({
-                    where: { txid: tx.metadata.reply_to || tx.metadata.replyTo }
+                    where: { tx_id: tx.metadata.reply_to || tx.metadata.replyTo }
                 });
             });
 
@@ -182,7 +182,7 @@ export class DbClient {
                 postData.parentId = parentPost.id;
             } else {
                 logger.warn(' DB: PARENT POST NOT FOUND', { 
-                    txid: tx.txid, 
+                    tx_id: tx.tx_id, 
                     replyTo: tx.metadata.reply_to || tx.metadata.replyTo 
                 });
             }
@@ -191,12 +191,12 @@ export class DbClient {
         return this.withFreshClient(async (client) => {
             // Check if post already exists
             const existingPost = await client.post.findUnique({
-                where: { txid: tx.txid }
+                where: { tx_id: tx.tx_id }
             });
 
             if (existingPost) {
                 logger.info(' DB: UPDATING EXISTING POST', { 
-                    txid: tx.txid, 
+                    tx_id: tx.tx_id, 
                     postId: existingPost.id 
                 });
                 
@@ -217,7 +217,7 @@ export class DbClient {
                 });
             } else {
                 logger.info(' DB: CREATING NEW POST', { 
-                    txid: tx.txid,
+                    tx_id: tx.tx_id,
                     isReply: !!postData.parentId
                 });
                 
@@ -227,7 +227,7 @@ export class DbClient {
         });
     }
 
-    private async processVoteOptions(postId: string, tx: ParsedTransaction): Promise<void> {
+    private async processvote_options(postId: string, tx: ParsedTransaction): Promise<void> {
         if (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options)) {
             return;
         }
@@ -242,22 +242,22 @@ export class DbClient {
             for (let i = 0; i < tx.metadata.vote_options.length; i++) {
                 const optionContent = tx.metadata.vote_options[i];
                 
-                // Generate a unique txid for each option by appending the index to the original txid
-                const optionTxid = `${tx.txid}-option-${i}`;
+                // Generate a unique tx_id for each option by appending the index to the original tx_id
+                const optiontx_id = `${tx.tx_id}-option-${i}`;
                 
                 // Check if this option already exists
-                const existingOption = await client.voteOption.findUnique({
-                    where: { txid: optionTxid }
+                const existingOption = await client.vote_option.findUnique({
+                    where: { tx_id: optiontx_id }
                 });
                 
                 if (!existingOption) {
                     // Create new vote option
-                    await client.voteOption.create({
+                    await client.vote_option.create({
                         data: {
-                            txid: optionTxid,
+                            tx_id: optiontx_id,
                             content: optionContent,
-                            authorAddress: tx.metadata.sender_address || tx.metadata.authorAddress,
-                            createdAt: this.createBlockTimeDate(tx.blockTime),
+                            author_address: tx.metadata.sender_address || tx.metadata.author_address,
+                            created_at: this.createBlockTimeDate(tx.blockTime),
                             tags: tx.metadata.tags || [],
                             postId: postId,
                             optionIndex: i
@@ -301,11 +301,11 @@ export class DbClient {
             ['post_id', 'postId'],
             ['lock_amount', 'lockAmount'],
             ['lock_duration', 'lockDuration'],
-            ['sender_address', 'authorAddress'],
-            ['author_address', 'authorAddress'],
-            ['created_at', 'createdAt'],
-            ['updated_at', 'updatedAt'],
-            ['vote_options', 'voteOptions'],
+            ['sender_address', 'author_address'],
+            ['author_address', 'author_address'],
+            ['created_at', 'created_at'],
+            ['updated_at', 'updated_at'],
+            ['vote_options', 'vote_options'],
             ['vote_question', 'voteQuestion'],
             ['content_type', 'contentType'],
             ['media_type', 'mediaType'],
@@ -348,14 +348,14 @@ export class DbClient {
     public async processTransaction(tx: ParsedTransaction): Promise<Post> {
         try {
             logger.info(' DB: SAVING TRANSACTION', {
-                txid: tx.txid,
+                tx_id: tx.tx_id,
                 type: tx.type,
                 metadataKeys: Object.keys(tx.metadata || {})
             });
             
             // Log the original metadata before normalization
             logger.debug(' DB: ORIGINAL METADATA', {
-                txid: tx.txid,
+                tx_id: tx.tx_id,
                 metadata: JSON.stringify(tx.metadata).substring(0, 500) // Limit string length
             });
             
@@ -364,7 +364,7 @@ export class DbClient {
             
             // Log the normalized metadata
             logger.debug(' DB: NORMALIZED METADATA', {
-                txid: tx.txid,
+                tx_id: tx.tx_id,
                 metadata: JSON.stringify(tx.metadata).substring(0, 500) // Limit string length
             });
 
@@ -373,7 +373,7 @@ export class DbClient {
                 // Check if transaction already exists
                 try {
                     const existingTx = await client.processedTransaction.findUnique({
-                        where: { txid: tx.txid }
+                        where: { tx_id: tx.tx_id }
                     });
 
                     if (!existingTx) {
@@ -381,7 +381,7 @@ export class DbClient {
                             // Create new processed transaction record with only essential fields
                             await client.processedTransaction.create({
                                 data: {
-                                    txid: tx.txid,
+                                    tx_id: tx.tx_id,
                                     type: tx.type,
                                     protocol: tx.protocol,
                                     metadata: tx.metadata || {}
@@ -390,12 +390,12 @@ export class DbClient {
                             });
                             
                             logger.info(' DB: TRANSACTION RECORD CREATED', {
-                                txid: tx.txid,
+                                tx_id: tx.tx_id,
                                 type: tx.type
                             });
                         } catch (error) {
                             logger.error(' DB: FAILED TO CREATE TRANSACTION RECORD', {
-                                txid: tx.txid,
+                                tx_id: tx.tx_id,
                                 error: error instanceof Error ? error.message : 'Unknown error',
                                 stack: error instanceof Error ? error.stack : undefined
                             });
@@ -406,7 +406,7 @@ export class DbClient {
                     }
                 } catch (error) {
                     logger.error(' DB: ERROR CHECKING FOR EXISTING TRANSACTION', {
-                        txid: tx.txid,
+                        tx_id: tx.tx_id,
                         error: error instanceof Error ? error.message : 'Unknown error'
                     });
                     // Continue processing even if this check fails
@@ -419,12 +419,12 @@ export class DbClient {
                 try {
                     imageBuffer = tx.metadata.image;
                     logger.info(' DB: IMAGE DATA RECEIVED', {
-                        txid: tx.txid,
+                        tx_id: tx.tx_id,
                         size: imageBuffer.length
                     });
                 } catch (error) {
                     logger.error(' DB: IMAGE PROCESSING FAILED', {
-                        txid: tx.txid
+                        tx_id: tx.tx_id
                     });
                 }
             }
@@ -435,7 +435,7 @@ export class DbClient {
             }
 
             logger.info(' DB: CREATING POST', {
-                txid: tx.txid,
+                tx_id: tx.tx_id,
                 type: tx.type,
                 hasImage: !!imageBuffer
             });
@@ -448,21 +448,21 @@ export class DbClient {
                     postId: post.id, 
                     optionCount: tx.metadata.vote_options.length 
                 });
-                await this.processVoteOptions(post.id, tx);
+                await this.processvote_options(post.id, tx);
             }
             // For vote posts, ensure they have vote options
             else if ((tx.type === 'vote' || post.isVote) && (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options) || tx.metadata.vote_options.length === 0)) {
                 logger.info(' DB: CREATING DEFAULT VOTE OPTIONS', { 
                     postId: post.id, 
-                    txid: tx.txid 
+                    tx_id: tx.tx_id 
                 });
                 
                 // Create default vote options
                 const defaultOptions = ['Yes', 'No', 'Maybe'];
-                tx.metadata.voteOptions = defaultOptions;
+                tx.metadata.vote_options = defaultOptions;
                 
                 // Process the default vote options
-                await this.processVoteOptions(post.id, tx);
+                await this.processvote_options(post.id, tx);
                 
                 // Update the post metadata to include vote options
                 await this.withFreshClient(async (client) => {
@@ -471,7 +471,7 @@ export class DbClient {
                         data: {
                             metadata: {
                                 ...(post.metadata as Record<string, any>),
-                                voteOptions: defaultOptions,
+                                vote_options: defaultOptions,
                                 contentType: 'vote'
                             }
                         }
@@ -479,9 +479,9 @@ export class DbClient {
                 });
             }
 
-            const action = post.createdAt === this.createBlockTimeDate(tx.blockTime) ? 'created' : 'updated';
+            const action = post.created_at === this.createBlockTimeDate(tx.blockTime) ? 'created' : 'updated';
             logger.info(` DB: POST ${action.toUpperCase()}`, {
-                txid: post.txid,
+                tx_id: post.tx_id,
                 postId: post.id,
                 type: tx.type,
                 isVote: post.isVote,
@@ -492,7 +492,7 @@ export class DbClient {
         } catch (error) {
             logger.error(' DB: TRANSACTION PROCESSING FAILED', {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                txid: tx.txid
+                tx_id: tx.tx_id
             });
             throw error;
         }
@@ -509,7 +509,7 @@ export class DbClient {
     }> {
         try {
             logger.debug('Saving transaction to database', { 
-                txid: tx.txid,
+                tx_id: tx.tx_id,
                 type: tx.type,
                 blockHeight: tx.blockHeight,
                 blockTime: tx.blockTime
@@ -523,10 +523,10 @@ export class DbClient {
                 try {
                     // Check if transaction already exists
                     const existingTx = await client.processedTransaction.findUnique({
-                        where: { txid: tx.txid },
+                        where: { tx_id: tx.tx_id },
                         select: {
                             id: true,
-                            txid: true
+                            tx_id: true
                         }
                     });
 
@@ -534,7 +534,7 @@ export class DbClient {
                         // Update existing transaction with only the fields we know exist
                         try {
                             return await client.processedTransaction.update({
-                                where: { txid: tx.txid },
+                                where: { tx_id: tx.tx_id },
                                 data: {
                                     type: tx.type,
                                     protocol: tx.protocol,
@@ -543,7 +543,7 @@ export class DbClient {
                                 },
                                 select: {
                                     id: true,
-                                    txid: true,
+                                    tx_id: true,
                                     type: true,
                                     protocol: true,
                                     metadata: true
@@ -552,14 +552,14 @@ export class DbClient {
                         } catch (updateError) {
                             logger.warn('Update failed, returning minimal transaction object', {
                                 error: updateError instanceof Error ? updateError.message : 'Unknown error',
-                                txid: tx.txid,
+                                tx_id: tx.tx_id,
                                 timestamp: new Date().toISOString()
                             });
                             
                             // Return a minimal transaction object
                             return {
                                 id: existingTx.id,
-                                txid: tx.txid,
+                                tx_id: tx.tx_id,
                                 type: tx.type || 'unknown',
                                 protocol: tx.protocol || 'unknown',
                                 metadata: tx.metadata || {}
@@ -570,7 +570,7 @@ export class DbClient {
                         try {
                             return await client.processedTransaction.create({
                                 data: {
-                                    txid: tx.txid,
+                                    tx_id: tx.tx_id,
                                     type: tx.type,
                                     protocol: tx.protocol,
                                     metadata: tx.metadata || {}
@@ -578,7 +578,7 @@ export class DbClient {
                                 },
                                 select: {
                                     id: true,
-                                    txid: true,
+                                    tx_id: true,
                                     type: true,
                                     protocol: true,
                                     metadata: true
@@ -587,14 +587,14 @@ export class DbClient {
                         } catch (createError) {
                             logger.warn('Create failed, returning minimal transaction object', {
                                 error: createError instanceof Error ? createError.message : 'Unknown error',
-                                txid: tx.txid,
+                                tx_id: tx.tx_id,
                                 timestamp: new Date().toISOString()
                             });
                             
                             // Return a minimal transaction object
                             return {
                                 id: '',
-                                txid: tx.txid,
+                                tx_id: tx.tx_id,
                                 type: tx.type || 'unknown',
                                 protocol: tx.protocol || 'unknown',
                                 metadata: tx.metadata || {}
@@ -611,7 +611,7 @@ export class DbClient {
                     // Return a minimal transaction object
                     return {
                         id: '',
-                        txid: tx.txid,
+                        tx_id: tx.tx_id,
                         type: tx.type || 'unknown',
                         protocol: tx.protocol || 'unknown',
                         metadata: tx.metadata || {}
@@ -626,13 +626,13 @@ export class DbClient {
             } catch (error) {
                 logger.error('Failed to process post for transaction', {
                     error: error instanceof Error ? error.message : 'Unknown error',
-                    txid: tx.txid
+                    tx_id: tx.tx_id
                 });
                 // Continue even if post processing fails
             }
 
             logger.info('Transaction saved successfully', { 
-                txid: tx.txid,
+                tx_id: tx.tx_id,
                 hasPost: !!post
             });
 
@@ -643,26 +643,26 @@ export class DbClient {
         } catch (error) {
             logger.error('Failed to save transaction', {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                txid: tx.txid
+                tx_id: tx.tx_id
             });
             throw error;
         }
     }
 
-    public async getTransaction(txid: string): Promise<ProcessedTransaction | null> {
+    public async getTransaction(tx_id: string): Promise<ProcessedTransaction | null> {
         try {
-            logger.info(' DB: FETCHING TRANSACTION', { txid });
+            logger.info(' DB: FETCHING TRANSACTION', { tx_id });
             
             return this.withFreshClient(async (client) => {
                 try {
                     // Try to get the transaction using Prisma's findUnique
-                    // Only query by txid, which we know exists in the database
+                    // Only query by tx_id, which we know exists in the database
                     // Explicitly select only columns we know exist
                     const tx = await client.processedTransaction.findUnique({
-                        where: { txid },
+                        where: { tx_id },
                         select: {
                             id: true,
-                            txid: true,
+                            tx_id: true,
                             type: true,
                             protocol: true,
                             metadata: true
@@ -675,15 +675,15 @@ export class DbClient {
                         // Use optional chaining to handle potentially missing fields
                         return {
                             id: tx.id,
-                            txid: tx.txid,
+                            tx_id: tx.tx_id,
                             type: tx.type ?? 'unknown',
                             protocol: tx.protocol ?? 'unknown',
                             metadata: tx.metadata ?? {},
                             // Provide default values for missing fields
                             blockHeight: 0,
                             blockTime: 0,
-                            createdAt: new Date(),
-                            updatedAt: new Date()
+                            created_at: new Date(),
+                            updated_at: new Date()
                         };
                     }
                     
@@ -696,23 +696,23 @@ export class DbClient {
                     });
                     
                     // Instead of trying another query that might fail, return a minimal object
-                    // with just the txid and default values for other fields
+                    // with just the tx_id and default values for other fields
                     return {
                         id: '', // We don't know the ID
-                        txid: txid,
+                        tx_id: tx_id,
                         blockHeight: 0,
                         blockTime: 0,
                         type: 'unknown',
                         protocol: 'unknown',
                         metadata: {},
-                        createdAt: new Date(),
-                        updatedAt: new Date()
+                        created_at: new Date(),
+                        updated_at: new Date()
                     };
                 }
             });
         } catch (error) {
             logger.error(' DB: FAILED TO FETCH TRANSACTION', {
-                txid,
+                tx_id,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
             return null;
@@ -845,7 +845,7 @@ export class DbClient {
             logger.info('Processing transactions', {
                 count: transactions.length,
                 types: transactions.map(t => t.type),
-                txids: transactions.map(t => t.txid)
+                tx_ids: transactions.map(t => t.tx_id)
             });
 
             // Handle single transaction
@@ -868,49 +868,49 @@ export class DbClient {
         }
     }
 
-    async getPostWithVoteOptions(postId: string): Promise<PostWithVoteOptions | null> {
+    async getPostWithvote_options(postId: string): Promise<PostWithvote_options | null> {
         const post = await prisma.post.findUnique({
             where: { id: postId },
             include: {
-                voteOptions: true,
+                vote_options: true,
                 lockLikes: true
             }
         });
 
         if (!post) return null;
 
-        // Transform the Prisma Post into our custom PostWithVoteOptions type
+        // Transform the Prisma Post into our custom PostWithvote_options type
         return {
             id: post.id,
             post_id: post.id,
             type: post.isVote ? 'vote' : 'post',
             content: post.content,
-            block_time: post.createdAt,
+            block_time: post.created_at,
             sequence: 0, // Default value
             parent_sequence: 0, // Default value
-            created_at: post.createdAt,
-            updated_at: post.createdAt, // Using createdAt as updatedAt
+            created_at: post.created_at,
+            updated_at: post.created_at, // Using created_at as updated_at
             protocol: 'MAP', // Default protocol
-            sender_address: post.authorAddress,
+            sender_address: post.author_address,
             block_height: post.blockHeight,
-            txid: post.txid,
+            tx_id: post.tx_id,
             image: post.rawImageData,
             lock_likes: post.lockLikes.map(like => ({
                 id: like.id,
-                txid: like.txid,
+                tx_id: like.tx_id,
                 lock_amount: like.amount,
                 lock_duration: 0, // Default value
-                created_at: like.createdAt,
-                updated_at: like.createdAt, // Using createdAt as updatedAt
+                created_at: like.created_at,
+                updated_at: like.created_at, // Using created_at as updated_at
                 post_id: like.postId
             })),
-            vote_options: post.voteOptions.map(option => ({
+            vote_options: post.vote_options.map(option => ({
                 id: option.id,
                 post_id: option.postId,
                 content: option.content,
                 index: option.optionIndex,
-                created_at: option.createdAt,
-                updated_at: option.createdAt, // Using createdAt as updatedAt
+                created_at: option.created_at,
+                updated_at: option.created_at, // Using created_at as updated_at
                 question_id: option.id // Using option.id as question_id
             })),
             vote_question: null // We don't have a voteQuestion model in Prisma
@@ -922,7 +922,7 @@ export class DbClient {
             throw new Error('Cleanup can only be run in test environment');
         }
         await this.withFreshClient(async () => {
-            await prisma.voteOption.deleteMany();
+            await prisma.vote_option.deleteMany();
             await prisma.lockLike.deleteMany();
             await prisma.post.deleteMany();
             await prisma.processedTransaction.deleteMany();
@@ -930,17 +930,17 @@ export class DbClient {
         });
     }
 
-    async verifyDatabaseContents(txid: string, testOutputDir: string) {
+    async verifyDatabaseContents(tx_id: string, testOutputDir: string) {
         // Get the processed transaction
-        const processedTx = await this.getTransaction(txid);
+        const processedTx = await this.getTransaction(tx_id);
         if (!processedTx) {
-            throw new Error(`No processed transaction found for txid ${txid}`);
+            throw new Error(`No processed transaction found for tx_id ${tx_id}`);
         }
 
         const metadata = processedTx.metadata as ProcessedTxMetadata;
 
         // Get the post with vote data
-        const post = await this.getPostWithVoteOptions(metadata.post_id);
+        const post = await this.getPostWithvote_options(metadata.post_id);
         if (!post) {
             throw new Error(`No post found for post_id ${metadata.post_id}`);
         }
@@ -952,7 +952,7 @@ export class DbClient {
             has_vote_question: post.vote_question !== null,
             vote_options_count: post.vote_options?.length || 0,
             has_lock_likes: post.lock_likes?.length > 0 || false,
-            txid,
+            tx_id,
             post_id: post.id,
             content_type: post.image ? 'Image + Text' : 'Text Only',
             vote_question: post.vote_question ? {
@@ -972,15 +972,15 @@ export class DbClient {
         // Save image if present
         if (post.image) {
             const ext = (metadata.image_metadata?.content_type?.split('/')[1] || 'jpg');
-            const imagePath = path.join(testOutputDir, `${txid}_image.${ext}`);
+            const imagePath = path.join(testOutputDir, `${tx_id}_image.${ext}`);
             await fs.promises.writeFile(imagePath, post.image);
             logger.info('Saved image to file', { path: imagePath });
         }
 
         // Write verification results to file
-        const outputPath = path.join(testOutputDir, `${txid}_verification.txt`);
+        const outputPath = path.join(testOutputDir, `${tx_id}_verification.txt`);
         const outputContent = [
-            `Transaction ID: ${txid}`,
+            `Transaction ID: ${tx_id}`,
             `Post ID: ${post.id}`,
             `Content Type: ${results.content_type}`,
             `Block Time: ${post.created_at.toISOString()}`,
@@ -1053,7 +1053,7 @@ export class DbClient {
 
     // Save image data to database
     public async saveImage(params: {
-        txid: string;
+        tx_id: string;
         imageData: Buffer | string;
         contentType: string;
         filename?: string;
@@ -1062,7 +1062,7 @@ export class DbClient {
         size?: number;
     }): Promise<void> {
         logger.debug('saveImage called with params', {
-            txid: params.txid,
+            tx_id: params.tx_id,
             contentType: params.contentType,
             imageDataType: typeof params.imageData,
             imageSize: typeof params.imageData === 'string' ? params.imageData.length : params.imageData?.length,
@@ -1092,7 +1092,7 @@ export class DbClient {
                     } catch (e) {
                         logger.error('Failed to convert string to Buffer', {
                             error: e instanceof Error ? e.message : 'Unknown error',
-                            txid: params.txid
+                            tx_id: params.tx_id
                         });
                         // Use a minimal buffer if conversion fails
                         imageBuffer = Buffer.from('placeholder');
@@ -1103,29 +1103,29 @@ export class DbClient {
 
                 // Use upsert instead of update to handle cases where the post doesn't exist yet
                 await client.post.upsert({
-                    where: { txid: params.txid },
+                    where: { tx_id: params.tx_id },
                     update: {
                         rawImageData: imageBuffer,
                         mediaType: params.contentType
                     },
                     create: {
-                        txid: params.txid,
+                        tx_id: params.tx_id,
                         content: '',  // Required field, can be updated later
                         rawImageData: imageBuffer,
                         mediaType: params.contentType,
-                        createdAt: new Date()
+                        created_at: new Date()
                     }
                 });
 
                 logger.info('Successfully saved image data', {
-                    txid: params.txid,
+                    tx_id: params.tx_id,
                     contentType: params.contentType,
                     size: params.size
                 });
             } catch (error) {
                 logger.error('Failed to save image data', {
                     error: error instanceof Error ? error.message : 'Unknown error',
-                    txid: params.txid
+                    tx_id: params.tx_id
                 });
                 throw error;
             }

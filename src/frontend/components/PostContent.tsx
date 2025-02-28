@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { HODLTransaction } from '../types';
-import VoteOptionsDisplay from './VoteOptionsDisplay';
+import vote_optionsDisplay from './vote_optionsDisplay';
 
 interface PostContentProps {
   transaction: HODLTransaction;
@@ -9,7 +9,7 @@ interface PostContentProps {
 
 const PostContent: React.FC<PostContentProps> = ({ transaction, onTotalLockedAmountChange }) => {
   useEffect(() => {
-    console.log('PostContent rendered with txid:', transaction.txid);
+    console.log('PostContent rendered with tx_id:', transaction.tx_id);
     console.log('Content type:', transaction.content_type);
     console.log('Is vote:', transaction.is_vote);
     console.log('Vote options:', transaction.vote_options);
@@ -23,8 +23,8 @@ const PostContent: React.FC<PostContentProps> = ({ transaction, onTotalLockedAmo
   
   // Handle vote type posts with actual options
   if (isVotePostWithOptions) {
-    console.log('Rendering VoteOptionsDisplay for vote post with options');
-    return <VoteOptionsDisplay 
+    console.log('Rendering vote_optionsDisplay for vote post with options');
+    return <vote_optionsDisplay 
       transaction={transaction} 
       onTotalLockedAmountChange={onTotalLockedAmountChange}
     />;

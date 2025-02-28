@@ -21,7 +21,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [isVotePost, setIsVotePost] = useState(false);
-  const [voteOptions, setVoteOptions] = useState<string[]>(['', '']);
+  const [vote_options, setvote_options] = useState<string[]>(['', '']);
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
   const [error, setError] = useState('');
@@ -257,7 +257,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           image, // Pass the File object directly
           image ? image.type : undefined,
           isVotePost,
-          isVotePost ? voteOptions.filter(option => option.trim() !== '') : []
+          isVotePost ? vote_options.filter(option => option.trim() !== '') : []
         );
         
         console.log('Post created successfully:', newPost);
@@ -322,25 +322,25 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     }
   };
 
-  const handleAddVoteOption = () => {
-    if (voteOptions.length < 10) { // Limit to 10 options
-      setVoteOptions([...voteOptions, '']);
+  const handleAddvote_option = () => {
+    if (vote_options.length < 10) { // Limit to 10 options
+      setvote_options([...vote_options, '']);
     }
   };
 
-  const handleRemoveVoteOption = (index: number) => {
-    if (voteOptions.length <= 2) {
+  const handleRemovevote_option = (index: number) => {
+    if (vote_options.length <= 2) {
       return; // Maintain at least 2 options
     }
-    const newOptions = [...voteOptions];
+    const newOptions = [...vote_options];
     newOptions.splice(index, 1);
-    setVoteOptions(newOptions);
+    setvote_options(newOptions);
   };
 
-  const handleVoteOptionChange = (index: number, value: string) => {
-    const newOptions = [...voteOptions];
+  const handlevote_optionChange = (index: number, value: string) => {
+    const newOptions = [...vote_options];
     newOptions[index] = value;
-    setVoteOptions(newOptions);
+    setvote_options(newOptions);
   };
 
   if (!isOpen) return null;
@@ -479,20 +479,20 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           {isVotePost && (
             <div className="mt-4 space-y-3">
               <h3 className="text-sm font-medium text-gray-300">Vote Options</h3>
-              {voteOptions.map((option, index) => (
+              {vote_options.map((option, index) => (
                 <div key={index} className="flex items-center space-x-2">
                   <input
                     type="text"
                     value={option}
-                    onChange={(e) => handleVoteOptionChange(index, e.target.value)}
+                    onChange={(e) => handlevote_optionChange(index, e.target.value)}
                     placeholder={`Option ${index + 1}`}
                     className="flex-grow px-3 py-2 bg-[#13141B] border border-gray-800 rounded-md text-gray-200 focus:outline-none focus:border-green-500"
                   />
                   <button
                     type="button"
-                    onClick={() => handleRemoveVoteOption(index)}
+                    onClick={() => handleRemovevote_option(index)}
                     className="p-1 text-gray-400 hover:text-red-400 focus:outline-none"
-                    disabled={voteOptions.length <= 2}
+                    disabled={vote_options.length <= 2}
                   >
                     <FiTrash2 size={16} />
                   </button>
@@ -500,7 +500,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               ))}
               <button
                 type="button"
-                onClick={handleAddVoteOption}
+                onClick={handleAddvote_option}
                 className="flex items-center px-3 py-2 text-sm text-green-500 hover:text-green-400 focus:outline-none"
               >
                 <FiPlus size={16} className="mr-1" /> Add Option

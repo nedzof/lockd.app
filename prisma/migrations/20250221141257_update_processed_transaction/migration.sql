@@ -12,7 +12,7 @@ ALTER TABLE "ProcessedTransaction" ADD COLUMN "metadata" JSONB;
 
 UPDATE "ProcessedTransaction"
 SET "metadata" = jsonb_build_object(
-    'postId', COALESCE((content->>'postId'), txid),
+    'postId', COALESCE((content->>'postId'), tx_id),
     'content', COALESCE((content->>'content'), ''),
     'lockAmount', COALESCE("lockAmount", 0),
     'lockDuration', COALESCE("lockDuration", 0)

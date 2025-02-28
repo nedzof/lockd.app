@@ -10,7 +10,7 @@ interface LockLikeRequest {
   lock_duration: number;
 }
 
-interface VoteOptionLockRequest {
+interface vote_optionLockRequest {
   vote_option_id: string;  // The vote option's id
   author_address: string;
   amount: number;
@@ -19,7 +19,7 @@ interface VoteOptionLockRequest {
 
 interface LockLikeResponse {
   id: string;
-  txid: string;
+  tx_id: string;
   author_address: string | null;
   amount: number;
   lock_duration: number;
@@ -59,7 +59,7 @@ const handleLockLike = async (
     // Create the lock like record using the post's id
     const lockLike = await prisma.lockLike.create({
       data: {
-        txid: `${post.id}_${Date.now()}`, // Temporary txid until we get the real one
+        tx_id: `${post.id}_${Date.now()}`, // Temporary tx_id until we get the real one
         post_id: post.id,
         author_address,
         amount,
@@ -82,8 +82,8 @@ const handleLockLike = async (
 };
 
 // Handle locking a vote option
-const handleVoteOptionLock = async (
-  req: Request<{}, any, VoteOptionLockRequest>,
+const handlevote_optionLock = async (
+  req: Request<{}, any, vote_optionLockRequest>,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
@@ -96,7 +96,7 @@ const handleVoteOptionLock = async (
     }
 
     // First find the vote option by its id
-    const voteOption = await prisma.voteOption.findUnique({
+    const vote_option = await prisma.vote_option.findUnique({
       where: {
         id: vote_option_id
       },
@@ -105,7 +105,7 @@ const handleVoteOptionLock = async (
       }
     });
 
-    if (!voteOption) {
+    if (!vote_option) {
       res.status(404).json({ 
         success: false,
         error: `Vote option with id ${vote_option_id} not found`
@@ -116,9 +116,9 @@ const handleVoteOptionLock = async (
     // Create the lock like record for the vote option
     const lockLike = await prisma.lockLike.create({
       data: {
-        txid: `${voteOption.id}_${Date.now()}`, // Temporary txid until we get the real one
-        post_id: voteOption.post.id, // Link to the parent post
-        vote_option_id: voteOption.id, // Link to the specific vote option
+        tx_id: `${vote_option.id}_${Date.now()}`, // Temporary tx_id until we get the real one
+        post_id: vote_option.post.id, // Link to the parent post
+        vote_option_id: vote_option.id, // Link to the specific vote option
         author_address,
         amount,
         lock_duration,
@@ -127,7 +127,7 @@ const handleVoteOptionLock = async (
     });
 
     // Update the vote option's total locked amount
-    await prisma.voteOption.update({
+    await prisma.vote_option.update({
       where: {
         id: vote_option_id
       },
@@ -152,6 +152,6 @@ const handleVoteOptionLock = async (
 };
 
 router.post('/', handleLockLike);
-router.post('/vote-options', handleVoteOptionLock);
+router.post('/vote-options', handlevote_optionLock);
 
 export default router;

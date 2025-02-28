@@ -20,13 +20,13 @@ export const initializeStatsUpdateJob = () => {
       
       // Calculate statistics
       const [
-        totalPosts,
-        totalVotes,
-        totalLockLikes,
-        totalUsers,
-        totalBsvLockedResult,
-        avgLockDurationResult,
-        mostUsedTag,
+        total_posts,
+        total_votes,
+        total_lock_likes,
+        total_users,
+        total_bsv_lockedResult,
+        avg_lock_durationResult,
+        most_used_tag,
         mostActiveUser,
         currentBsvPrice
       ] = await Promise.all([
@@ -46,14 +46,14 @@ export const initializeStatsUpdateJob = () => {
         // Total unique users
         prisma.post.findMany({
           where: {
-            authorAddress: {
+            author_address: {
               not: null
             }
           },
           select: {
-            authorAddress: true
+            author_address: true
           },
-          distinct: ['authorAddress']
+          distinct: ['author_address']
         }).then(users => users.length),
         
         // Total BSV locked
@@ -80,9 +80,9 @@ export const initializeStatsUpdateJob = () => {
         
         // Most active user
         prisma.post.groupBy({
-          by: ['authorAddress'],
+          by: ['author_address'],
           where: {
-            authorAddress: {
+            author_address: {
               not: null
             }
           },
@@ -103,14 +103,14 @@ export const initializeStatsUpdateJob = () => {
       
       // Create stats data object
       const statsData: any = {
-        total_posts: totalPosts,
-        total_votes: totalVotes,
-        total_lock_likes: totalLockLikes,
-        total_users: totalUsers,
-        total_bsv_locked: totalBsvLockedResult._sum.amount || 0,
-        avg_lock_duration: avgLockDurationResult._avg.lock_duration || 0,
-        most_used_tag: mostUsedTag.length > 0 ? mostUsedTag[0].name : null,
-        most_active_user: mostActiveUser.length > 0 ? mostActiveUser[0].authorAddress : null,
+        total_posts: total_posts,
+        total_votes: total_votes,
+        total_lock_likes: total_lock_likes,
+        total_users: total_users,
+        total_bsv_locked: total_bsv_lockedResult._sum.amount || 0,
+        avg_lock_duration: avg_lock_durationResult._avg.lock_duration || 0,
+        most_used_tag: most_used_tag.length > 0 ? most_used_tag[0].name : null,
+        most_active_user: mostActiveUser.length > 0 ? mostActiveUser[0].author_address : null,
         last_updated: new Date()
       };
       

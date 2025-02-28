@@ -59,7 +59,7 @@ async function broadcastTransaction(txHex: string): Promise<string> {
     const url = 'https://api.whatsonchain.com/v1/bsv/main/tx/raw';
     
     try {
-        // Parse the transaction to get the txid
+        // Parse the transaction to get the tx_id
         const tx = new bsv.Transaction(txHex);
         
         // Log the request details
@@ -72,7 +72,7 @@ async function broadcastTransaction(txHex: string): Promise<string> {
             },
             bodyLength: txHex.length,
             bodyPreview: `${txHex.substring(0, 100)}...${txHex.substring(txHex.length - 100)}`,
-            txid: tx.id,
+            tx_id: tx.id,
             inputCount: tx.inputs.length,
             outputCount: tx.outputs.length
         });
@@ -93,7 +93,7 @@ async function broadcastTransaction(txHex: string): Promise<string> {
             statusText: response.statusText,
             headers: Object.fromEntries(response.headers.entries()),
             body: responseText,
-            txid: tx.id
+            tx_id: tx.id
         });
 
         // Check if the response indicates a mempool conflict
@@ -111,12 +111,12 @@ async function broadcastTransaction(txHex: string): Promise<string> {
             if (errorMessage.includes('txn-mempool-conflict') || 
                 errorMessage.includes('Transaction already in the mempool')) {
                 console.log('Transaction already in mempool:', {
-                    txid: tx.id,
+                    tx_id: tx.id,
                     size: txHex.length / 2,
                     error: errorMessage,
                     timestamp: new Date().toISOString()
                 });
-                return tx.id; // Return the txid since the transaction is already in the mempool
+                return tx.id; // Return the tx_id since the transaction is already in the mempool
             }
 
             // For other errors, log details and throw
@@ -125,7 +125,7 @@ async function broadcastTransaction(txHex: string): Promise<string> {
                 statusText: response.statusText,
                 error: errorMessage,
                 request: {
-                    txid: tx.id,
+                    tx_id: tx.id,
                     size: txHex.length / 2,
                     inputCount: tx.inputs.length,
                     outputCount: tx.outputs.length
@@ -135,43 +135,43 @@ async function broadcastTransaction(txHex: string): Promise<string> {
             throw new Error(`Failed to broadcast transaction: ${response.status} ${response.statusText} - ${errorMessage}`);
         }
 
-        // The response should be the txid as plain text
-        const txid = responseText
+        // The response should be the tx_id as plain text
+        const tx_id = responseText
             .trim() // Remove whitespace and newlines
             .replace(/^"/, '') // Remove leading quote
             .replace(/"$/, '') // Remove trailing quote
             .replace(/\n$/, ''); // Remove trailing newline if present
 
-        console.log('Cleaned txid response:', {
+        console.log('Cleaned tx_id response:', {
             original: responseText,
             afterTrim: responseText.trim(),
             afterQuoteRemoval: responseText.trim().replace(/^"/, '').replace(/"$/, ''),
-            final: txid
+            final: tx_id
         });
 
-        if (!txid.match(/^[0-9a-f]{64}$/i)) {
-            console.error('Invalid txid format:', {
-                receivedTxid: responseText,
-                cleanedTxid: txid,
+        if (!tx_id.match(/^[0-9a-f]{64}$/i)) {
+            console.error('Invalid tx_id format:', {
+                receivedtx_id: responseText,
+                cleanedtx_id: tx_id,
                 responseText: responseText,
-                expectedTxid: tx.id,
+                expectedtx_id: tx.id,
                 matches: {
-                    length64: txid.length === 64,
-                    hexOnly: /^[0-9a-f]+$/i.test(txid),
-                    fullRegex: /^[0-9a-f]{64}$/i.test(txid)
+                    length64: tx_id.length === 64,
+                    hexOnly: /^[0-9a-f]+$/i.test(tx_id),
+                    fullRegex: /^[0-9a-f]{64}$/i.test(tx_id)
                 }
             });
-            throw new Error(`Invalid txid format received: ${responseText}`);
+            throw new Error(`Invalid tx_id format received: ${responseText}`);
         }
 
         console.log('Transaction broadcast successful:', {
-            txid,
-            expectedTxid: tx.id,
+            tx_id,
+            expectedtx_id: tx.id,
             size: txHex.length / 2,
             responseTime: new Date().toISOString()
         });
         
-        return txid;
+        return tx_id;
     } catch (error) {
         console.error('Broadcast error details:', error);
         throw error;
@@ -245,7 +245,7 @@ export class YoursWalletAdapter implements Signer {
             nInputs: tx.inputs.length,
             nOutputs: tx.outputs.length,
             inputs: tx.inputs.map(input => ({
-                prevTxId: input.prevTxId.toString('hex'),
+                prevtx_id: input.prevtx_id.toString('hex'),
                 outputIndex: input.outputIndex,
                 sequenceNumber: input.sequenceNumber,
                 script: input.script?.toHex() || '',
@@ -275,12 +275,12 @@ export class YoursWalletAdapter implements Signer {
         for (let i = 0; i < newTx.inputs.length; i++) {
             const input = newTx.inputs[i];
             const utxo = utxos.find(u => 
-                u.txId === input.prevTxId.toString('hex') && 
+                u.tx_id === input.prevtx_id.toString('hex') && 
                 u.outputIndex === input.outputIndex
             );
             if (!utxo) {
                 console.error('Available UTXOs:', utxos);
-                throw new Error(`Could not find UTXO for input ${i} (prevTxId: ${input.prevTxId.toString('hex')}, outputIndex: ${input.outputIndex})`);
+                throw new Error(`Could not find UTXO for input ${i} (prevtx_id: ${input.prevtx_id.toString('hex')}, outputIndex: ${input.outputIndex})`);
             }
             
             // Set the output information
@@ -291,7 +291,7 @@ export class YoursWalletAdapter implements Signer {
 
             // Always create a new input with empty script
             const newInput = new bsv.Transaction.Input({
-                prevTxId: input.prevTxId,
+                prevtx_id: input.prevtx_id,
                 outputIndex: input.outputIndex,
                 script: bsv.Script.empty(), // Initialize with empty script
                 output: input.output,
@@ -300,7 +300,7 @@ export class YoursWalletAdapter implements Signer {
             newTx.inputs[i] = newInput;
 
             console.log(`Input ${i} initialized:`, {
-                prevTxId: newInput.prevTxId.toString('hex'),
+                prevtx_id: newInput.prevtx_id.toString('hex'),
                 outputIndex: newInput.outputIndex,
                 script: newInput.script.toHex(),
                 output: {
@@ -331,9 +331,9 @@ export class YoursWalletAdapter implements Signer {
             console.log('Transaction validation passed:', {
                 nInputs: newTx.inputs.length,
                 nOutputs: newTx.outputs.length,
-                txid: newTx.id,
+                tx_id: newTx.id,
                 inputs: newTx.inputs.map(input => ({
-                    prevTxId: input.prevTxId.toString('hex'),
+                    prevtx_id: input.prevtx_id.toString('hex'),
                     outputIndex: input.outputIndex,
                     script: input.script.toHex(),
                     output: {
@@ -443,14 +443,14 @@ export class YoursWalletAdapter implements Signer {
                     satoshis: ordOutput.satoshis
                 }]);
 
-                if (!result?.txid) {
+                if (!result?.tx_id) {
                     throw new Error('Failed to inscribe');
                 }
 
                 // Parse the raw transaction
                 const signedTx = new bsv.Transaction(result.rawtx);
                 console.log('Inscription transaction:', {
-                    txid: result.txid,
+                    tx_id: result.tx_id,
                     rawTxLength: result.rawtx.length,
                     nInputs: signedTx.inputs.length,
                     nOutputs: signedTx.outputs.length,
@@ -460,10 +460,10 @@ export class YoursWalletAdapter implements Signer {
                 // Explicitly broadcast the transaction
                 try {
                     console.log('Broadcasting transaction...');
-                    const broadcastTxid = await broadcastTransaction(result.rawtx);
-                    console.log('Transaction broadcast successful:', broadcastTxid);
+                    const broadcasttx_id = await broadcastTransaction(result.rawtx);
+                    console.log('Transaction broadcast successful:', broadcasttx_id);
                     
-                    // Create new transaction with broadcast txid
+                    // Create new transaction with broadcast tx_id
                     const broadcastTx = new bsv.Transaction(result.rawtx);
                     return broadcastTx;
                 } catch (error) {
@@ -500,14 +500,14 @@ export class YoursWalletAdapter implements Signer {
         const result = await this.wallet.sendBsv(params);
         console.log('Send result:', result);
 
-        if (!result?.txid) {
+        if (!result?.tx_id) {
             throw new Error('Failed to sign and broadcast transaction');
         }
 
         // Parse the raw transaction
         const signedTx = new bsv.Transaction(result.rawtx);
         console.log('Signed transaction:', {
-            txid: result.txid,
+            tx_id: result.tx_id,
             rawTxLength: result.rawtx.length,
             nInputs: signedTx.inputs.length,
             nOutputs: signedTx.outputs.length
@@ -536,7 +536,7 @@ export class YoursWalletAdapter implements Signer {
             nInputs: tx.inputs.length,
             nOutputs: tx.outputs.length,
             inputs: tx.inputs.map(input => ({
-                prevTxId: input.prevTxId.toString('hex'),
+                prevtx_id: input.prevtx_id.toString('hex'),
                 outputIndex: input.outputIndex,
                 sequenceNumber: input.sequenceNumber,
                 script: input.script.toHex(),
@@ -554,7 +554,7 @@ export class YoursWalletAdapter implements Signer {
         // Sign and broadcast the transaction
         const signedTx = await this.signTransaction(tx, options);
         console.log('Transaction signed and broadcast:', {
-            txid: signedTx.id,
+            tx_id: signedTx.id,
             rawTxLength: signedTx.toString().length
         });
 
@@ -571,7 +571,7 @@ export class YoursWalletAdapter implements Signer {
             return [];
         }
         return utxos.map(utxo => ({
-            txId: utxo.txid,
+            tx_id: utxo.tx_id,
             outputIndex: utxo.vout,
             satoshis: utxo.satoshis,
             script: utxo.script

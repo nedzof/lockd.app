@@ -12,17 +12,17 @@ const prisma = new PrismaClient();
 function parseMapTransaction(tx: any) {
     try {
         // Extract basic transaction data
-        const txid = tx.id;
+        const tx_id = tx.id;
         const blockHeight = tx.block_height;
         const blockTime = tx.block_time;
         const addresses = tx.addresses || [];
-        const authorAddress = addresses[0] || null;
+        const author_address = addresses[0] || null;
         
         // Parse outputs to extract data
         const data: Record<string, any> = {
             content: '',
             tags: [],
-            voteOptions: [],
+            vote_options: [],
             isVote: false,
             contentType: null
         };
@@ -61,7 +61,7 @@ function parseMapTransaction(tx: any) {
                     if (optionsMatch && optionsMatch[1]) {
                         try {
                             const options = JSON.parse(optionsMatch[1]);
-                            data.voteOptions = options.map((opt: string, index: number) => ({
+                            data.vote_options = options.map((opt: string, index: number) => ({
                                 content: opt,
                                 index
                             }));
@@ -75,10 +75,10 @@ function parseMapTransaction(tx: any) {
         
         // Return the parsed transaction
         return {
-            txid,
+            tx_id,
             blockHeight,
             blockTime,
-            authorAddress,
+            author_address,
             metadata: data
         };
     } catch (error) {
@@ -92,20 +92,20 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
     try {
         // Create or update the post
         const post = await prisma.post.upsert({
-            where: { txid: parsedTx.txid },
+            where: { tx_id: parsedTx.tx_id },
             create: {
-                txid: parsedTx.txid,
+                tx_id: parsedTx.tx_id,
                 content: parsedTx.metadata.content,
-                authorAddress: parsedTx.authorAddress,
+                author_address: parsedTx.author_address,
                 blockHeight: parsedTx.blockHeight,
-                createdAt: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
+                created_at: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
                 tags: parsedTx.metadata.tags,
                 isVote: parsedTx.metadata.isVote,
                 mediaType: parsedTx.metadata.contentType
             },
             update: {
                 content: parsedTx.metadata.content,
-                authorAddress: parsedTx.authorAddress,
+                author_address: parsedTx.author_address,
                 blockHeight: parsedTx.blockHeight,
                 tags: parsedTx.metadata.tags,
                 isVote: parsedTx.metadata.isVote,
@@ -114,23 +114,23 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
         });
         
         // Create vote options if this is a vote post
-        if (parsedTx.metadata.isVote && parsedTx.metadata.voteOptions.length > 0) {
-            for (const option of parsedTx.metadata.voteOptions) {
-                const optionTxid = `${parsedTx.txid}-option-${option.index}`;
+        if (parsedTx.metadata.isVote && parsedTx.metadata.vote_options.length > 0) {
+            for (const option of parsedTx.metadata.vote_options) {
+                const optiontx_id = `${parsedTx.tx_id}-option-${option.index}`;
                 
-                await prisma.voteOption.upsert({
-                    where: { txid: optionTxid },
+                await prisma.vote_option.upsert({
+                    where: { tx_id: optiontx_id },
                     create: {
-                        txid: optionTxid,
+                        tx_id: optiontx_id,
                         content: option.content,
-                        authorAddress: parsedTx.authorAddress,
-                        createdAt: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
+                        author_address: parsedTx.author_address,
+                        created_at: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
                         postId: post.id,
                         optionIndex: option.index
                     },
                     update: {
                         content: option.content,
-                        authorAddress: parsedTx.authorAddress,
+                        author_address: parsedTx.author_address,
                         postId: post.id,
                         optionIndex: option.index
                     }

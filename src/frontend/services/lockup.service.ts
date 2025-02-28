@@ -7,7 +7,7 @@ export const useLockupService = () => {
   const wallet = useYoursWallet();
   const polymarketService = new PolymarketService();
 
-  const createLockScript = (lockUntilHeight: number): string => {
+  const createLockScript = (lock_until_height: number): string => {
     // Implement the lock script creation logic
     // This should return a hex string of the locking script
     throw new Error('Not implemented');
@@ -21,12 +21,12 @@ export const useLockupService = () => {
 
   const createLock = async (params: CreateLockParams & { polymarketUrl?: string }): Promise<string> => {
     try {
-      const { recipientAddress, amount, lockUntilHeight, polymarketUrl } = params;
+      const { recipientAddress, amount, lock_until_height, polymarketUrl } = params;
 
       // Validate parameters
       if (!recipientAddress) throw new WalletError('Recipient address is required');
       if (!amount || amount <= 0) throw new WalletError('Invalid amount');
-      if (!lockUntilHeight || lockUntilHeight <= 0) throw new WalletError('Invalid lock height');
+      if (!lock_until_height || lock_until_height <= 0) throw new WalletError('Invalid lock height');
 
       if (!wallet?.sendBsv) {
         throw new WalletError('Wallet not connected');
@@ -56,15 +56,15 @@ export const useLockupService = () => {
       const result = await wallet.sendBsv([{
         satoshis: amount,
         address: recipientAddress,
-        script: createLockScript(lockUntilHeight),
+        script: createLockScript(lock_until_height),
         data: polymarketData ? [JSON.stringify(polymarketData)] : undefined
       }]);
 
-      if (!result?.txid) {
+      if (!result?.tx_id) {
         throw new WalletError('Failed to create lock transaction');
       }
 
-      return result.txid;
+      return result.tx_id;
     } catch (err) {
       throw err instanceof WalletError ? err : new WalletError('Failed to create lock');
     }
@@ -94,11 +94,11 @@ export const useLockupService = () => {
         script: createUnlockScript(lockId)
       }]);
 
-      if (!result?.txid) {
+      if (!result?.tx_id) {
         throw new WalletError('Failed to create unlock transaction');
       }
 
-      return result.txid;
+      return result.tx_id;
     } catch (err) {
       throw err instanceof WalletError ? err : new WalletError('Failed to unlock');
     }

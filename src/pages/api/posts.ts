@@ -209,7 +209,7 @@ async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
           lock_likes: {
             select: {
               id: true,
-              txid: true,
+              tx_id: true,
               author_address: true,
               amount: true,
               lock_duration: true,
@@ -238,7 +238,7 @@ async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
         try {
           return {
             id: post.id,
-            txid: post.txid,
+            tx_id: post.tx_id,
             content: post.content,
             author_address: post.author_address,
             media_type: post.media_type,
@@ -256,7 +256,7 @@ async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
             is_vote: post.is_vote || false,
             vote_options: post.vote_options?.map(option => ({
               id: option.id,
-              txid: option.txid,
+              tx_id: option.tx_id,
               content: option.content || '',
               author_address: option.author_address || '',
               created_at: option.created_at,
@@ -305,7 +305,7 @@ async function handleCreatePost(req: NextApiRequest, res: NextApiResponse) {
     
     // Extract post data from request body
     const {
-      txid,
+      tx_id,
       postId,
       content,
       author_address,
@@ -329,15 +329,15 @@ async function handleCreatePost(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ error: 'Author address is required' });
     }
 
-    if (!txid) {
-      console.error('Missing required field: txid');
+    if (!tx_id) {
+      console.error('Missing required field: tx_id');
       return res.status(400).json({ error: 'Transaction ID is required' });
     }
 
     // Create the post in the database
     const post = await dbClient.prisma.post.create({
       data: {
-        txid,
+        tx_id,
         content,
         author_address,
         tags,
@@ -352,9 +352,9 @@ async function handleCreatePost(req: NextApiRequest, res: NextApiResponse) {
     // If this is a vote post, create the vote options
     if (is_vote && vote_options && vote_options.length > 0) {
       for (const option of vote_options) {
-        await dbClient.prisma.voteOption.create({
+        await dbClient.prisma.vote_option.create({
           data: {
-            txid: option.txid || `${txid}_option_${option.index}`,
+            tx_id: option.tx_id || `${tx_id}_option_${option.index}`,
             content: option.text,
             author_address,
             post_id: post.id,

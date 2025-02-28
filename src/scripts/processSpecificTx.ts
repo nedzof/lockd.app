@@ -23,8 +23,8 @@ interface ImageOutput {
     data_url: string;
 }
 
-async function fetchTransaction(txid: string) {
-    const url = `https://junglebus.gorillapool.io/v1/transaction/get/${txid}`;
+async function fetchTransaction(tx_id: string) {
+    const url = `https://junglebus.gorillapool.io/v1/transaction/get/${tx_id}`;
     const response = await axios.get(url);
     return response.data;
 }
@@ -120,12 +120,12 @@ async function processSpecificTransaction() {
 
         // Create or update the post in the database
         const post = await prisma.post.upsert({
-            where: { txid: TX_ID },
+            where: { tx_id: TX_ID },
             create: {
-                txid: TX_ID,
+                tx_id: TX_ID,
                 content: content,
-                authorAddress: tx.addresses[0],
-                createdAt: timestamp,
+                author_address: tx.addresses[0],
+                created_at: timestamp,
                 tags: tags,
                 isVote: totalOptions > 0,
                 mediaType: imageData?.mime_type,
@@ -133,8 +133,8 @@ async function processSpecificTransaction() {
             },
             update: {
                 content: content,
-                authorAddress: tx.addresses[0],
-                createdAt: timestamp,
+                author_address: tx.addresses[0],
+                created_at: timestamp,
                 tags: tags,
                 isVote: totalOptions > 0,
                 mediaType: imageData?.mime_type,
@@ -150,22 +150,22 @@ async function processSpecificTransaction() {
             
             for (let i = 0; i < totalOptions; i++) {
                 const optionContent = parsedData[`option${i}`] || `Option ${i+1}`;
-                const optionTxid = `${TX_ID}-option-${i}`;
+                const optiontx_id = `${TX_ID}-option-${i}`;
                 
-                await prisma.voteOption.upsert({
-                    where: { txid: optionTxid },
+                await prisma.vote_option.upsert({
+                    where: { tx_id: optiontx_id },
                     create: {
-                        txid: optionTxid,
+                        tx_id: optiontx_id,
                         content: optionContent,
-                        authorAddress: tx.addresses[0],
-                        createdAt: timestamp,
+                        author_address: tx.addresses[0],
+                        created_at: timestamp,
                         postId: post.id,
                         optionIndex: i
                     },
                     update: {
                         content: optionContent,
-                        authorAddress: tx.addresses[0],
-                        createdAt: timestamp,
+                        author_address: tx.addresses[0],
+                        created_at: timestamp,
                         postId: post.id,
                         optionIndex: i
                     }

@@ -1,5 +1,5 @@
 export interface ParsedTransaction {
-    txid: string;
+    tx_id: string;
     blockHeight: number;
     blockTime: number;
     decodedTx?: DecodedTransaction;
@@ -8,7 +8,7 @@ export interface ParsedTransaction {
         lockAmount: number;
         lockDuration: number;
         content: string;
-        voteOptions: string[];
+        vote_options: string[];
         voteQuestion: string;
         image: Buffer | null;
         imageMetadata: {
@@ -20,11 +20,11 @@ export interface ParsedTransaction {
 }
 
 export interface DecodedTransaction {
-    txid: string;
+    tx_id: string;
     inputs: {
         index: number;
         script: string;
-        prevTxId: string;
+        prevtx_id: string;
         outputIndex: number;
         sequenceNumber: number;
     }[];
@@ -41,7 +41,7 @@ export interface LockProtocolData {
     lockAmount: number;
     lockDuration: number;
     content: string;
-    voteOptions: string[];
+    vote_options: string[];
     voteQuestion: string;
     image: Buffer | null;
     imageMetadata: {

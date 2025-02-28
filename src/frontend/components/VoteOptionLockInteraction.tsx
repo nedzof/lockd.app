@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { FiLock, FiLoader } from 'react-icons/fi';
 
-interface VoteOptionLockInteractionProps {
+interface vote_optionLockInteractionProps {
   optionId: string;
   connected?: boolean;
   isLocking?: boolean;
   onLock: (optionId: string, amount: number, duration: number) => Promise<void>;
 }
 
-const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
+const vote_optionLockInteraction: React.FC<vote_optionLockInteractionProps> = ({
   optionId,
   connected = false,
   isLocking = false,
@@ -93,4 +93,4 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
   );
 };
 
-export default VoteOptionLockInteraction;
+export default vote_optionLockInteraction;

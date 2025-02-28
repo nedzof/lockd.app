@@ -23,10 +23,10 @@ interface PostQueryParams {
 
 // Define request body type for post creation
 interface CreatePostBody {
-  txid: string;
+  tx_id: string;
   postId: string;
   content: string;
-  authorAddress: string;
+  author_address: string;
   mediaType?: string;
   rawImageData?: string | null;
   description?: string;
@@ -35,7 +35,7 @@ interface CreatePostBody {
   isLocked?: boolean;
   lockDuration?: number;
   isVote?: boolean;
-  voteOptions?: Array<{
+  vote_options?: Array<{
     text: string;
     lockAmount: number;
     lockDuration: number;
@@ -48,7 +48,7 @@ interface CreatePostBody {
 interface DirectPostBody {
   postId: string;
   content: string;
-  authorAddress: string;
+  author_address: string;
   rawImageData?: string | null;
   mediaType?: string | null;
   description?: string;
@@ -57,7 +57,7 @@ interface DirectPostBody {
   isLocked: boolean;
   lockDuration?: number;
   lockAmount?: number;
-  createdAt: string;
+  created_at: string;
 }
 
 // Define route handler types
@@ -69,24 +69,24 @@ type CreateDirectPostHandler = RequestHandler<{}, any, DirectPostBody>;
 
 interface PostResponse {
   id: string;
-  txid: string;
+  tx_id: string;
   content: string;
-  authorAddress: string;
-  createdAt: Date;
+  author_address: string;
+  created_at: Date;
   tags: string[];
   mediaType?: string | null;
   rawImageData?: Buffer | null;
 }
 
-interface VoteOptionResponse {
+interface vote_optionResponse {
   id: string;
-  txid: string;
+  tx_id: string;
   content: string;
-  authorAddress: string | null;
-  createdAt: Date;
+  author_address: string | null;
+  created_at: Date;
   lockAmount: number;
   lockDuration: number;
-  unlockHeight: number | null;
+  unlock_height: number | null;
   tags: string[];
   postId: string;
 }
@@ -126,7 +126,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
         ]
       },
       orderBy: [
-        { createdAt: 'desc' },
+        { created_at: 'desc' },
         { id: 'desc' }
       ]
     };
@@ -139,9 +139,9 @@ const listPosts: PostListHandler = async (req, res, next) => {
     const posts = await prisma.post.findMany({
       ...queryParams,
       include: {
-        voteOptions: true,
+        vote_options: true,
         lockLikes: {
-          orderBy: { createdAt: 'desc' }
+          orderBy: { created_at: 'desc' }
         }
       }
     });
@@ -225,7 +225,7 @@ const getPost: PostDetailHandler = async (req, res, next) => {
     const post = await prisma.post.findUnique({
       where: { id: req.params.id },
       include: {
-        voteOptions: true
+        vote_options: true
       }
     });
 
@@ -346,13 +346,13 @@ const createPost: CreatePostHandler = async (req, res, next) => {
     // Extract post data from request body
     const {
       content,
-      authorAddress,
+      author_address,
       tags = [],
       isVote = false,
-      voteOptions = [],
+      vote_options = [],
       rawImageData,
       mediaType,
-      txid,
+      tx_id,
       postId: clientProvidedPostId // Extract postId if client provides it
     } = req.body;
 
@@ -362,8 +362,8 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       return res.status(400).json({ error: 'Content or image is required' });
     }
 
-    if (!authorAddress) {
-      console.error('Missing required field: authorAddress');
+    if (!author_address) {
+      console.error('Missing required field: author_address');
       return res.status(400).json({ error: 'Author address is required' });
     }
 
@@ -389,24 +389,24 @@ const createPost: CreatePostHandler = async (req, res, next) => {
     }
 
     // Validate vote options if this is a vote post
-    if (isVote && (!voteOptions || voteOptions.length < 2)) {
-      console.error('Invalid vote options:', voteOptions);
+    if (isVote && (!vote_options || vote_options.length < 2)) {
+      console.error('Invalid vote options:', vote_options);
       return res.status(400).json({ error: 'Vote posts require at least 2 valid options' });
     }
 
     // Generate temporary transaction ID if not provided
-    const tempTxid = txid || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    const temptx_id = tx_id || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
     
-    console.log(`Creating post with ID: ${tempTxid}, clientProvidedPostId: ${clientProvidedPostId}`);
+    console.log(`Creating post with ID: ${temptx_id}, clientProvidedPostId: ${clientProvidedPostId}`);
     
     // Create a minimal post with required fields
     try {
       const post = await prisma.post.create({
         data: {
-          id: tempTxid,
-          txid: tempTxid,
+          id: temptx_id,
+          tx_id: temptx_id,
           content: content,
-          authorAddress: authorAddress,
+          author_address: author_address,
           tags: tags || [],
           isVote: isVote || false,
           metadata: clientProvidedPostId ? { postId: clientProvidedPostId } : undefined
@@ -432,23 +432,23 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       console.log('Post created successfully:', post);
 
       // If this is a vote post, create vote options
-      if (isVote && voteOptions && voteOptions.length >= 2) {
+      if (isVote && vote_options && vote_options.length >= 2) {
         // Create vote options
-        const voteOptionPromises = voteOptions.map(async (option: any, index: number) => {
-          const voteOptionId = `vote_option_${tempTxid}_${index}`;
-          return prisma.voteOption.create({
+        const vote_optionPromises = vote_options.map(async (option: any, index: number) => {
+          const vote_option_id = `vote_option_${temptx_id}_${index}`;
+          return prisma.vote_option.create({
             data: {
-              id: voteOptionId,
-              txid: `${tempTxid}_option_${index}`,
+              id: vote_option_id,
+              tx_id: `${temptx_id}_option_${index}`,
               content: option.text,
               postId: post.id,
-              authorAddress: authorAddress,
+              author_address: author_address,
               optionIndex: index
             }
           });
         });
 
-        await Promise.all(voteOptionPromises);
+        await Promise.all(vote_optionPromises);
       }
 
       // Return the created post
@@ -494,13 +494,13 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
     const {
       postId,
       content,
-      authorAddress,
+      author_address,
       rawImageData,
       mediaType,
       tags = [],
       isLocked = false,
       lockAmount = 0,
-      createdAt = new Date().toISOString()
+      created_at = new Date().toISOString()
     } = req.body;
 
     // Validate required fields
@@ -509,8 +509,8 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       return res.status(400).json({ error: 'Content or image is required' });
     }
 
-    if (!authorAddress) {
-      console.error('Missing required field: authorAddress');
+    if (!author_address) {
+      console.error('Missing required field: author_address');
       return res.status(400).json({ error: 'Author address is required' });
     }
 
@@ -543,8 +543,8 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       });
     }
 
-    // Create temporary txid for the post
-    const tempTxid = `temp_${postId}_${Date.now()}`;
+    // Create temporary tx_id for the post
+    const temptx_id = `temp_${postId}_${Date.now()}`;
     
     // Prepare metadata for scanner processing
     const metadata = {
@@ -563,31 +563,31 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
     };
 
     const postData = {
-      id: tempTxid,
-      txid: tempTxid,
+      id: temptx_id,
+      tx_id: temptx_id,
       content,
-      authorAddress,
+      author_address,
       rawImageData: rawImageData || null,
       mediaType: mediaType || null,
       tags,
       metadata,
       isLocked,
-      createdAt: new Date(createdAt),
+      created_at: new Date(created_at),
       blockHeight: null
     } as const;
 
     const post = await prisma.post.create({
       data: {
         id: postData.id,
-        txid: postData.txid,
+        tx_id: postData.tx_id,
         content: postData.content,
-        authorAddress: postData.authorAddress,
+        author_address: postData.author_address,
         rawImageData: postData.rawImageData ? Buffer.from(postData.rawImageData) : null,
         mediaType: postData.mediaType,
         tags: postData.tags,
         metadata: postData.metadata,
         isLocked: postData.isLocked,
-        createdAt: postData.createdAt,
+        created_at: postData.created_at,
         blockHeight: postData.blockHeight
       }
     });

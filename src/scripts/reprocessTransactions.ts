@@ -15,9 +15,9 @@ const prisma = new PrismaClient({
     log: ['query', 'info', 'warn', 'error']
 });
 
-async function fetchTransaction(txid: string): Promise<any> {
+async function fetchTransaction(tx_id: string): Promise<any> {
     try {
-        const response = await axios.get(`https://junglebus.gorillapool.io/v1/transaction/get/${txid}`);
+        const response = await axios.get(`https://junglebus.gorillapool.io/v1/transaction/get/${tx_id}`);
         return response.data;
     } catch (error) {
         console.error('Error fetching transaction:', error);
@@ -25,12 +25,12 @@ async function fetchTransaction(txid: string): Promise<any> {
     }
 }
 
-async function reprocessTransaction(txid: string) {
+async function reprocessTransaction(tx_id: string) {
     try {
-        console.log(`\nReprocessing transaction ${txid}...`);
+        console.log(`\nReprocessing transaction ${tx_id}...`);
         
         // Fetch full transaction data
-        const fullTx = await fetchTransaction(txid);
+        const fullTx = await fetchTransaction(tx_id);
         console.log("Full transaction data:", JSON.stringify(fullTx, null, 2));
         
         // Get author address
@@ -76,13 +76,13 @@ async function reprocessTransaction(txid: string) {
         
         // Prepare final data
         const finalData = {
-            id: txid,
-            txid: txid,
+            id: tx_id,
+            tx_id: tx_id,
             content: parsedTx.content,
-            authorAddress: parsedTx.author || author_address,
+            author_address: parsedTx.author || author_address,
             blockHeight: fullTx.block_height || 0,
-            unlockHeight: parsedTx.lock?.unlock_height || 0,
-            createdAt: new Date(parsedTx.timestamp),
+            unlock_height: parsedTx.lock?.unlock_height || 0,
+            created_at: new Date(parsedTx.timestamp),
             tags: parsedTx.tags,
             metadata: {
                 type: parsedTx.type,
@@ -110,39 +110,39 @@ async function reprocessTransaction(txid: string) {
 
         // Update database
         await prisma.post.update({
-            where: { txid },
+            where: { tx_id },
             data: finalData
         });
 
         // Process vote options if present
-        const voteOptions = parsedTx.vote?.options;
-        if (voteOptions && voteOptions.length > 0) {
-            console.log("\nProcessing vote options:", voteOptions);
-            await Promise.all(voteOptions.map(async (option) => {
-                const optionId = `${txid}-${option.index}`;
-                return prisma.voteOption.upsert({
-                    where: { txid: optionId },
+        const vote_options = parsedTx.vote?.options;
+        if (vote_options && vote_options.length > 0) {
+            console.log("\nProcessing vote options:", vote_options);
+            await Promise.all(vote_options.map(async (option) => {
+                const optionId = `${tx_id}-${option.index}`;
+                return prisma.vote_option.upsert({
+                    where: { tx_id: optionId },
                     create: {
                         id: optionId,
-                        txid: optionId,
-                        postTxid: txid,
+                        tx_id: optionId,
+                        posttx_id: tx_id,
                         content: option.text,
-                        authorAddress: parsedTx.author || author_address,
-                        createdAt: new Date(parsedTx.timestamp),
+                        author_address: parsedTx.author || author_address,
+                        created_at: new Date(parsedTx.timestamp),
                         lockAmount: option.lock_amount,
                         lockDuration: option.lock_duration,
-                        unlockHeight: option.unlock_height,
+                        unlock_height: option.unlock_height,
                         currentHeight: option.current_height,
                         lockPercentage: option.lock_percentage,
                         tags: []
                     },
                     update: {
                         content: option.text,
-                        authorAddress: parsedTx.author || author_address,
-                        createdAt: new Date(parsedTx.timestamp),
+                        author_address: parsedTx.author || author_address,
+                        created_at: new Date(parsedTx.timestamp),
                         lockAmount: option.lock_amount,
                         lockDuration: option.lock_duration,
-                        unlockHeight: option.unlock_height,
+                        unlock_height: option.unlock_height,
                         currentHeight: option.current_height,
                         lockPercentage: option.lock_percentage
                     }
@@ -150,9 +150,9 @@ async function reprocessTransaction(txid: string) {
             }));
         }
 
-        console.log(`Successfully reprocessed post ${txid}`);
+        console.log(`Successfully reprocessed post ${tx_id}`);
     } catch (error) {
-        console.error(`Error reprocessing transaction ${txid}:`, error);
+        console.error(`Error reprocessing transaction ${tx_id}:`, error);
     }
 }
 
@@ -160,14 +160,14 @@ async function main() {
     try {
         // Get all posts
         const posts = await prisma.post.findMany({
-            select: { txid: true }
+            select: { tx_id: true }
         });
 
         console.log(`Found ${posts.length} posts to reprocess`);
 
         // Process each post
         for (const post of posts) {
-            await reprocessTransaction(post.txid);
+            await reprocessTransaction(post.tx_id);
         }
 
         console.log('Finished reprocessing all posts');

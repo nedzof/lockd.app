@@ -19,7 +19,7 @@ declare module 'bsv' {
         version: number;
         nLockTime: number;
         inputs: {
-            prevTxId: Buffer;
+            prevtx_id: Buffer;
             outputIndex: number;
             sequenceNumber: number;
             script: Script;

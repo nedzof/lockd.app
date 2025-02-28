@@ -36,10 +36,10 @@ export function extractVoteData(tx: { data: string[] }): {
 
         // Check if this is a vote transaction
         const isVoteQuestion = tx.data.some((d: string) => d.startsWith('type=vote_question'));
-        const isVoteOption = tx.data.some((d: string) => d.startsWith('type=vote_option'));
+        const isvote_option = tx.data.some((d: string) => d.startsWith('type=vote_option'));
         const isVoteType = tx.data.some((d: string) => d.startsWith('content_type=vote'));
         
-        if (!isVoteQuestion && !isVoteOption && !isVoteType) {
+        if (!isVoteQuestion && !isvote_option && !isVoteType) {
             return {};
         }
         
@@ -65,7 +65,7 @@ export function extractVoteData(tx: { data: string[] }): {
         }
         
         // Extract vote options
-        if (isVoteOption) {
+        if (isvote_option) {
             const optionIndices = tx.data.filter((d: string) => d.startsWith('optionindex=')).map((d: string) => parseInt(d.split('=')[1]));
             
             // Extract option text
@@ -111,10 +111,10 @@ export class TransactionParser {
     }
 
     // Process image data and save to database
-    private async processImage(imageData: Buffer, metadata: any, txid: string): Promise<void> {
+    private async processImage(imageData: Buffer, metadata: any, tx_id: string): Promise<void> {
         try {
             logger.debug('Starting image processing', {
-                txid,
+                tx_id,
                 hasImageData: !!imageData,
                 metadataKeys: metadata ? Object.keys(metadata) : [],
                 contentType: metadata?.contentType
@@ -133,7 +133,7 @@ export class TransactionParser {
 
             // Save image data using DbClient
             await this.dbClient.saveImage({
-                txid,
+                tx_id,
                 imageData,
                 contentType: metadata.contentType,
                 filename: metadata.filename || 'image.jpg',
@@ -143,14 +143,14 @@ export class TransactionParser {
             });
 
             logger.info('Successfully processed and saved image', {
-                txid,
+                tx_id,
                 contentType: metadata.contentType,
                 size: imageData.length
             });
         } catch (error) {
             logger.error('Failed to process image', {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                txid
+                tx_id
             });
             throw error;
         }
@@ -606,31 +606,31 @@ export class TransactionParser {
         }
     }
 
-    public async parseTransaction(txid: string): Promise<void> {
+    public async parseTransaction(tx_id: string): Promise<void> {
         try {
-            if (!txid || typeof txid !== 'string') {
-                logger.error('Invalid transaction ID', { txid });
+            if (!tx_id || typeof tx_id !== 'string') {
+                logger.error('Invalid transaction ID', { tx_id });
                 return;
             }
 
             // Check if transaction already exists in database
-            const existingTx = await this.dbClient.getTransaction(txid);
+            const existingTx = await this.dbClient.getTransaction(tx_id);
             if (existingTx) {
-                logger.info('📋 TRANSACTION ALREADY PROCESSED', { txid });
+                logger.info('📋 TRANSACTION ALREADY PROCESSED', { tx_id });
                 return;
             }
 
-            logger.info('🔄 PARSING TRANSACTION', { txid });
+            logger.info('🔄 PARSING TRANSACTION', { tx_id });
 
-            const tx: any = await this.jungleBus.GetTransaction(txid);
+            const tx: any = await this.jungleBus.GetTransaction(tx_id);
             if (!tx) {
-                logger.warn('Transaction not found in JungleBus', { txid });
+                logger.warn('Transaction not found in JungleBus', { tx_id });
                 return;
             }
 
             // Log the raw transaction data structure to understand its format
             logger.debug('📦 RAW TRANSACTION DATA', { 
-                txid,
+                tx_id,
                 hasOutputs: !!tx.outputs,
                 outputsLength: tx.outputs?.length || 0,
                 outputsType: tx.outputs ? typeof tx.outputs : 'undefined',
@@ -655,19 +655,19 @@ export class TransactionParser {
             
             const parsedTx = this.extractLockProtocolData(txData, tx);
             if (!parsedTx) {
-                logger.warn('Not a Lock protocol transaction', { txid });
+                logger.warn('Not a Lock protocol transaction', { tx_id });
                 return;
             }
 
             logger.info('✅ TRANSACTION PARSED', { 
-                txid,
+                tx_id,
                 has_image: !!parsedTx.image,
                 has_vote_options: !!(parsedTx.vote_options && parsedTx.vote_options.length > 0),
                 parsedTxKeys: Object.keys(parsedTx)
             });
 
             if (parsedTx.image) {
-                await this.processImage(parsedTx.image, parsedTx.image_metadata, txid);
+                await this.processImage(parsedTx.image, parsedTx.image_metadata, tx_id);
             }
 
             // Determine transaction type
@@ -678,7 +678,7 @@ export class TransactionParser {
                 // Ensure we have vote options
                 if (!parsedTx.vote_options || parsedTx.vote_options.length === 0) {
                     // Create default vote options if none exist
-                    logger.info('Creating default vote options for vote', { txid });
+                    logger.info('Creating default vote options for vote', { tx_id });
                     parsedTx.vote_options = ['Yes', 'No', 'Maybe'];
                 }
             }
@@ -690,7 +690,7 @@ export class TransactionParser {
 
             // Create the parsed transaction object to send to the database
             const parsedTransaction: ParsedTransaction = {
-                txid,
+                tx_id,
                 type: txType,
                 protocol: 'LOCK',
                 blockHeight: tx.block_height, // Use camelCase to match the interface
@@ -712,7 +712,7 @@ export class TransactionParser {
             };
 
             logger.info('📤 SENDING TO DATABASE', { 
-                txid,
+                tx_id,
                 type: txType,
                 blockHeight: tx.block_height
             });
@@ -721,14 +721,14 @@ export class TransactionParser {
             const post = await this.dbClient.processTransaction(parsedTransaction);
             
             logger.info('💾 TRANSACTION SAVED', {
-                txid,
+                tx_id,
                 post_id: post.id,
                 type: txType,
                 vote_options_count: parsedTx.vote_options?.length || 0
             });
         } catch (error) {
             logger.error('❌ TRANSACTION PROCESSING FAILED', {
-                txid,
+                tx_id,
                 error: error instanceof Error ? error.message : String(error)
             });
         }

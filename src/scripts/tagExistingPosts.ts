@@ -28,7 +28,7 @@ async function tagExistingPosts() {
         ]
       },
       orderBy: {
-        createdAt: 'desc'  // Using camelCase for Prisma query, which maps to snake_case in DB
+        created_at: 'desc'  // Using camelCase for Prisma query, which maps to snake_case in DB
       },
       select: {
         id: true,
@@ -103,7 +103,7 @@ async function tagExistingPosts() {
       path.join(resultsDir, `tag-results-${timestamp}.json`),
       JSON.stringify({
         timestamp,
-        totalPosts: filteredPosts.length,
+        total_posts: filteredPosts.length,
         processedPosts: results.length,
         results
       }, null, 2)
