@@ -13,18 +13,18 @@ function parseMapTransaction(tx: any) {
     try {
         // Extract basic transaction data
         const txid = tx.id;
-        const block_height = tx.block_height;
-        const block_time = tx.block_time;
+        const blockHeight = tx.block_height;
+        const blockTime = tx.block_time;
         const addresses = tx.addresses || [];
-        const author_address = addresses[0] || null;
+        const authorAddress = addresses[0] || null;
         
         // Parse outputs to extract data
         const data: Record<string, any> = {
             content: '',
             tags: [],
-            vote_options: [],
-            is_vote: false,
-            content_type: null
+            voteOptions: [],
+            isVote: false,
+            contentType: null
         };
         
         // Process each output to extract MAP data
@@ -54,14 +54,14 @@ function parseMapTransaction(tx: any) {
                 
                 // Extract vote options
                 if (script.includes('MAP_TYPE=vote') && script.includes('MAP_OPTIONS=')) {
-                    data.is_vote = true;
-                    data.content_type = 'vote';
+                    data.isVote = true;
+                    data.contentType = 'vote';
                     
                     const optionsMatch = script.match(/MAP_OPTIONS=(\[[^\]]+\])/);
                     if (optionsMatch && optionsMatch[1]) {
                         try {
                             const options = JSON.parse(optionsMatch[1]);
-                            data.vote_options = options.map((opt: string, index: number) => ({
+                            data.voteOptions = options.map((opt: string, index: number) => ({
                                 content: opt,
                                 index
                             }));
@@ -76,9 +76,9 @@ function parseMapTransaction(tx: any) {
         // Return the parsed transaction
         return {
             txid,
-            block_height,
-            block_time,
-            author_address,
+            blockHeight,
+            blockTime,
+            authorAddress,
             metadata: data
         };
     } catch (error) {
@@ -96,26 +96,26 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
             create: {
                 txid: parsedTx.txid,
                 content: parsedTx.metadata.content,
-                authorAddress: parsedTx.author_address,
-                blockHeight: parsedTx.block_height,
-                createdAt: parsedTx.block_time ? new Date(parsedTx.block_time * 1000) : new Date(),
+                authorAddress: parsedTx.authorAddress,
+                blockHeight: parsedTx.blockHeight,
+                createdAt: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
                 tags: parsedTx.metadata.tags,
-                isVote: parsedTx.metadata.is_vote,
-                mediaType: parsedTx.metadata.content_type
+                isVote: parsedTx.metadata.isVote,
+                mediaType: parsedTx.metadata.contentType
             },
             update: {
                 content: parsedTx.metadata.content,
-                authorAddress: parsedTx.author_address,
-                blockHeight: parsedTx.block_height,
+                authorAddress: parsedTx.authorAddress,
+                blockHeight: parsedTx.blockHeight,
                 tags: parsedTx.metadata.tags,
-                isVote: parsedTx.metadata.is_vote,
-                mediaType: parsedTx.metadata.content_type
+                isVote: parsedTx.metadata.isVote,
+                mediaType: parsedTx.metadata.contentType
             }
         });
         
         // Create vote options if this is a vote post
-        if (parsedTx.metadata.is_vote && parsedTx.metadata.vote_options.length > 0) {
-            for (const option of parsedTx.metadata.vote_options) {
+        if (parsedTx.metadata.isVote && parsedTx.metadata.voteOptions.length > 0) {
+            for (const option of parsedTx.metadata.voteOptions) {
                 const optionTxid = `${parsedTx.txid}-option-${option.index}`;
                 
                 await prisma.voteOption.upsert({
@@ -123,14 +123,14 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                     create: {
                         txid: optionTxid,
                         content: option.content,
-                        authorAddress: parsedTx.author_address,
-                        createdAt: parsedTx.block_time ? new Date(parsedTx.block_time * 1000) : new Date(),
+                        authorAddress: parsedTx.authorAddress,
+                        createdAt: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
                         postId: post.id,
                         optionIndex: option.index
                     },
                     update: {
                         content: option.content,
-                        authorAddress: parsedTx.author_address,
+                        authorAddress: parsedTx.authorAddress,
                         postId: post.id,
                         optionIndex: option.index
                     }

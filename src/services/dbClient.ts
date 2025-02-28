@@ -1,7 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import { PrismaClient } from '@prisma/client';
 import type { Post } from '@prisma/client';
-import { ParsedTransaction, DbError, PostWithVoteOptions, ProcessedTxMetadata } from '../shared/types.js';
+import { ParsedTransaction, DbError, PostWithVoteOptions, ProcessedTxMetadata, ProcessedTransaction } from '../shared/types.js';
 import { logger } from '../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
@@ -55,108 +55,163 @@ export class DbClient {
         return DbClient.instance;
     }
 
-    private async withFreshClient<T>(operation: (client: PrismaClient) => Promise<T>): Promise<T> {
-        // Create a new client for this operation
-        logger.debug('Creating fresh PrismaClient instance', {
-            instanceId: this.instanceId,
-            dbUrl: process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':****@').split('?')[0],
-            isPrismaClientDefined: typeof PrismaClient !== 'undefined',
-            directUrl: process.env.DIRECT_URL?.replace(/:[^:@]*@/, ':****@').split('?')[0],
-        });
-
-        try {
-            // Always use DIRECT_URL to bypass PgBouncer for operations that need prepared statements
-            const client = new PrismaClient({
-                datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL,
-                log: [
-                    { level: 'error', emit: 'stdout' },
-                    { level: 'warn', emit: 'stdout' },
-                ],
-            });
-            
-            logger.debug('PrismaClient instance created', {
-                clientType: typeof client,
-                clientMethods: Object.keys(client),
-                hasConnectMethod: typeof client.$connect === 'function',
-                usingDirectUrl: !!process.env.DIRECT_URL
-            });
-
+    /**
+     * Executes a database operation with a fresh Prisma client
+     * Handles connection errors and retries if necessary
+     */
+    private async withFreshClient<T>(
+        operation: (client: PrismaClient) => Promise<T>,
+        retries = 3,
+        delay = 1000
+    ): Promise<T> {
+        let lastError: Error | null = null;
+        
+        for (let attempt = 1; attempt <= retries; attempt++) {
             try {
-                await client.$connect();
+                // Create a fresh client for each operation
+                const client = new PrismaClient({
+                    datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL,
+                    log: [
+                        { level: 'error', emit: 'stdout' },
+                        { level: 'warn', emit: 'stdout' },
+                    ],
+                });
                 
-                // Set a timeout to prevent hanging operations
-                const timeoutPromise = new Promise<T>((_, reject) => {
-                    setTimeout(() => {
-                        reject(new Error('Database operation timed out after 10 seconds'));
-                    }, 10000);
-                });
-
-                // Race the operation against the timeout
-                const result = await Promise.race([
-                    operation(client),
-                    timeoutPromise
-                ]);
-
-                return result;
+                try {
+                    // Execute the operation
+                    const result = await operation(client);
+                    return result;
+                } finally {
+                    // Always disconnect the client when done
+                    await client.$disconnect().catch(err => {
+                        logger.warn(' DB: ERROR DISCONNECTING CLIENT', {
+                            error: err instanceof Error ? err.message : 'Unknown error',
+                            attempt
+                        });
+                    });
+                }
             } catch (error) {
-                logger.error('Database operation failed', {
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    instanceId: this.instanceId
-                });
-                throw error;
-            } finally {
-                // Simply disconnect without deallocating prepared statements
-                await client.$disconnect();
+                lastError = error instanceof Error ? error : new Error('Unknown database error');
+                
+                // Check if this is a retryable error
+                const isRetryable = this.isRetryableError(error);
+                
+                if (attempt < retries && isRetryable) {
+                    const waitTime = delay * attempt; // Exponential backoff
+                    
+                    logger.warn(` DB: OPERATION FAILED, RETRYING (${attempt}/${retries})`, {
+                        error: lastError.message,
+                        retryable: isRetryable,
+                        waitTime: `${waitTime}ms`
+                    });
+                    
+                    // Wait before retrying
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                } else if (!isRetryable) {
+                    // If error is not retryable, break immediately
+                    logger.error(' DB: NON-RETRYABLE ERROR', {
+                        error: lastError.message,
+                        attempt
+                    });
+                    break;
+                }
             }
-        } catch (error) {
-            logger.error('Failed to create PrismaClient instance', {
-                error: error instanceof Error ? error.message : 'Unknown error',
-                instanceId: this.instanceId
-            });
-            throw error;
         }
+        
+        // If we got here, all retries failed
+        logger.error(' DB: ALL RETRIES FAILED', {
+            error: lastError?.message || 'Unknown error',
+            retries
+        });
+        
+        throw lastError || new Error('Database operation failed after multiple retries');
     }
 
-    private async upsertPost(tx: ParsedTransaction, imageBuffer: Buffer | null): Promise<Post> {
-        const postData = {
+    private async upsertPost(tx: ParsedTransaction, imageBuffer: Buffer | null = null): Promise<Post> {
+        // Prepare the post data
+        const postData: Prisma.PostCreateInput = {
             txid: tx.txid,
-            content: tx.metadata.content,
-            authorAddress: tx.metadata.sender_address,
-            blockHeight: tx.block_height,
-            createdAt: this.createBlockTimeDate(tx.block_time),
-            rawImageData: imageBuffer,
+            content: tx.metadata.content || '',
+            authorAddress: tx.metadata.sender_address || tx.metadata.authorAddress,
+            createdAt: this.createBlockTimeDate(tx.blockTime),
+            updatedAt: this.createBlockTimeDate(tx.blockTime),
             tags: tx.metadata.tags || [],
-            metadata: tx.metadata || {},
-            isLocked: tx.type === 'lock',
-            isVote: tx.type === 'vote' || !!tx.metadata.vote_options || tx.metadata.content_type === 'vote'
+            isVote: tx.type === 'vote',
+            isLocked: !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0 || !!tx.metadata.lockAmount && tx.metadata.lockAmount > 0,
+            lockAmount: tx.metadata.lock_amount || tx.metadata.lockAmount || 0,
+            lockDuration: tx.metadata.lock_duration || tx.metadata.lockDuration || 0,
+            metadata: tx.metadata
         };
 
+        // Add image data if available
+        if (imageBuffer) {
+            postData.rawImageData = imageBuffer;
+            postData.mediaType = tx.metadata.media_type || tx.metadata.mediaType || 'image/png';
+        }
+
+        // Check if this is a reply to another post
+        if (tx.metadata.reply_to || tx.metadata.replyTo) {
+            logger.info(' DB: PROCESSING REPLY POST', { 
+                txid: tx.txid, 
+                replyTo: tx.metadata.reply_to || tx.metadata.replyTo 
+            });
+            
+            // Find the parent post
+            const parentPost = await this.withFreshClient(async (client) => {
+                return client.post.findUnique({
+                    where: { txid: tx.metadata.reply_to || tx.metadata.replyTo }
+                });
+            });
+
+            if (parentPost) {
+                postData.parentId = parentPost.id;
+            } else {
+                logger.warn(' DB: PARENT POST NOT FOUND', { 
+                    txid: tx.txid, 
+                    replyTo: tx.metadata.reply_to || tx.metadata.replyTo 
+                });
+            }
+        }
+
         return this.withFreshClient(async (client) => {
-            // Try to find existing post
+            // Check if post already exists
             const existingPost = await client.post.findUnique({
                 where: { txid: tx.txid }
             });
 
-            let post;
             if (existingPost) {
+                logger.info(' DB: UPDATING EXISTING POST', { 
+                    txid: tx.txid, 
+                    postId: existingPost.id 
+                });
+                
                 // Update existing post
-                post = await client.post.update({
+                return client.post.update({
                     where: { id: existingPost.id },
-                    data: postData
+                    data: {
+                        content: postData.content,
+                        tags: postData.tags,
+                        isVote: postData.isVote,
+                        isLocked: postData.isLocked,
+                        lockAmount: postData.lockAmount,
+                        lockDuration: postData.lockDuration,
+                        updatedAt: postData.updatedAt,
+                        metadata: postData.metadata,
+                        ...(imageBuffer ? {
+                            rawImageData: postData.rawImageData,
+                            mediaType: postData.mediaType
+                        } : {})
+                    }
                 });
             } else {
-                // Create new post
-                post = await client.post.create({
-                    data: postData
+                logger.info(' DB: CREATING NEW POST', { 
+                    txid: tx.txid,
+                    isReply: !!postData.parentId
                 });
+                
+                // Create new post
+                return client.post.create({ data: postData });
             }
-
-            // Process vote options if present
-            if (tx.metadata.vote_options && Array.isArray(tx.metadata.vote_options) && tx.metadata.vote_options.length > 0) {
-                await this.processVoteOptions(post.id, tx);
-            }
-
-            return post;
         });
     }
 
@@ -164,6 +219,11 @@ export class DbClient {
         if (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options)) {
             return;
         }
+
+        logger.info(' DB: PROCESSING VOTE OPTIONS', { 
+            postId, 
+            optionCount: tx.metadata.vote_options.length 
+        });
 
         return this.withFreshClient(async (client) => {
             // Process each vote option
@@ -184,26 +244,80 @@ export class DbClient {
                         data: {
                             txid: optionTxid,
                             content: optionContent,
-                            authorAddress: tx.metadata.sender_address,
-                            createdAt: this.createBlockTimeDate(tx.block_time),
+                            authorAddress: tx.metadata.sender_address || tx.metadata.authorAddress,
+                            createdAt: this.createBlockTimeDate(tx.blockTime),
                             tags: tx.metadata.tags || [],
                             postId: postId,
                             optionIndex: i
                         }
                     });
-                    
-                    logger.info(`Created vote option for post`, {
-                        postId,
-                        optionIndex: i,
-                        content: optionContent
-                    });
                 }
             }
+
+            logger.info(' DB: VOTE OPTIONS CREATED', {
+                postId,
+                optionCount: tx.metadata.vote_options.length
+            });
         });
+    }
+
+    /**
+     * Normalizes transaction metadata to handle both snake_case and camelCase property names
+     * This ensures our code is resilient to changes in the naming convention
+     * @param metadata Transaction metadata object
+     * @returns Normalized metadata object with both naming conventions
+     */
+    private normalizeMetadata(metadata: Record<string, any>): Record<string, any> {
+        if (!metadata || typeof metadata !== 'object') {
+            return {};
+        }
+        
+        const normalized: Record<string, any> = { ...metadata };
+        
+        // Map between snake_case and camelCase for common fields
+        const fieldMappings: [string, string][] = [
+            ['block_height', 'blockHeight'],
+            ['block_time', 'blockTime'],
+            ['post_id', 'postId'],
+            ['lock_amount', 'lockAmount'],
+            ['lock_duration', 'lockDuration'],
+            ['sender_address', 'authorAddress'],
+            ['author_address', 'authorAddress'],
+            ['created_at', 'createdAt'],
+            ['updated_at', 'updatedAt'],
+            ['vote_options', 'voteOptions'],
+            ['vote_question', 'voteQuestion'],
+            ['content_type', 'contentType'],
+            ['media_type', 'mediaType'],
+            ['raw_image_data', 'rawImageData'],
+            ['image_metadata', 'imageMetadata']
+        ];
+        
+        // Ensure both snake_case and camelCase versions exist
+        for (const [snakeCase, camelCase] of fieldMappings) {
+            // If snake_case exists but camelCase doesn't, add camelCase
+            if (normalized[snakeCase] !== undefined && normalized[camelCase] === undefined) {
+                normalized[camelCase] = normalized[snakeCase];
+            }
+            // If camelCase exists but snake_case doesn't, add snake_case
+            else if (normalized[camelCase] !== undefined && normalized[snakeCase] === undefined) {
+                normalized[snakeCase] = normalized[camelCase];
+            }
+        }
+        
+        return normalized;
     }
 
     public async processTransaction(tx: ParsedTransaction): Promise<Post> {
         try {
+            logger.info(' DB: SAVING TRANSACTION', {
+                txid: tx.txid,
+                type: tx.type
+            });
+            
+            // Normalize metadata to handle both snake_case and camelCase
+            tx.metadata = this.normalizeMetadata(tx.metadata);
+
             // First, save the transaction to the ProcessedTransaction table
             await this.withFreshClient(async (client) => {
                 // Check if transaction already exists
@@ -212,23 +326,35 @@ export class DbClient {
                 });
 
                 if (!existingTx) {
-                    // Create new processed transaction record
-                    await client.processedTransaction.create({
-                        data: {
+                    try {
+                        // Create new processed transaction record
+                        await client.processedTransaction.create({
+                            data: {
+                                txid: tx.txid,
+                                type: tx.type,
+                                protocol: tx.protocol,
+                                blockHeight: tx.blockHeight || 0,
+                                blockTime: tx.blockTime ? BigInt(tx.blockTime) : BigInt(0),
+                                metadata: tx.metadata || {}
+                            }
+                        });
+                        
+                        logger.info(' DB: TRANSACTION RECORD CREATED', {
                             txid: tx.txid,
                             type: tx.type,
-                            protocol: tx.protocol,
-                            blockHeight: tx.block_height || 0,
-                            blockTime: tx.block_time || 0,
-                            metadata: tx.metadata || {}
-                        }
-                    });
-                    
-                    logger.info('Transaction saved to ProcessedTransaction table', {
-                        txid: tx.txid,
-                        type: tx.type,
-                        blockHeight: tx.block_height
-                    });
+                            blockHeight: tx.blockHeight || 0,
+                            blockTime: tx.blockTime || 0
+                        });
+                    } catch (error) {
+                        logger.error(' DB: FAILED TO CREATE TRANSACTION RECORD', {
+                            txid: tx.txid,
+                            error: error instanceof Error ? error.message : 'Unknown error',
+                            stack: error instanceof Error ? error.stack : undefined
+                        });
+                        
+                        // Continue processing even if transaction record creation fails
+                        // This allows us to still attempt to create the post
+                    }
                 }
             });
 
@@ -236,34 +362,49 @@ export class DbClient {
             let imageBuffer: Buffer | null = null;
             if (tx.metadata.image) {
                 try {
-                    // We need to implement this method or use a different approach
-                    // imageBuffer = await this.processImage(tx.metadata.image);
-                    logger.warn('Image processing not implemented', {
-                        txid: tx.txid
+                    imageBuffer = tx.metadata.image;
+                    logger.info(' DB: IMAGE DATA RECEIVED', {
+                        txid: tx.txid,
+                        size: imageBuffer.length
                     });
                 } catch (error) {
-                    logger.error('Failed to process image', {
-                        error: error instanceof Error ? error.message : 'Unknown error',
+                    logger.error(' DB: IMAGE PROCESSING FAILED', {
                         txid: tx.txid
                     });
                 }
             }
 
             // Ensure vote posts have content_type set
-            if (tx.type === 'vote' && !tx.metadata.content_type) {
-                tx.metadata.content_type = 'vote';
-                logger.debug('Set content_type for vote post', { txid: tx.txid });
+            if (tx.type === 'vote' && !tx.metadata.content_type && !tx.metadata.contentType) {
+                tx.metadata.contentType = 'vote';
             }
+
+            logger.info(' DB: CREATING POST', {
+                txid: tx.txid,
+                type: tx.type,
+                hasImage: !!imageBuffer
+            });
 
             const post = await this.upsertPost(tx, imageBuffer);
 
+            // Process vote options if present
+            if (tx.metadata.vote_options && Array.isArray(tx.metadata.vote_options) && tx.metadata.vote_options.length > 0) {
+                logger.info(' DB: PROCESSING EXISTING VOTE OPTIONS', { 
+                    postId: post.id, 
+                    optionCount: tx.metadata.vote_options.length 
+                });
+                await this.processVoteOptions(post.id, tx);
+            }
             // For vote posts, ensure they have vote options
-            if ((tx.type === 'vote' || post.isVote) && (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options) || tx.metadata.vote_options.length === 0)) {
-                logger.info('Creating default vote options for vote post', { postId: post.id, txid: tx.txid });
+            else if ((tx.type === 'vote' || post.isVote) && (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options) || tx.metadata.vote_options.length === 0)) {
+                logger.info(' DB: CREATING DEFAULT VOTE OPTIONS', { 
+                    postId: post.id, 
+                    txid: tx.txid 
+                });
                 
                 // Create default vote options
                 const defaultOptions = ['Yes', 'No', 'Maybe'];
-                tx.metadata.vote_options = defaultOptions;
+                tx.metadata.voteOptions = defaultOptions;
                 
                 // Process the default vote options
                 await this.processVoteOptions(post.id, tx);
@@ -275,26 +416,26 @@ export class DbClient {
                         data: {
                             metadata: {
                                 ...(post.metadata as Record<string, any>),
-                                vote_options: defaultOptions,
-                                content_type: 'vote'
+                                voteOptions: defaultOptions,
+                                contentType: 'vote'
                             }
                         }
                     });
                 });
             }
 
-            const action = post.createdAt === this.createBlockTimeDate(tx.block_time) ? 'created' : 'updated';
-            logger.info(`✅ Post ${action} successfully`, {
+            const action = post.createdAt === this.createBlockTimeDate(tx.blockTime) ? 'created' : 'updated';
+            logger.info(` DB: POST ${action.toUpperCase()}`, {
                 txid: post.txid,
-                hasImage: !!imageBuffer,
-                tags: post.tags,
+                postId: post.id,
+                type: tx.type,
                 isVote: post.isVote,
-                contentType: tx.metadata.content_type
+                tagCount: post.tags.length
             });
 
             return post;
         } catch (error) {
-            logger.error('Failed to process transaction', {
+            logger.error(' DB: TRANSACTION PROCESSING FAILED', {
                 error: error instanceof Error ? error.message : 'Unknown error',
                 txid: tx.txid
             });
@@ -315,8 +456,12 @@ export class DbClient {
             logger.debug('Saving transaction to database', { 
                 txid: tx.txid,
                 type: tx.type,
-                block_height: tx.block_height
+                blockHeight: tx.blockHeight,
+                blockTime: tx.blockTime
             });
+            
+            // Normalize metadata to handle both snake_case and camelCase
+            tx.metadata = this.normalizeMetadata(tx.metadata);
 
             // Save to ProcessedTransaction table
             const savedTx = await this.withFreshClient(async (client) => {
@@ -332,8 +477,8 @@ export class DbClient {
                         data: {
                             type: tx.type,
                             protocol: tx.protocol,
-                            blockHeight: tx.block_height || 0,
-                            blockTime: tx.block_time || 0,
+                            blockHeight: tx.blockHeight || 0,
+                            blockTime: tx.blockTime ? BigInt(tx.blockTime) : BigInt(0),
                             metadata: tx.metadata || {}
                         }
                     });
@@ -344,8 +489,8 @@ export class DbClient {
                             txid: tx.txid,
                             type: tx.type,
                             protocol: tx.protocol,
-                            blockHeight: tx.block_height || 0,
-                            blockTime: tx.block_time || 0,
+                            blockHeight: tx.blockHeight || 0,
+                            blockTime: tx.blockTime ? BigInt(tx.blockTime) : BigInt(0),
                             metadata: tx.metadata || {}
                         }
                     });
@@ -379,6 +524,64 @@ export class DbClient {
                 txid: tx.txid
             });
             throw error;
+        }
+    }
+
+    public async getTransaction(txid: string): Promise<ProcessedTransaction | null> {
+        try {
+            logger.info(' DB: FETCHING TRANSACTION', { txid });
+            
+            return this.withFreshClient(async (client) => {
+                // First try to get the transaction using Prisma's findUnique
+                const tx = await client.processedTransaction.findUnique({
+                    where: { txid }
+                });
+                
+                if (tx) {
+                    // Map database column names to interface property names
+                    return {
+                        id: tx.id,
+                        txid: tx.txid,
+                        blockHeight: tx.blockHeight,
+                        blockTime: Number(tx.blockTime), // Convert BigInt to Number
+                        type: tx.type,
+                        protocol: tx.protocol,
+                        metadata: tx.metadata,
+                        createdAt: tx.createdAt,
+                        updatedAt: tx.updatedAt
+                    };
+                }
+                
+                // If not found, try with a raw query as fallback
+                const rawResult = await client.$queryRaw`
+                    SELECT * FROM "ProcessedTransaction" WHERE txid = ${txid} LIMIT 1
+                `;
+                
+                if (Array.isArray(rawResult) && rawResult.length > 0) {
+                    const rawTx = rawResult[0] as any;
+                    
+                    // Map database column names to interface property names
+                    return {
+                        id: rawTx.id,
+                        txid: rawTx.txid,
+                        blockHeight: rawTx.block_height,
+                        blockTime: Number(rawTx.block_time), // Convert BigInt to Number
+                        type: rawTx.type,
+                        protocol: rawTx.protocol,
+                        metadata: rawTx.metadata,
+                        createdAt: rawTx.created_at,
+                        updatedAt: rawTx.updated_at
+                    };
+                }
+                
+                return null;
+            });
+        } catch (error) {
+            logger.error(' DB: FAILED TO FETCH TRANSACTION', {
+                txid,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            return null;
         }
     }
 
@@ -425,28 +628,7 @@ export class DbClient {
         }
     }
 
-    private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
-        let lastError: Error | null = null;
-        for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
-            try {
-                return await operation();
-            } catch (error) {
-                lastError = error as Error;
-                if (this.shouldRetry(error)) {
-                    logger.warn('Database operation failed, retrying', {
-                        attempt,
-                        error: error instanceof Error ? error.message : 'Unknown error'
-                    });
-                    await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY * attempt));
-                    continue;
-                }
-                throw error;
-            }
-        }
-        throw lastError || new Error('Operation failed after retries');
-    }
-
-    private shouldRetry(error: unknown): boolean {
+    private isRetryableError(error: unknown): boolean {
         const dbError = error as DbError;
         // Retry on connection errors or deadlocks
         return dbError.code === '40001' || // serialization failure
@@ -454,35 +636,72 @@ export class DbClient {
                dbError.code === '57P01';   // connection lost
     }
 
-    private createBlockTimeDate(blockTime?: number | bigint): Date {
-        const now = new Date();
-        if (!blockTime) {
-            return now;
-        }
-
+    /**
+     * Creates a JavaScript Date object from a block time value
+     * Handles different formats of blockTime (number, BigInt, string)
+     * @param blockTime Block time in seconds (Unix timestamp)
+     * @returns JavaScript Date object
+     */
+    private createBlockTimeDate(blockTime?: number | BigInt | string | null): Date {
         try {
-            // Convert to milliseconds
-            const timestampMs = Number(BigInt(blockTime) * BigInt(1000));
+            // Handle undefined, null, or invalid input
+            if (blockTime === undefined || blockTime === null) {
+                return new Date();
+            }
             
-            // Check if timestamp is reasonable (between 2020 and 2050)
-            const minTimestamp = new Date('2020-01-01').getTime();
-            const maxTimestamp = new Date('2050-01-01').getTime();
+            // Convert various input types to number
+            let blockTimeNumber: number;
+            
+            if (typeof blockTime === 'bigint') {
+                blockTimeNumber = Number(blockTime);
+            } else if (typeof blockTime === 'string') {
+                blockTimeNumber = parseInt(blockTime, 10);
+            } else if (typeof blockTime === 'number') {
+                blockTimeNumber = blockTime;
+            } else {
+                logger.warn(' DB: INVALID BLOCK TIME TYPE', { 
+                    blockTime,
+                    type: typeof blockTime,
+                    usingCurrentTime: true
+                });
+                return new Date();
+            }
+            
+            // Check if the conversion resulted in a valid number
+            if (isNaN(blockTimeNumber)) {
+                logger.warn(' DB: BLOCK TIME IS NaN', { 
+                    blockTime,
+                    usingCurrentTime: true
+                });
+                return new Date();
+            }
+            
+            // Convert seconds to milliseconds for JavaScript Date
+            // Bitcoin timestamps are in seconds, JS Date expects milliseconds
+            const timestampMs = blockTimeNumber * 1000;
+            
+            // Validate the timestamp is reasonable (between 2009 and 100 years in the future)
+            const minTimestamp = new Date('2009-01-03').getTime(); // Bitcoin genesis block
+            const maxTimestamp = Date.now() + (100 * 365 * 24 * 60 * 60 * 1000); // 100 years in the future
             
             if (timestampMs < minTimestamp || timestampMs > maxTimestamp) {
-                logger.warn('Invalid block time detected, using current time', {
-                    blockTime,
-                    timestampMs
+                logger.warn(' DB: INVALID BLOCK TIME RANGE', { 
+                    blockTime: blockTimeNumber,
+                    timestampMs,
+                    minTimestamp,
+                    maxTimestamp,
+                    usingCurrentTime: true
                 });
-                return now;
+                return new Date();
             }
-
+            
             return new Date(timestampMs);
         } catch (error) {
-            logger.error('Error converting block time', {
+            logger.error(' DB: ERROR CREATING BLOCK TIME DATE', {
                 blockTime,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
-            return now;
+            return new Date();
         }
     }
 
@@ -515,44 +734,7 @@ export class DbClient {
         }
     }
 
-    async getTransaction(txid: string): Promise<ParsedTransaction | null> {
-        try {
-            const [transaction] = await prisma.$queryRaw<Array<{
-                txid: string;
-                type: string;
-                protocol: string;
-                block_height: number;
-                block_time: bigint;
-                metadata: any;
-            }>>`
-                SELECT txid, type, protocol, "block_height", "block_time", metadata
-                FROM "ProcessedTransaction"
-                WHERE txid = ${txid}
-                LIMIT 1
-            `;
-
-            if (!transaction) {
-                return null;
-            }
-
-            return {
-                txid: transaction.txid,
-                type: transaction.type,
-                protocol: transaction.protocol,
-                block_height: transaction.block_height,
-                block_time: Number(transaction.block_time),
-                metadata: transaction.metadata
-            };
-        } catch (error) {
-            logger.error('Error in getTransaction', {
-                error: error instanceof Error ? error.message : 'Unknown error',
-                txid
-            });
-            return null;
-        }
-    }
-
-    public async getPostWithVoteOptions(postId: string): Promise<PostWithVoteOptions | null> {
+    async getPostWithVoteOptions(postId: string): Promise<PostWithVoteOptions | null> {
         const post = await prisma.post.findUnique({
             where: { id: postId },
             include: {
@@ -605,7 +787,7 @@ export class DbClient {
         if (process.env.NODE_ENV !== 'test') {
             throw new Error('Cleanup can only be run in test environment');
         }
-        await this.withRetry(async () => {
+        await this.withFreshClient(async () => {
             await prisma.voteOption.deleteMany();
             await prisma.lockLike.deleteMany();
             await prisma.post.deleteMany();

@@ -101,15 +101,15 @@ export interface PostWithVoteOptions extends Post {
 }
 
 export interface ProcessedTransaction {
-  id: string;
-  txid: string;
-  block_height: number;
-  block_time: bigint;
-  type: string;
-  protocol: string;
-  metadata: any;
-  created_at: Date;
-  updated_at: Date;
+    id: string;
+    txid: string;
+    blockHeight: number;  // Maps to block_height in database
+    blockTime: number;    // Maps to block_time in database (BigInt in DB, Number in TS)
+    type: string;
+    protocol: string;
+    metadata: Record<string, any>;
+    createdAt: Date;      // Maps to created_at in database
+    updatedAt: Date;      // Maps to updated_at in database
 }
 
 export interface JungleBusTransaction {
@@ -166,9 +166,14 @@ export interface ParsedTransaction {
         timestamp?: number;
         [key: string]: any;
     };
+    post_id?: string;
+    content?: string;
+    lock_amount?: number;
+    lock_duration?: number;
+    timestamp?: number;
     sender_address?: string;
-    block_height?: number;
-    block_time?: number | bigint;
+    blockHeight?: number;  // camelCase for consistency in code
+    blockTime?: number;    // camelCase for consistency in code
     sequence?: number;
     parent_sequence?: number;
     lock_like?: LockLike;

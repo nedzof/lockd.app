@@ -1,0 +1,15 @@
+{
+  "timestamp": "2025-02-28T12-19-43.725Z",
+  "totalPosts": 1,
+  "processedPosts": 1,
+  "results": [
+    {
+      "postId": "dcb1b82e-1449-4893-9246-6a981f7e6d69",
+      "status": "skipped",
+      "reason": "Content too short",
+      "previousTags": [],
+      "newTags": [],
+      "executionTimeMs": 0
+    }
+  ]
+}

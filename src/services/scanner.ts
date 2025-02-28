@@ -38,16 +38,11 @@ export class Scanner {
 
         const block = tx?.block?.height || tx?.height || tx?.block_height;
 
-        // Log the raw transaction structure
-        logger.debug('📥 Raw transaction data:', {
+        // Clear transaction detection log
+        logger.info('🔍 TRANSACTION DETECTED', {
             txid,
             block,
-            has_transaction: !!tx.transaction,
-            has_outputs: !!tx.outputs,
-            has_data: !!tx.data,
-            data_length: tx.data?.length,
-            raw_tx_keys: Object.keys(tx),
-            first_data_items: tx.data?.slice(0, 3)
+            type: 'incoming'
         });
 
         // Process all transactions
@@ -59,18 +54,17 @@ export class Scanner {
             if (errorMessage.includes('prepared statement') || errorMessage.includes('P2010')) {
                 logger.warn('⚠️ Prepared statement error, will retry later', {
                     txid,
-                    block,
-                    error: errorMessage
+                    block
                 });
                 
                 // For target txids, retry with a delay
                 setTimeout(async () => {
                     try {
-                        logger.info('🔄 Retrying target transaction', { txid });
+                        logger.info('🔄 Retrying transaction', { txid });
                         await this.parser.parseTransaction(txid);
-                        logger.info('✅ Successfully processed target transaction on retry', { txid });
+                        logger.info('✅ Successfully processed transaction on retry', { txid });
                     } catch (retryError) {
-                        logger.error('❌ Failed to process target transaction on retry', {
+                        logger.error('❌ Failed to process transaction on retry', {
                             txid,
                             error: retryError instanceof Error ? retryError.message : 'Unknown error'
                         });

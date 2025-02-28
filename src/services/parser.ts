@@ -3,6 +3,22 @@ import { DbClient } from './dbClient.js';
 import { JungleBusClient } from '@gorillapool/js-junglebus';
 import { LockProtocolData, ParsedTransaction } from '../shared/types.js';
 
+// Helper function to extract tags from transaction data
+export function extractTags(data: string[]): string[] {
+    if (!Array.isArray(data)) {
+        return [];
+    }
+    
+    // Extract all tags from the data array
+    const tags = data
+        .filter(item => item.startsWith('tags='))
+        .map(item => item.replace('tags=', ''))
+        .filter(tag => tag.trim() !== '');
+    
+    // Remove duplicates
+    return [...new Set(tags)];
+}
+
 // Helper function to extract vote data from transactions
 export function extractVoteData(tx: { data: string[] }): { 
     question?: string, 
@@ -392,9 +408,11 @@ export class TransactionParser {
             // Check if transaction already exists in database
             const existingTx = await this.dbClient.getTransaction(txid);
             if (existingTx) {
-                logger.info('Transaction already processed', { txid });
+                logger.info('📋 TRANSACTION ALREADY PROCESSED', { txid });
                 return;
             }
+
+            logger.info('🔄 PARSING TRANSACTION', { txid });
 
             const tx: any = await this.jungleBus.GetTransaction(txid);
             if (!tx) {
@@ -407,9 +425,15 @@ export class TransactionParser {
             const txData = tx.outputs || [];
             const parsedTx = this.extractLockProtocolData(txData, tx);
             if (!parsedTx) {
-                logger.warn('Could not extract Lock protocol data from transaction', { txid });
+                logger.warn('Not a Lock protocol transaction', { txid });
                 return;
             }
+
+            logger.info('✅ TRANSACTION PARSED', { 
+                txid,
+                has_image: !!parsedTx.image,
+                has_vote_options: !!(parsedTx.vote_options && parsedTx.vote_options.length > 0)
+            });
 
             if (parsedTx.image) {
                 await this.processImage(parsedTx.image, parsedTx.image_metadata, txid);
@@ -419,17 +443,11 @@ export class TransactionParser {
             let txType = 'lock';
             if (parsedTx.is_vote || (parsedTx.vote_options && parsedTx.vote_options.length > 0) || parsedTx.content_type === 'vote') {
                 txType = 'vote';
-                logger.debug('Processing vote transaction', {
-                    txid,
-                    vote_options: parsedTx.vote_options,
-                    is_vote: parsedTx.is_vote,
-                    content_type: parsedTx.content_type
-                });
                 
                 // Ensure we have vote options
                 if (!parsedTx.vote_options || parsedTx.vote_options.length === 0) {
                     // Create default vote options if none exist
-                    logger.info('Creating default vote options for vote post', { txid });
+                    logger.info('Creating default vote options for vote', { txid });
                     parsedTx.vote_options = ['Yes', 'No', 'Maybe'];
                 }
             }
@@ -462,22 +480,25 @@ export class TransactionParser {
                 }
             };
 
+            logger.info('📤 SENDING TO DATABASE', { 
+                txid,
+                type: txType,
+                block_height: tx.block_height
+            });
+
             // Process the transaction in the database
             const post = await this.dbClient.processTransaction(parsedTransaction);
             
-            logger.info('Transaction processed successfully', {
+            logger.info('💾 TRANSACTION SAVED', {
                 txid,
                 post_id: post.id,
-                block_height: tx.block_height,
                 type: txType,
-                has_vote_options: parsedTx.vote_options && parsedTx.vote_options.length > 0,
-                content_type: parsedTx.content_type
+                vote_options_count: parsedTx.vote_options?.length || 0
             });
         } catch (error) {
-            logger.error('❌ Failed to parse transaction', {
+            logger.error('❌ TRANSACTION PROCESSING FAILED', {
                 txid,
-                error: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined
+                error: error instanceof Error ? error.message : String(error)
             });
         }
     }

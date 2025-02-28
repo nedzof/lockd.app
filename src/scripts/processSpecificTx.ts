@@ -124,21 +124,21 @@ async function processSpecificTransaction() {
             create: {
                 txid: TX_ID,
                 content: content,
-                author_address: tx.addresses[0],
-                created_at: timestamp,
+                authorAddress: tx.addresses[0],
+                createdAt: timestamp,
                 tags: tags,
-                is_vote: totalOptions > 0,
-                media_type: imageData?.mime_type,
-                raw_image_data: imageData?.raw_data
+                isVote: totalOptions > 0,
+                mediaType: imageData?.mime_type,
+                rawImageData: imageData?.raw_data
             },
             update: {
                 content: content,
-                author_address: tx.addresses[0],
-                created_at: timestamp,
+                authorAddress: tx.addresses[0],
+                createdAt: timestamp,
                 tags: tags,
-                is_vote: totalOptions > 0,
-                media_type: imageData?.mime_type,
-                raw_image_data: imageData?.raw_data
+                isVote: totalOptions > 0,
+                mediaType: imageData?.mime_type,
+                rawImageData: imageData?.raw_data
             }
         });
 
@@ -157,17 +157,17 @@ async function processSpecificTransaction() {
                     create: {
                         txid: optionTxid,
                         content: optionContent,
-                        author_address: tx.addresses[0],
-                        created_at: timestamp,
-                        post_id: post.id,
-                        option_index: i
+                        authorAddress: tx.addresses[0],
+                        createdAt: timestamp,
+                        postId: post.id,
+                        optionIndex: i
                     },
                     update: {
                         content: optionContent,
-                        author_address: tx.addresses[0],
-                        created_at: timestamp,
-                        post_id: post.id,
-                        option_index: i
+                        authorAddress: tx.addresses[0],
+                        createdAt: timestamp,
+                        postId: post.id,
+                        optionIndex: i
                     }
                 });
                 

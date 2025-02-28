@@ -25,11 +25,10 @@ async function tagExistingPosts() {
       where: {
         OR: [
           { tags: { isEmpty: true } },
-          { tags: { array_length: { lte: 5 } } }
         ]
       },
       orderBy: {
-        created_at: 'desc'
+        createdAt: 'desc'  // Using camelCase for Prisma query, which maps to snake_case in DB
       },
       select: {
         id: true,
@@ -38,9 +37,12 @@ async function tagExistingPosts() {
       }
     });
     
-    logger.info(`Found ${posts.length} posts that need tags`);
+    // Filter posts with few tags in memory
+    const filteredPosts = posts.filter(post => post.tags.length === 0 || post.tags.length <= 5);
     
-    if (posts.length === 0) {
+    logger.info(`Found ${filteredPosts.length} posts that need tags`);
+    
+    if (filteredPosts.length === 0) {
       logger.info('No posts found that need tags');
       return;
     }
@@ -49,9 +51,9 @@ async function tagExistingPosts() {
     const batchSize = 10;
     const results = [];
     
-    for (let i = 0; i < posts.length; i += batchSize) {
-      const batch = posts.slice(i, i + batchSize);
-      logger.info(`Processing batch ${i / batchSize + 1} of ${Math.ceil(posts.length / batchSize)}`);
+    for (let i = 0; i < filteredPosts.length; i += batchSize) {
+      const batch = filteredPosts.slice(i, i + batchSize);
+      logger.info(`Processing batch ${i / batchSize + 1} of ${Math.ceil(filteredPosts.length / batchSize)}`);
       
       for (const post of batch) {
         const startTime = Date.now();
@@ -87,7 +89,7 @@ async function tagExistingPosts() {
       }
       
       // Small delay between batches
-      if (i + batchSize < posts.length) {
+      if (i + batchSize < filteredPosts.length) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
@@ -101,7 +103,7 @@ async function tagExistingPosts() {
       path.join(resultsDir, `tag-results-${timestamp}.json`),
       JSON.stringify({
         timestamp,
-        totalPosts: posts.length,
+        totalPosts: filteredPosts.length,
         processedPosts: results.length,
         results
       }, null, 2)
