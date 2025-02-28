@@ -566,20 +566,20 @@ export class DbClient {
         // Transform the Prisma Post into our custom PostWithVoteOptions type
         return {
             id: post.id,
-            postId: post.id,
+            post_id: post.id,
             type: post.isVote ? 'vote' : 'post',
             content: post.content,
-            blockTime: post.createdAt,
+            block_time: post.createdAt,
             sequence: 0, // Default value
-            parentSequence: 0, // Default value
-            createdAt: post.createdAt,
-            updatedAt: post.createdAt, // Using createdAt as updatedAt
+            parent_sequence: 0, // Default value
+            created_at: post.createdAt,
+            updated_at: post.createdAt, // Using createdAt as updatedAt
             protocol: 'MAP', // Default protocol
-            senderAddress: post.authorAddress,
-            blockHeight: post.blockHeight,
+            sender_address: post.authorAddress,
+            block_height: post.blockHeight,
             txid: post.txid,
             image: post.rawImageData,
-            lockLikes: post.lockLikes.map(like => ({
+            lock_likes: post.lockLikes.map(like => ({
                 id: like.id,
                 txid: like.txid,
                 lock_amount: like.amount,
@@ -588,7 +588,7 @@ export class DbClient {
                 updated_at: like.createdAt, // Using createdAt as updatedAt
                 post_id: like.postId
             })),
-            voteOptions: post.voteOptions.map(option => ({
+            vote_options: post.voteOptions.map(option => ({
                 id: option.id,
                 post_id: option.postId,
                 content: option.content,
@@ -597,7 +597,7 @@ export class DbClient {
                 updated_at: option.createdAt, // Using createdAt as updatedAt
                 question_id: option.id // Using option.id as question_id
             })),
-            voteQuestion: null // We don't have a voteQuestion model in Prisma
+            vote_question: null // We don't have a voteQuestion model in Prisma
         };
     }
 

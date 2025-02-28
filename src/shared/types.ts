@@ -34,8 +34,8 @@ export interface VoteQuestion {
 }
 
 export interface Vote {
-  optionsHash: string;
-  totalOptions: number;
+  options_hash: string;
+  total_options: number;
   options: VoteOption[];
 }
 
@@ -51,26 +51,26 @@ export interface LockLike {
 
 export interface Post {
     id: string;
-    postId: string;
+    post_id: string;
     type: string;
     content: any;
-    blockTime: Date;
+    block_time: Date;
     sequence: number;
-    parentSequence: number;
-    createdAt: Date;
-    updatedAt: Date;
+    parent_sequence: number;
+    created_at: Date;
+    updated_at: Date;
     protocol: string;
-    senderAddress?: string | null;
-    blockHeight?: number | null;
+    sender_address?: string | null;
+    block_height?: number | null;
     txid?: string | null;
     image?: Buffer | null;
-    lockLikes?: LockLike[];
-    voteOptions?: VoteOption[];
-    voteQuestion?: VoteQuestion | null;
+    lock_likes?: LockLike[];
+    vote_options?: VoteOption[];
+    vote_question?: VoteQuestion | null;
 }
 
 export interface PostWithVoteOptions extends Post {
-    voteQuestion: {
+    vote_question: {
         id: string;
         post_id: string;
         protocol: string;
@@ -80,7 +80,7 @@ export interface PostWithVoteOptions extends Post {
         total_options: number;
         options_hash: string;
     } | null;
-    voteOptions: {
+    vote_options: {
         id: string;
         post_id: string;
         content: string;
@@ -89,7 +89,7 @@ export interface PostWithVoteOptions extends Post {
         updated_at: Date;
         question_id: string;
     }[];
-    lockLikes: {
+    lock_likes: {
         id: string;
         txid: string;
         lock_amount: number;
@@ -103,13 +103,13 @@ export interface PostWithVoteOptions extends Post {
 export interface ProcessedTransaction {
   id: string;
   txid: string;
-  blockHeight: number;
-  blockTime: bigint;
+  block_height: number;
+  block_time: bigint;
   type: string;
   protocol: string;
   metadata: any;
-  createdAt: Date;
-  updatedAt: Date;
+  created_at: Date;
+  updated_at: Date;
 }
 
 export interface JungleBusTransaction {
@@ -118,15 +118,15 @@ export interface JungleBusTransaction {
         hash: string;
         version: number;
         inputs: Array<{
-            prevTxId: string;
-            outputIndex: number;
-            inputScript: string;
-            outputScript: string;
+            prev_tx_id: string;
+            output_index: number;
+            input_script: string;
+            output_script: string;
             sequence: number;
         }>;
         outputs: Array<{
             value: number;
-            outputScript: string;
+            output_script: string;
         }>;
         locktime: number;
     };
@@ -146,8 +146,8 @@ export interface JungleBusAddressInfo {
 export interface JungleBusBlockHeader {
     height: number;
     hash: string;
-    prevHash: string;
-    merkleRoot: string;
+    prev_hash: string;
+    merkle_root: string;
     timestamp: string;
     bits: string;
     nonce: number;
@@ -179,17 +179,17 @@ export interface ParsedTransaction {
 export interface DecodedTransaction {
     txid: string;
     inputs: {
-        index: number;
-        script: string;
-        prevTxId: string;
-        outputIndex: number;
-        sequenceNumber: number;
+        input_index: number;
+        input_script: string;
+        prev_tx_id: string;
+        output_index: number;
+        sequence_number: number;
     }[];
     outputs: {
-        index: number;
-        script: string;
+        output_index: number;
+        output_script: string;
         satoshis: number;
-        opReturn: string | null;
+        op_return: string | null;
     }[];
 }
 
@@ -258,11 +258,11 @@ export const SCANNER_EVENTS = {
 } as const;
 
 export interface ScannerConfig {
-    startBlock: number;
-    fromBlock?: number;
-    toBlock?: number;
-    batchSize?: number;
-    maxRetries?: number;
+    start_block: number;
+    from_block?: number;
+    to_block?: number;
+    batch_size?: number;
+    max_retries?: number;
 }
 
 export interface TestTxData {
@@ -283,30 +283,30 @@ export interface JungleBusResponse {
 export interface TransactionTestCase {
     txid: string;
     description?: string;
-    expectedPostId?: string;
-    expectedSenderAddress?: string;
-    hasImage?: boolean;
-    defaultLockAmount?: number;
-    defaultLockDuration?: number;
-    expectedImageMetadata?: {
-        contentType: string;
+    expected_post_id?: string;
+    expected_sender_address?: string;
+    has_image?: boolean;
+    default_lock_amount?: number;
+    default_lock_duration?: number;
+    expected_image_metadata?: {
+        content_type: string;
         filename: string;
     };
 }
 
 export interface VerificationResults {
-    hasPost: boolean;
-    hasVoteQuestion: boolean;
-    voteOptionsCount: number;
-    hasLockLikes: boolean;
+    has_post: boolean;
+    has_vote_question: boolean;
+    vote_options_count: number;
+    has_lock_likes: boolean;
     txid: string;
     post_id: string;
-    voteQuestion?: {
+    vote_question?: {
         question: string;
         total_options: number;
         options_hash: string;
     };
-    voteOptions?: Array<{
+    vote_options?: Array<{
         index: number;
         content: string;
     }>;

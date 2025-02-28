@@ -1,7 +1,7 @@
 import { logger } from '../utils/logger.js';
 import { DbClient } from './dbClient.js';
 import { JungleBusClient } from '@gorillapool/js-junglebus';
-import { LockProtocolData } from '../shared/types.js';
+import { LockProtocolData, ParsedTransaction } from '../shared/types.js';
 
 // Helper function to extract vote data from transactions
 export function extractVoteData(tx: { data: string[] }): { 
@@ -382,8 +382,16 @@ export class TransactionParser {
                 return;
             }
 
+            // Check if transaction already exists in database
+            const existingTx = await this.dbClient.getTransaction(txid);
+            if (existingTx) {
+                logger.info('Transaction already processed', { txid });
+                return;
+            }
+
             const tx: any = await this.jungleBus.GetTransaction(txid);
             if (!tx) {
+                logger.warn('Transaction not found in JungleBus', { txid });
                 return;
             }
 
@@ -392,6 +400,7 @@ export class TransactionParser {
             const txData = tx.outputs || [];
             const parsedTx = this.extractLockProtocolData(txData, tx);
             if (!parsedTx) {
+                logger.warn('Could not extract Lock protocol data from transaction', { txid });
                 return;
             }
 
@@ -405,9 +414,9 @@ export class TransactionParser {
                 txType = 'vote';
                 logger.debug('Processing vote transaction', {
                     txid,
-                    voteOptions: parsedTx.vote_options,
-                    isVote: parsedTx.is_vote,
-                    contentType: parsedTx.content_type
+                    vote_options: parsedTx.vote_options,
+                    is_vote: parsedTx.is_vote,
+                    content_type: parsedTx.content_type
                 });
                 
                 // Ensure we have vote options
@@ -423,7 +432,8 @@ export class TransactionParser {
                 parsedTx.content_type = 'vote';
             }
 
-            await this.dbClient.processTransaction({
+            // Create the parsed transaction object to send to the database
+            const parsedTransaction: ParsedTransaction = {
                 txid,
                 type: txType,
                 protocol: 'LOCK',
@@ -443,19 +453,24 @@ export class TransactionParser {
                     tags: parsedTx.tags || [],
                     sender_address: tx.addresses?.[0] || null
                 }
-            });
+            };
+
+            // Process the transaction in the database
+            const post = await this.dbClient.processTransaction(parsedTransaction);
             
             logger.info('Transaction processed successfully', {
                 txid,
-                blockHeight: tx.block_height,
+                post_id: post.id,
+                block_height: tx.block_height,
                 type: txType,
-                hasVoteOptions: parsedTx.vote_options && parsedTx.vote_options.length > 0,
-                contentType: parsedTx.content_type
+                has_vote_options: parsedTx.vote_options && parsedTx.vote_options.length > 0,
+                content_type: parsedTx.content_type
             });
         } catch (error) {
             logger.error('❌ Failed to parse transaction', {
                 txid,
-                error
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
             });
         }
     }
