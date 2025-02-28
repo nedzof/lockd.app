@@ -11,7 +11,7 @@ async function testPrismaQuery() {
     
     // Using the raw query with the corrected column names
     const [transaction] = await prisma.$queryRaw`
-      SELECT tx_id, type, protocol, "blockHeight", "blockTime", metadata
+      SELECT tx_id, type, protocol, "block_height", "block_time", metadata
       FROM "ProcessedTransaction"
       WHERE tx_id = ${tx_id}
       LIMIT 1

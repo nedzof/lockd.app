@@ -140,20 +140,20 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
       }
 
       // Get current block height from the network
-      const currentBlockHeight = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info')
+      const currentblock_height = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info')
         .then(res => res.json())
         .then(data => data.blocks);
 
-      if (!currentBlockHeight) {
+      if (!currentblock_height) {
         throw new Error('Could not get current block height');
       }
 
-      const nLockTime = currentBlockHeight + 1; // Lock for 1 block
+      const nLockTime = currentblock_height + 1; // Lock for 1 block
 
       // Create the lock transaction
       const lockResponse = await wallet.lockBsv([{
         address: addresses.identityAddress,
-        blockHeight: nLockTime,
+        block_height: nLockTime,
         sats: parsedAmount * SATS_PER_BSV,
       }]);
 

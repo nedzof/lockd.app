@@ -501,7 +501,7 @@ function createSequence(): ComponentSequence {
 }
 
 // Helper function to get current block height
-async function getCurrentBlockHeight(): Promise<number> {
+async function getCurrentblock_height(): Promise<number> {
     const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
     const data = await response.json();
     return data.blocks;
@@ -820,8 +820,8 @@ export const createPost = async (
             }
             
             // Get current block height for lock calculations
-            const currentBlockHeight = await getCurrentBlockHeight();
-            console.log('Current block height:', currentBlockHeight);
+            const currentblock_height = await getCurrentblock_height();
+            console.log('Current block height:', currentblock_height);
             
             // Create vote options objects
             const vote_optionObjects: vote_option[] = await Promise.all(

@@ -709,7 +709,7 @@ export class TransactionParser {
                 metadata.content = value;
                 break;
             case 'post_id':
-            case 'post_id':
+            case 'postid':
                 metadata.post_id = value;
                 break;
             case 'is_vote':
@@ -717,20 +717,21 @@ export class TransactionParser {
                 metadata.is_vote = value.toLowerCase() === 'true';
                 break;
             case 'is_locked':
-            case 'is_locked':
+            case 'islocked':
                 metadata.is_locked = value.toLowerCase() === 'true';
                 break;
             case 'lock_amount':
-            case 'lock_amount':
+            case 'lockamount':
                 metadata.lock_amount = parseInt(value, 10) || 0;
                 break;
             case 'lock_duration':
-            case 'lock_duration':
+            case 'lockduration':
                 metadata.lock_duration = parseInt(value, 10) || 0;
                 break;
             case 'vote_question':
             case 'votequestion':
                 metadata.vote_question = value;
+                metadata.is_vote = true; // If we have a vote question, it's a vote
                 break;
             case 'options_hash':
             case 'optionshash':
@@ -740,6 +741,29 @@ export class TransactionParser {
             case 'totaloptions':
                 metadata.total_options = parseInt(value, 10) || 0;
                 break;
+            case 'vote_options':
+            case 'voteoptions':
+                try {
+                    // Try to parse as JSON array
+                    if (value.startsWith('[') && value.endsWith(']')) {
+                        metadata.vote_options = JSON.parse(value);
+                    } else {
+                        // If not a JSON array, split by commas
+                        metadata.vote_options = value.split(',').map(opt => opt.trim());
+                    }
+                    metadata.is_vote = true; // If we have vote options, it's a vote
+                    
+                    logger.debug('✅ Processed vote options', {
+                        count: metadata.vote_options.length,
+                        options: metadata.vote_options
+                    });
+                } catch (e) {
+                    logger.error('❌ Failed to parse vote options', {
+                        error: e instanceof Error ? e.message : 'Unknown error',
+                        value
+                    });
+                }
+                break;
             case 'sequence':
                 // This might be useful for ordering
                 break;
@@ -747,28 +771,17 @@ export class TransactionParser {
             case 'parentsequence':
                 // This might indicate a reply
                 break;
-            case 'option_index':
-            case 'optionindex':
-                // This is for vote options
-                break;
-            case 'tags':
-                try {
-                    // Tags might be in JSON format
-                    const parsedTags = JSON.parse(value);
-                    if (Array.isArray(parsedTags)) {
-                        metadata.tags = parsedTags;
-                    }
-                } catch (e) {
-                    // If not valid JSON, try as a single tag
-                    metadata.tags = [value];
+            case 'content_type':
+            case 'contenttype':
+                metadata.content_type = value;
+                if (value === 'vote') {
+                    metadata.is_vote = true;
                 }
                 break;
-            case 'timestamp':
-                try {
-                    metadata.created_at = new Date(value);
-                } catch (e) {
-                    // Invalid date format
-                }
+            default:
+                // Store any other key-value pairs in the metadata
+                logger.debug('🔄 Storing unknown key-value pair', { key, value });
+                (metadata as any)[key] = value;
                 break;
         }
     }
@@ -820,39 +833,52 @@ export class TransactionParser {
                 sampleData: txData.slice(0, 3)
             });
             
+            // First try to extract regular Lock protocol data
             const parsedTx = this.extractLockProtocolData(txData, tx);
-            if (!parsedTx) {
+            
+            // If that fails, try to extract vote-specific data
+            const voteData = this.extractVoteData(txData, tx);
+            
+            // Combine the data if both are available
+            let finalParsedTx = parsedTx;
+            if (voteData) {
+                if (!finalParsedTx) {
+                    finalParsedTx = voteData;
+                } else {
+                    // Merge vote data into parsed data
+                    finalParsedTx.is_vote = true;
+                    finalParsedTx.vote_options = voteData.vote_options || finalParsedTx.vote_options;
+                    finalParsedTx.vote_question = voteData.vote_question || finalParsedTx.vote_question;
+                }
+            }
+            
+            if (!finalParsedTx) {
                 logger.warn('Not a Lock protocol transaction', { tx_id });
                 return;
             }
 
             logger.info('✅ TRANSACTION PARSED', { 
                 tx_id,
-                has_image: !!parsedTx.image,
-                has_vote_options: !!(parsedTx.vote_options && parsedTx.vote_options.length > 0),
-                parsedTxKeys: Object.keys(parsedTx)
+                has_image: !!finalParsedTx.image,
+                has_vote_options: !!(finalParsedTx.vote_options && finalParsedTx.vote_options.length > 0),
+                parsedTxKeys: Object.keys(finalParsedTx)
             });
 
-            if (parsedTx.image) {
-                await this.processImage(parsedTx.image, parsedTx.image_metadata, tx_id);
+            if (finalParsedTx.image) {
+                await this.processImage(finalParsedTx.image, finalParsedTx.image_metadata, tx_id);
             }
 
             // Determine transaction type
             let txType = 'lock';
-            if (parsedTx.is_vote || (parsedTx.vote_options && parsedTx.vote_options.length > 0) || parsedTx.content_type === 'vote') {
+            if (finalParsedTx.is_vote || (finalParsedTx.vote_options && finalParsedTx.vote_options.length > 0) || finalParsedTx.content_type === 'vote') {
                 txType = 'vote';
                 
                 // Ensure we have vote options
-                if (!parsedTx.vote_options || parsedTx.vote_options.length === 0) {
+                if (!finalParsedTx.vote_options || finalParsedTx.vote_options.length === 0) {
                     // Create default vote options if none exist
                     logger.info('Creating default vote options for vote', { tx_id });
-                    parsedTx.vote_options = ['Yes', 'No', 'Maybe'];
+                    finalParsedTx.vote_options = ['Yes', 'No', 'Maybe'];
                 }
-            }
-
-            // Set content type for vote transactions
-            if (txType === 'vote' && !parsedTx.content_type) {
-                parsedTx.content_type = 'vote';
             }
 
             // Create the parsed transaction object to send to the database
@@ -863,17 +889,17 @@ export class TransactionParser {
                 block_height: tx.block_height, // Use snake_case for consistency
                 block_time: tx.block_time,     // Use snake_case for consistency
                 metadata: {
-                    post_id: parsedTx.post_id,
-                    content: parsedTx.content,
-                    lock_amount: parsedTx.lock_amount,
-                    lock_duration: parsedTx.lock_duration,
-                    vote_options: parsedTx.vote_options,
-                    vote_question: parsedTx.vote_question,
-                    image: parsedTx.image,
-                    image_metadata: parsedTx.image_metadata,
-                    options_hash: parsedTx.options_hash,
-                    content_type: parsedTx.content_type,
-                    tags: parsedTx.tags || [],
+                    post_id: finalParsedTx.post_id,
+                    content: finalParsedTx.content,
+                    lock_amount: finalParsedTx.lock_amount,
+                    lock_duration: finalParsedTx.lock_duration,
+                    vote_options: finalParsedTx.vote_options,
+                    vote_question: finalParsedTx.vote_question,
+                    image: finalParsedTx.image,
+                    image_metadata: finalParsedTx.image_metadata,
+                    options_hash: finalParsedTx.options_hash,
+                    content_type: finalParsedTx.content_type,
+                    tags: finalParsedTx.tags || [],
                     sender_address: tx.addresses?.[0] || null
                 }
             };
@@ -891,7 +917,7 @@ export class TransactionParser {
                 tx_id,
                 post_id: post.id,
                 type: txType,
-                vote_options_count: parsedTx.vote_options?.length || 0
+                vote_options_count: finalParsedTx.vote_options?.length || 0
             });
         } catch (error) {
             logger.error('❌ TRANSACTION PROCESSING FAILED', {

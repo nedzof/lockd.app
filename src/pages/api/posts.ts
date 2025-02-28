@@ -176,16 +176,16 @@ async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
         console.log('Looking back', blockCount, 'blocks');
         
         // Get the current block height
-        const currentBlockHeight = await dbClient.getCurrentBlockHeight();
-        if (currentBlockHeight) {
-          const minBlockHeight = currentBlockHeight - blockCount;
+        const currentblock_height = await dbClient.getCurrentblock_height();
+        if (currentblock_height) {
+          const minblock_height = currentblock_height - blockCount;
           
           // Find posts created in the last N blocks
           where.created_block_height = { 
-            gte: minBlockHeight 
+            gte: minblock_height 
           };
           
-          console.log(`Filtering posts with block height >= ${minBlockHeight} (current: ${currentBlockHeight})`);
+          console.log(`Filtering posts with block height >= ${minblock_height} (current: ${currentblock_height})`);
         } else {
           console.error('Failed to get current block height');
         }

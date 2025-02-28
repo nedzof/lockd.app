@@ -80,7 +80,7 @@ async function reprocessTransaction(tx_id: string) {
             tx_id: tx_id,
             content: parsedTx.content,
             author_address: parsedTx.author || author_address,
-            blockHeight: fullTx.block_height || 0,
+            block_height: fullTx.block_height || 0,
             unlock_height: parsedTx.lock?.unlock_height || 0,
             created_at: new Date(parsedTx.timestamp),
             tags: parsedTx.tags,

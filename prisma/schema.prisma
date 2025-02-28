@@ -38,14 +38,14 @@ model Post {
   tags          String[]     @default([]) @map("tags")
   mediaUrl      String?      @map("media_url")
   raw_image_data  Bytes?       @map("raw_image_data")
-  blockHeight   Int?         @map("block_height")
+  block_height   Int?         @map("block_height")
   metadata      Json?        @map("metadata")
   is_locked      Boolean      @default(false) @map("is_locked")
   lockLikes     LockLike[]
   vote_options   vote_option[]
 
   @@index([author_address])
-  @@index([blockHeight])
+  @@index([block_height])
   @@index([created_at])
   @@index([tags])
   @@index([tx_id])
@@ -54,18 +54,18 @@ model Post {
 model ProcessedTransaction {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
   tx_id        String   @unique @map("tx_id")
-  blockHeight Int      @default(0) @map("block_height")
+  block_height Int      @default(0) @map("block_height")
   created_at   DateTime @default(now()) @map("created_at")
   updated_at   DateTime @default(now()) @map("updated_at")
   protocol    String   @default("MAP") @map("protocol")
   type        String   @default("unknown") @map("type")
   metadata    Json     @map("metadata")
-  blockTime   BigInt   @default(0) @map("block_time")
+  block_time   BigInt   @default(0) @map("block_time")
 
   @@index([protocol])
   @@index([tx_id])
   @@index([type])
-  @@index([blockHeight], map: "processed_transaction_block_height_idx")
+  @@index([block_height], map: "processed_transaction_block_height_idx")
 }
 
 model Tag {

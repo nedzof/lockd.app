@@ -13,8 +13,8 @@ function parseMapTransaction(tx: any) {
     try {
         // Extract basic transaction data
         const tx_id = tx.id;
-        const blockHeight = tx.block_height;
-        const blockTime = tx.block_time;
+        const block_height = tx.block_height;
+        const block_time = tx.block_time;
         const addresses = tx.addresses || [];
         const author_address = addresses[0] || null;
         
@@ -76,8 +76,8 @@ function parseMapTransaction(tx: any) {
         // Return the parsed transaction
         return {
             tx_id,
-            blockHeight,
-            blockTime,
+            block_height,
+            block_time,
             author_address,
             metadata: data
         };
@@ -97,8 +97,8 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                 tx_id: parsedTx.tx_id,
                 content: parsedTx.metadata.content,
                 author_address: parsedTx.author_address,
-                blockHeight: parsedTx.blockHeight,
-                created_at: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
+                block_height: parsedTx.block_height,
+                created_at: parsedTx.block_time ? new Date(parsedTx.block_time * 1000) : new Date(),
                 tags: parsedTx.metadata.tags,
                 isVote: parsedTx.metadata.isVote,
                 media_type: parsedTx.metadata.contentType
@@ -106,7 +106,7 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
             update: {
                 content: parsedTx.metadata.content,
                 author_address: parsedTx.author_address,
-                blockHeight: parsedTx.blockHeight,
+                block_height: parsedTx.block_height,
                 tags: parsedTx.metadata.tags,
                 isVote: parsedTx.metadata.isVote,
                 media_type: parsedTx.metadata.contentType
@@ -124,7 +124,7 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                         tx_id: optiontx_id,
                         content: option.content,
                         author_address: parsedTx.author_address,
-                        created_at: parsedTx.blockTime ? new Date(parsedTx.blockTime * 1000) : new Date(),
+                        created_at: parsedTx.block_time ? new Date(parsedTx.block_time * 1000) : new Date(),
                         post_id: post.id,
                         optionIndex: option.index
                     },

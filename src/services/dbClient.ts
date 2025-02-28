@@ -141,7 +141,7 @@ export class DbClient {
             tx_id: tx.tx_id,
             content: tx.metadata.content || '',
             author_address: tx.metadata.sender_address || tx.metadata.author_address,
-            created_at: this.createBlockTimeDate(tx.blockTime),
+            created_at: this.createblock_timeDate(tx.block_time),
             tags: tx.metadata.tags || [],
             isVote: tx.type === 'vote',
             is_locked: !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0 || !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0,
@@ -257,7 +257,7 @@ export class DbClient {
                             tx_id: optiontx_id,
                             content: optionContent,
                             author_address: tx.metadata.sender_address || tx.metadata.author_address,
-                            created_at: this.createBlockTimeDate(tx.blockTime),
+                            created_at: this.createblock_timeDate(tx.block_time),
                             tags: tx.metadata.tags || [],
                             post_id: post_id,
                             optionIndex: i
@@ -296,8 +296,8 @@ export class DbClient {
         
         // Map between snake_case and camelCase for common fields
         const fieldMappings: [string, string][] = [
-            ['block_height', 'blockHeight'],
-            ['block_time', 'blockTime'],
+            ['block_height', 'block_height'],
+            ['block_time', 'block_time'],
             ['post_id', 'post_id'],
             ['lock_amount', 'lock_amount'],
             ['lock_duration', 'lock_duration'],
@@ -385,7 +385,7 @@ export class DbClient {
                                     type: tx.type,
                                     protocol: tx.protocol,
                                     metadata: tx.metadata || {}
-                                    // Omit blockHeight and blockTime if they cause issues
+                                    // Omit block_height and block_time if they cause issues
                                 }
                             });
                             
@@ -479,7 +479,7 @@ export class DbClient {
                 });
             }
 
-            const action = post.created_at === this.createBlockTimeDate(tx.blockTime) ? 'created' : 'updated';
+            const action = post.created_at === this.createblock_timeDate(tx.block_time) ? 'created' : 'updated';
             logger.info(` DB: POST ${action.toUpperCase()}`, {
                 tx_id: post.tx_id,
                 post_id: post.id,
@@ -511,8 +511,8 @@ export class DbClient {
             logger.debug('Saving transaction to database', { 
                 tx_id: tx.tx_id,
                 type: tx.type,
-                blockHeight: tx.blockHeight,
-                blockTime: tx.blockTime
+                block_height: tx.block_height,
+                block_time: tx.block_time
             });
             
             // Normalize metadata to handle both snake_case and camelCase
@@ -539,7 +539,7 @@ export class DbClient {
                                     type: tx.type,
                                     protocol: tx.protocol,
                                     metadata: tx.metadata || {}
-                                    // Deliberately omit blockHeight and blockTime
+                                    // Deliberately omit block_height and block_time
                                 },
                                 select: {
                                     id: true,
@@ -574,7 +574,7 @@ export class DbClient {
                                     type: tx.type,
                                     protocol: tx.protocol,
                                     metadata: tx.metadata || {}
-                                    // Deliberately omit blockHeight and blockTime
+                                    // Deliberately omit block_height and block_time
                                 },
                                 select: {
                                     id: true,
@@ -666,7 +666,7 @@ export class DbClient {
                             type: true,
                             protocol: true,
                             metadata: true
-                            // Deliberately omit blockHeight, blockTime, etc.
+                            // Deliberately omit block_height, block_time, etc.
                         }
                     });
                     
@@ -680,8 +680,8 @@ export class DbClient {
                             protocol: tx.protocol ?? 'unknown',
                             metadata: tx.metadata ?? {},
                             // Provide default values for missing fields
-                            blockHeight: 0,
-                            blockTime: 0,
+                            block_height: 0,
+                            block_time: 0,
                             created_at: new Date(),
                             updated_at: new Date()
                         };
@@ -700,8 +700,8 @@ export class DbClient {
                     return {
                         id: '', // We don't know the ID
                         tx_id: tx_id,
-                        blockHeight: 0,
-                        blockTime: 0,
+                        block_height: 0,
+                        block_time: 0,
                         type: 'unknown',
                         protocol: 'unknown',
                         metadata: {},
@@ -772,39 +772,39 @@ export class DbClient {
 
     /**
      * Creates a JavaScript Date object from a block time value
-     * Handles different formats of blockTime (number, BigInt, string)
-     * @param blockTime Block time in seconds (Unix timestamp)
+     * Handles different formats of block_time (number, BigInt, string)
+     * @param block_time Block time in seconds (Unix timestamp)
      * @returns JavaScript Date object
      */
-    private createBlockTimeDate(blockTime?: number | BigInt | string | null): Date {
+    private createblock_timeDate(block_time?: number | BigInt | string | null): Date {
         try {
             // Handle undefined, null, or invalid input
-            if (blockTime === undefined || blockTime === null) {
+            if (block_time === undefined || block_time === null) {
                 return new Date();
             }
             
             // Convert various input types to number
-            let blockTimeNumber: number;
+            let block_timeNumber: number;
             
-            if (typeof blockTime === 'bigint') {
-                blockTimeNumber = Number(blockTime);
-            } else if (typeof blockTime === 'string') {
-                blockTimeNumber = parseInt(blockTime, 10);
-            } else if (typeof blockTime === 'number') {
-                blockTimeNumber = blockTime;
+            if (typeof block_time === 'bigint') {
+                block_timeNumber = Number(block_time);
+            } else if (typeof block_time === 'string') {
+                block_timeNumber = parseInt(block_time, 10);
+            } else if (typeof block_time === 'number') {
+                block_timeNumber = block_time;
             } else {
                 logger.warn(' DB: INVALID BLOCK TIME TYPE', { 
-                    blockTime,
-                    type: typeof blockTime,
+                    block_time,
+                    type: typeof block_time,
                     usingCurrentTime: true
                 });
                 return new Date();
             }
             
             // Check if the conversion resulted in a valid number
-            if (isNaN(blockTimeNumber)) {
+            if (isNaN(block_timeNumber)) {
                 logger.warn(' DB: BLOCK TIME IS NaN', { 
-                    blockTime,
+                    block_time,
                     usingCurrentTime: true
                 });
                 return new Date();
@@ -812,7 +812,7 @@ export class DbClient {
             
             // Convert seconds to milliseconds for JavaScript Date
             // Bitcoin timestamps are in seconds, JS Date expects milliseconds
-            const timestampMs = blockTimeNumber * 1000;
+            const timestampMs = block_timeNumber * 1000;
             
             // Validate the timestamp is reasonable (between 2009 and 100 years in the future)
             const minTimestamp = new Date('2009-01-03').getTime(); // Bitcoin genesis block
@@ -820,7 +820,7 @@ export class DbClient {
             
             if (timestampMs < minTimestamp || timestampMs > maxTimestamp) {
                 logger.warn(' DB: INVALID BLOCK TIME RANGE', { 
-                    blockTime: blockTimeNumber,
+                    block_time: block_timeNumber,
                     timestampMs,
                     minTimestamp,
                     maxTimestamp,
@@ -832,7 +832,7 @@ export class DbClient {
             return new Date(timestampMs);
         } catch (error) {
             logger.error(' DB: ERROR CREATING BLOCK TIME DATE', {
-                blockTime,
+                block_time,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
             return new Date();
@@ -892,7 +892,7 @@ export class DbClient {
             updated_at: post.created_at, // Using created_at as updated_at
             protocol: 'MAP', // Default protocol
             sender_address: post.author_address,
-            block_height: post.blockHeight,
+            block_height: post.block_height,
             tx_id: post.tx_id,
             image: post.raw_image_data,
             lock_likes: post.lockLikes.map(like => ({
@@ -1019,25 +1019,25 @@ export class DbClient {
      * Get the current blockchain height from the database
      * @returns The current block height or null if not available
      */
-    public async getCurrentBlockHeight(): Promise<number | null> {
+    public async getCurrentblock_height(): Promise<number | null> {
         try {
             logger.debug('Getting current block height');
             
             // Try to get the latest block height from processed transactions
             const latestTx = await prisma.processedTransaction.findFirst({
                 orderBy: {
-                    blockHeight: 'desc'
+                    block_height: 'desc'
                 },
                 where: {
-                    blockHeight: {
+                    block_height: {
                         gt: 0
                     }
                 }
             });
             
-            if (latestTx?.blockHeight) {
-                logger.debug(`Using latest transaction block height: ${latestTx.blockHeight}`);
-                return latestTx.blockHeight;
+            if (latestTx?.block_height) {
+                logger.debug(`Using latest transaction block height: ${latestTx.block_height}`);
+                return latestTx.block_height;
             }
             
             // If we still don't have a height, return null

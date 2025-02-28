@@ -573,7 +573,7 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       metadata,
       is_locked,
       created_at: new Date(created_at),
-      blockHeight: null
+      block_height: null
     } as const;
 
     const post = await prisma.post.create({
@@ -588,7 +588,7 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
         metadata: postData.metadata,
         is_locked: postData.is_locked,
         created_at: postData.created_at,
-        blockHeight: postData.blockHeight
+        block_height: postData.block_height
       }
     });
 
