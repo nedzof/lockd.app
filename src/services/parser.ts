@@ -6,16 +6,16 @@ import { LockProtocolData, ParsedTransaction } from '../shared/types.js';
 // Helper function to extract vote data from transactions
 export function extractVoteData(tx: { data: string[] }): { 
     question?: string, 
-    options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
-    totalOptions?: number,
-    optionsHash?: string
+    options?: { text: string, lock_amount: number, lock_duration: number, option_index: number }[],
+    total_options?: number,
+    options_hash?: string
 } {
     try {
         const voteData: { 
             question?: string, 
-            options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
-            totalOptions?: number,
-            optionsHash?: string
+            options?: { text: string, lock_amount: number, lock_duration: number, option_index: number }[],
+            total_options?: number,
+            options_hash?: string
         } = {};
 
         // Check if this is a vote transaction
@@ -39,12 +39,12 @@ export function extractVoteData(tx: { data: string[] }): {
         if (isVoteQuestion) {
             const totalOptionsStr = tx.data.find((d: string) => d.startsWith('totaloptions='))?.split('=')[1];
             if (totalOptionsStr) {
-                voteData.totalOptions = parseInt(totalOptionsStr, 10);
+                voteData.total_options = parseInt(totalOptionsStr, 10);
             }
             
             const optionsHash = tx.data.find((d: string) => d.startsWith('optionshash='))?.split('=')[1];
             if (optionsHash) {
-                voteData.optionsHash = optionsHash;
+                voteData.options_hash = optionsHash;
             }
         }
         
@@ -59,9 +59,9 @@ export function extractVoteData(tx: { data: string[] }): {
             
             voteData.options = optionIndices.map((index: number) => ({
                 text: optionTexts[0] || '',
-                lockAmount: parseInt(tx.data.find((d: string) => d.startsWith('lockamount='))?.split('=')[1] || '0'),
-                lockDuration: parseInt(tx.data.find((d: string) => d.startsWith('lockduration='))?.split('=')[1] || '0'),
-                optionIndex: index
+                lock_amount: parseInt(tx.data.find((d: string) => d.startsWith('lockamount='))?.split('=')[1] || '0'),
+                lock_duration: parseInt(tx.data.find((d: string) => d.startsWith('lockduration='))?.split('=')[1] || '0'),
+                option_index: index
             }));
         }
         

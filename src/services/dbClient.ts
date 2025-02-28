@@ -631,20 +631,20 @@ export class DbClient {
 
         // Prepare verification results
         const results = {
-            hasPost: true,
-            hasImage: !!post.image,
-            hasVoteQuestion: post.voteQuestion !== null,
-            voteOptionsCount: post.voteOptions?.length || 0,
-            hasLockLikes: post.lockLikes?.length > 0 || false,
+            has_post: true,
+            has_image: !!post.image,
+            has_vote_question: post.vote_question !== null,
+            vote_options_count: post.vote_options?.length || 0,
+            has_lock_likes: post.lock_likes?.length > 0 || false,
             txid,
-            postId: post.id,
-            contentType: post.image ? 'Image + Text' : 'Text Only',
-            voteQuestion: post.voteQuestion ? {
-                question: post.voteQuestion.question,
-                total_options: post.voteQuestion.total_options,
-                options_hash: post.voteQuestion.options_hash
+            post_id: post.id,
+            content_type: post.image ? 'Image + Text' : 'Text Only',
+            vote_question: post.vote_question ? {
+                question: post.vote_question.question,
+                total_options: post.vote_question.total_options,
+                options_hash: post.vote_question.options_hash
             } : undefined,
-            voteOptions: post.voteOptions?.map(opt => ({
+            vote_options: post.vote_options?.map(opt => ({
                 content: opt.content,
                 index: opt.index
             })).sort((a, b) => a.index - b.index)
@@ -666,30 +666,30 @@ export class DbClient {
         const outputContent = [
             `Transaction ID: ${txid}`,
             `Post ID: ${post.id}`,
-            `Content Type: ${results.contentType}`,
-            `Block Time: ${post.createdAt.toISOString()}`,
-            `Sender Address: ${post.senderAddress || 'Not specified'}`,
+            `Content Type: ${results.content_type}`,
+            `Block Time: ${post.created_at.toISOString()}`,
+            `Sender Address: ${post.sender_address || 'Not specified'}`,
             '\nContent:',
             post.content,
             '\nTransaction Details:',
-            `- Has Image: ${results.hasImage}`,
-            `- Has Vote Question: ${results.hasVoteQuestion}`,
-            `- Vote Options Count: ${results.voteOptionsCount}`,
-            `- Has Lock Likes: ${results.hasLockLikes}`,
-            results.hasImage ? [
+            `- Has Image: ${results.has_image}`,
+            `- Has Vote Question: ${results.has_vote_question}`,
+            `- Vote Options Count: ${results.vote_options_count}`,
+            `- Has Lock Likes: ${results.has_lock_likes}`,
+            results.has_image ? [
                 '\nImage Metadata:',
                 `- Content Type: ${metadata.image_metadata?.content_type || 'Not specified'}`,
                 `- Filename: ${metadata.image_metadata?.filename || 'Not specified'}`,
                 `- Size: ${metadata.image_metadata?.size || 'Not specified'}`,
                 `- Dimensions: ${metadata.image_metadata?.width || '?'}x${metadata.image_metadata?.height || '?'}`
             ].join('\n') : '',
-            results.hasVoteQuestion ? [
+            results.has_vote_question ? [
                 '\nVote Details:',
-                `Question: ${post.voteQuestion?.question}`,
-                `Total Options: ${post.voteQuestion?.total_options}`,
-                `Options Hash: ${post.voteQuestion?.options_hash}`,
+                `Question: ${post.vote_question?.question}`,
+                `Total Options: ${post.vote_question?.total_options}`,
+                `Options Hash: ${post.vote_question?.options_hash}`,
                 '\nVote Options:',
-                ...post.voteOptions
+                ...post.vote_options
                     .sort((a, b) => a.index - b.index)
                     .map((opt, i) => `${i + 1}. ${opt.content} (Index: ${opt.index})`)
             ].join('\n') : '\nNo Vote Data'

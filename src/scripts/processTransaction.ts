@@ -13,18 +13,18 @@ function parseMapTransaction(tx: any) {
     try {
         // Extract basic transaction data
         const txid = tx.id;
-        const blockHeight = tx.blockHeight;
-        const blockTime = tx.blockTime;
+        const block_height = tx.block_height;
+        const block_time = tx.block_time;
         const addresses = tx.addresses || [];
-        const authorAddress = addresses[0] || null;
+        const author_address = addresses[0] || null;
         
         // Parse outputs to extract data
         const data: Record<string, any> = {
             content: '',
             tags: [],
-            voteOptions: [],
-            isVote: false,
-            contentType: null
+            vote_options: [],
+            is_vote: false,
+            content_type: null
         };
         
         // Process each output to extract MAP data
@@ -52,41 +52,33 @@ function parseMapTransaction(tx: any) {
                     }
                 }
                 
-                // Extract vote data
-                if (script.includes('MAP_TYPE=vote_question')) {
-                    data.isVote = true;
-                    data.contentType = 'vote';
-                    
-                    // Extract question content
-                    const contentMatch = script.match(/MAP_CONTENT=([^|]+)/);
-                    if (contentMatch && contentMatch[1]) {
-                        data.content = contentMatch[1];
-                    }
-                }
-                
                 // Extract vote options
-                if (script.includes('MAP_TYPE=vote_option')) {
-                    const contentMatch = script.match(/MAP_CONTENT=([^|]+)/);
-                    const indexMatch = script.match(/MAP_OPTION_INDEX=(\d+)/);
+                if (script.includes('MAP_TYPE=vote') && script.includes('MAP_OPTIONS=')) {
+                    data.is_vote = true;
+                    data.content_type = 'vote';
                     
-                    if (contentMatch && contentMatch[1] && indexMatch && indexMatch[1]) {
-                        const optionContent = contentMatch[1];
-                        const optionIndex = parseInt(indexMatch[1], 10);
-                        
-                        data.voteOptions.push({
-                            content: optionContent,
-                            index: optionIndex
-                        });
+                    const optionsMatch = script.match(/MAP_OPTIONS=(\[[^\]]+\])/);
+                    if (optionsMatch && optionsMatch[1]) {
+                        try {
+                            const options = JSON.parse(optionsMatch[1]);
+                            data.vote_options = options.map((opt: string, index: number) => ({
+                                content: opt,
+                                index
+                            }));
+                        } catch (e) {
+                            console.error('Failed to parse vote options:', e);
+                        }
                     }
                 }
             });
         }
         
+        // Return the parsed transaction
         return {
             txid,
-            blockHeight,
-            blockTime: blockTime ? blockTime * 1000 : null,
-            authorAddress,
+            block_height,
+            block_time,
+            author_address,
             metadata: data
         };
     } catch (error) {
@@ -104,26 +96,26 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
             create: {
                 txid: parsedTx.txid,
                 content: parsedTx.metadata.content,
-                authorAddress: parsedTx.authorAddress,
-                blockHeight: parsedTx.blockHeight,
-                createdAt: parsedTx.blockTime ? new Date(parsedTx.blockTime) : new Date(),
+                authorAddress: parsedTx.author_address,
+                blockHeight: parsedTx.block_height,
+                createdAt: parsedTx.block_time ? new Date(parsedTx.block_time * 1000) : new Date(),
                 tags: parsedTx.metadata.tags,
-                isVote: parsedTx.metadata.isVote,
-                mediaType: parsedTx.metadata.contentType
+                isVote: parsedTx.metadata.is_vote,
+                mediaType: parsedTx.metadata.content_type
             },
             update: {
                 content: parsedTx.metadata.content,
-                authorAddress: parsedTx.authorAddress,
-                blockHeight: parsedTx.blockHeight,
+                authorAddress: parsedTx.author_address,
+                blockHeight: parsedTx.block_height,
                 tags: parsedTx.metadata.tags,
-                isVote: parsedTx.metadata.isVote,
-                mediaType: parsedTx.metadata.contentType
+                isVote: parsedTx.metadata.is_vote,
+                mediaType: parsedTx.metadata.content_type
             }
         });
         
         // Create vote options if this is a vote post
-        if (parsedTx.metadata.isVote && parsedTx.metadata.voteOptions.length > 0) {
-            for (const option of parsedTx.metadata.voteOptions) {
+        if (parsedTx.metadata.is_vote && parsedTx.metadata.vote_options.length > 0) {
+            for (const option of parsedTx.metadata.vote_options) {
                 const optionTxid = `${parsedTx.txid}-option-${option.index}`;
                 
                 await prisma.voteOption.upsert({
@@ -131,14 +123,14 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                     create: {
                         txid: optionTxid,
                         content: option.content,
-                        authorAddress: parsedTx.authorAddress,
-                        createdAt: parsedTx.blockTime ? new Date(parsedTx.blockTime) : new Date(),
+                        authorAddress: parsedTx.author_address,
+                        createdAt: parsedTx.block_time ? new Date(parsedTx.block_time * 1000) : new Date(),
                         postId: post.id,
                         optionIndex: option.index
                     },
                     update: {
                         content: option.content,
-                        authorAddress: parsedTx.authorAddress,
+                        authorAddress: parsedTx.author_address,
                         postId: post.id,
                         optionIndex: option.index
                     }
@@ -160,8 +152,8 @@ async function main() {
             id: "d8985709fb522609da66d91dab7483b8bad4447a33c9feabc25d6dac295e53ee",
             transaction: "...", // Truncated for brevity
             addresses: ["1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5"],
-            blockHeight: 885675,
-            blockTime: 1707831498,
+            block_height: 885675,
+            block_time: 1707831498,
             outputs: [
                 {
                     script: {

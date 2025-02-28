@@ -5,14 +5,14 @@ import { CONFIG } from "./config";
 import { logger } from "../utils/logger";
 
 export class Scanner {
-    private readonly startBlock = 885675;  // Start earlier to catch all target blocks
-    private readonly subscriptionId = CONFIG.JB_SUBSCRIPTION_ID;
-    private readonly jungleBus: JungleBusClient;
+    private readonly start_block = 885675;  // Start earlier to catch all target blocks
+    private readonly subscription_id = CONFIG.JB_SUBSCRIPTION_ID;
+    private readonly jungle_bus: JungleBusClient;
     private readonly parser: TransactionParser;
 
     constructor(parser: TransactionParser, dbClient: DbClient) {
         this.parser = parser;
-        this.jungleBus = new JungleBusClient("junglebus.gorillapool.io", {
+        this.jungle_bus = new JungleBusClient("junglebus.gorillapool.io", {
             useSSL: true,
             onConnected: (ctx) => {
                 logger.info("🔌 JungleBus CONNECTED", ctx);
@@ -36,18 +36,18 @@ export class Scanner {
             return;
         }
 
-        const block = tx?.block?.height || tx?.height || tx?.blockHeight;
+        const block = tx?.block?.height || tx?.height || tx?.block_height;
 
         // Log the raw transaction structure
         logger.debug('📥 Raw transaction data:', {
             txid,
             block,
-            hasTransaction: !!tx.transaction,
-            hasOutputs: !!tx.outputs,
-            hasData: !!tx.data,
-            dataLength: tx.data?.length,
-            rawTxKeys: Object.keys(tx),
-            firstDataItems: tx.data?.slice(0, 3)
+            has_transaction: !!tx.transaction,
+            has_outputs: !!tx.outputs,
+            has_data: !!tx.data,
+            data_length: tx.data?.length,
+            raw_tx_keys: Object.keys(tx),
+            first_data_items: tx.data?.slice(0, 3)
         });
 
         // Process all transactions
@@ -88,9 +88,9 @@ export class Scanner {
 
     private async handleStatus(status: any): Promise<void> {
         // Only log block completion and waiting status
-        if (status.statusCode === ControlMessageStatusCode.WAITING) {
-            logger.info("⏳ Waiting for new blocks", { currentBlock: status.block });
-        } else if (status.statusCode === 199) {
+        if (status.status_code === ControlMessageStatusCode.WAITING) {
+            logger.info("⏳ Waiting for new blocks", { current_block: status.block });
+        } else if (status.status_code === 199) {
             logger.info("✓ Block scanned", { block: status.block });
         }
     }
@@ -101,7 +101,7 @@ export class Scanner {
 
     private async fetchSubscriptionDetails() {
         try {
-            const response = await fetch(`${this.jungleBus.url}/v1/subscription/${this.subscriptionId}`);
+            const response = await fetch(`${this.jungle_bus.url}/v1/subscription/${this.subscription_id}`);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -111,7 +111,7 @@ export class Scanner {
         } catch (error) {
             logger.warn("⚠️ Failed to fetch subscription details", {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                subscriptionId: this.subscriptionId
+                subscription_id: this.subscription_id
             });
             return null;
         }
@@ -119,23 +119,23 @@ export class Scanner {
 
     public async start(): Promise<void> {
         try {
-            logger.info(`🚀 Starting scanner from block ${this.startBlock} with subscription ID ${this.subscriptionId}`);
+            logger.info(`🚀 Starting scanner from block ${this.start_block} with subscription ID ${this.subscription_id}`);
             
             // Use the direct parameter approach instead of an object
-            await this.jungleBus.Subscribe(
-                this.subscriptionId,
-                this.startBlock,
+            await this.jungle_bus.Subscribe(
+                this.subscription_id,
+                this.start_block,
                 (tx: any) => this.handleTransaction(tx),
                 (status: any) => this.handleStatus(status),
                 (error: any) => this.handleError(error)
             );
             
-            logger.info(`✅ Scanner subscription ${this.subscriptionId} started successfully`);
+            logger.info(`✅ Scanner subscription ${this.subscription_id} started successfully`);
         } catch (error) {
             logger.error(`❌ Failed to start scanner`, {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                subscriptionId: this.subscriptionId,
-                startBlock: this.startBlock
+                subscription_id: this.subscription_id,
+                start_block: this.start_block
             });
             throw error;
         }
@@ -144,7 +144,7 @@ export class Scanner {
     public async stop(): Promise<void> {
         try {
             logger.info(' STOPPING SCANNER');
-            await this.jungleBus.Disconnect();
+            await this.jungle_bus.Disconnect();
             logger.info(' SCANNER STOPPED');
         } catch (error) {
             logger.error(' Failed to stop scanner', {

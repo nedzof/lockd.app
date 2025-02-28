@@ -27,7 +27,7 @@ export class TagDatabaseService {
       // Store tags in the database
       await this.storeTags(tags, 'ai_generated');
       
-      logger.info(`Generated and stored ${tags.length} tags using ${this.deepseekService.isUsingFallback() ? 'fallback' : 'AI'} mode`);
+      logger.info(`Generated and stored ${tags.length} tags using ${this.deepseekService.is_using_fallback() ? 'fallback' : 'AI'} mode`);
       return tags;
     } catch (error) {
       logger.error('Error generating and storing tags:', error);

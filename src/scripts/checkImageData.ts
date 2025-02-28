@@ -40,11 +40,11 @@ async function main() {
       const isBuffer = post.raw_image_data ? Buffer.isBuffer(post.raw_image_data) : false;
       
       logger.info(`Post ${post.id} (${post.txid}):`, {
-        mediaType: post.media_type,
-        imageDataLength,
-        imageDataType,
-        isBuffer,
-        firstFewBytes: post.raw_image_data ? 
+        media_type: post.media_type,
+        image_data_length: imageDataLength,
+        image_data_type: imageDataType,
+        is_buffer: isBuffer,
+        first_few_bytes: post.raw_image_data ? 
           Buffer.from(post.raw_image_data).toString('hex').substring(0, 20) + '...' : 
           'none'
       });

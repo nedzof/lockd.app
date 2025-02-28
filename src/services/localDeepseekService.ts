@@ -4,17 +4,17 @@ import { logger } from '../utils/logger';
 import fs from 'fs';
 
 export class LocalDeepseekService {
-  private modelPath: string;
-  private pythonPath: string;
-  private scriptPath: string;
-  private useCpuFallback: boolean;
+  private model_path: string;
+  private python_path: string;
+  private script_path: string;
+  private use_cpu_fallback: boolean;
 
   constructor() {
     // Configure paths - adjust these to match your setup
-    this.modelPath = process.env.DEEPSEEK_MODEL_PATH || path.join(process.cwd(), 'models/deepseek-v3-7b');
-    this.pythonPath = process.env.PYTHON_PATH || 'python3';
-    this.scriptPath = path.join(process.cwd(), 'scripts/run_deepseek.py');
-    this.useCpuFallback = process.env.USE_CPU_FALLBACK === 'true';
+    this.model_path = process.env.DEEPSEEK_MODEL_PATH || path.join(process.cwd(), 'models/deepseek-v3-7b');
+    this.python_path = process.env.PYTHON_PATH || 'python3';
+    this.script_path = path.join(process.cwd(), 'scripts/run_deepseek.py');
+    this.use_cpu_fallback = process.env.USE_CPU_FALLBACK === 'true';
     
     // Ensure the Python script exists
     this.ensurePythonScript();
@@ -24,9 +24,9 @@ export class LocalDeepseekService {
    * Creates the Python script if it doesn't exist
    */
   private ensurePythonScript(): void {
-    if (!fs.existsSync(this.scriptPath)) {
+    if (!fs.existsSync(this.script_path)) {
       logger.info('Creating DeepSeek Python script');
-      const scriptDir = path.dirname(this.scriptPath);
+      const scriptDir = path.dirname(this.script_path);
       
       if (!fs.existsSync(scriptDir)) {
         fs.mkdirSync(scriptDir, { recursive: true });
@@ -128,8 +128,8 @@ if __name__ == "__main__":
     print(json.dumps(tags))
 `;
       
-      fs.writeFileSync(this.scriptPath, pythonScript);
-      logger.info(`Created DeepSeek Python script at ${this.scriptPath}`);
+      fs.writeFileSync(this.script_path, pythonScript);
+      logger.info(`Created DeepSeek Python script at ${this.script_path}`);
     }
   }
 
@@ -153,19 +153,19 @@ if __name__ == "__main__":
         /*
         // Prepare arguments
         const args = [
-          this.scriptPath,
-          this.modelPath,
+          this.script_path,
+          this.model_path,
           content
         ];
         
         // Add CPU fallback option if configured
-        if (this.useCpuFallback) {
+        if (this.use_cpu_fallback) {
           args.push('cpu');
           logger.info('Using CPU fallback for DeepSeek inference');
         }
         
         // Spawn Python process to run DeepSeek
-        const pythonProcess = spawn(this.pythonPath, args);
+        const pythonProcess = spawn(this.python_path, args);
         
         let output = '';
         let errorOutput = '';
@@ -288,7 +288,7 @@ if __name__ == "__main__":
    * Checks if the service is using fallback mode
    * @returns True if using fallback mode, false if using AI model
    */
-  public isUsingFallback(): boolean {
+  public is_using_fallback(): boolean {
     // Currently we're always using fallback mode
     // This will change when the actual model implementation is uncommented
     return true;
