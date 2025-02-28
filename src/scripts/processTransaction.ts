@@ -24,7 +24,7 @@ function parseMapTransaction(tx: any) {
             tags: [],
             vote_options: [],
             isVote: false,
-            contentType: null
+            content_type: null
         };
         
         // Process each output to extract MAP data
@@ -55,7 +55,7 @@ function parseMapTransaction(tx: any) {
                 // Extract vote options
                 if (script.includes('MAP_TYPE=vote') && script.includes('MAP_OPTIONS=')) {
                     data.isVote = true;
-                    data.contentType = 'vote';
+                    data.content_type = 'vote';
                     
                     const optionsMatch = script.match(/MAP_OPTIONS=(\[[^\]]+\])/);
                     if (optionsMatch && optionsMatch[1]) {
@@ -101,7 +101,7 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                 created_at: parsedTx.block_time ? new Date(parsedTx.block_time * 1000) : new Date(),
                 tags: parsedTx.metadata.tags,
                 isVote: parsedTx.metadata.isVote,
-                media_type: parsedTx.metadata.contentType
+                media_type: parsedTx.metadata.content_type
             },
             update: {
                 content: parsedTx.metadata.content,
@@ -109,7 +109,7 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                 block_height: parsedTx.block_height,
                 tags: parsedTx.metadata.tags,
                 isVote: parsedTx.metadata.isVote,
-                media_type: parsedTx.metadata.contentType
+                media_type: parsedTx.metadata.content_type
             }
         });
         

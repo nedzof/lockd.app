@@ -117,10 +117,10 @@ export class TransactionParser {
                 tx_id,
                 has_imageData: !!imageData,
                 metadataKeys: metadata ? Object.keys(metadata) : [],
-                contentType: metadata?.contentType
+                content_type: metadata?.content_type
             });
 
-            if (!imageData || !metadata.contentType) {
+            if (!imageData || !metadata.content_type) {
                 throw new Error('Invalid image data or content type');
             }
 
@@ -135,7 +135,7 @@ export class TransactionParser {
             await this.dbClient.saveImage({
                 tx_id,
                 imageData,
-                contentType: metadata.contentType,
+                content_type: metadata.content_type,
                 filename: metadata.filename || 'image.jpg',
                 width: metadata.width,
                 height: metadata.height,
@@ -144,7 +144,7 @@ export class TransactionParser {
 
             logger.info('Successfully processed and saved image', {
                 tx_id,
-                contentType: metadata.contentType,
+                content_type: metadata.content_type,
                 size: imageData.length
             });
         } catch (error) {
@@ -157,6 +157,39 @@ export class TransactionParser {
     }
 
     private extractLockProtocolData(data: string[], tx: any): LockProtocolData | null {
+        logger.debug('🔍 ENTERING extractLockProtocolData', { 
+            dataLength: data.length,
+            txId: tx?.id || 'unknown'
+        });
+        
+        // Create initial metadata structure
+        const metadata: LockProtocolData = {
+            post_id: '',
+            created_at: null,
+            content: '',
+            tags: [],
+            is_vote: false,
+            is_locked: false,
+            lock_amount: 0,
+            lock_duration: 0,
+            raw_image_data: null,
+            media_type: null,
+            vote_options: null,
+            vote_question: null,
+            total_options: null,
+            options_hash: null,
+            image: null,
+            image_metadata: {
+                filename: '',
+                content_type: '',
+                is_image: false
+            }
+        };
+        
+        logger.debug('🏗️ Created initial metadata structure', {
+            metadata: JSON.stringify(metadata)
+        });
+        
         try {
             // Log the raw data we're processing
             logger.debug('🔍 PROCESSING RAW DATA', { 
@@ -198,32 +231,6 @@ export class TransactionParser {
 
             logger.info('✅ Found LOCK protocol transaction');
 
-            // Create initial metadata structure
-            const metadata: LockProtocolData = {
-                post_id: '',
-                created_at: null,
-                content: '',
-                tags: [],
-                is_vote: false,
-                is_locked: false,
-                lock_amount: 0,
-                lock_duration: 0,
-                raw_image_data: null,
-                media_type: null,
-                vote_options: null,
-                vote_question: null,
-                total_options: null,
-                options_hash: null,
-                image: null,
-                image_metadata: {
-                    filename: '',
-                    content_type: '',
-                    is_image: false
-                }
-            };
-
-            logger.debug('🏗️ Created initial metadata structure', { metadata: JSON.stringify(metadata) });
-
             // Extract fields from the data
             try {
                 // Log the entire data array for debugging
@@ -262,6 +269,11 @@ export class TransactionParser {
                             
                             // Process tab-separated key-value pairs
                             const tabPairs = decoded.split('\t');
+                            let foundTabSeparatedPairs = false;
+                            
+                            if (tabPairs.length > 1) {
+                                foundTabSeparatedPairs = true;
+                            }
                             for (let i = 0; i < tabPairs.length; i++) {
                                 const pair = tabPairs[i];
                                 
@@ -538,7 +550,7 @@ export class TransactionParser {
                             });
                         } else {
                             logger.warn('Could not find image data markers in transaction', {
-                                contentType: metadata.image_metadata.content_type
+                                content_type: metadata.image_metadata.content_type
                             });
                         }
                     } catch (error) {
@@ -678,7 +690,7 @@ export class TransactionParser {
                 }
                 
                 // Check for content_type=vote
-                if (item.includes('content_type=vote') || item.includes('contentType=vote')) {
+                if (item.includes('content_type=vote') || item.includes('content_type=vote')) {
                     metadata.is_vote = true;
                     logger.debug('✅ Found content_type=vote');
                 }
@@ -772,7 +784,7 @@ export class TransactionParser {
                 // This might indicate a reply
                 break;
             case 'content_type':
-            case 'contenttype':
+            case 'content_type':
                 metadata.content_type = value;
                 if (value === 'vote') {
                     metadata.is_vote = true;

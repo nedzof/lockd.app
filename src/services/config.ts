@@ -1,4 +1,4 @@
 // src/config.ts
 export const CONFIG = {
-    JB_SUBSCRIPTION_ID: '2e90bfc319a509705a7508f98cd13e4656ebca8dc06e36e833d1d13ff60fd054'
+    JB_SUBSCRIPTION_ID: '970b41f01831fb72cc8de3d3bb462c15018b4e5909d8f9bf0dcf0e0a2fb4696f'
 };

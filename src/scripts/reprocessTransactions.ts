@@ -86,7 +86,7 @@ async function reprocessTransaction(tx_id: string) {
             tags: parsedTx.tags,
             metadata: {
                 type: parsedTx.type,
-                contentType: parsedTx.image?.mime_type || 'text/plain',
+                content_type: parsedTx.image?.mime_type || 'text/plain',
                 fileName: parsedTx.image?.file_name || '',
                 fileSize: parsedTx.image?.file_size || 0,
                 timestamp: parsedTx.timestamp,

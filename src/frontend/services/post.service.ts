@@ -33,7 +33,7 @@ export interface VoteData {
 
 export interface ImageData {
     file: File;
-    contentType: string;
+    content_type: string;
     base64Data: string;
     description?: string;
     metadata?: {
@@ -118,7 +118,7 @@ export interface PostMetadata {
     };
     image?: {
         file: File;
-        contentType: string;
+        content_type: string;
         base64Data: string;
         format: string;
         source?: string;
@@ -167,7 +167,7 @@ export function createDbPost(metadata: PostMetadata, tx_id: string): DbPost {
     }
 
     if (metadata.image) {
-        post.media_type = metadata.image.contentType;
+        post.media_type = metadata.image.content_type;
         post.image_format = metadata.image.format;
         post.image_source = metadata.image.source;
         post.description = metadata.image.description;
@@ -261,7 +261,7 @@ function createMapData(metadata: PostMetadata): MAP {
     }
 
     if (metadata.image) {
-        mapData.contentType = metadata.image.contentType || '';
+        mapData.content_type = metadata.image.content_type || '';
         mapData.format = metadata.image.format || '';
         if (metadata.image.source) {
             mapData.imageSource = metadata.image.source;
@@ -344,7 +344,7 @@ async function createImageComponent(
         imageData.base64Data,
         map,
         satoshis,
-        imageData.contentType
+        imageData.content_type
     );
 }
 
@@ -765,7 +765,7 @@ export const createPost = async (
                 
                 const imageDataObj: ImageData = {
                     file: imageFile,
-                    contentType: `image/${imageMetadata.format}`,
+                    content_type: `image/${imageMetadata.format}`,
                     base64Data,
                     metadata: imageMetadata
                 };
@@ -776,7 +776,7 @@ export const createPost = async (
                 };
 
                 console.log('Added image to metadata:', { 
-                    contentType: imageDataObj.contentType,
+                    content_type: imageDataObj.content_type,
                     format: imageMetadata.format,
                     dimensions: `${imageMetadata.width}x${imageMetadata.height}`
                 });
@@ -788,7 +788,7 @@ export const createPost = async (
                     base64Data,
                     createMapData({ ...metadata, type: 'image' }),
                     await calculateOutputSatoshis(base64Data.length),
-                    imageDataObj.contentType
+                    imageDataObj.content_type
                 );
                 components.push(imageComponent);
                 console.log('Image component created successfully');

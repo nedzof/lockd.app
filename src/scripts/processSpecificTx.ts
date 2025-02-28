@@ -39,8 +39,8 @@ async function extractImageFromTransaction(tx: any): Promise<ImageOutput | null>
         }
 
         // Get the content type from the data array
-        const contentTypeEntry = tx.data.find((item: string) => item.includes('contenttype='));
-        const mimeType = contentTypeEntry ? contentTypeEntry.split('=')[1] : 'image/png';
+        const content_typeEntry = tx.data.find((item: string) => item.includes('content_type='));
+        const mimeType = content_typeEntry ? content_typeEntry.split('=')[1] : 'image/png';
 
         // Convert the transaction data to a Buffer
         const buffer = Buffer.from(imageData, 'base64');

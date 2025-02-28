@@ -307,7 +307,7 @@ export class DbClient {
             ['updated_at', 'updated_at'],
             ['vote_options', 'vote_options'],
             ['vote_question', 'voteQuestion'],
-            ['content_type', 'contentType'],
+            ['content_type', 'content_type'],
             ['media_type', 'media_type'],
             ['raw_image_data', 'raw_image_data'],
             ['image_metadata', 'imageMetadata']
@@ -430,8 +430,8 @@ export class DbClient {
             }
 
             // Ensure vote posts have content_type set
-            if (tx.type === 'vote' && !tx.metadata.content_type && !tx.metadata.contentType) {
-                tx.metadata.contentType = 'vote';
+            if (tx.type === 'vote' && !tx.metadata.content_type && !tx.metadata.content_type) {
+                tx.metadata.content_type = 'vote';
             }
 
             logger.info(' DB: CREATING POST', {
@@ -472,7 +472,7 @@ export class DbClient {
                             metadata: {
                                 ...(post.metadata as Record<string, any>),
                                 vote_options: defaultOptions,
-                                contentType: 'vote'
+                                content_type: 'vote'
                             }
                         }
                     });
@@ -1055,7 +1055,7 @@ export class DbClient {
     public async saveImage(params: {
         tx_id: string;
         imageData: Buffer | string;
-        contentType: string;
+        content_type: string;
         filename?: string;
         width?: number;
         height?: number;
@@ -1063,7 +1063,7 @@ export class DbClient {
     }): Promise<void> {
         logger.debug('saveImage called with params', {
             tx_id: params.tx_id,
-            contentType: params.contentType,
+            content_type: params.content_type,
             imageDataType: typeof params.imageData,
             imageSize: typeof params.imageData === 'string' ? params.imageData.length : params.imageData?.length,
             hasFilename: !!params.filename
@@ -1106,20 +1106,20 @@ export class DbClient {
                     where: { tx_id: params.tx_id },
                     update: {
                         raw_image_data: imageBuffer,
-                        media_type: params.contentType
+                        media_type: params.content_type
                     },
                     create: {
                         tx_id: params.tx_id,
                         content: '',  // Required field, can be updated later
                         raw_image_data: imageBuffer,
-                        media_type: params.contentType,
+                        media_type: params.content_type,
                         created_at: new Date()
                     }
                 });
 
                 logger.info('Successfully saved image data', {
                     tx_id: params.tx_id,
-                    contentType: params.contentType,
+                    content_type: params.content_type,
                     size: params.size
                 });
             } catch (error) {

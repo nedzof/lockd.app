@@ -275,7 +275,7 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     }
 
     // Map of content types for different formats
-    const contentTypeMap: Record<string, string> = {
+    const content_typeMap: Record<string, string> = {
       'jpeg': 'image/jpeg',
       'jpg': 'image/jpeg',
       'png': 'image/png',
@@ -287,20 +287,20 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     };
 
     // Determine content type
-    let contentType = post.media_type;
+    let content_type = post.media_type;
     
     // If we have an imageFormat but no media_type, try to determine from format
-    if (!contentType && post.imageFormat && contentTypeMap[post.imageFormat.toLowerCase()]) {
-      contentType = contentTypeMap[post.imageFormat.toLowerCase()];
+    if (!content_type && post.imageFormat && content_typeMap[post.imageFormat.toLowerCase()]) {
+      content_type = content_typeMap[post.imageFormat.toLowerCase()];
     }
     
     // Default to octet-stream if we can't determine the type
-    if (!contentType) {
-      contentType = 'application/octet-stream';
+    if (!content_type) {
+      content_type = 'application/octet-stream';
     }
 
     // Set appropriate content type
-    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Type', content_type);
 
     // Add cache control headers for better performance
     res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
@@ -309,7 +309,7 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     // Log information about the image data
     logger.debug('Sending image data', {
       post_id: req.params.id,
-      media_type: contentType,
+      media_type: content_type,
       dataType: typeof post.raw_image_data,
       isBuffer: Buffer.isBuffer(post.raw_image_data),
       dataLength: post.raw_image_data.length
