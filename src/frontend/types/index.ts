@@ -29,7 +29,7 @@ export interface Post {
   locklikes: LockLike[];
 }
 
-export interface Post {
+export interface PostExtended {
   id: string;
   creator: string;
   title: string;
@@ -38,18 +38,18 @@ export interface Post {
   style: string;
   duration: number;
   format: string;
-  fileUrl: string;
-  thumbnailUrl: string;
-  txId: string;
+  file_url: string;
+  thumbnail_url: string;
+  tx_id: string;
   locks: number;
   status: 'minted';
   tags: string[];
-  createdAt: Date;
-  updatedAt: Date;
-  totalLocked: number;
+  created_at: Date;
+  updated_at: Date;
+  total_locked: number;
   threshold: number;
-  isTop10Percent: boolean;
-  isTop3: boolean;
+  is_top_10_percent: boolean;
+  is_top_3: boolean;
   locklikes: LockLike[];
   content: string;
   unlock_height?: number;

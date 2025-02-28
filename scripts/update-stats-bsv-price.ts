@@ -19,7 +19,7 @@ async function updateStatsBsvPrice() {
     // Get the latest stats record
     const stats = await prisma.stats.findFirst({
       orderBy: {
-        last_updated: 'desc'
+        lastUpdated: 'desc'
       }
     });
     
@@ -34,8 +34,8 @@ async function updateStatsBsvPrice() {
         id: stats.id
       },
       data: {
-        current_bsv_price: currentBsvPrice,
-        last_updated: new Date()
+        currentBsvPrice: currentBsvPrice,
+        lastUpdated: new Date()
       }
     });
     

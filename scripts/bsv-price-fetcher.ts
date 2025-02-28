@@ -99,7 +99,7 @@ async function insertIntoDatabase(priceData: PriceData[]): Promise<void> {
     // Get the latest stats record
     const latestStats = await prisma.stats.findFirst({
       orderBy: {
-        last_updated: 'desc'
+        lastUpdated: 'desc'
       }
     });
     
