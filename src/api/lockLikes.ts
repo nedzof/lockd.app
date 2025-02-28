@@ -117,7 +117,7 @@ const handleVoteOptionLock = async (
     const lockLike = await prisma.lockLike.create({
       data: {
         txid: `${voteOption.id}_${Date.now()}`, // Temporary txid until we get the real one
-        post_id: voteOption.post_id, // Link to the parent post
+        post_id: voteOption.post.id, // Link to the parent post
         vote_option_id: voteOption.id, // Link to the specific vote option
         author_address,
         amount,
@@ -132,7 +132,7 @@ const handleVoteOptionLock = async (
         id: vote_option_id
       },
       data: {
-        lock_amount: {
+        lockAmount: {
           increment: amount
         }
       }
@@ -154,4 +154,4 @@ const handleVoteOptionLock = async (
 router.post('/', handleLockLike);
 router.post('/vote-options', handleVoteOptionLock);
 
-export default router; 
+export default router;

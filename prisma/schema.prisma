@@ -9,116 +9,117 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-model Post {
-  id             String       @id @default(dbgenerated("gen_random_uuid()"))
-  content        String
-  txid           String       @unique
-  author_address String?
-  createdAt      DateTime     @default(now()) @map("created_at")
-  isVote         Boolean      @default(false) @map("is_vote")
-  mediaType      String?      @map("media_type")
-  tags           String[]     @default([])
-  mediaUrl       String?      @map("media_url")
-  rawImageData   Bytes?       @map("raw_image_data")
-  blockHeight    Int?         @map("block_height")
-  metadata       Json?
-  isLocked       Boolean      @default(false) @map("is_locked")
-  lockLikes      LockLike[]   @relation("PostLockLikes")
-  voteOptions    VoteOption[] @relation("PostVoteOptions")
-
-  @@index([txid])
-  @@index([author_address])
-  @@index([blockHeight])
-  @@index([createdAt])
-  @@index([tags])
-  @@map("Post")
-}
-
-model VoteOption {
-  id            String     @id @default(dbgenerated("gen_random_uuid()"))
-  content       String
-  authorAddress String?    @map("author_address")
-  createdAt     DateTime   @default(now()) @map("created_at")
-  postId        String     @map("post_id")
-  tags          String[]   @default([])
-  txid          String     @unique
-  optionIndex   Int        @default(0) @map("option_index")
-  lockLikes     LockLike[] @relation("VoteOptionLockLikes")
-  post          Post       @relation("PostVoteOptions", fields: [postId], references: [id], onDelete: Cascade)
-
-  @@index([txid])
-  @@index([createdAt])
-  @@index([optionIndex])
-  @@index([postId])
-  @@map("VoteOption")
-}
-
 model LockLike {
-  id            String      @id @default(dbgenerated("gen_random_uuid()"))
-  txid          String      @unique
-  amount        Int
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @map("id")
+  txid          String      @unique @map("txid")
+  amount        Int         @map("amount")
   authorAddress String?     @map("author_address")
   createdAt     DateTime    @default(now()) @map("created_at")
   postId        String      @map("post_id")
   unlockHeight  Int?        @map("unlock_height")
   voteOptionId  String?     @map("vote_option_id")
-  post          Post        @relation("PostLockLikes", fields: [postId], references: [id], onDelete: Cascade)
-  voteOption    VoteOption? @relation("VoteOptionLockLikes", fields: [voteOptionId], references: [id], onDelete: Cascade)
+  post          Post        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  voteOption    VoteOption? @relation(fields: [voteOptionId], references: [id], onDelete: Cascade)
 
   @@index([authorAddress])
   @@index([createdAt])
   @@index([postId])
   @@index([voteOptionId])
-  @@map("LockLike")
+}
+
+model Post {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @map("id")
+  content       String       @map("content")
+  txid          String       @unique @map("txid")
+  authorAddress String?      @map("author_address")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  isVote        Boolean      @default(false) @map("is_vote")
+  mediaType     String?      @map("media_type")
+  tags          String[]     @default([]) @map("tags")
+  mediaUrl      String?      @map("media_url")
+  rawImageData  Bytes?       @map("raw_image_data")
+  blockHeight   Int?         @map("block_height")
+  metadata      Json?        @map("metadata")
+  isLocked      Boolean      @default(false) @map("is_locked")
+  lockLikes     LockLike[]
+  voteOptions   VoteOption[]
+
+  @@index([authorAddress])
+  @@index([blockHeight])
+  @@index([createdAt])
+  @@index([tags])
+  @@index([txid])
 }
 
 model ProcessedTransaction {
-  id          String   @id @default(dbgenerated("gen_random_uuid()"))
-  txid        String   @unique
-  blockHeight Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now()) @updatedAt
-  protocol    String   @default("MAP")
-  type        String   @default("unknown")
-  metadata    Json
-  blockTime   BigInt   @default(0)
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
+  txid        String   @unique @map("txid")
+  blockHeight Int      @default(0) @map("block_height")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+  protocol    String   @default("MAP") @map("protocol")
+  type        String   @default("unknown") @map("type")
+  metadata    Json     @map("metadata")
+  blockTime   BigInt   @default(0) @map("block_time")
 
+  @@index([blockHeight])
+  @@index([protocol])
   @@index([txid])
   @@index([type])
-  @@index([protocol])
-  @@index([blockHeight])
 }
 
 model Tag {
-  id         String   @id @default(dbgenerated("gen_random_uuid()"))
-  name       String   @unique
-  type       String   @default("user_created")
-  usageCount Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now()) @updatedAt
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
+  name       String   @unique @map("name")
+  type       String   @default("user_created") @map("type")
+  usageCount Int      @default(0) @map("usage_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @map("updated_at")
 
   @@index([name])
   @@index([type])
   @@index([usageCount])
 }
 
-model bsv_price_history {
-  id         Int       @id @default(autoincrement())
-  date       DateTime  @unique @db.Date
-  price      Float
-  created_at DateTime? @default(now()) @db.Timestamptz(6)
+model VoteOption {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @map("id")
+  content       String     @map("content")
+  authorAddress String?    @map("author_address")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  postId        String     @map("post_id")
+  tags          String[]   @default([]) @map("tags")
+  txid          String     @unique @map("txid")
+  optionIndex   Int        @default(0) @map("option_index")
+  lockLikes     LockLike[]
+  post          Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([optionIndex])
+  @@index([postId])
+  @@index([txid])
 }
 
-model stats {
-  id                String   @id @default(dbgenerated("gen_random_uuid()"))
-  total_posts       Int
-  total_votes       Int
-  total_lock_likes  Int
-  total_users       Int
-  total_bsv_locked  Float
-  avg_lock_duration Float
-  most_used_tag     String?
-  most_active_user  String?
-  last_updated      DateTime @default(now())
-  current_bsv_price Float?
+model BsvPriceHistory {
+  id        Int       @id @default(autoincrement()) @map("id")
+  date      DateTime  @unique @db.Date @map("date")
+  price     Float     @map("price")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("bsv_price_history")
+}
+
+model Stats {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
+  totalPosts       Int      @map("total_posts")
+  totalVotes       Int      @map("total_votes")
+  totalLockLikes   Int      @map("total_lock_likes")
+  totalUsers       Int      @map("total_users")
+  totalBsvLocked   Float    @map("total_bsv_locked")
+  avgLockDuration  Float    @map("avg_lock_duration")
+  mostUsedTag      String?  @map("most_used_tag")
+  mostActiveUser   String?  @map("most_active_user")
+  lastUpdated      DateTime @default(now()) @map("last_updated")
+  currentBsvPrice  Float?   @map("current_bsv_price")
+
+  @@map("stats")
 }

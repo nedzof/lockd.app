@@ -514,10 +514,14 @@ async function processImage(file: File): Promise<{ base64Data: string; metadata:
         const format = file.type.split('/')[1].toLowerCase();
         
         // List of supported web formats
-        const supportedWebFormats = ['jpeg', 'jpg', 'png', 'gif', 'webp'];
+        const supportedWebFormats = ['jpeg', 'jpg', 'png', 'gif', 'webp', 'bmp', 'svg+xml', 'tiff'];
         
         // Keep original format if it's web-supported, otherwise use PNG
-        const outputFormat = supportedWebFormats.includes(format) ? format : 'png';
+        let outputFormat = supportedWebFormats.includes(format) ? format : 'png';
+        
+        // Normalize format names for consistency
+        if (outputFormat === 'svg+xml') outputFormat = 'svg';
+        if (outputFormat === 'jpg') outputFormat = 'jpeg';
         
         // Create URL from file
         const url = URL.createObjectURL(file);
@@ -696,12 +700,41 @@ export const createPost = async (
                 if (imageData instanceof File) {
                     // If imageData is already a File
                     imageFile = imageData;
+                    
+                    // Validate supported image formats
+                    const supportedFormats = [
+                        'image/jpeg', 
+                        'image/jpg', 
+                        'image/png', 
+                        'image/gif', 
+                        'image/bmp', 
+                        'image/svg+xml', 
+                        'image/webp', 
+                        'image/tiff'
+                    ];
+                    
+                    if (!supportedFormats.includes(imageFile.type)) {
+                        throw new Error(`Unsupported image format: ${imageFile.type}. Please use JPEG, PNG, GIF, BMP, SVG, WEBP, or TIFF.`);
+                    }
+                    
                     processedImage = await processImage(imageFile);
                 } else if (typeof imageData === 'string') {
                     // If imageData is a string (base64 or data URL)
                     if (!imageMimeType) {
-                        console.warn('No MIME type provided for image data string, defaulting to image/png');
-                        imageMimeType = 'image/png';
+                        // Try to detect MIME type from data URI
+                        if (imageData.startsWith('data:')) {
+                            const mimeMatch = imageData.match(/^data:([^;]+);/);
+                            if (mimeMatch && mimeMatch[1]) {
+                                imageMimeType = mimeMatch[1];
+                                console.log('Detected MIME type from data URI:', imageMimeType);
+                            } else {
+                                console.warn('Could not detect MIME type from data URI, defaulting to image/png');
+                                imageMimeType = 'image/png';
+                            }
+                        } else {
+                            console.warn('No MIME type provided for image data string, defaulting to image/png');
+                            imageMimeType = 'image/png';
+                        }
                     }
                     
                     try {

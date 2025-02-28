@@ -81,7 +81,7 @@ export const updateTag = async (req: Request, res: Response) => {
       where: { id },
       data: { 
         name: name.trim(),
-        updatedAt: new Date()
+        updated_at: new Date()
       }
     });
     

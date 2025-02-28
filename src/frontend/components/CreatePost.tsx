@@ -127,9 +127,21 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     const file = e.target.files?.[0];
     if (!file) return;
     
+    // Define supported image formats
+    const supportedFormats = [
+      'image/jpeg', 
+      'image/jpg', 
+      'image/png', 
+      'image/gif', 
+      'image/bmp', 
+      'image/svg+xml', 
+      'image/webp', 
+      'image/tiff'
+    ];
+    
     // Check file type
-    if (!file.type.startsWith('image/')) {
-      toast.error('Please upload an image file', {
+    if (!supportedFormats.includes(file.type)) {
+      toast.error(`Unsupported image format. Please upload one of: JPEG, PNG, GIF, BMP, SVG, WEBP, or TIFF`, {
         style: {
           background: '#1A1B23',
           color: '#f87171',
@@ -423,7 +435,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/jpg,image/png,image/gif,image/bmp,image/svg+xml,image/webp,image/tiff"
                   onChange={handleImageUpload}
                   className="sr-only"
                   id="image-upload"
@@ -431,10 +443,15 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 <label
                   htmlFor="image-upload"
                   className="flex items-center justify-center p-2 text-green-500 hover:text-green-400 focus:outline-none cursor-pointer"
-                  title="Upload image"
+                  title="Upload image (JPEG, PNG, GIF, BMP, SVG, WEBP, TIFF)"
                 >
                   <FiImage size={20} />
                 </label>
+                {!imagePreview && (
+                  <div className="absolute top-full left-0 text-xs text-gray-400 mt-1 whitespace-nowrap">
+                    Supports: JPEG, PNG, GIF, BMP, SVG, WEBP, TIFF
+                  </div>
+                )}
               </div>
               
               {/* Vote post toggle */}

@@ -120,76 +120,66 @@ async function processSpecificTransaction() {
 
         // Create or update the post with image data if present
         const post = await prisma.post.upsert({
-            where: { id: postId },
+            where: { txid: TX_ID },
             create: {
-                id: postId,
                 txid: TX_ID,
-                postId: postId,
                 content: content,
-                author_address: tx.addresses[0],
-                block_height: 0,
-                created_at: timestamp,
+                authorAddress: tx.addresses[0],
+                blockHeight: 0,
+                createdAt: timestamp,
                 tags: tags,
-                is_vote: totalOptions > 0,
-                lock_duration: lockDuration,
-                media_type: imageData?.mimeType,
-                raw_image_data: imageData?.rawData,
-                image_format: imageData?.mimeType?.split('/')[1] || null
+                isVote: totalOptions > 0,
+                mediaType: imageData?.mimeType,
+                rawImageData: imageData?.rawData
             },
             update: {
                 content: content,
-                author_address: tx.addresses[0],
-                block_height: 0,
-                created_at: timestamp,
+                authorAddress: tx.addresses[0],
+                blockHeight: 0,
+                createdAt: timestamp,
                 tags: tags,
-                is_vote: totalOptions > 0,
-                lock_duration: lockDuration,
-                media_type: imageData?.mimeType,
-                raw_image_data: imageData?.rawData,
-                image_format: imageData?.mimeType?.split('/')[1] || null
+                isVote: totalOptions > 0,
+                mediaType: imageData?.mimeType,
+                rawImageData: imageData?.rawData
             }
         });
 
-        console.log('Created/Updated post:', post);
+        console.log('Post created/updated:', post);
 
-        // If there are vote options, create them
+        // If this is a vote post, create vote options
         if (totalOptions > 0) {
-            const optionsHash = parsedData.optionshash;
+            console.log(`Creating ${totalOptions} vote options...`);
             
-            // Delete existing vote options first
-            await prisma.voteOption.deleteMany({
-                where: { post_txid: TX_ID }
-            });
-            
-            // Create vote options
             for (let i = 0; i < totalOptions; i++) {
-                const optionId = `${postId}-option-${i}`;
-                await prisma.voteOption.create({
-                    data: {
-                        id: optionId,
-                        txid: `${TX_ID}-option-${i}`,
-                        postId: postId,
-                        post_txid: TX_ID,
-                        content: content,
-                        author_address: tx.addresses[0],
-                        created_at: timestamp,
-                        lock_amount: lockAmount,
-                        lock_duration: lockDuration,
-                        unlock_height: 0,
-                        current_height: 0,
-                        lock_percentage: 0,
-                        tags: [],
+                const optionContent = parsedData[`option${i}`] || `Option ${i+1}`;
+                const optionTxid = `${TX_ID}-option-${i}`;
+                
+                await prisma.voteOption.upsert({
+                    where: { txid: optionTxid },
+                    create: {
+                        txid: optionTxid,
+                        content: optionContent,
+                        authorAddress: tx.addresses[0],
+                        createdAt: timestamp,
+                        postId: post.id,
+                        optionIndex: i
                     },
+                    update: {
+                        content: optionContent,
+                        authorAddress: tx.addresses[0],
+                        createdAt: timestamp,
+                        postId: post.id,
+                        optionIndex: i
+                    }
                 });
+                
+                console.log(`Created vote option ${i+1}: ${optionContent}`);
             }
-
-            console.log(`Created ${totalOptions} vote options`);
         }
 
-        console.log('Transaction processing completed successfully');
+        console.log('Transaction processed successfully');
     } catch (error) {
         console.error('Error processing transaction:', error);
-        throw error;
     } finally {
         await prisma.$disconnect();
     }

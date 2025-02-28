@@ -121,15 +121,14 @@ export class DbClient {
         const postData = {
             txid: tx.txid,
             content: tx.metadata.content,
-            author_address: tx.metadata.senderAddress,
-            block_height: tx.blockHeight,
-            created_at: this.createBlockTimeDate(tx.blockTime),
-            raw_image_data: imageBuffer,
+            authorAddress: tx.metadata.senderAddress,
+            blockHeight: tx.blockHeight,
+            createdAt: this.createBlockTimeDate(tx.blockTime),
+            rawImageData: imageBuffer,
             tags: tx.metadata.tags || [],
             metadata: tx.metadata || {},
-            is_locked: tx.type === 'lock',
-            lock_duration: tx.metadata.lockDuration || null,
-            is_vote: tx.type === 'vote' || !!tx.metadata.voteOptions || tx.metadata.content_type === 'vote'
+            isLocked: tx.type === 'lock',
+            isVote: tx.type === 'vote' || !!tx.metadata.voteOptions || tx.metadata.content_type === 'vote'
         };
 
         return this.withFreshClient(async (client) => {
@@ -187,12 +186,11 @@ export class DbClient {
                         data: {
                             txid: optionTxid,
                             content: optionContent,
-                            author_address: tx.metadata.senderAddress,
-                            created_at: this.createBlockTimeDate(tx.blockTime),
-                            lock_amount: lockAmount,
-                            lock_duration: lockDuration,
+                            authorAddress: tx.metadata.senderAddress,
+                            createdAt: this.createBlockTimeDate(tx.blockTime),
                             tags: tx.metadata.tags || [],
-                            post_id: postId
+                            postId: postId,
+                            optionIndex: i
                         }
                     });
                     
@@ -222,15 +220,15 @@ export class DbClient {
             }
 
             // Ensure vote posts have content_type set
-            if (tx.type === 'vote' && !tx.metadata.content_type) {
-                tx.metadata.content_type = 'vote';
-                logger.debug('Set content_type for vote post', { txid: tx.txid });
+            if (tx.type === 'vote' && !tx.metadata.contentType) {
+                tx.metadata.contentType = 'vote';
+                logger.debug('Set contentType for vote post', { txid: tx.txid });
             }
 
             const post = await this.upsertPost(tx, imageBuffer);
 
             // For vote posts, ensure they have vote options
-            if ((tx.type === 'vote' || post.is_vote) && (!tx.metadata.voteOptions || !Array.isArray(tx.metadata.voteOptions) || tx.metadata.voteOptions.length === 0)) {
+            if ((tx.type === 'vote' || post.isVote) && (!tx.metadata.voteOptions || !Array.isArray(tx.metadata.voteOptions) || tx.metadata.voteOptions.length === 0)) {
                 logger.info('Creating default vote options for vote post', { postId: post.id, txid: tx.txid });
                 
                 // Create default vote options
@@ -248,21 +246,21 @@ export class DbClient {
                             metadata: {
                                 ...post.metadata,
                                 voteOptions: defaultOptions,
-                                content_type: 'vote'
+                                contentType: 'vote'
                             }
                         }
                     });
                 });
             }
 
-            const action = post.created_at === this.createBlockTimeDate(tx.blockTime) ? 'created' : 'updated';
+            const action = post.createdAt === this.createBlockTimeDate(tx.blockTime) ? 'created' : 'updated';
             logger.info(`✅ Post ${action} successfully`, {
                 txid: post.txid,
                 hasImage: !!imageBuffer,
                 imageSize: imageBuffer?.length,
                 tags: post.tags,
-                isVote: post.is_vote,
-                contentType: tx.metadata.content_type
+                isVote: post.isVote,
+                contentType: tx.metadata.contentType
             });
 
             return post;
@@ -479,30 +477,30 @@ export class DbClient {
             // Try to get the latest block height from the blockchain_state table
             const blockchainState = await prisma.blockchain_state.findFirst({
                 orderBy: {
-                    updated_at: 'desc'
+                    updatedAt: 'desc'
                 }
             });
             
-            if (blockchainState?.current_height) {
-                logger.debug(`Found current block height: ${blockchainState.current_height}`);
-                return blockchainState.current_height;
+            if (blockchainState?.currentHeight) {
+                logger.debug(`Found current block height: ${blockchainState.currentHeight}`);
+                return blockchainState.currentHeight;
             }
             
             // If no blockchain_state record, try to get the height from the latest transaction
             const latestTx = await prisma.transaction.findFirst({
                 orderBy: {
-                    block_height: 'desc'
+                    blockHeight: 'desc'
                 },
                 where: {
-                    block_height: {
+                    blockHeight: {
                         not: null
                     }
                 }
             });
             
-            if (latestTx?.block_height) {
-                logger.debug(`Using latest transaction block height: ${latestTx.block_height}`);
-                return latestTx.block_height;
+            if (latestTx?.blockHeight) {
+                logger.debug(`Using latest transaction block height: ${latestTx.blockHeight}`);
+                return latestTx.blockHeight;
             }
             
             // If we still don't have a height, return null
@@ -658,15 +656,15 @@ export class DbClient {
                 await client.post.upsert({
                     where: { txid: params.txid },
                     update: {
-                        raw_image_data: imageBuffer,
-                        media_type: params.contentType
+                        rawImageData: imageBuffer,
+                        mediaType: params.contentType
                     },
                     create: {
                         txid: params.txid,
                         content: '',  // Required field, can be updated later
-                        raw_image_data: imageBuffer,
-                        media_type: params.contentType,
-                        created_at: new Date()
+                        rawImageData: imageBuffer,
+                        mediaType: params.contentType,
+                        createdAt: new Date()
                     }
                 });
 

@@ -5,14 +5,15 @@ import { CONFIG } from "./config";
 import { logger } from "../utils/logger";
 
 export class Scanner {
-    private readonly START_BLOCK = 883800;  // Start earlier to catch all target blocks
-    private readonly SUBSCRIPTION_ID = CONFIG.JB_SUBSCRIPTION_ID;
+    private readonly startBlock = 885675;  // Start earlier to catch all target blocks
+    private readonly subscriptionId = CONFIG.JB_SUBSCRIPTION_ID;
     private readonly jungleBus: JungleBusClient;
     private readonly parser: TransactionParser;
 
     constructor(parser: TransactionParser, dbClient: DbClient) {
         this.parser = parser;
         this.jungleBus = new JungleBusClient("https://junglebus.gorillapool.io", {
+            protocol: "json", // Add the required protocol property
             useSSL: true,
             onConnected: (ctx) => {
                 logger.info("🔌 JungleBus CONNECTED", ctx);
@@ -36,13 +37,6 @@ export class Scanner {
             return;
         }
 
-        // Target txids for logging purposes only
-        const targetTxids = [
-            "0861619cb8357753cb415832777d9a1bb42701047bb233cbdd5a9318c8328fea",
-            "3f440827985052004a2d9db778445591f8fb09e3a60e661e8cbe8e6d2798bd84",
-            "355b4989bb76ac9dc1d72b07861d3fa1e58b2f0bddb588ddaa4897226c132df4"
-        ];
-
         const block = tx?.block?.height || tx?.height || tx?.blockHeight;
 
         // Log the raw transaction structure
@@ -57,14 +51,7 @@ export class Scanner {
             firstDataItems: tx.data?.slice(0, 3)
         });
 
-        if (targetTxids.includes(txid)) {
-            logger.info("🎯 TARGET TRANSACTION FOUND", {
-                txid,
-                block
-            });
-        }
-
-        // Process all transactions, not just target txids
+        // Process all transactions
         try {
             await this.parser.parseTransaction(txid);
         } catch (error) {
@@ -78,20 +65,18 @@ export class Scanner {
                 });
                 
                 // For target txids, retry with a delay
-                if (targetTxids.includes(txid)) {
-                    setTimeout(async () => {
-                        try {
-                            logger.info('🔄 Retrying target transaction', { txid });
-                            await this.parser.parseTransaction(txid);
-                            logger.info('✅ Successfully processed target transaction on retry', { txid });
-                        } catch (retryError) {
-                            logger.error('❌ Failed to process target transaction on retry', {
-                                txid,
-                                error: retryError instanceof Error ? retryError.message : 'Unknown error'
-                            });
-                        }
-                    }, 5000); // Retry after 5 seconds
-                }
+                setTimeout(async () => {
+                    try {
+                        logger.info('🔄 Retrying target transaction', { txid });
+                        await this.parser.parseTransaction(txid);
+                        logger.info('✅ Successfully processed target transaction on retry', { txid });
+                    } catch (retryError) {
+                        logger.error('❌ Failed to process target transaction on retry', {
+                            txid,
+                            error: retryError instanceof Error ? retryError.message : 'Unknown error'
+                        });
+                    }
+                }, 30000); // Retry after 30 seconds
             } else {
                 logger.error('❌ Error processing transaction', {
                     txid,
@@ -117,7 +102,7 @@ export class Scanner {
 
     private async fetchSubscriptionDetails() {
         try {
-            const response = await fetch(`https://junglebus.gorillapool.io/v1/subscription/${this.SUBSCRIPTION_ID}`);
+            const response = await fetch(`https://junglebus.gorillapool.io/v1/subscription/${this.subscriptionId}`);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -127,7 +112,7 @@ export class Scanner {
         } catch (error) {
             logger.warn("⚠️ Failed to fetch subscription details", {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                subscriptionId: this.SUBSCRIPTION_ID
+                subscriptionId: this.subscriptionId
             });
             return null;
         }
@@ -135,40 +120,20 @@ export class Scanner {
 
     public async start(): Promise<void> {
         try {
-            logger.info('🚀 STARTING SCANNER', {
-                startBlock: this.START_BLOCK,
-                subscriptionId: this.SUBSCRIPTION_ID,
-                targetBlocks: [883850, 883975, 884239]
+            logger.info(`🚀 Starting scanner from block ${this.startBlock} with subscription ID ${this.subscriptionId}`);
+            await this.jungleBus.Subscribe({
+                id: this.subscriptionId,
+                fromBlock: this.startBlock,
+                onTransaction: (tx: any) => this.handleTransaction(tx),
+                onStatus: (status: any) => this.handleStatus(status),
+                onError: (error: any) => this.handleError(error)
             });
-
-            const boundHandleTransaction = this.handleTransaction.bind(this);
-            const boundHandleStatus = this.handleStatus.bind(this);
-            const boundHandleError = this.handleError.bind(this);
-
-            logger.info('🔌 SUBSCRIBING TO JUNGLEBUS', {
-                handlers: {
-                    transaction: !!boundHandleTransaction,
-                    status: !!boundHandleStatus,
-                    error: !!boundHandleError
-                }
-            });
-
-            // Get subscription details
-            await this.fetchSubscriptionDetails();
-
-            await this.jungleBus.Subscribe(
-                this.SUBSCRIPTION_ID,
-                this.START_BLOCK,
-                boundHandleTransaction,
-                boundHandleStatus,
-                boundHandleError,
-                boundHandleTransaction
-            );
-            
-            logger.info('✅ SCANNER STARTED');
+            logger.info(`✅ Scanner subscription ${this.subscriptionId} started successfully`);
         } catch (error) {
-            logger.error('❌ Failed to start scanner', {
-                error: error instanceof Error ? error.message : 'Unknown error'
+            logger.error(`❌ Failed to start scanner`, {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                subscriptionId: this.subscriptionId,
+                startBlock: this.startBlock
             });
             throw error;
         }

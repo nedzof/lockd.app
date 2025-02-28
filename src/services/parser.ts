@@ -24,14 +24,14 @@ export function extractVoteData(tx: JungleBusResponse): {
     options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
     totalOptions?: number,
     optionsHash?: string,
-    content_type?: string 
+    contentType?: string 
 } {
     const voteData: { 
         question?: string, 
         options?: { text: string, lockAmount: number, lockDuration: number, optionIndex: number }[],
         totalOptions?: number,
         optionsHash?: string,
-        content_type?: string 
+        contentType?: string 
     } = {};
     
     // Check if this is a vote transaction
@@ -41,7 +41,7 @@ export function extractVoteData(tx: JungleBusResponse): {
     
     if (isVoteQuestion || isVoteOption || isVoteType) {
         // Set content_type for vote posts
-        voteData.content_type = 'vote';
+        voteData.contentType = 'vote';
         
         // Extract vote question
         const questionContent = tx.data.find(d => d.startsWith('content='))?.split('=')[1];
@@ -448,7 +448,7 @@ export class TransactionParser {
                 image: null,
                 imageMetadata: null,
                 optionsHash: null,
-                content_type: null
+                contentType: null
             };
 
             // Try to extract image from BSV transaction
@@ -470,7 +470,7 @@ export class TransactionParser {
             // If this is a vote transaction, set the type accordingly
             if (isVoteQuestion || isVoteOption || isVoteType) {
                 metadata.isVote = true;
-                metadata.content_type = 'vote';
+                metadata.contentType = 'vote';
             }
 
             // Process each data item
@@ -503,7 +503,7 @@ export class TransactionParser {
                         metadata.optionsHash = value;
                         break;
                     case 'content_type':
-                        metadata.content_type = value;
+                        metadata.contentType = value;
                         if (value === 'vote') {
                             metadata.isVote = true;
                         }
@@ -511,7 +511,7 @@ export class TransactionParser {
                     case 'type':
                         if (value === 'vote' || value === 'vote_question' || value === 'vote_option') {
                             metadata.isVote = true;
-                            metadata.content_type = 'vote';
+                            metadata.contentType = 'vote';
                         }
                         break;
                     // Image related fields
@@ -682,13 +682,13 @@ export class TransactionParser {
 
             // Determine transaction type
             let txType = 'lock';
-            if (parsedTx.isVote || (parsedTx.voteOptions && parsedTx.voteOptions.length > 0) || parsedTx.content_type === 'vote') {
+            if (parsedTx.isVote || (parsedTx.voteOptions && parsedTx.voteOptions.length > 0) || parsedTx.contentType === 'vote') {
                 txType = 'vote';
                 logger.debug('Processing vote transaction', {
                     txid,
                     voteOptions: parsedTx.voteOptions,
                     isVote: parsedTx.isVote,
-                    contentType: parsedTx.content_type
+                    contentType: parsedTx.contentType
                 });
                 
                 // Ensure we have vote options
@@ -700,27 +700,36 @@ export class TransactionParser {
             }
 
             // Ensure content_type is set for vote posts
-            if (txType === 'vote' && !parsedTx.content_type) {
-                parsedTx.content_type = 'vote';
+            if (txType === 'vote' && !parsedTx.contentType) {
+                parsedTx.contentType = 'vote';
             }
 
             await this.dbClient.processTransaction({
                 txid: tx.id,
                 type: txType,
                 protocol: 'LOCK',
-                blockHeight: tx.block_height,
-                blockTime: tx.block_time,
+                block_height: tx.block_height,
+                block_time: tx.block_time,
                 metadata: {
-                    senderAddress: tx.addresses?.[0] || null,
-                    ...parsedTx
+                    sender_address: tx.addresses?.[0] || null,
+                    post_id: parsedTx.postId,
+                    lock_amount: parsedTx.lockAmount,
+                    lock_duration: parsedTx.lockDuration,
+                    content: parsedTx.content,
+                    vote_options: parsedTx.voteOptions,
+                    vote_question: parsedTx.voteQuestion,
+                    image: parsedTx.image,
+                    image_metadata: parsedTx.imageMetadata,
+                    options_hash: parsedTx.optionsHash,
+                    content_type: parsedTx.contentType
                 }
             });
             logger.info('✅ Transaction saved to database', { 
                 txid,
-                blockHeight: tx.block_height,
+                block_height: tx.block_height,
                 type: txType,
                 hasVoteOptions: parsedTx.voteOptions && parsedTx.voteOptions.length > 0,
-                contentType: parsedTx.content_type
+                content_type: parsedTx.contentType
             });
         } catch (error) {
             logger.error('❌ Failed to parse transaction', {
