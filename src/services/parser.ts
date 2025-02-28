@@ -158,243 +158,451 @@ export class TransactionParser {
 
     private extractLockProtocolData(data: string[], tx: any): LockProtocolData | null {
         try {
-            if (!Array.isArray(data)) {
-                logger.debug('❌ Data is not an array', { data });
-                return null;
-            }
-
-            // Log raw data for debugging
-            logger.debug('📝 Processing data array', { 
-                data,
-                dataLength: data.length
+            // Log the raw data we're processing
+            logger.debug('🔍 PROCESSING RAW DATA', { 
+                dataLength: data.length,
+                dataType: typeof data,
+                isArray: Array.isArray(data),
+                firstFewItems: data.slice(0, 10)
             });
 
             // Check if this is a LOCK protocol transaction
-            const isLockApp = data.some(item => item === 'app=lockd.app');
+            // We need to check if any string in the data array contains the app=lockd.app substring
+            // The data is in hex format, so we need to check for both text and hex representation
+            const isLockApp = data.some(item => {
+                if (typeof item !== 'string') return false;
+                
+                // Check for plain text representation
+                if (item.includes('app=lockd.app')) return true;
+                
+                // Check for hex representation (convert to ASCII and check)
+                try {
+                    // For hex strings that might contain binary data
+                    const decoded = Buffer.from(item, 'hex').toString();
+                    return decoded.includes('app=lockd.app') || decoded.includes('lockd.app');
+                } catch (e) {
+                    // If decoding fails, it's not a valid hex string
+                    return false;
+                }
+            });
+            
             logger.debug('🔍 Checking for LOCK protocol', { 
                 isLockApp,
                 firstFewItems: data.slice(0, 5)
             });
 
             if (!isLockApp) {
+                logger.debug('❌ Not a LOCK protocol transaction');
                 return null;
             }
 
-            // Extract metadata
+            logger.info('✅ Found LOCK protocol transaction');
+
+            // Create initial metadata structure
             const metadata: LockProtocolData = {
                 post_id: '',
-                lock_amount: 0,  
-                lock_duration: 0,  
+                created_at: null,
                 content: '',
-                vote_options: [],
-                vote_question: '',
+                tags: [],
+                is_vote: false,
+                is_locked: false,
+                lock_amount: 0,
+                lock_duration: 0,
+                raw_image_data: null,
+                media_type: null,
+                vote_options: null,
+                vote_question: null,
+                total_options: null,
+                options_hash: null,
                 image: null,
                 image_metadata: {
                     filename: '',
                     content_type: '',
-                },
-                tags: [] // Initialize tags array
+                    is_image: false
+                }
             };
 
-            // Check if this is a vote transaction
-            const isVoteQuestion = data.some(item => item.startsWith('type=vote_question'));
-            const isVoteOption = data.some(item => item.startsWith('type=vote_option'));
-            const isVoteType = data.some(item => item.startsWith('content_type=vote'));
-            
-            // If this is a vote transaction, set the type accordingly
-            if (isVoteQuestion || isVoteOption || isVoteType) {
-                metadata.is_vote = true;
-                metadata.content_type = 'vote';
-            }
+            logger.debug('🏗️ Created initial metadata structure', { metadata: JSON.stringify(metadata) });
 
-            // Process each data item
-            data.forEach((item: string) => {
-                const [key, value] = item.split('=');
-                if (!key) return;
-
-                switch (key.toLowerCase()) {
-                    case 'postid':
-                        metadata.post_id = value;
-                        break;
-                    case 'lockamount':
-                        metadata.lock_amount = parseInt(value, 10) || 0;  
-                        break;
-                    case 'lockduration':
-                        metadata.lock_duration = parseInt(value, 10) || 0;  
-                        break;
-                    case 'content':
-                        if (isVoteQuestion && !metadata.vote_question) {
-                            metadata.vote_question = value;
-                        } else if (isVoteOption) {
-                            metadata.vote_options.push(value);
-                        }
-                        metadata.content = value;
-                        break;
-                    case 'totaloptions':
-                        metadata.total_options = parseInt(value, 10);
-                        break;
-                    case 'optionshash':
-                        metadata.options_hash = value;
-                        break;
-                    case 'content_type':
-                        metadata.content_type = value;
-                        if (value === 'vote') {
-                            metadata.is_vote = true;
-                        }
-                        break;
-                    case 'type':
-                        if (value === 'vote' || value === 'vote_question' || value === 'vote_option') {
-                            metadata.is_vote = true;
-                            metadata.content_type = 'vote';
-                        }
-                        break;
-                    case 'tags':
-                        if (!metadata.tags) {
-                            metadata.tags = [];
-                        }
-                        metadata.tags.push(value);
-                        break;
-                    // Image related fields
-                    case 'contenttype':
-                        metadata.image_metadata.content_type = value;
-                        break;
-                    case 'imageheight':
-                        metadata.image_metadata.height = parseInt(value, 10);
-                        break;
-                    case 'imagewidth':
-                        metadata.image_metadata.width = parseInt(value, 10);
-                        break;
-                    case 'imagesize':
-                        metadata.image_metadata.size = parseInt(value, 10);
-                        break;
-                    case 'filename':
-                        metadata.image_metadata.filename = value;
-                        break;
-                    case 'format':
-                        metadata.image_metadata.format = value;
-                        break;
-                    case 'encoding':
-                        metadata.image_metadata.encoding = value;
-                        break;
-                    case 'type':
-                        if (value === 'image') {
-                            metadata.image_metadata.is_image = true;
-                        }
-                        break;
-                    default:
-                        // Check if this is base64 encoded image data
-                        if (item.length > 100) {
-                            try {
-                                // Try to decode as base64
-                                const imageBuffer = Buffer.from(item, 'base64');
-                                metadata.image = imageBuffer;
-                            } catch (e) {
-                                // Not valid base64, ignore
-                            }
-                        }
-                }
-            });
-
-            // Handle image data
-            if (metadata.image_metadata.is_image && tx.transaction) {
-                try {
-                    // Get raw transaction data
-                    const buffer = Buffer.from(tx.transaction, 'base64');
-                    
-                    // Find image data markers based on content type
-                    let imageBuffer: Buffer | null = null;
-                    
-                    if (metadata.image_metadata.content_type?.includes('jpeg') || metadata.image_metadata.content_type?.includes('jpg')) {
-                        // Look for JPEG marker (FF D8 FF)
-                        const jpegMarker = Buffer.from([0xFF, 0xD8, 0xFF]);
-                        for (let i = 0; i < buffer.length - jpegMarker.length; i++) {
-                            if (buffer[i] === jpegMarker[0] && 
-                                buffer[i + 1] === jpegMarker[1] && 
-                                buffer[i + 2] === jpegMarker[2]) {
-                                imageBuffer = buffer.slice(i);
-                                break;
-                            }
-                        }
-                    } else if (metadata.image_metadata.content_type?.includes('png')) {
-                        // Look for PNG marker (89 50 4E 47)
-                        const pngMarker = Buffer.from([0x89, 0x50, 0x4E, 0x47]);
-                        for (let i = 0; i < buffer.length - pngMarker.length; i++) {
-                            if (buffer[i] === pngMarker[0] && 
-                                buffer[i + 1] === pngMarker[1] && 
-                                buffer[i + 2] === pngMarker[2] && 
-                                buffer[i + 3] === pngMarker[3]) {
-                                imageBuffer = buffer.slice(i);
-                                break;
-                            }
-                        }
-                    } else if (metadata.image_metadata.content_type?.includes('gif')) {
-                        // Look for GIF marker (47 49 46 38)
-                        const gifMarker = Buffer.from([0x47, 0x49, 0x46, 0x38]);
-                        for (let i = 0; i < buffer.length - gifMarker.length; i++) {
-                            if (buffer[i] === gifMarker[0] && 
-                                buffer[i + 1] === gifMarker[1] && 
-                                buffer[i + 2] === gifMarker[2] && 
-                                buffer[i + 3] === gifMarker[3]) {
-                                imageBuffer = buffer.slice(i);
-                                break;
-                            }
-                        }
-                    }
-
-                    if (imageBuffer) {
-                        metadata.image = imageBuffer;
-                        metadata.image_metadata = {
-                            content_type: metadata.image_metadata.content_type || 'image/jpeg',
-                            filename: metadata.image_metadata.filename || `image.${metadata.image_metadata.format || 'jpg'}`,
-                            width: metadata.image_metadata.width,
-                            height: metadata.image_metadata.height,
-                            size: metadata.image_metadata.size,
-                            encoding: 'binary'
-                        };
-                        logger.debug('Successfully extracted image data', {
-                            size: metadata.image.length,
-                            metadata: metadata.image_metadata
-                        });
-                    } else {
-                        logger.warn('Could not find image data markers in transaction', {
-                            contentType: metadata.image_metadata.content_type
-                        });
-                    }
-                } catch (error) {
-                    logger.error('Failed to process image data', {
-                        error: error instanceof Error ? error.message : 'Unknown error'
-                    });
-                }
-            }
-
-            // For vote questions, collect all content items after the first one as options
-            if (isVoteQuestion) {
-                const contents = data
-                    .filter(item => item.startsWith('content='))
-                    .map(item => item.split('=')[1]);
+            // Extract fields from the data
+            try {
+                // Log the entire data array for debugging
+                logger.debug('📊 FULL DATA ARRAY FOR EXTRACTION', {
+                    dataLength: data.length,
+                    fullData: JSON.stringify(data).substring(0, 1000) // Limit the string length
+                });
                 
-                if (contents.length > 1) {
-                    metadata.vote_options = contents.slice(1);
-                    logger.debug('Found vote options', { 
-                        count: metadata.vote_options.length,
-                        options: metadata.vote_options
-                    });
+                // First, try to find a single data item that contains most of the metadata
+                // This handles the case where the data is in a single hex-encoded string
+                let foundCompleteMetadata = false;
+                
+                for (const item of data) {
+                    if (typeof item !== 'string') continue;
+                    
+                    try {
+                        // Try to decode the hex string
+                        const decoded = Buffer.from(item, 'hex').toString();
+                        
+                        // Log the decoded content for debugging
+                        logger.debug('🔍 DECODED HEX STRING', {
+                            originalLength: item.length,
+                            decodedLength: decoded.length,
+                            decodedSample: decoded.substring(0, 200)
+                        });
+                        
+                        // Check if this contains key metadata fields
+                        if (decoded.includes('app\tlockd.app') || 
+                            decoded.includes('content') || 
+                            decoded.includes('is_vote') ||
+                            decoded.includes('is_locked')) {
+                            
+                            logger.debug('✅ Found metadata-rich item', {
+                                decodedSample: decoded.substring(0, 200)
+                            });
+                            
+                            // First, try to extract key-value pairs using tab characters as separators
+                            // This pattern seems common in the logs: "app\tlockd.app\u0007content\u0007Arsenal"
+                            const tabPattern = /([a-zA-Z0-9_]+)\t([^\t]+)/g;
+                            let match;
+                            let foundTabSeparatedPairs = false;
+                            
+                            while ((match = tabPattern.exec(decoded)) !== null) {
+                                foundTabSeparatedPairs = true;
+                                const [, key, value] = match;
+                                
+                                logger.debug('🔑 Found tab-separated key-value pair', {
+                                    key,
+                                    value
+                                });
+                                
+                                // Normalize the key (camelCase to snake_case)
+                                const normalizedKey = key
+                                    .replace(/([A-Z])/g, '_$1')
+                                    .toLowerCase()
+                                    .replace(/^_/, '');
+                                
+                                // Check if value contains control characters that might separate additional key-value pairs
+                                if (value.match(/[\x00-\x1F]/)) {
+                                    // Split the value by control characters
+                                    const subPairs = value.split(/[\x00-\x1F]/).filter(Boolean);
+                                    
+                                    // Process the first part as the value for the current key
+                                    if (normalizedKey === 'app' && subPairs[0] === 'lockd.app') {
+                                        // Special handling for app=lockd.app
+                                        // Process the rest of the subPairs as potential key-value pairs
+                                        for (let i = 1; i < subPairs.length; i += 2) {
+                                            if (i + 1 < subPairs.length) {
+                                                const subKey = subPairs[i];
+                                                const subValue = subPairs[i + 1];
+                                                
+                                                logger.debug('🔑 Found sub key-value pair', {
+                                                    key: subKey,
+                                                    value: subValue
+                                                });
+                                                
+                                                // Normalize the sub key
+                                                const normalizedSubKey = subKey
+                                                    .replace(/([A-Z])/g, '_$1')
+                                                    .toLowerCase()
+                                                    .replace(/^_/, '');
+                                                
+                                                // Process the sub key-value pair
+                                                this.processKeyValuePair(normalizedSubKey, subValue, metadata);
+                                            }
+                                        }
+                                    } else {
+                                        // For other keys, just use the first part as the value
+                                        this.processKeyValuePair(normalizedKey, subPairs[0], metadata);
+                                    }
+                                } else {
+                                    // Process the key-value pair normally
+                                    this.processKeyValuePair(normalizedKey, value, metadata);
+                                }
+                            }
+                            
+                            // If we found tab-separated pairs, we can skip the segment processing
+                            if (!foundTabSeparatedPairs) {
+                                // Split the string by common control characters that might separate fields
+                                const segments = decoded.split(/[\x00-\x1F]/).filter(Boolean);
+                                
+                                logger.debug('🔍 Extracted segments from decoded string', {
+                                    segmentCount: segments.length,
+                                    segments: segments.slice(0, 20)
+                                });
+                                
+                                // Process segments to find key-value pairs
+                                for (let i = 0; i < segments.length - 1; i++) {
+                                    const potentialKey = segments[i];
+                                    const potentialValue = segments[i + 1];
+                                    
+                                    // Skip segments that are likely not keys
+                                    if (potentialKey.includes('SET') || 
+                                        potentialKey.includes('ord') || 
+                                        potentialKey.length > 20 ||
+                                        potentialKey.match(/[^a-zA-Z0-9_]/)) {
+                                        continue;
+                                    }
+                                    
+                                    logger.debug('🔑 Potential key-value pair', {
+                                        key: potentialKey,
+                                        value: potentialValue
+                                    });
+                                    
+                                    // Normalize the key (camelCase to snake_case)
+                                    const normalizedKey = potentialKey
+                                        .replace(/([A-Z])/g, '_$1')
+                                        .toLowerCase()
+                                        .replace(/^_/, '');
+                                    
+                                    // Process the key-value pair
+                                    this.processKeyValuePair(normalizedKey, potentialValue, metadata);
+                                }
+                            }
+                            
+                            // Check if we found enough metadata to consider this complete
+                            if (metadata.post_id || metadata.content) {
+                                foundCompleteMetadata = true;
+                                
+                                logger.debug('✅ Successfully extracted metadata', {
+                                    metadata: JSON.stringify(metadata).substring(0, 500)
+                                });
+                                
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        // If decoding fails, continue to the next item
+                        logger.debug('❌ Failed to decode hex string', {
+                            error: e instanceof Error ? e.message : 'Unknown error'
+                        });
+                    }
                 }
-            }
+                
+                logger.debug('📊 METADATA EXTRACTION RESULT', {
+                    foundCompleteMetadata,
+                    extractedMetadata: JSON.stringify(metadata).substring(0, 500)
+                });
+                
+                // If we didn't find complete metadata, fall back to the original extraction method
+                if (!foundCompleteMetadata) {
+                    // Original extraction logic
+                    for (const item of data) {
+                        if (typeof item !== 'string') continue;
+                        
+                        // Try to decode if it looks like hex
+                        let processedItem = item;
+                        if (/^[0-9a-fA-F]+$/.test(item)) {
+                            try {
+                                processedItem = Buffer.from(item, 'hex').toString();
+                            } catch (e) {
+                                // If decoding fails, use the original string
+                            }
+                        }
+                        
+                        // Check if it's a key-value pair
+                        if (processedItem.includes('=')) {
+                            const [key, value] = processedItem.split('=');
+                            if (!key) continue;
+                            
+                            logger.debug('🔑 Found key-value pair in fallback method', {
+                                key,
+                                value
+                            });
+                            
+                            // Process the key-value pair
+                            this.processKeyValuePair(key.toLowerCase(), value, metadata);
+                        }
+                    }
+                }
 
-            // Validate required fields
-            if (!metadata.content && !metadata.image) {
-                logger.debug('Missing required content', {
-                    hasContent: !!metadata.content,
-                    hasImage: !!metadata.image
+                // Handle image data
+                if (metadata.image_metadata.is_image && tx.transaction) {
+                    try {
+                        // Get raw transaction data
+                        const buffer = Buffer.from(tx.transaction, 'base64');
+                        
+                        // Find image data markers based on content type
+                        let imageBuffer: Buffer | null = null;
+                        
+                        if (metadata.image_metadata.content_type?.includes('jpeg') || metadata.image_metadata.content_type?.includes('jpg')) {
+                            // Look for JPEG marker (FF D8 FF)
+                            const jpegMarker = Buffer.from([0xFF, 0xD8, 0xFF]);
+                            for (let i = 0; i < buffer.length - jpegMarker.length; i++) {
+                                if (buffer[i] === jpegMarker[0] && 
+                                    buffer[i + 1] === jpegMarker[1] && 
+                                    buffer[i + 2] === jpegMarker[2]) {
+                                    imageBuffer = buffer.slice(i);
+                                    break;
+                                }
+                            }
+                        } else if (metadata.image_metadata.content_type?.includes('png')) {
+                            // Look for PNG marker (89 50 4E 47)
+                            const pngMarker = Buffer.from([0x89, 0x50, 0x4E, 0x47]);
+                            for (let i = 0; i < buffer.length - pngMarker.length; i++) {
+                                if (buffer[i] === pngMarker[0] && 
+                                    buffer[i + 1] === pngMarker[1] && 
+                                    buffer[i + 2] === pngMarker[2] && 
+                                    buffer[i + 3] === pngMarker[3]) {
+                                    imageBuffer = buffer.slice(i);
+                                    break;
+                                }
+                            }
+                        } else if (metadata.image_metadata.content_type?.includes('gif')) {
+                            // Look for GIF marker (47 49 46 38)
+                            const gifMarker = Buffer.from([0x47, 0x49, 0x46, 0x38]);
+                            for (let i = 0; i < buffer.length - gifMarker.length; i++) {
+                                if (buffer[i] === gifMarker[0] && 
+                                    buffer[i + 1] === gifMarker[1] && 
+                                    buffer[i + 2] === gifMarker[2] && 
+                                    buffer[i + 3] === gifMarker[3]) {
+                                    imageBuffer = buffer.slice(i);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (imageBuffer) {
+                            metadata.image = imageBuffer;
+                            metadata.image_metadata = {
+                                content_type: metadata.image_metadata.content_type || 'image/jpeg',
+                                filename: metadata.image_metadata.filename || `image.${metadata.image_metadata.format || 'jpg'}`,
+                                width: metadata.image_metadata.width,
+                                height: metadata.image_metadata.height,
+                                size: metadata.image_metadata.size,
+                                encoding: 'binary'
+                            };
+                            logger.debug('Successfully extracted image data', {
+                                size: metadata.image.length,
+                                metadata: metadata.image_metadata
+                            });
+                        } else {
+                            logger.warn('Could not find image data markers in transaction', {
+                                contentType: metadata.image_metadata.content_type
+                            });
+                        }
+                    } catch (error) {
+                        logger.error('Failed to process image data', {
+                            error: error instanceof Error ? error.message : 'Unknown error'
+                        });
+                    }
+                }
+
+                // For vote questions, collect all content items after the first one as options
+                if (metadata.is_vote) {
+                    const contents = data
+                        .filter(item => item.startsWith('content='))
+                        .map(item => item.split('=')[1]);
+                    
+                    if (contents.length > 1) {
+                        metadata.vote_options = contents.slice(1);
+                        logger.debug('Found vote options', { 
+                            count: metadata.vote_options.length,
+                            options: metadata.vote_options
+                        });
+                    }
+                }
+
+                // Validate required fields
+                if (!metadata.content && !metadata.image) {
+                    logger.debug('Missing required content', {
+                        hasContent: !!metadata.content,
+                        hasImage: !!metadata.image
+                    });
+                    return null;
+                }
+
+                return metadata;
+            } catch (error) {
+                logger.error('Failed to extract LOCK protocol data', { 
+                    error: error instanceof Error ? {
+                        message: error.message,
+                        stack: error.stack
+                    } : error
                 });
                 return null;
             }
-
-            return metadata;
         } catch (error) {
-            logger.error('Failed to extract LOCK protocol data', { error });
+            logger.error('Failed to extract LOCK protocol data', { 
+                error: error instanceof Error ? {
+                    message: error.message,
+                    stack: error.stack
+                } : error
+            });
             return null;
+        }
+    }
+
+    // Helper function to process key-value pairs
+    private processKeyValuePair(key: string, value: string, metadata: LockProtocolData): void {
+        switch (key) {
+            case 'app':
+                // Already verified this is lockd.app
+                break;
+            case 'content':
+                metadata.content = value;
+                break;
+            case 'post_id':
+            case 'postid':
+                metadata.post_id = value;
+                break;
+            case 'is_vote':
+            case 'isvote':
+                metadata.is_vote = value.toLowerCase() === 'true';
+                break;
+            case 'is_locked':
+            case 'islocked':
+                metadata.is_locked = value.toLowerCase() === 'true';
+                break;
+            case 'lock_amount':
+            case 'lockamount':
+                metadata.lock_amount = parseInt(value, 10) || 0;
+                break;
+            case 'lock_duration':
+            case 'lockduration':
+                metadata.lock_duration = parseInt(value, 10) || 0;
+                break;
+            case 'vote_question':
+            case 'votequestion':
+                metadata.vote_question = value;
+                break;
+            case 'options_hash':
+            case 'optionshash':
+                metadata.options_hash = value;
+                break;
+            case 'total_options':
+            case 'totaloptions':
+                metadata.total_options = parseInt(value, 10) || 0;
+                break;
+            case 'sequence':
+                // This might be useful for ordering
+                break;
+            case 'parent_sequence':
+            case 'parentsequence':
+                // This might indicate a reply
+                break;
+            case 'option_index':
+            case 'optionindex':
+                // This is for vote options
+                break;
+            case 'tags':
+                try {
+                    // Tags might be in JSON format
+                    const parsedTags = JSON.parse(value);
+                    if (Array.isArray(parsedTags)) {
+                        metadata.tags = parsedTags;
+                    }
+                } catch (e) {
+                    // If not valid JSON, try as a single tag
+                    metadata.tags = [value];
+                }
+                break;
+            case 'timestamp':
+                try {
+                    metadata.created_at = new Date(value);
+                } catch (e) {
+                    // Invalid date format
+                }
+                break;
         }
     }
 
@@ -420,9 +628,31 @@ export class TransactionParser {
                 return;
             }
 
+            // Log the raw transaction data structure to understand its format
+            logger.debug('📦 RAW TRANSACTION DATA', { 
+                txid,
+                hasOutputs: !!tx.outputs,
+                outputsLength: tx.outputs?.length || 0,
+                outputsType: tx.outputs ? typeof tx.outputs : 'undefined',
+                firstFewOutputs: tx.outputs?.slice(0, 5) || [],
+                txStructure: Object.keys(tx),
+                dataType: tx.data ? typeof tx.data : 'undefined',
+                dataLength: tx.data?.length || 0,
+                addresses: tx.addresses
+            });
+
             // For JungleBus JSON protocol, we need to handle the data differently
             // than for the protobuf protocol
             const txData = tx.outputs || [];
+            
+            // Log the txData before processing
+            logger.debug('🔍 TX DATA BEFORE PROCESSING', {
+                txDataType: typeof txData,
+                isArray: Array.isArray(txData),
+                txDataLength: txData.length,
+                sampleData: txData.slice(0, 3)
+            });
+            
             const parsedTx = this.extractLockProtocolData(txData, tx);
             if (!parsedTx) {
                 logger.warn('Not a Lock protocol transaction', { txid });
@@ -432,7 +662,8 @@ export class TransactionParser {
             logger.info('✅ TRANSACTION PARSED', { 
                 txid,
                 has_image: !!parsedTx.image,
-                has_vote_options: !!(parsedTx.vote_options && parsedTx.vote_options.length > 0)
+                has_vote_options: !!(parsedTx.vote_options && parsedTx.vote_options.length > 0),
+                parsedTxKeys: Object.keys(parsedTx)
             });
 
             if (parsedTx.image) {
@@ -462,8 +693,8 @@ export class TransactionParser {
                 txid,
                 type: txType,
                 protocol: 'LOCK',
-                block_height: tx.block_height,
-                block_time: tx.block_time,
+                blockHeight: tx.block_height, // Use camelCase to match the interface
+                blockTime: tx.block_time,     // Use camelCase to match the interface
                 metadata: {
                     post_id: parsedTx.post_id,
                     content: parsedTx.content,
@@ -483,7 +714,7 @@ export class TransactionParser {
             logger.info('📤 SENDING TO DATABASE', { 
                 txid,
                 type: txType,
-                block_height: tx.block_height
+                blockHeight: tx.block_height
             });
 
             // Process the transaction in the database

@@ -128,13 +128,20 @@ export class DbClient {
     }
 
     private async upsertPost(tx: ParsedTransaction, imageBuffer: Buffer | null = null): Promise<Post> {
+        // Log the transaction data before preparing post data
+        logger.debug(' DB: PREPARING POST DATA', {
+            txid: tx.txid,
+            metadataKeys: Object.keys(tx.metadata || {}),
+            hasImage: !!imageBuffer,
+            imageSize: imageBuffer?.length || 0
+        });
+        
         // Prepare the post data
         const postData: Prisma.PostCreateInput = {
             txid: tx.txid,
             content: tx.metadata.content || '',
             authorAddress: tx.metadata.sender_address || tx.metadata.authorAddress,
             createdAt: this.createBlockTimeDate(tx.blockTime),
-            updatedAt: this.createBlockTimeDate(tx.blockTime),
             tags: tx.metadata.tags || [],
             isVote: tx.type === 'vote',
             isLocked: !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0 || !!tx.metadata.lockAmount && tx.metadata.lockAmount > 0,
@@ -142,6 +149,16 @@ export class DbClient {
             lockDuration: tx.metadata.lock_duration || tx.metadata.lockDuration || 0,
             metadata: tx.metadata
         };
+        
+        // Log the prepared post data
+        logger.debug(' DB: POST DATA PREPARED', {
+            txid: tx.txid,
+            postDataKeys: Object.keys(postData),
+            authorAddress: postData.authorAddress,
+            isVote: postData.isVote,
+            isLocked: postData.isLocked,
+            hasMetadata: !!postData.metadata
+        });
 
         // Add image data if available
         if (imageBuffer) {
@@ -195,7 +212,6 @@ export class DbClient {
                         isLocked: postData.isLocked,
                         lockAmount: postData.lockAmount,
                         lockDuration: postData.lockDuration,
-                        updatedAt: postData.updatedAt,
                         metadata: postData.metadata,
                         ...(imageBuffer ? {
                             rawImageData: postData.rawImageData,
@@ -269,8 +285,16 @@ export class DbClient {
      */
     private normalizeMetadata(metadata: Record<string, any>): Record<string, any> {
         if (!metadata || typeof metadata !== 'object') {
+            logger.debug(' DB: METADATA NORMALIZATION - Invalid metadata', {
+                metadataType: typeof metadata
+            });
             return {};
         }
+        
+        // Log the original metadata keys
+        logger.debug(' DB: METADATA NORMALIZATION - Original keys', {
+            originalKeys: Object.keys(metadata)
+        });
         
         const normalized: Record<string, any> = { ...metadata };
         
@@ -293,17 +317,34 @@ export class DbClient {
             ['image_metadata', 'imageMetadata']
         ];
         
+        // Track which fields were normalized
+        const normalizedFields: Record<string, { snakeCase: boolean, camelCase: boolean }> = {};
+        
         // Ensure both snake_case and camelCase versions exist
         for (const [snakeCase, camelCase] of fieldMappings) {
+            // Initialize tracking
+            normalizedFields[snakeCase] = { 
+                snakeCase: normalized[snakeCase] !== undefined,
+                camelCase: normalized[camelCase] !== undefined
+            };
+            
             // If snake_case exists but camelCase doesn't, add camelCase
             if (normalized[snakeCase] !== undefined && normalized[camelCase] === undefined) {
                 normalized[camelCase] = normalized[snakeCase];
+                normalizedFields[snakeCase].camelCase = true;
             }
             // If camelCase exists but snake_case doesn't, add snake_case
             else if (normalized[camelCase] !== undefined && normalized[snakeCase] === undefined) {
                 normalized[snakeCase] = normalized[camelCase];
+                normalizedFields[snakeCase].snakeCase = true;
             }
         }
+        
+        // Log the normalization results
+        logger.debug(' DB: METADATA NORMALIZATION - Results', {
+            normalizedFields,
+            finalKeys: Object.keys(normalized)
+        });
         
         return normalized;
     }
@@ -312,11 +353,24 @@ export class DbClient {
         try {
             logger.info(' DB: SAVING TRANSACTION', {
                 txid: tx.txid,
-                type: tx.type
+                type: tx.type,
+                metadataKeys: Object.keys(tx.metadata || {})
+            });
+            
+            // Log the original metadata before normalization
+            logger.debug(' DB: ORIGINAL METADATA', {
+                txid: tx.txid,
+                metadata: JSON.stringify(tx.metadata).substring(0, 500) // Limit string length
             });
             
             // Normalize metadata to handle both snake_case and camelCase
             tx.metadata = this.normalizeMetadata(tx.metadata);
+            
+            // Log the normalized metadata
+            logger.debug(' DB: NORMALIZED METADATA', {
+                txid: tx.txid,
+                metadata: JSON.stringify(tx.metadata).substring(0, 500) // Limit string length
+            });
 
             // First, save the transaction to the ProcessedTransaction table
             await this.withFreshClient(async (client) => {
