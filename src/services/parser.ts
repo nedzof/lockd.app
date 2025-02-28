@@ -87,6 +87,47 @@ export function extractVoteData(tx: { data: string[] }): {
     }
 }
 
+// Helper function to safely normalize keys with potential Unicode characters
+function normalizeKey(key: string): string {
+    try {
+        // First, clean up any non-printable characters
+        const cleaned = key.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+        
+        // Convert camelCase to snake_case while preserving Unicode characters
+        return cleaned
+            .replace(/([A-Z])/g, '_$1')
+            .toLowerCase()
+            .replace(/^_/, '')
+            .trim();
+    } catch (e) {
+        // If normalization fails, return a safe version of the key
+        return key.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase();
+    }
+}
+
+// Helper function to safely decode hex strings using Node.js Buffer
+function decodeHexString(hexString: string): string {
+    try {
+        // Use Node.js Buffer implementation for proper hex decoding
+        if (!hexString || typeof hexString !== 'string') {
+            throw new Error('Invalid hex string');
+        }
+        
+        // Check if it looks like a hex string
+        if (!/^[0-9a-fA-F]+$/.test(hexString)) {
+            return hexString; // Return as-is if not a hex string
+        }
+        
+        return Buffer.from(hexString, 'hex').toString('utf8');
+    } catch (e) {
+        logger.debug('Failed to decode hex string', {
+            error: e instanceof Error ? e.message : 'Unknown error',
+            hexString: hexString && typeof hexString === 'string' ? hexString.substring(0, 50) + '...' : 'Invalid input'
+        });
+        return '';
+    }
+}
+
 export class TransactionParser {
     private dbClient: DbClient;
     private jungleBus: JungleBusClient;
@@ -211,7 +252,7 @@ export class TransactionParser {
                 // Check for hex representation (convert to ASCII and check)
                 try {
                     // For hex strings that might contain binary data
-                    const decoded = Buffer.from(item, 'hex').toString();
+                    const decoded = decodeHexString(item);
                     return decoded.includes('app=lockd.app') || decoded.includes('lockd.app');
                 } catch (e) {
                     // If decoding fails, it's not a valid hex string
@@ -248,7 +289,7 @@ export class TransactionParser {
                     
                     try {
                         // Try to decode the hex string
-                        const decoded = Buffer.from(item, 'hex').toString();
+                        const decoded = decodeHexString(item);
                         
                         // Log the decoded content for debugging
                         logger.debug('🔍 DECODED HEX STRING', {
@@ -289,10 +330,7 @@ export class TransactionParser {
                                             // This is a value for the previous key
                                             const prevKey = tabPairs[i-1].split('\u0007').pop() || tabPairs[i-1];
                                             if (prevKey && prevKey.length > 0) {
-                                                const normalizedPrevKey = prevKey
-                                                    .replace(/([A-Z])/g, '_$1')
-                                                    .toLowerCase()
-                                                    .replace(/^_/, '');
+                                                const normalizedPrevKey = normalizeKey(prevKey);
                                                 
                                                 logger.debug('🔑 Found embedded value for previous key', {
                                                     key: normalizedPrevKey,
@@ -305,10 +343,7 @@ export class TransactionParser {
                                             // This is a key=value pair
                                             const [embeddedKey, embeddedValue] = embeddedPair.split('=');
                                             if (embeddedKey && embeddedKey.length > 0) {
-                                                const normalizedEmbeddedKey = embeddedKey
-                                                    .replace(/([A-Z])/g, '_$1')
-                                                    .toLowerCase()
-                                                    .replace(/^_/, '');
+                                                const normalizedEmbeddedKey = normalizeKey(embeddedKey);
                                                 
                                                 logger.debug('🔑 Found embedded key-value pair', {
                                                     key: normalizedEmbeddedKey,
@@ -323,10 +358,7 @@ export class TransactionParser {
                                             const embeddedValue = embeddedPairs[j+1];
                                             
                                             if (embeddedKey && embeddedKey.length > 0) {
-                                                const normalizedEmbeddedKey = embeddedKey
-                                                    .replace(/([A-Z])/g, '_$1')
-                                                    .toLowerCase()
-                                                    .replace(/^_/, '');
+                                                const normalizedEmbeddedKey = normalizeKey(embeddedKey);
                                                 
                                                 logger.debug('🔑 Found embedded key with next value', {
                                                     key: normalizedEmbeddedKey,
@@ -348,10 +380,7 @@ export class TransactionParser {
                                     });
                                     
                                     // Normalize the key (camelCase to snake_case)
-                                    const normalizedKey = key
-                                        .replace(/([A-Z])/g, '_$1')
-                                        .toLowerCase()
-                                        .replace(/^_/, '');
+                                    const normalizedKey = normalizeKey(key);
                                     
                                     // Check if value contains control characters that might separate additional key-value pairs
                                     if (value.match(/[\x00-\x1F]/)) {
@@ -373,10 +402,7 @@ export class TransactionParser {
                                                     });
                                                     
                                                     // Normalize the sub key
-                                                    const normalizedSubKey = subKey
-                                                        .replace(/([A-Z])/g, '_$1')
-                                                        .toLowerCase()
-                                                        .replace(/^_/, '');
+                                                    const normalizedSubKey = normalizeKey(subKey);
                                                     
                                                     // Process the sub key-value pair
                                                     this.processKeyValuePair(normalizedSubKey, subValue, metadata);
@@ -422,10 +448,7 @@ export class TransactionParser {
                                     });
                                     
                                     // Normalize the key (camelCase to snake_case)
-                                    const normalizedKey = potentialKey
-                                        .replace(/([A-Z])/g, '_$1')
-                                        .toLowerCase()
-                                        .replace(/^_/, '');
+                                    const normalizedKey = normalizeKey(potentialKey);
                                     
                                     // Process the key-value pair
                                     this.processKeyValuePair(normalizedKey, potentialValue, metadata);
@@ -465,11 +488,7 @@ export class TransactionParser {
                         // Try to decode if it looks like hex
                         let processedItem = item;
                         if (/^[0-9a-fA-F]+$/.test(item)) {
-                            try {
-                                processedItem = Buffer.from(item, 'hex').toString();
-                            } catch (e) {
-                                // If decoding fails, use the original string
-                            }
+                            processedItem = decodeHexString(item);
                         }
                         
                         // Check if it's a key-value pair
@@ -713,88 +732,111 @@ export class TransactionParser {
 
     // Helper function to process key-value pairs
     private processKeyValuePair(key: string, value: string, metadata: LockProtocolData): void {
-        switch (key) {
-            case 'app':
-                // Already verified this is lockd.app
-                break;
-            case 'content':
-                metadata.content = value;
-                break;
-            case 'post_id':
-            case 'postid':
-                metadata.post_id = value;
-                break;
-            case 'is_vote':
-            case 'isvote':
-                metadata.is_vote = value.toLowerCase() === 'true';
-                break;
-            case 'is_locked':
-            case 'islocked':
-                metadata.is_locked = value.toLowerCase() === 'true';
-                break;
-            case 'lock_amount':
-            case 'lockamount':
-                metadata.lock_amount = parseInt(value, 10) || 0;
-                break;
-            case 'lock_duration':
-            case 'lockduration':
-                metadata.lock_duration = parseInt(value, 10) || 0;
-                break;
-            case 'vote_question':
-            case 'votequestion':
-                metadata.vote_question = value;
-                metadata.is_vote = true; // If we have a vote question, it's a vote
-                break;
-            case 'options_hash':
-            case 'optionshash':
-                metadata.options_hash = value;
-                break;
-            case 'total_options':
-            case 'totaloptions':
-                metadata.total_options = parseInt(value, 10) || 0;
-                break;
-            case 'vote_options':
-            case 'voteoptions':
-                try {
-                    // Try to parse as JSON array
-                    if (value.startsWith('[') && value.endsWith(']')) {
-                        metadata.vote_options = JSON.parse(value);
-                    } else {
-                        // If not a JSON array, split by commas
-                        metadata.vote_options = value.split(',').map(opt => opt.trim());
+        logger.debug('🔑 Processing key-value pair', {
+            key,
+            value,
+            keyLength: key.length,
+            valueLength: value.length
+        });
+        
+        try {
+            // Normalize the key by converting camelCase to snake_case
+            const normalizedKey = normalizeKey(key);
+            
+            logger.debug('🔑 Normalized key', {
+                originalKey: key,
+                normalizedKey
+            });
+            
+            switch (normalizedKey) {
+                case 'app':
+                    // Already verified this is lockd.app
+                    break;
+                case 'content':
+                    metadata.content = value;
+                    break;
+                case 'post_id':
+                case 'postid':
+                    metadata.post_id = value;
+                    break;
+                case 'is_vote':
+                case 'isvote':
+                    metadata.is_vote = value.toLowerCase() === 'true';
+                    break;
+                case 'is_locked':
+                case 'islocked':
+                    metadata.is_locked = value.toLowerCase() === 'true';
+                    break;
+                case 'lock_amount':
+                case 'lockamount':
+                    metadata.lock_amount = parseInt(value, 10) || 0;
+                    break;
+                case 'lock_duration':
+                case 'lockduration':
+                    metadata.lock_duration = parseInt(value, 10) || 0;
+                    break;
+                case 'vote_question':
+                case 'votequestion':
+                    metadata.vote_question = value;
+                    metadata.is_vote = true; // If we have a vote question, it's a vote
+                    break;
+                case 'options_hash':
+                case 'optionshash':
+                    metadata.options_hash = value;
+                    break;
+                case 'total_options':
+                case 'totaloptions':
+                    metadata.total_options = parseInt(value, 10) || 0;
+                    break;
+                case 'vote_options':
+                case 'voteoptions':
+                    try {
+                        // Try to parse as JSON array
+                        if (value.startsWith('[') && value.endsWith(']')) {
+                            metadata.vote_options = JSON.parse(value);
+                        } else {
+                            // If not a JSON array, split by commas
+                            metadata.vote_options = value.split(',').map(opt => opt.trim());
+                        }
+                        metadata.is_vote = true; // If we have vote options, it's a vote
+                        
+                        logger.debug('✅ Processed vote options', {
+                            count: metadata.vote_options.length,
+                            options: metadata.vote_options
+                        });
+                    } catch (e) {
+                        logger.error('❌ Failed to parse vote options', {
+                            error: e instanceof Error ? e.message : 'Unknown error',
+                            value
+                        });
                     }
-                    metadata.is_vote = true; // If we have vote options, it's a vote
-                    
-                    logger.debug('✅ Processed vote options', {
-                        count: metadata.vote_options.length,
-                        options: metadata.vote_options
-                    });
-                } catch (e) {
-                    logger.error('❌ Failed to parse vote options', {
-                        error: e instanceof Error ? e.message : 'Unknown error',
-                        value
-                    });
-                }
-                break;
-            case 'sequence':
-                // This might be useful for ordering
-                break;
-            case 'parent_sequence':
-            case 'parentsequence':
-                // This might indicate a reply
-                break;
-            case 'content_type':
-            case 'content_type':
-                metadata.content_type = value;
-                if (value === 'vote') {
-                    metadata.is_vote = true;
-                }
-                break;
-            default:
-                // Store any other key-value pairs in the metadata
-                logger.debug('🔄 Storing unknown key-value pair', { key, value });
-                (metadata as any)[key] = value;
-                break;
+                    break;
+                case 'sequence':
+                    // This might be useful for ordering
+                    break;
+                case 'parent_sequence':
+                case 'parentsequence':
+                    // This might indicate a reply
+                    break;
+                case 'content_type':
+                case 'content_type':
+                    metadata.content_type = value;
+                    if (value === 'vote') {
+                        metadata.is_vote = true;
+                    }
+                    break;
+                default:
+                    // Store any other key-value pairs in the metadata
+                    logger.debug('🔄 Storing unknown key-value pair', { key, value });
+                    (metadata as any)[key] = value;
+                    break;
+            }
+        } catch (error) {
+            logger.error('Failed to process key-value pair', { 
+                error: error instanceof Error ? error.message : 'Unknown error',
+                key,
+                value
+            });
         }
     }
 

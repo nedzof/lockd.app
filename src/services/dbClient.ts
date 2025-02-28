@@ -1077,28 +1077,23 @@ export class DbClient {
             });
 
             try {
-                // Ensure imageData is a Buffer
+                // Convert image data to buffer based on format
                 let imageBuffer: Buffer;
                 if (typeof params.imageData === 'string') {
-                    // Try to convert string to Buffer
-                    try {
-                        // Check if it's a base64 string
-                        if (params.imageData.match(/^[A-Za-z0-9+/=]+$/)) {
-                            imageBuffer = Buffer.from(params.imageData, 'base64');
-                        } else {
-                            // Just convert the string to a buffer
-                            imageBuffer = Buffer.from(params.imageData);
-                        }
-                    } catch (e) {
-                        logger.error('Failed to convert string to Buffer', {
-                            error: e instanceof Error ? e.message : 'Unknown error',
-                            tx_id: params.tx_id
-                        });
-                        // Use a minimal buffer if conversion fails
-                        imageBuffer = Buffer.from('placeholder');
+                    if (params.imageData.startsWith('data:')) {
+                        // Handle data URI
+                        const base64Data = params.imageData.split(',')[1];
+                        imageBuffer = Buffer.from(base64Data, 'base64');
+                    } else {
+                        // Assume base64 string
+                        imageBuffer = Buffer.from(params.imageData, 'base64');
                     }
-                } else {
+                } else if (Buffer.isBuffer(params.imageData)) {
+                    // Already a buffer
                     imageBuffer = params.imageData;
+                } else {
+                    // Fallback
+                    imageBuffer = Buffer.from(params.imageData);
                 }
 
                 // Use upsert instead of update to handle cases where the post doesn't exist yet
