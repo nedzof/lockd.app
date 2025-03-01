@@ -369,14 +369,14 @@ export class DbClient {
             await this.withFreshClient(async (client) => {
                 // Check if transaction already exists
                 try {
-                    const existingTx = await client.processedTransaction.findUnique({
+                    const existingTx = await client.processed_transaction.findUnique({
                         where: { tx_id: tx.tx_id }
                     });
 
                     if (!existingTx) {
                         try {
                             // Create new processed transaction record with only essential fields
-                            await client.processedTransaction.create({
+                            await client.processed_transaction.create({
                                 data: {
                                     tx_id: tx.tx_id,
                                     type: tx.type,
@@ -522,7 +522,7 @@ export class DbClient {
             });
             
             // Execute the query
-            const queryPromise = prisma.processedTransaction.upsert({
+            const queryPromise = prisma.processed_transaction.upsert({
                 where: {
                     tx_id: tx.tx_id
                 },
@@ -582,7 +582,7 @@ export class DbClient {
             });
             
             // Execute the query
-            const queryPromise = prisma.processedTransaction.findUnique({
+            const queryPromise = prisma.processed_transaction.findUnique({
                 where: {
                     tx_id: tx_id
                 }
@@ -766,7 +766,7 @@ export class DbClient {
             where: { id: post_id },
             include: {
                 vote_options: true,
-                lockLikes: true
+                lock_likes: true
             }
         });
 
@@ -788,7 +788,7 @@ export class DbClient {
             block_height: post.block_height,
             tx_id: post.tx_id,
             image: post.raw_image_data,
-            lock_likes: post.lockLikes.map(like => ({
+            lock_likes: post.lock_likes.map(like => ({
                 id: like.id,
                 tx_id: like.tx_id,
                 lock_amount: like.amount,
@@ -814,11 +814,11 @@ export class DbClient {
         if (process.env.NODE_ENV !== 'test') {
             throw new Error('Cleanup can only be run in test environment');
         }
-        await this.withFreshClient(async () => {
-            await prisma.vote_option.deleteMany();
-            await prisma.lockLike.deleteMany();
-            await prisma.post.deleteMany();
-            await prisma.processedTransaction.deleteMany();
+        await this.withFreshClient(async (tx) => {
+            await tx.vote_option.deleteMany();
+            await tx.lock_like.deleteMany();
+            await tx.post.deleteMany();
+            await tx.processed_transaction.deleteMany();
             logger.info('Test data cleaned up');
         });
     }
@@ -917,7 +917,7 @@ export class DbClient {
             logger.debug('Getting current block height');
             
             // Try to get the latest block height from processed transactions
-            const latestTx = await prisma.processedTransaction.findFirst({
+            const latestTx = await prisma.processed_transaction.findFirst({
                 orderBy: {
                     block_height: 'desc'
                 },

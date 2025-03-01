@@ -28,9 +28,8 @@ const prisma = global.prisma || new PrismaClient({
   datasourceUrl: useDirectUrl ? process.env.DIRECT_URL : process.env.DATABASE_URL,
   // Add connection timeout settings
   errorFormat: 'pretty',
-  // Add connection pool settings
-  connectionLimit: 5, // Limit concurrent connections
-  poolTimeout: 20, // 20 seconds timeout
+  // Connection pool settings are managed through the DATABASE_URL connection string
+  // or through environment variables
 });
 
 // Process-level event handler for graceful shutdown
