@@ -47,7 +47,22 @@ export class Scanner {
 
         // Process all transactions
         try {
-            await this.parser.parseTransaction(tx_id);
+            // Set a timeout to prevent hanging on a single transaction
+            const timeoutPromise = new Promise<void>((resolve) => {
+                setTimeout(() => {
+                    logger.warn('⏱️ TRANSACTION PROCESSING TIMEOUT', {
+                        tx_id,
+                        block
+                    });
+                    resolve();
+                }, 15000); // 15 second timeout
+            });
+
+            // Process the transaction
+            const processingPromise = this.parser.parseTransaction(tx_id);
+            
+            // Race the processing against the timeout
+            await Promise.race([processingPromise, timeoutPromise]);
         } catch (error) {
             // Check if this is a prepared statement error
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';

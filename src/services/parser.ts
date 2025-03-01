@@ -572,12 +572,20 @@ export class TransactionParser {
             return;
         }
         
-        // Check database
-        const existingTx = await this.dbClient.getTransaction(tx_id);
-        if (existingTx) {
-            this.transactionCache.set(tx_id, true);
-            this.pruneCache(); // Prune cache if needed
-            return;
+        // Check database with timeout
+        try {
+            const existingTx = await this.dbClient.getTransaction(tx_id);
+            if (existingTx) {
+                this.transactionCache.set(tx_id, true);
+                this.pruneCache(); // Prune cache if needed
+                return;
+            }
+        } catch (error) {
+            logger.warn('Error checking if transaction exists, continuing with processing', {
+                tx_id,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            // Continue processing even if database check fails
         }
 
         try {
@@ -588,7 +596,26 @@ export class TransactionParser {
 
             logger.info('Parsing transaction', { tx_id });
 
-            const tx: any = await this.jungleBus.GetTransaction(tx_id);
+            // Set timeout for JungleBus transaction fetch
+            const timeoutPromise = new Promise<null>((resolve) => {
+                setTimeout(() => {
+                    logger.warn('Transaction fetch from JungleBus timed out', { tx_id });
+                    resolve(null);
+                }, 10000); // 10 second timeout
+            });
+
+            // Fetch transaction from JungleBus
+            const txPromise = this.jungleBus.GetTransaction(tx_id).catch(error => {
+                logger.error('Error fetching transaction from JungleBus', {
+                    tx_id,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+                return null;
+            });
+
+            // Race the fetch against the timeout
+            const tx: any = await Promise.race([txPromise, timeoutPromise]);
+            
             if (!tx || !tx.transaction) {
                 logger.warn('Transaction not found or invalid', { tx_id });
                 return;
@@ -600,11 +627,10 @@ export class TransactionParser {
             try {
                 // Parse the raw transaction using BSV
                 const rawTx = Buffer.from(tx.transaction, 'base64');
-                const bsvTx = bsv.Transaction.fromBuffer(rawTx);
                 
                 // Process each output
-                for (let i = 0; i < bsvTx.outputs.length; i++) {
-                    const output = bsvTx.outputs[i];
+                for (let i = 0; i < tx.outputs.length; i++) {
+                    const output = tx.outputs[i];
                     
                     // Check if this is an OP_RETURN output
                     if (output.script && output.script.isDataOut()) {

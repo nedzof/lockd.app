@@ -518,8 +518,24 @@ export class DbClient {
             // Normalize metadata to handle both snake_case and camelCase
             tx.metadata = this.normalizeMetadata(tx.metadata);
 
+            // Use a timeout to prevent hanging queries
+            const timeoutPromise = new Promise<{transaction: any}>((resolve) => {
+                setTimeout(() => {
+                    logger.warn(' DB: TRANSACTION SAVE TIMEOUT', { tx_id: tx.tx_id });
+                    resolve({
+                        transaction: {
+                            id: '',
+                            tx_id: tx.tx_id,
+                            type: tx.type || 'unknown',
+                            protocol: tx.protocol || 'unknown',
+                            metadata: tx.metadata || {}
+                        }
+                    });
+                }, 10000); // 10 second timeout
+            });
+
             // Save to ProcessedTransaction table
-            const savedTx = await this.withFreshClient(async (client) => {
+            const dbPromise = this.withFreshClient(async (client) => {
                 try {
                     // Check if transaction already exists
                     const existingTx = await client.processedTransaction.findUnique({
@@ -533,22 +549,23 @@ export class DbClient {
                     if (existingTx) {
                         // Update existing transaction with only the fields we know exist
                         try {
-                            return await client.processedTransaction.update({
-                                where: { tx_id: tx.tx_id },
-                                data: {
-                                    type: tx.type,
-                                    protocol: tx.protocol,
-                                    metadata: tx.metadata || {}
-                                    // Deliberately omit block_height and block_time
-                                },
-                                select: {
-                                    id: true,
-                                    tx_id: true,
-                                    type: true,
-                                    protocol: true,
-                                    metadata: true
-                                }
-                            });
+                            return {
+                                transaction: await client.processedTransaction.update({
+                                    where: { tx_id: tx.tx_id },
+                                    data: {
+                                        type: tx.type,
+                                        protocol: tx.protocol,
+                                        metadata: tx.metadata || {}
+                                    },
+                                    select: {
+                                        id: true,
+                                        tx_id: true,
+                                        type: true,
+                                        protocol: true,
+                                        metadata: true
+                                    }
+                                })
+                            };
                         } catch (updateError) {
                             logger.warn('Update failed, returning minimal transaction object', {
                                 error: updateError instanceof Error ? updateError.message : 'Unknown error',
@@ -558,32 +575,35 @@ export class DbClient {
                             
                             // Return a minimal transaction object
                             return {
-                                id: existingTx.id,
-                                tx_id: tx.tx_id,
-                                type: tx.type || 'unknown',
-                                protocol: tx.protocol || 'unknown',
-                                metadata: tx.metadata || {}
+                                transaction: {
+                                    id: existingTx.id,
+                                    tx_id: tx.tx_id,
+                                    type: tx.type || 'unknown',
+                                    protocol: tx.protocol || 'unknown',
+                                    metadata: tx.metadata || {}
+                                }
                             };
                         }
                     } else {
                         // Create new transaction with only the fields we know exist
                         try {
-                            return await client.processedTransaction.create({
-                                data: {
-                                    tx_id: tx.tx_id,
-                                    type: tx.type,
-                                    protocol: tx.protocol,
-                                    metadata: tx.metadata || {}
-                                    // Deliberately omit block_height and block_time
-                                },
-                                select: {
-                                    id: true,
-                                    tx_id: true,
-                                    type: true,
-                                    protocol: true,
-                                    metadata: true
-                                }
-                            });
+                            return {
+                                transaction: await client.processedTransaction.create({
+                                    data: {
+                                        tx_id: tx.tx_id,
+                                        type: tx.type,
+                                        protocol: tx.protocol,
+                                        metadata: tx.metadata || {}
+                                    },
+                                    select: {
+                                        id: true,
+                                        tx_id: true,
+                                        type: true,
+                                        protocol: true,
+                                        metadata: true
+                                    }
+                                })
+                            };
                         } catch (createError) {
                             logger.warn('Create failed, returning minimal transaction object', {
                                 error: createError instanceof Error ? createError.message : 'Unknown error',
@@ -593,11 +613,13 @@ export class DbClient {
                             
                             // Return a minimal transaction object
                             return {
-                                id: '',
-                                tx_id: tx.tx_id,
-                                type: tx.type || 'unknown',
-                                protocol: tx.protocol || 'unknown',
-                                metadata: tx.metadata || {}
+                                transaction: {
+                                    id: '',
+                                    tx_id: tx.tx_id,
+                                    type: tx.type || 'unknown',
+                                    protocol: tx.protocol || 'unknown',
+                                    metadata: tx.metadata || {}
+                                }
                             };
                         }
                     }
@@ -610,42 +632,35 @@ export class DbClient {
                     
                     // Return a minimal transaction object
                     return {
-                        id: '',
-                        tx_id: tx.tx_id,
-                        type: tx.type || 'unknown',
-                        protocol: tx.protocol || 'unknown',
-                        metadata: tx.metadata || {}
+                        transaction: {
+                            id: '',
+                            tx_id: tx.tx_id,
+                            type: tx.type || 'unknown',
+                            protocol: tx.protocol || 'unknown',
+                            metadata: tx.metadata || {}
+                        }
                     };
                 }
             });
-
-            // Process the transaction to create/update post if needed
-            let post: Post | undefined;
-            try {
-                post = await this.processTransaction(tx);
-            } catch (error) {
-                logger.error('Failed to process post for transaction', {
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    tx_id: tx.tx_id
-                });
-                // Continue even if post processing fails
-            }
-
-            logger.info('Transaction saved successfully', { 
-                tx_id: tx.tx_id,
-                hasPost: !!post
-            });
-
-            return {
-                transaction: savedTx,
-                post
-            };
+            
+            // Race the database query against the timeout
+            return Promise.race([dbPromise, timeoutPromise]);
         } catch (error) {
-            logger.error('Failed to save transaction', {
-                error: error instanceof Error ? error.message : 'Unknown error',
-                tx_id: tx.tx_id
+            logger.error('DB: FAILED TO SAVE TRANSACTION', {
+                tx_id: tx.tx_id,
+                error: error instanceof Error ? error.message : 'Unknown error'
             });
-            throw error;
+            
+            // Return a minimal transaction object
+            return {
+                transaction: {
+                    id: '',
+                    tx_id: tx.tx_id,
+                    type: tx.type || 'unknown',
+                    protocol: tx.protocol || 'unknown',
+                    metadata: tx.metadata || {}
+                }
+            };
         }
     }
 
@@ -653,11 +668,17 @@ export class DbClient {
         try {
             logger.info(' DB: FETCHING TRANSACTION', { tx_id });
             
-            return this.withFreshClient(async (client) => {
+            // Use a timeout to prevent hanging queries
+            const timeoutPromise = new Promise<null>((resolve) => {
+                setTimeout(() => {
+                    logger.warn(' DB: TRANSACTION FETCH TIMEOUT', { tx_id });
+                    resolve(null);
+                }, 5000); // 5 second timeout
+            });
+            
+            // Database query with fresh client
+            const dbPromise = this.withFreshClient(async (client) => {
                 try {
-                    // Try to get the transaction using Prisma's findUnique
-                    // Only query by tx_id, which we know exists in the database
-                    // Explicitly select only columns we know exist
                     const tx = await client.processedTransaction.findUnique({
                         where: { tx_id },
                         select: {
@@ -665,53 +686,32 @@ export class DbClient {
                             tx_id: true,
                             type: true,
                             protocol: true,
-                            metadata: true
-                            // Deliberately omit block_height, block_time, etc.
+                            metadata: true,
+                            block_height: true,
+                            block_time: true
                         }
                     });
                     
                     if (tx) {
-                        // Map database column names to interface property names
-                        // Use optional chaining to handle potentially missing fields
-                        return {
-                            id: tx.id,
-                            tx_id: tx.tx_id,
-                            type: tx.type ?? 'unknown',
-                            protocol: tx.protocol ?? 'unknown',
-                            metadata: tx.metadata ?? {},
-                            // Provide default values for missing fields
-                            block_height: 0,
-                            block_time: 0,
-                            created_at: new Date(),
-                            updated_at: new Date()
-                        };
+                        logger.debug(' DB: TRANSACTION FOUND', { tx_id });
+                    } else {
+                        logger.debug(' DB: TRANSACTION NOT FOUND', { tx_id });
                     }
                     
-                    return null;
+                    return tx;
                 } catch (error) {
-                    // If there's an error with column names, log it and return a minimal object
-                    logger.warn(' DB: ERROR WITH PRISMA QUERY, RETURNING MINIMAL OBJECT', {
-                        error: error instanceof Error ? error.message : 'Unknown error',
-                        timestamp: new Date().toISOString()
+                    logger.error(' DB: ERROR FETCHING TRANSACTION', {
+                        tx_id,
+                        error: error instanceof Error ? error.message : 'Unknown error'
                     });
-                    
-                    // Instead of trying another query that might fail, return a minimal object
-                    // with just the tx_id and default values for other fields
-                    return {
-                        id: '', // We don't know the ID
-                        tx_id: tx_id,
-                        block_height: 0,
-                        block_time: 0,
-                        type: 'unknown',
-                        protocol: 'unknown',
-                        metadata: {},
-                        created_at: new Date(),
-                        updated_at: new Date()
-                    };
+                    return null;
                 }
             });
+            
+            // Race the database query against the timeout
+            return Promise.race([dbPromise, timeoutPromise]);
         } catch (error) {
-            logger.error(' DB: FAILED TO FETCH TRANSACTION', {
+            logger.error(' DB: UNEXPECTED ERROR FETCHING TRANSACTION', {
                 tx_id,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
