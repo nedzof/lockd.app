@@ -137,12 +137,23 @@ export class Scanner {
      */
     public async getCurrentBlockHeight(): Promise<number | null> {
         try {
-            return await this.dbClient.getCurrentBlockHeight();
+            // Try to get the block height from the database
+            const dbHeight = await this.dbClient.get_current_block_height();
+            if (dbHeight) {
+                return dbHeight;
+            }
+            
+            // If database call fails, use the default start block from config
+            logger.info(`Using default start block from config: ${CONFIG.DEFAULT_START_BLOCK}`);
+            return CONFIG.DEFAULT_START_BLOCK;
         } catch (error) {
             logger.error('Error getting current block height', {
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
-            return null;
+            
+            // Return the default start block as a fallback
+            logger.info(`Using default start block as fallback: ${CONFIG.DEFAULT_START_BLOCK}`);
+            return CONFIG.DEFAULT_START_BLOCK;
         }
     }
 
