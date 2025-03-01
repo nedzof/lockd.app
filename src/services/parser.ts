@@ -2,7 +2,7 @@ import { logger } from '../utils/logger.js';
 import { DbClient } from './dbClient.js';
 import { JungleBusClient } from '@gorillapool/js-junglebus';
 import { LockProtocolData, ParsedTransaction } from '../shared/types.js';
-import bsv from 'bsv';
+import * as bsv from 'bsv';
 
 // Helper function to extract tags from transaction data
 export function extractTags(data: string[]): string[] {
@@ -43,7 +43,8 @@ export function extractVoteData(data: string[]): {
         const plainText = item.includes('is_vote=true') || 
                          item.includes('isVote=true') ||
                          item.includes('content_type=vote') ||
-                         item.includes('type=vote_question');
+                         item.includes('type=vote_question') ||
+                         item === 'VOTE';
                          
         if (plainText) return true;
         
@@ -53,7 +54,8 @@ export function extractVoteData(data: string[]): {
             return decoded.includes('is_vote=true') || 
                    decoded.includes('isVote=true') ||
                    decoded.includes('content_type=vote') ||
-                   decoded.includes('type=vote_question');
+                   decoded.includes('type=vote_question') ||
+                   decoded === 'VOTE';
         }
         
         return false;
@@ -61,61 +63,125 @@ export function extractVoteData(data: string[]): {
     
     if (!result.isVote) return result;
     
-    // Process each data item for vote information
-    for (const item of data) {
+    // Look for a question and options
+    let foundQuestion = false;
+    let optionsStartIndex = -1;
+    
+    // First pass: find the question and where options start
+    for (let i = 0; i < data.length; i++) {
+        const item = data[i];
         if (typeof item !== 'string') continue;
         
-        let decoded = item;
-        // If it looks like hex, decode it
-        if (item.match(/^[0-9a-fA-F]+$/)) {
-            decoded = decodeHexString(item);
+        // Skip empty items
+        if (!item.trim()) continue;
+        
+        // Skip protocol indicators
+        if (item === 'LOCK' || item === 'VOTE' || 
+            item.includes('app=lockd.app') || 
+            item.includes('is_vote=true')) {
+            continue;
         }
         
-        // Extract question
-        if (decoded.includes('vote_question=') || decoded.includes('voteQuestion=')) {
-            const questionMatch = decoded.match(/(?:vote_question|voteQuestion)=([^&\s]+)/);
-            if (questionMatch && questionMatch[1]) {
-                result.question = questionMatch[1];
+        // If we haven't found a question yet, this might be it
+        if (!foundQuestion) {
+            result.question = item;
+            foundQuestion = true;
+            optionsStartIndex = i + 1;
+            continue;
+        }
+    }
+    
+    // Second pass: collect options if we found a question
+    if (foundQuestion && optionsStartIndex >= 0) {
+        result.options = [];
+        
+        for (let i = optionsStartIndex; i < data.length; i++) {
+            const item = data[i];
+            if (typeof item !== 'string' || !item.trim()) continue;
+            
+            // Skip protocol indicators
+            if (item === 'LOCK' || item === 'VOTE' || 
+                item.includes('app=lockd.app') || 
+                item.includes('is_vote=true')) {
+                continue;
             }
+            
+            // Add as an option
+            result.options.push(item);
         }
         
-        // Extract options
-        if (decoded.includes('vote_options=') || decoded.includes('voteOptions=')) {
-            const optionsMatch = decoded.match(/(?:vote_options|voteOptions)=([^&\s]+)/);
-            if (optionsMatch && optionsMatch[1]) {
-                try {
-                    // Try to parse as JSON
-                    if (optionsMatch[1].startsWith('[') && optionsMatch[1].endsWith(']')) {
-                        result.options = JSON.parse(optionsMatch[1]);
-                    } else {
-                        // Otherwise split by comma
-                        result.options = optionsMatch[1].split(',').map(opt => opt.trim());
+        // Set total options
+        if (result.options.length > 0) {
+            result.total_options = result.options.length;
+        }
+    }
+    
+    // Fallback to the old method if we didn't find options
+    if (!result.options) {
+        // Process each data item for vote information
+        for (const item of data) {
+            if (typeof item !== 'string') continue;
+            
+            let decoded = item;
+            // If it looks like hex, decode it
+            if (item.match(/^[0-9a-fA-F]+$/)) {
+                decoded = decodeHexString(item);
+            }
+            
+            // Extract question
+            if (decoded.includes('vote_question=') || decoded.includes('voteQuestion=')) {
+                const questionMatch = decoded.match(/(?:vote_question|voteQuestion)=([^&\s]+)/);
+                if (questionMatch && questionMatch[1]) {
+                    result.question = questionMatch[1];
+                }
+            }
+            
+            // Extract options
+            if (decoded.includes('vote_options=') || decoded.includes('voteOptions=')) {
+                const optionsMatch = decoded.match(/(?:vote_options|voteOptions)=([^&\s]+)/);
+                if (optionsMatch && optionsMatch[1]) {
+                    try {
+                        // Try to parse as JSON
+                        if (optionsMatch[1].startsWith('[') && optionsMatch[1].endsWith(']')) {
+                            result.options = JSON.parse(optionsMatch[1]);
+                        } else {
+                            // Otherwise split by comma
+                            result.options = optionsMatch[1].split(',').map(opt => opt.trim());
+                        }
+                        result.total_options = result.options.length;
+                    } catch {
+                        // If parsing fails, just use the raw value
+                        result.options = [optionsMatch[1]];
+                        result.total_options = 1;
                     }
-                    result.total_options = result.options.length;
-                } catch {
-                    // If parsing fails, just use the raw value
-                    result.options = [optionsMatch[1]];
-                    result.total_options = 1;
+                }
+            }
+            
+            // Extract options hash
+            if (decoded.includes('options_hash=') || decoded.includes('optionsHash=')) {
+                const hashMatch = decoded.match(/(?:options_hash|optionsHash)=([^&\s]+)/);
+                if (hashMatch && hashMatch[1]) {
+                    result.options_hash = hashMatch[1];
+                }
+            }
+            
+            // Extract total options
+            if (decoded.includes('total_options=') || decoded.includes('totalOptions=')) {
+                const totalMatch = decoded.match(/(?:total_options|totalOptions)=(\d+)/);
+                if (totalMatch && totalMatch[1]) {
+                    result.total_options = parseInt(totalMatch[1], 10);
                 }
             }
         }
-        
-        // Extract options hash
-        if (decoded.includes('options_hash=') || decoded.includes('options_hash=')) {
-            const hashMatch = decoded.match(/(?:options_hash|options_hash)=([^&\s]+)/);
-            if (hashMatch && hashMatch[1]) {
-                result.options_hash = hashMatch[1];
-            }
-        }
-        
-        // Extract total options
-        if (decoded.includes('total_options=') || decoded.includes('total_options=')) {
-            const totalMatch = decoded.match(/(?:total_options|total_options)=(\d+)/);
-            if (totalMatch && totalMatch[1]) {
-                result.total_options = parseInt(totalMatch[1], 10);
-            }
-        }
     }
+    
+    // Debug log the extracted vote data
+    logger.debug('Extracted vote data', {
+        isVote: result.isVote,
+        question: result.question,
+        options: result.options,
+        total_options: result.total_options
+    });
     
     return result;
 }
@@ -212,7 +278,7 @@ export class TransactionParser {
             });
 
             // Save image data using DbClient
-            await this.dbClient.saveImage({
+            await this.dbClient.save_image({
                 tx_id,
                 imageData,
                 content_type: metadata.content_type,
@@ -399,6 +465,24 @@ export class TransactionParser {
                 }
             }
             
+            // Extract vote data
+            const voteData = extractVoteData(data);
+            if (voteData.isVote) {
+                metadata.is_vote = voteData.isVote;
+                metadata.vote_question = voteData.question;
+                metadata.vote_options = voteData.options;
+                metadata.total_options = voteData.total_options;
+                metadata.options_hash = voteData.options_hash;
+                
+                // Log the extracted vote data
+                logger.info('Extracted vote data from transaction', {
+                    tx_id: tx?.id || 'unknown',
+                    question: voteData.question,
+                    options: voteData.options,
+                    total_options: voteData.total_options
+                });
+            }
+            
             return metadata;
         } catch (error) {
             logger.error('Failed to extract Lock protocol data', { 
@@ -554,7 +638,7 @@ export class TransactionParser {
         
         // Check database with timeout
         try {
-            const existingTx = await this.dbClient.getTransaction(tx_id);
+            const existingTx = await this.dbClient.get_transaction(tx_id);
             if (existingTx) {
                 this.transactionCache.set(tx_id, true);
                 this.pruneCache(); // Prune cache if needed
@@ -608,7 +692,7 @@ export class TransactionParser {
                 // Parse the raw transaction using BSV
                 try {
                     const rawTx = Buffer.from(tx.transaction, 'base64');
-                    const bsvTx = bsv.Transaction.fromBuffer(rawTx);
+                    const bsvTx = new bsv.Transaction(rawTx);
                     
                     // Process each output
                     for (let i = 0; i < bsvTx.outputs.length; i++) {
@@ -726,24 +810,23 @@ export class TransactionParser {
                 lockData.tags = [...(lockData.tags || []), ...tags];
             }
 
-            // Extract vote data
-            const voteData = extractVoteData(data);
-            if (voteData.isVote) {
-                lockData.is_vote = voteData.isVote;
-                lockData.vote_question = voteData.question;
-                lockData.vote_options = voteData.options;
-                lockData.total_options = voteData.total_options;
-                lockData.options_hash = voteData.options_hash;
-            }
-
             // Create transaction record
             const txRecord: ParsedTransaction = {
                 tx_id,
                 block_height: tx.block_height || 0,
-                block_time: tx.block_time ? BigInt(tx.block_time) : BigInt(Math.floor(Date.now() / 1000)),
+                block_time: tx.block_time 
+                    ? String(tx.block_time) // Keep as string, dbClient will convert to BigInt
+                    : String(Math.floor(Date.now() / 1000)),
                 author_address: tx.inputs && tx.inputs[0] ? tx.inputs[0].address : '',
                 metadata: lockData
             };
+
+            // Debug log the transaction record
+            logger.debug('Saving transaction', {
+                tx_id,
+                block_time_type: typeof txRecord.block_time,
+                block_time: txRecord.block_time
+            });
 
             // Set a timeout for database operation
             const dbTimeoutPromise = new Promise<void>((resolve) => {
@@ -755,7 +838,7 @@ export class TransactionParser {
 
             // Save to database with timeout
             try {
-                const savePromise = this.dbClient.saveTransaction(txRecord);
+                const savePromise = this.dbClient.save_transaction(txRecord);
                 await Promise.race([savePromise, dbTimeoutPromise]);
                 logger.info('Transaction saved successfully', { tx_id });
             } catch (dbError) {

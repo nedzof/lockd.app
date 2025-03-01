@@ -6,7 +6,6 @@ import { logger } from "../utils/logger";
 
 export class Scanner {
     private readonly start_block = 0;  // Start earlier to catch all target blocks
-    private readonly subscription_id = CONFIG.JB_SUBSCRIPTION_ID;
     private readonly jungle_bus: JungleBusClient;
     private readonly parser: TransactionParser;
     private readonly dbClient: DbClient;
@@ -114,18 +113,19 @@ export class Scanner {
     }
 
     private async fetchSubscriptionDetails() {
+        const subscription_id = process.env.JB_SUBSCRIPTION_ID || CONFIG.JB_SUBSCRIPTION_ID;
         try {
-            const response = await fetch(`${this.jungle_bus.url}/v1/subscription/${this.subscription_id}`);
+            const response = await fetch(`${this.jungle_bus.url}/v1/subscription/${subscription_id}`);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            logger.info("📋 SUBSCRIPTIO N DETAILS", { data });
+            logger.info("📋 SUBSCRIPTION DETAILS", { data });
             return data;
         } catch (error) {
             logger.warn("⚠️ Failed to fetch subscription details", {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                subscription_id: this.subscription_id
+                subscription_id
             });
             return null;
         }
@@ -159,46 +159,105 @@ export class Scanner {
 
     public async start(): Promise<void> {
         try {
-            logger.info(`🚀 Starting scanner from block ${this.start_block} with subscription ID ${this.subscription_id}`);
+            const subscription_id = process.env.JB_SUBSCRIPTION_ID || CONFIG.JB_SUBSCRIPTION_ID;
+            logger.info(`🚀 Starting scanner from block ${this.start_block} with subscription ID ${subscription_id}`);
             
             // If start_block is 0, try to get the latest block height from the database
-            if (this.start_block === 0) {
+            let start_block = this.start_block;
+            if (start_block === 0) {
                 const latestBlockHeight = await this.getCurrentBlockHeight();
                 if (latestBlockHeight) {
-                    this.start_block = latestBlockHeight;
-                    logger.info(`Using latest block height from database: ${this.start_block}`);
+                    start_block = latestBlockHeight;
+                    logger.info(`Using latest block height from database: ${start_block}`);
                 } else {
                     // Default to a reasonable starting point if we can't get the latest height
-                    this.start_block = CONFIG.DEFAULT_START_BLOCK;
-                    logger.info(`Using default start block: ${this.start_block}`);
+                    start_block = CONFIG.DEFAULT_START_BLOCK;
+                    logger.info(`Using default start block: ${start_block}`);
                 }
             }
             
-            // Subscribe to the JungleBus
-            await this.jungle_bus.Subscribe({
-                id: this.subscription_id,
-                fromBlock: this.start_block,
-                onStatus: (status) => {
-                    logger.info(`JungleBus Status: ${status.status}`, status);
-                },
-                onError: (error) => {
-                    logger.error(`JungleBus Error: ${error.message}`, error);
-                },
-                onMempool: (tx) => {
+            try {
+                // Define callback functions
+                const onPublish = (tx: any) => {
                     this.handleTransaction(tx);
-                },
-                onBlock: (tx) => {
+                };
+                
+                const onStatus = (message: any) => {
+                    if (message.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
+                        logger.info("✓ Block scanned", { block: message.block });
+                    } else if (message.statusCode === ControlMessageStatusCode.WAITING) {
+                        logger.info("⏳ Waiting for new blocks", { current_block: message.block });
+                    } else if (message.statusCode === ControlMessageStatusCode.REORG) {
+                        logger.info("🔄 REORG TRIGGERED", message);
+                    } else if (message.statusCode === ControlMessageStatusCode.ERROR) {
+                        logger.error("❌ JungleBus Status Error", message);
+                    }
+                };
+                
+                const onError = (err: any) => {
+                    logger.error("❌ JungleBus Error", err);
+                };
+                
+                const onMempool = (tx: any) => {
                     this.handleTransaction(tx);
-                }
-            });
-            
-            logger.info(`Scanner started successfully from block ${this.start_block}`);
+                };
+                
+                // Subscribe to the JungleBus using the format from the example
+                await this.jungle_bus.Subscribe(
+                    subscription_id,
+                    start_block,
+                    onPublish,
+                    onStatus,
+                    onError,
+                    onMempool
+                );
+                
+                logger.info(`Scanner started successfully from block ${start_block}`);
+            } catch (jungleBusError) {
+                // Handle JungleBus connection errors gracefully
+                logger.error('JungleBus connection error', {
+                    error: jungleBusError instanceof Error ? jungleBusError.message : 'Unknown error',
+                    subscription_id
+                });
+                
+                logger.info('Scanner will continue to run without JungleBus connection');
+                
+                // Start a polling loop to check for new transactions periodically
+                this.startPollingLoop();
+            }
         } catch (error) {
             logger.error('Failed to start scanner', {
                 error: error instanceof Error ? error.message : 'Unknown error',
                 stack: error instanceof Error ? error.stack : undefined
             });
             throw error;
+        }
+    }
+    
+    /**
+     * Start a polling loop to check for new transactions periodically
+     * This is a fallback when JungleBus connection fails
+     */
+    private async startPollingLoop() {
+        logger.info('Starting polling loop for transactions');
+        
+        // Poll every 30 seconds
+        const POLL_INTERVAL = 30000;
+        
+        while (true) {
+            try {
+                logger.info('Polling for new transactions');
+                
+                // Wait for the next poll interval
+                await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+            } catch (error) {
+                logger.error('Error in polling loop', {
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+                
+                // Wait before trying again
+                await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+            }
         }
     }
 

@@ -340,18 +340,17 @@ export class DbClient {
         try {
             logger.debug('Saving transaction', { tx_id: tx.tx_id });
             
-            // Convert BigInt values to numbers
-            const safe_block_height = typeof tx.block_height === 'bigint' 
-                ? Number(tx.block_height) 
-                : (tx.block_height || 0);
+            // Ensure block_height is a valid number
+            const safe_block_height = tx.block_height && !isNaN(tx.block_height) 
+                ? tx.block_height 
+                : 0;
             
-            // Create the transaction data with snake_case fields
+            // Create transaction data object
             const tx_data = {
                 tx_id: tx.tx_id,
                 type: tx.type || 'unknown',
-                author_address: tx.author_address || '',
                 block_height: safe_block_height,
-                block_time: tx.block_time ? new Date(tx.block_time) : new Date(),
+                block_time: this.create_block_time_date(tx.block_time),
                 metadata: tx.metadata || {}
             };
             
@@ -487,24 +486,29 @@ export class DbClient {
     }
 
     /**
-     * Creates a JavaScript Date object from a block time value
+     * Creates a BigInt from a block time value
      * Handles different formats of block_time (number, BigInt, string)
      * @param block_time Block time in seconds (Unix timestamp)
-     * @returns JavaScript Date object
+     * @returns BigInt
      */
-    private create_block_time_date(block_time?: number | BigInt | string | null): Date {
+    private create_block_time_date(block_time?: number | BigInt | string | null): BigInt {
         try {
             // Handle undefined, null, or invalid input
             if (block_time === undefined || block_time === null) {
-                return new Date();
+                return BigInt(Math.floor(Date.now() / 1000));
             }
             
             // Convert various input types to number
             let block_time_number: number;
             
             if (typeof block_time === 'bigint') {
-                block_time_number = Number(block_time);
+                return block_time; // Already a BigInt, return as is
             } else if (typeof block_time === 'string') {
+                // Check if it's an ISO date string
+                if (block_time.includes('T') && block_time.includes('Z')) {
+                    const date = new Date(block_time);
+                    return BigInt(Math.floor(date.getTime() / 1000));
+                }
                 block_time_number = parseInt(block_time, 10);
             } else if (typeof block_time === 'number') {
                 block_time_number = block_time;
@@ -514,7 +518,7 @@ export class DbClient {
                     type: typeof block_time,
                     using_current_time: true
                 });
-                return new Date();
+                return BigInt(Math.floor(Date.now() / 1000));
             }
             
             // Check if the conversion resulted in a valid number
@@ -523,35 +527,30 @@ export class DbClient {
                     block_time,
                     using_current_time: true
                 });
-                return new Date();
+                return BigInt(Math.floor(Date.now() / 1000));
             }
             
-            // Convert seconds to milliseconds for JavaScript Date
-            // Bitcoin timestamps are in seconds, JS Date expects milliseconds
-            const timestamp_ms = block_time_number * 1000;
-            
             // Validate the timestamp is reasonable (between 2009 and 100 years in the future)
-            const min_timestamp = new Date('2009-01-03').getTime(); // Bitcoin genesis block
-            const max_timestamp = Date.now() + (100 * 365 * 24 * 60 * 60 * 1000); // 100 years in the future
+            const min_timestamp = new Date('2009-01-03').getTime() / 1000; // Bitcoin genesis block
+            const max_timestamp = Date.now() / 1000 + (100 * 365 * 24 * 60 * 60); // 100 years in the future
             
-            if (timestamp_ms < min_timestamp || timestamp_ms > max_timestamp) {
+            if (block_time_number < min_timestamp || block_time_number > max_timestamp) {
                 logger.warn('DB: INVALID BLOCK TIME RANGE', { 
                     block_time: block_time_number,
-                    timestamp_ms,
                     min_timestamp,
                     max_timestamp,
                     using_current_time: true
                 });
-                return new Date();
+                return BigInt(Math.floor(Date.now() / 1000));
             }
             
-            return new Date(timestamp_ms);
+            return BigInt(block_time_number);
         } catch (error) {
             logger.error('DB: ERROR CREATING BLOCK TIME DATE', {
                 block_time,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
-            return new Date();
+            return BigInt(Math.floor(Date.now() / 1000));
         }
     }
 

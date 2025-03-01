@@ -160,7 +160,7 @@ export interface ParsedTransaction {
     content?: any;
     metadata: LockProtocolData;
     block_height?: number;
-    block_time?: bigint;
+    block_time?: string;
     author_address?: string;
 }
 
