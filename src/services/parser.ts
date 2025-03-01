@@ -276,127 +276,107 @@ export class TransactionParser {
 
             logger.info('Found LOCK protocol transaction', { tx_id: tx?.id || 'unknown' });
 
-            // First, try to find a single data item that contains most of the metadata
-            // This handles the case where the data is in a single hex-encoded string
-            for (const item of data) {
-                if (typeof item !== 'string') continue;
+            // Initialize isLockProtocol flag
+            let isLockProtocol = false;
+
+            // Process lock protocol data
+            const lockData: Record<string, any> = {
+                post_id: '',
+                created_at: new Date().toISOString(),
+                content: '',
+                tags: [],
+                is_vote: false,
+                is_locked: false
+            };
+
+            // Parse the data array for lock protocol data
+            for (let i = 0; i < data.length; i++) {
+                const item = data[i];
                 
-                try {
-                    // Try to decode the hex string
-                    const decoded = decodeHexString(item);
-                    
-                    // Check if this contains key metadata fields
-                    if (decoded.includes('app\tlockd.app') || 
-                        decoded.includes('content') || 
-                        decoded.includes('is_vote') ||
-                        decoded.includes('is_locked')) {
-                        
-                        // Process tab-separated key-value pairs
-                        const tabPairs = decoded.split('\t');
-                        let foundTabSeparatedPairs = false;
-                        
-                        if (tabPairs.length > 1) {
-                            foundTabSeparatedPairs = true;
-                        }
-                        for (let i = 0; i < tabPairs.length; i++) {
-                            const pair = tabPairs[i];
-                            
-                            // Check if this pair contains embedded key-value pairs
-                            if (pair.includes('\u0007')) {
-                                const embeddedPairs = pair.split('\u0007');
-                                for (let j = 0; j < embeddedPairs.length; j++) {
-                                    const embeddedPair = embeddedPairs[j];
-                                    if (embeddedPair.includes('=')) {
-                                        const [key, value] = embeddedPair.split('=');
-                                        if (key && value) {
-                                            this.processKeyValuePair(key, value, metadata);
-                                        }
-                                    }
-                                }
-                            } else if (pair.includes('=')) {
-                                // Regular key-value pair
-                                const [key, value] = pair.split('=');
-                                if (key && value) {
-                                    this.processKeyValuePair(key, value, metadata);
-                                }
-                            }
-                        }
-                        
-                        if (foundTabSeparatedPairs) {
-                            // If we found tab-separated pairs, we can skip the rest of the processing
-                            break;
+                // Check for lock protocol
+                if (item === 'LOCK' || item.includes('LOCK')) {
+                    isLockProtocol = true;
+                    continue;
+                }
+                
+                // Skip non-lock protocol transactions
+                if (!isLockProtocol) {
+                    continue;
+                }
+                
+                // Check for content
+                if (item.length > 0 && !lockData.content && item !== 'LOCK') {
+                    lockData.content = item;
+                    continue;
+                }
+                
+                // Check for vote
+                if (item === 'VOTE' || item.includes('VOTE')) {
+                    lockData.is_vote = true;
+                    continue;
+                }
+                
+                // Check for vote options
+                if (lockData.is_vote && !lockData.vote_options) {
+                    // Initialize vote options array
+                    lockData.vote_options = [];
+                    lockData.vote_question = item;
+                    lockData.total_options = 0;
+                    continue;
+                }
+                
+                // Add vote options
+                if (lockData.is_vote && lockData.vote_options && item !== lockData.vote_question) {
+                    lockData.vote_options.push(item);
+                    lockData.total_options = lockData.vote_options.length;
+                    continue;
+                }
+                
+                // Check for lock amount
+                if (item.includes('LOCK_AMOUNT')) {
+                    const parts = item.split('=');
+                    if (parts.length === 2) {
+                        const amount = parseInt(parts[1].trim(), 10);
+                        if (!isNaN(amount)) {
+                            lockData.lock_amount = amount;
+                            lockData.is_locked = true;
                         }
                     }
-                } catch (error) {
-                    // Continue to next item if decoding fails
+                    continue;
+                }
+                
+                // Check for lock duration
+                if (item.includes('LOCK_DURATION')) {
+                    const parts = item.split('=');
+                    if (parts.length === 2) {
+                        const duration = parseInt(parts[1].trim(), 10);
+                        if (!isNaN(duration)) {
+                            lockData.lock_duration = duration;
+                        }
+                    }
+                    continue;
+                }
+                
+                // Check for tags
+                if (item.startsWith('#')) {
+                    lockData.tags.push(item.substring(1));
                     continue;
                 }
             }
-            
-            // Process any remaining key-value pairs in the data
-            for (const item of data) {
-                if (typeof item !== 'string') continue;
-                
-                try {
-                    // Check for key-value pairs in the format "key=value"
-                    if (item.includes('=')) {
-                        const parts = item.split('=');
-                        if (parts.length >= 2) {
-                            const key = parts[0];
-                            // Join the rest of the parts in case the value itself contains '='
-                            const value = parts.slice(1).join('=');
-                            this.processKeyValuePair(key, value, metadata);
-                        }
-                    } else {
-                        // Try to decode hex strings
-                        const decoded = decodeHexString(item);
-                        
-                        // Check for key-value pairs in the decoded string
-                        if (decoded.includes('=')) {
-                            const parts = decoded.split('=');
-                            if (parts.length >= 2) {
-                                const key = parts[0];
-                                // Join the rest of the parts in case the value itself contains '='
-                                const value = parts.slice(1).join('=');
-                                this.processKeyValuePair(key, value, metadata);
-                            }
-                        }
-                        
-                        // Check for app=lockd.app in a special format
-                        if (decoded.includes('app\tlockd.app')) {
-                            // This is a tab-separated format often used in B protocol
-                            const tabPairs = decoded.split('\t');
-                            for (let i = 0; i < tabPairs.length; i += 2) {
-                                if (i + 1 < tabPairs.length) {
-                                    const key = tabPairs[i];
-                                    const value = tabPairs[i + 1];
-                                    
-                                    // Special handling for app=lockd.app
-                                    if (key === 'app' && value === 'lockd.app') {
-                                        // Skip this pair, but process the rest of the pairs
-                                        continue;
-                                    }
-                                    
-                                    this.processKeyValuePair(key, value, metadata);
-                                }
-                            }
-                        }
-                    }
-                } catch (error) {
-                    // Continue to next item if processing fails
-                    continue;
-                }
-            }
-            
-            // Check if we found any content
-            if (!metadata.content) {
-                logger.debug('Missing required content', { 
-                    has_content: false,
-                    has_image: !!metadata.image,
-                    tx_id: tx?.id || 'unknown'
-                });
-            }
-            
+
+            // Map lockData to metadata
+            metadata.post_id = lockData.post_id;
+            metadata.created_at = lockData.created_at;
+            metadata.content = lockData.content;
+            metadata.tags = lockData.tags;
+            metadata.is_vote = lockData.is_vote;
+            metadata.is_locked = lockData.is_locked;
+            metadata.lock_amount = lockData.lock_amount;
+            metadata.lock_duration = lockData.lock_duration;
+            metadata.vote_options = lockData.vote_options;
+            metadata.vote_question = lockData.vote_question;
+            metadata.total_options = lockData.total_options;
+
             // Handle image data
             if (metadata.image_metadata.is_image && tx.transaction) {
                 try {

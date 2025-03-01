@@ -127,484 +127,310 @@ export class DbClient {
         throw lastError || new Error('Database operation failed after multiple retries');
     }
 
-    private async upsertPost(tx: ParsedTransaction, imageBuffer: Buffer | null = null): Promise<Post> {
-        // Log the transaction data before preparing post data
-        logger.debug(' DB: PREPARING POST DATA', {
-            tx_id: tx.tx_id,
-            metadataKeys: Object.keys(tx.metadata || {}),
-            has_image: !!imageBuffer,
-            imageSize: imageBuffer?.length || 0
-        });
-        
-        // Prepare the post data
-        const postData: Prisma.PostCreateInput = {
-            tx_id: tx.tx_id,
-            content: tx.metadata.content || '',
-            author_address: tx.metadata.sender_address || tx.metadata.author_address,
-            created_at: this.createblock_timeDate(tx.block_time),
-            tags: tx.metadata.tags || [],
-            isVote: tx.type === 'vote',
-            is_locked: !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0 || !!tx.metadata.lock_amount && tx.metadata.lock_amount > 0,
-            metadata: tx.metadata
-        };
-        
-        // Log the prepared post data
-        logger.debug(' DB: POST DATA PREPARED', {
-            tx_id: tx.tx_id,
-            postDataKeys: Object.keys(postData),
-            author_address: postData.author_address,
-            isVote: postData.isVote,
-            is_locked: postData.is_locked,
-            hasMetadata: !!postData.metadata
-        });
-
-        // Add image data if available
-        if (imageBuffer) {
-            postData.raw_image_data = imageBuffer;
-            postData.media_type = tx.metadata.media_type || tx.metadata.media_type || 'image/png';
-        }
-
-        // Check if this is a reply to another post
-        if (tx.metadata.reply_to || tx.metadata.replyTo) {
-            logger.info(' DB: PROCESSING REPLY POST', { 
-                tx_id: tx.tx_id, 
-                replyTo: tx.metadata.reply_to || tx.metadata.replyTo 
-            });
-            
-            // Find the parent post
-            const parentPost = await this.withFreshClient(async (client) => {
-                return client.post.findUnique({
-                    where: { tx_id: tx.metadata.reply_to || tx.metadata.replyTo }
-                });
-            });
-
-            if (parentPost) {
-                postData.parentId = parentPost.id;
-            } else {
-                logger.warn(' DB: PARENT POST NOT FOUND', { 
-                    tx_id: tx.tx_id, 
-                    replyTo: tx.metadata.reply_to || tx.metadata.replyTo 
-                });
-            }
-        }
-
-        return this.withFreshClient(async (client) => {
-            // Check if post already exists
-            const existingPost = await client.post.findUnique({
-                where: { tx_id: tx.tx_id }
-            });
-
-            if (existingPost) {
-                logger.info(' DB: UPDATING EXISTING POST', { 
-                    tx_id: tx.tx_id, 
-                    post_id: existingPost.id 
-                });
-                
-                // Update existing post
-                return client.post.update({
-                    where: { id: existingPost.id },
-                    data: {
-                        content: postData.content,
-                        tags: postData.tags,
-                        isVote: postData.isVote,
-                        is_locked: postData.is_locked,
-                        metadata: postData.metadata,
-                        ...(imageBuffer ? {
-                            raw_image_data: postData.raw_image_data,
-                            media_type: postData.media_type
-                        } : {})
-                    }
-                });
-            } else {
-                logger.info(' DB: CREATING NEW POST', { 
-                    tx_id: tx.tx_id,
-                    isReply: !!postData.parentId
-                });
-                
-                // Create new post
-                return client.post.create({ data: postData });
-            }
-        });
-    }
-
-    private async processvote_options(post_id: string, tx: ParsedTransaction): Promise<void> {
-        if (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options)) {
-            return;
-        }
-
-        logger.info(' DB: PROCESSING VOTE OPTIONS', { 
-            post_id, 
-            optionCount: tx.metadata.vote_options.length 
-        });
-
-        return this.withFreshClient(async (client) => {
-            // Process each vote option
-            for (let i = 0; i < tx.metadata.vote_options.length; i++) {
-                const optionContent = tx.metadata.vote_options[i];
-                
-                // Generate a unique tx_id for each option by appending the index to the original tx_id
-                const optiontx_id = `${tx.tx_id}-option-${i}`;
-                
-                // Check if this option already exists
-                const existingOption = await client.vote_option.findUnique({
-                    where: { tx_id: optiontx_id }
-                });
-                
-                if (!existingOption) {
-                    // Create new vote option
-                    await client.vote_option.create({
-                        data: {
-                            tx_id: optiontx_id,
-                            content: optionContent,
-                            author_address: tx.metadata.sender_address || tx.metadata.author_address,
-                            created_at: this.createblock_timeDate(tx.block_time),
-                            tags: tx.metadata.tags || [],
-                            post_id: post_id,
-                            optionIndex: i
-                        }
-                    });
-                }
-            }
-
-            logger.info(' DB: VOTE OPTIONS CREATED', {
-                post_id,
-                optionCount: tx.metadata.vote_options.length
-            });
-        });
-    }
-
-    /**
-     * Normalize metadata to ensure both snake_case and camelCase versions exist
-     * @param metadata The metadata to normalize
-     * @returns Normalized metadata
-     */
-    private normalizeMetadata(metadata: any): any {
-        if (!metadata) {
-            return {};
-        }
-        
-        // Create a copy to avoid modifying the original
-        const normalized = { ...metadata };
-        
-        // Define field mappings [snake_case, camelCase]
-        const fieldMappings = [
-            ['post_id', 'postId'],
-            ['lock_amount', 'lockAmount'],
-            ['lock_duration', 'lockDuration'],
-            ['sender_address', 'senderAddress'],
-            ['author_address', 'authorAddress'],
-            ['created_at', 'createdAt'],
-            ['updated_at', 'updatedAt'],
-            ['vote_options', 'voteOptions'],
-            ['vote_question', 'voteQuestion'],
-            ['content_type', 'contentType'],
-            ['media_type', 'mediaType'],
-            ['raw_image_data', 'rawImageData'],
-            ['image_metadata', 'imageMetadata'],
-            ['block_height', 'blockHeight'],
-            ['block_time', 'blockTime'],
-            ['is_vote', 'isVote'],
-            ['is_locked', 'isLocked'],
-            ['total_options', 'totalOptions'],
-            ['options_hash', 'optionsHash'],
-            ['option_index', 'optionIndex']
-        ];
-        
-        // Track which fields were normalized
-        const normalizedFields: Record<string, { snake_case: boolean, camel_case: boolean }> = {};
-        
-        // Ensure both snake_case and camelCase versions exist
-        for (const [snake_case, camel_case] of fieldMappings) {
-            // Initialize tracking
-            normalizedFields[snake_case] = { 
-                snake_case: normalized[snake_case] !== undefined,
-                camel_case: normalized[camel_case] !== undefined
-            };
-            
-            // If snake_case exists but camelCase doesn't, add camelCase
-            if (normalized[snake_case] !== undefined && normalized[camel_case] === undefined) {
-                normalized[camel_case] = normalized[snake_case];
-                normalizedFields[snake_case].camel_case = true;
-            }
-            // If camelCase exists but snake_case doesn't, add snake_case
-            else if (normalized[camel_case] !== undefined && normalized[snake_case] === undefined) {
-                normalized[snake_case] = normalized[camel_case];
-                normalizedFields[snake_case].snake_case = true;
-            }
-        }
-        
-        // Log the normalization results
-        logger.debug(' DB: METADATA NORMALIZATION - Results', {
-            normalizedFields,
-            finalKeys: Object.keys(normalized)
-        });
-        
-        return normalized;
-    }
-
     public async processTransaction(tx: ParsedTransaction): Promise<Post> {
         try {
-            logger.info(' DB: SAVING TRANSACTION', {
+            logger.info('DB: SAVING TRANSACTION', {
                 tx_id: tx.tx_id,
                 type: tx.type,
-                metadataKeys: Object.keys(tx.metadata || {})
-            });
-            
-            // Log the original metadata before normalization
-            logger.debug(' DB: ORIGINAL METADATA', {
-                tx_id: tx.tx_id,
+                block_height: tx.block_height,
+                author_address: tx.author_address,
                 metadata: JSON.stringify(tx.metadata).substring(0, 500) // Limit string length
             });
             
-            // Normalize metadata to handle both snake_case and camelCase
-            tx.metadata = this.normalizeMetadata(tx.metadata);
-            
-            // Log the normalized metadata
-            logger.debug(' DB: NORMALIZED METADATA', {
-                tx_id: tx.tx_id,
-                metadata: JSON.stringify(tx.metadata).substring(0, 500) // Limit string length
-            });
-
             // First, save the transaction to the ProcessedTransaction table
             await this.withFreshClient(async (client) => {
                 // Check if transaction already exists
-                try {
-                    const existingTx = await client.processed_transaction.findUnique({
-                        where: { tx_id: tx.tx_id }
-                    });
-
-                    if (!existingTx) {
-                        try {
-                            // Create new processed transaction record with only essential fields
-                            await client.processed_transaction.create({
-                                data: {
-                                    tx_id: tx.tx_id,
-                                    type: tx.type,
-                                    protocol: tx.protocol,
-                                    metadata: tx.metadata || {}
-                                    // Omit block_height and block_time if they cause issues
-                                }
-                            });
-                            
-                            logger.info(' DB: TRANSACTION RECORD CREATED', {
-                                tx_id: tx.tx_id,
-                                type: tx.type
-                            });
-                        } catch (error) {
-                            logger.error(' DB: FAILED TO CREATE TRANSACTION RECORD', {
-                                tx_id: tx.tx_id,
-                                error: error instanceof Error ? error.message : 'Unknown error',
-                                stack: error instanceof Error ? error.stack : undefined
-                            });
-                            
-                            // Continue processing even if transaction record creation fails
-                            // This allows us to still attempt to create the post
+                const existingTx = await client.processed_transaction.findUnique({
+                    where: { tx_id: tx.tx_id }
+                });
+                
+                if (existingTx) {
+                    logger.info('Transaction already exists, updating', { tx_id: tx.tx_id });
+                    
+                    // Update the transaction
+                    await client.processed_transaction.update({
+                        where: { tx_id: tx.tx_id },
+                        data: {
+                            block_height: tx.block_height,
+                            block_time: tx.block_time ? new Date(tx.block_time) : new Date(),
+                            author_address: tx.author_address,
+                            metadata: tx.metadata || {}
                         }
+                    });
+                } else {
+                    logger.info('Creating new transaction', { tx_id: tx.tx_id });
+                    
+                    // Create a new transaction
+                    await client.processed_transaction.create({
+                        data: {
+                            tx_id: tx.tx_id,
+                            type: tx.type || 'unknown',
+                            block_height: tx.block_height,
+                            block_time: tx.block_time ? new Date(tx.block_time) : new Date(),
+                            author_address: tx.author_address,
+                            metadata: tx.metadata || {}
+                        }
+                    });
+                }
+            });
+            
+            // Prepare post data
+            const postData = {
+                tx_id: tx.tx_id,
+                content: tx.metadata?.content || '',
+                author_address: tx.metadata?.author_address || tx.author_address,
+                created_at: new Date(tx.block_time),
+                tags: tx.metadata?.tags || [],
+                is_vote: tx.type === 'vote',
+                is_locked: !!tx.metadata?.lock_amount && tx.metadata.lock_amount > 0,
+                metadata: tx.metadata
+            };
+            
+            logger.debug('Prepared post data', {
+                tx_id: tx.tx_id,
+                postDataKeys: Object.keys(postData),
+                author_address: postData.author_address,
+                is_vote: postData.is_vote,
+                is_locked: postData.is_locked,
+                hasMetadata: !!postData.metadata
+            });
+            
+            // Check for image data
+            let imageBuffer: Buffer | null = null;
+            if (tx.metadata?.image_metadata?.is_image && tx.metadata?.raw_image_data) {
+                try {
+                    // Convert image data to buffer based on format
+                    if (typeof tx.metadata.raw_image_data === 'string') {
+                        if (tx.metadata.raw_image_data.startsWith('data:')) {
+                            // Handle data URI
+                            const base64Data = tx.metadata.raw_image_data.split(',')[1];
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            // Assume base64 string
+                            imageBuffer = Buffer.from(tx.metadata.raw_image_data, 'base64');
+                        }
+                    } else if (Buffer.isBuffer(tx.metadata.raw_image_data)) {
+                        // Already a buffer
+                        imageBuffer = tx.metadata.raw_image_data;
                     }
+                    
+                    logger.debug('Processed image data', {
+                        tx_id: tx.tx_id,
+                        hasImageBuffer: !!imageBuffer,
+                        bufferSize: imageBuffer?.length
+                    });
                 } catch (error) {
-                    logger.error(' DB: ERROR CHECKING FOR EXISTING TRANSACTION', {
+                    logger.error('Error processing image data', {
                         tx_id: tx.tx_id,
                         error: error instanceof Error ? error.message : 'Unknown error'
                     });
-                    // Continue processing even if this check fails
-                }
-            });
-
-            // Process image if present
-            let imageBuffer: Buffer | null = null;
-            if (tx.metadata.image) {
-                try {
-                    imageBuffer = tx.metadata.image;
-                    logger.info(' DB: IMAGE DATA RECEIVED', {
-                        tx_id: tx.tx_id,
-                        size: imageBuffer.length
-                    });
-                } catch (error) {
-                    logger.error(' DB: IMAGE PROCESSING FAILED', {
-                        tx_id: tx.tx_id
-                    });
                 }
             }
-
-            // Ensure vote posts have content_type set
-            if (tx.type === 'vote' && !tx.metadata.content_type && !tx.metadata.content_type) {
-                tx.metadata.content_type = 'vote';
-            }
-
-            logger.info(' DB: CREATING POST', {
-                tx_id: tx.tx_id,
-                type: tx.type,
-                has_image: !!imageBuffer
-            });
-
-            const post = await this.upsertPost(tx, imageBuffer);
-
-            // Process vote options if present
-            if (tx.metadata.vote_options && Array.isArray(tx.metadata.vote_options) && tx.metadata.vote_options.length > 0) {
-                logger.info(' DB: PROCESSING EXISTING VOTE OPTIONS', { 
-                    post_id: post.id, 
-                    optionCount: tx.metadata.vote_options.length 
-                });
-                await this.processvote_options(post.id, tx);
-            }
-            // For vote posts, ensure they have vote options
-            else if ((tx.type === 'vote' || post.isVote) && (!tx.metadata.vote_options || !Array.isArray(tx.metadata.vote_options) || tx.metadata.vote_options.length === 0)) {
-                logger.info(' DB: CREATING DEFAULT VOTE OPTIONS', { 
-                    post_id: post.id, 
-                    tx_id: tx.tx_id 
+            
+            // Create or update the post
+            const post = await this.withFreshClient(async (client) => {
+                // Check if post already exists
+                const existingPost = await client.post.findUnique({
+                    where: { tx_id: tx.tx_id }
                 });
                 
-                // Create default vote options
-                const defaultOptions = ['Yes', 'No', 'Maybe'];
-                tx.metadata.vote_options = defaultOptions;
-                
-                // Process the default vote options
-                await this.processvote_options(post.id, tx);
-                
-                // Update the post metadata to include vote options
-                await this.withFreshClient(async (client) => {
-                    await client.post.update({
-                        where: { id: post.id },
+                if (existingPost) {
+                    logger.info('Post already exists, updating', { tx_id: tx.tx_id });
+                    
+                    // Update the post
+                    return await client.post.update({
+                        where: { tx_id: tx.tx_id },
                         data: {
-                            metadata: {
-                                ...(post.metadata as Record<string, any>),
-                                vote_options: defaultOptions,
-                                content_type: 'vote'
-                            }
+                            content: postData.content,
+                            tags: postData.tags,
+                            is_vote: postData.is_vote,
+                            is_locked: postData.is_locked,
+                            metadata: postData.metadata,
+                            ...(imageBuffer ? {
+                                raw_image_data: imageBuffer,
+                                media_type: tx.metadata?.image_metadata?.content_type || 'image/jpeg'
+                            } : {})
                         }
                     });
-                });
-            }
-
-            const action = post.created_at === this.createblock_timeDate(tx.block_time) ? 'created' : 'updated';
-            logger.info(` DB: POST ${action.toUpperCase()}`, {
-                tx_id: post.tx_id,
-                post_id: post.id,
-                type: tx.type,
-                isVote: post.isVote,
-                tagCount: post.tags.length
+                } else {
+                    logger.info('Creating new post', { tx_id: tx.tx_id });
+                    
+                    // Create a new post
+                    return await client.post.create({
+                        data: {
+                            tx_id: tx.tx_id,
+                            content: postData.content,
+                            author_address: postData.author_address,
+                            created_at: postData.created_at,
+                            tags: postData.tags,
+                            is_vote: postData.is_vote,
+                            is_locked: postData.is_locked,
+                            block_height: tx.block_height,
+                            metadata: postData.metadata,
+                            ...(imageBuffer ? {
+                                raw_image_data: imageBuffer,
+                                media_type: tx.metadata?.image_metadata?.content_type || 'image/jpeg'
+                            } : {})
+                        }
+                    });
+                }
             });
-
+            
+            // If this is a vote post, create vote options
+            if (postData.is_vote && tx.metadata?.vote_options && Array.isArray(tx.metadata.vote_options)) {
+                const voteOptions = tx.metadata.vote_options;
+                
+                logger.debug('Processing vote options', {
+                    tx_id: tx.tx_id,
+                    optionsCount: voteOptions.length
+                });
+                
+                // Create each vote option
+                for (let i = 0; i < voteOptions.length; i++) {
+                    const option = voteOptions[i];
+                    
+                    await this.withFreshClient(async (client) => {
+                        // Check if option already exists
+                        const existingOption = await client.vote_option.findFirst({
+                            where: {
+                                post_id: post.id,
+                                option_index: i
+                            }
+                        });
+                        
+                        if (existingOption) {
+                            logger.debug('Vote option already exists, updating', {
+                                tx_id: tx.tx_id,
+                                option_index: i
+                            });
+                            
+                            // Update the option
+                            await client.vote_option.update({
+                                where: { id: existingOption.id },
+                                data: {
+                                    content: option
+                                }
+                            });
+                        } else {
+                            logger.debug('Creating new vote option', {
+                                tx_id: tx.tx_id,
+                                option_index: i
+                            });
+                            
+                            // Create a new option
+                            await client.vote_option.create({
+                                data: {
+                                    tx_id: `${tx.tx_id}_option_${i}`,
+                                    content: option,
+                                    author_address: postData.author_address,
+                                    post_id: post.id,
+                                    option_index: i,
+                                    tags: []
+                                }
+                            });
+                        }
+                    });
+                }
+            }
+            
+            logger.info('Transaction processed successfully', {
+                tx_id: tx.tx_id,
+                post_id: post.id,
+                is_vote: postData.is_vote,
+                is_locked: postData.is_locked
+            });
+            
             return post;
         } catch (error) {
-            logger.error(' DB: TRANSACTION PROCESSING FAILED', {
+            logger.error('Error processing transaction', {
+                tx_id: tx?.tx_id,
                 error: error instanceof Error ? error.message : 'Unknown error',
-                tx_id: tx.tx_id
+                stack: error instanceof Error ? error.stack : undefined
             });
             throw error;
         }
     }
 
     /**
-     * Save a transaction to the ProcessedTransaction table
-     * @param tx The transaction to save
-     * @returns The saved transaction with post data if available
+     * Save a transaction to the database
+     * @param tx Transaction to save
+     * @returns Saved transaction
      */
-    public async saveTransaction(tx: ParsedTransaction): Promise<{ 
-        transaction: any; 
-        post?: Post;
-    }> {
+    public async saveTransaction(tx: ParsedTransaction): Promise<ProcessedTransaction> {
         if (!tx || !tx.tx_id) {
-            logger.error(' DB: INVALID TRANSACTION', { tx });
             throw new Error('Invalid transaction data');
         }
         
         try {
-            // Normalize metadata to ensure both snake_case and camelCase fields
-            const normalizedMetadata = this.normalizeMetadata(tx.metadata);
+            logger.debug('Saving transaction', { tx_id: tx.tx_id });
             
-            // Use a timeout to prevent hanging queries
-            const timeoutPromise = new Promise((resolve) => {
-                setTimeout(() => {
-                    logger.warn(' DB: TRANSACTION SAVE TIMEOUT', { tx_id: tx.tx_id });
-                    resolve(null);
-                }, 5000); // 5 second timeout
-            });
-            
-            // Execute the query
-            const queryPromise = prisma.processed_transaction.upsert({
-                where: {
-                    tx_id: tx.tx_id
-                },
-                update: {
-                    block_height: tx.block_height,
-                    block_time: tx.block_time,
-                    author_address: tx.author_address,
-                    metadata: normalizedMetadata
-                },
-                create: {
-                    tx_id: tx.tx_id,
-                    block_height: tx.block_height,
-                    block_time: tx.block_time,
-                    author_address: tx.author_address,
-                    metadata: normalizedMetadata
-                }
-            });
-            
-            // Race the query against the timeout
-            const result = await Promise.race([queryPromise, timeoutPromise]);
-            
-            if (!result) {
-                throw new Error('Transaction save operation timed out');
-            }
-            
-            // Return the saved transaction with snake_case fields
-            return {
-                transaction: {
-                    tx_id: result.tx_id,
-                    block_height: result.block_height,
-                    block_time: result.block_time,
-                    author_address: result.author_address,
-                    metadata: normalizedMetadata
-                }
+            // Create the transaction data with snake_case fields
+            const txData = {
+                tx_id: tx.tx_id,
+                type: tx.type || 'unknown',
+                author_address: tx.author_address || '',
+                block_height: tx.block_height || 0,
+                block_time: tx.block_time ? new Date(tx.block_time) : new Date(),
+                metadata: tx.metadata || {}
             };
+            
+            // Save the transaction
+            const savedTx = await this.withFreshClient(async (client) => {
+                return await client.processed_transaction.upsert({
+                    where: { tx_id: tx.tx_id },
+                    update: txData,
+                    create: txData
+                });
+            });
+            
+            logger.debug('Transaction saved successfully', { 
+                tx_id: savedTx.tx_id,
+                type: savedTx.type
+            });
+            
+            return savedTx;
         } catch (error) {
-            logger.error(' DB: ERROR SAVING TRANSACTION', {
+            logger.error('Error saving transaction', {
                 tx_id: tx.tx_id,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
             throw error;
         }
     }
-
-    public async getTransaction(tx_id: string): Promise<any | null> {
+    
+    /**
+     * Get a transaction from the database
+     * @param tx_id Transaction ID
+     * @returns Transaction or null if not found
+     */
+    public async getTransaction(tx_id: string): Promise<ProcessedTransaction | null> {
         if (!tx_id) {
-            return null;
+            throw new Error('Invalid transaction ID');
         }
         
         try {
-            // Use a timeout to prevent hanging queries
-            const timeoutPromise = new Promise((resolve) => {
-                setTimeout(() => {
-                    logger.warn(' DB: TRANSACTION FETCH TIMEOUT', { tx_id });
-                    resolve(null);
-                }, 5000); // 5 second timeout
+            logger.debug('Getting transaction', { tx_id });
+            
+            // Get the transaction
+            const tx = await this.withFreshClient(async (client) => {
+                return await client.processed_transaction.findUnique({
+                    where: { tx_id }
+                });
             });
             
-            // Execute the query
-            const queryPromise = prisma.processed_transaction.findUnique({
-                where: {
-                    tx_id: tx_id
-                }
-            });
-            
-            // Race the query against the timeout
-            const result = await Promise.race([queryPromise, timeoutPromise]);
-            
-            if (!result) {
+            if (!tx) {
+                logger.debug('Transaction not found', { tx_id });
                 return null;
             }
             
-            // Normalize the result to ensure snake_case fields
-            return {
-                tx_id: result.tx_id,
-                block_height: result.block_height,
-                block_time: result.block_time,
-                author_address: result.author_address,
-                metadata: this.normalizeMetadata(result.metadata)
-            };
+            logger.debug('Transaction found', { 
+                tx_id: tx.tx_id,
+                type: tx.type
+            });
+            
+            return tx;
         } catch (error) {
-            logger.error(' DB: ERROR FETCHING TRANSACTION', {
+            logger.error('Error getting transaction', {
                 tx_id,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
@@ -1018,6 +844,426 @@ export class DbClient {
                 throw error;
             }
         });
+    }
+
+    /**
+     * Create a post from transaction data
+     * @param tx Transaction data
+     * @returns Created post
+     */
+    public async createPostFromTransaction(tx: ParsedTransaction): Promise<any> {
+        if (!tx || !tx.tx_id) {
+            throw new Error('Invalid transaction data');
+        }
+        
+        try {
+            // Extract metadata
+            const metadata = tx.metadata || {};
+            
+            // Create post with snake_case fields
+            const post = await this.withFreshClient(async (client) => {
+                return await client.post.create({
+                    data: {
+                        tx_id: tx.tx_id,
+                        content: metadata.content || '',
+                        author_address: tx.author_address || '',
+                        tags: metadata.tags || [],
+                        is_vote: metadata.is_vote === true,
+                        is_locked: metadata.is_locked === true,
+                        media_type: metadata.media_type || null,
+                        media_url: metadata.media_url || null,
+                        raw_image_data: metadata.raw_image_data || null,
+                        block_height: tx.block_height || 0,
+                        metadata: metadata
+                    }
+                });
+            });
+            
+            // If this is a vote post, create vote options
+            if (metadata.is_vote && Array.isArray(metadata.vote_options)) {
+                const voteOptions = metadata.vote_options;
+                
+                // Create each vote option
+                for (let i = 0; i < voteOptions.length; i++) {
+                    const option = voteOptions[i];
+                    
+                    await this.withFreshClient(async (client) => {
+                        await client.vote_option.create({
+                            data: {
+                                tx_id: `${tx.tx_id}_option_${i}`,
+                                content: option,
+                                author_address: tx.author_address || '',
+                                post_id: post.id,
+                                option_index: i,
+                                tags: []
+                            }
+                        });
+                    });
+                }
+            }
+            
+            return post;
+        } catch (error) {
+            logger.error(' DB: ERROR CREATING POST', {
+                tx_id: tx.tx_id,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            throw error;
+        }
+    }
+
+    async processTransactions(tx: ParsedTransaction | ParsedTransaction[]): Promise<void> {
+        try {
+            const transactions = Array.isArray(tx) ? tx : [tx];
+            logger.info('Processing transactions', {
+                count: transactions.length,
+                types: transactions.map(t => t.type),
+                tx_ids: transactions.map(t => t.tx_id)
+            });
+
+            // Handle single transaction
+            if (!Array.isArray(tx)) {
+                await this.processTransaction(tx);
+                return;
+            }
+
+            // Handle transaction array in chunks
+            const chunks = this.chunk(tx, 10);
+            for (const chunk of chunks) {
+                await Promise.all(chunk.map(t => this.processTransaction(t)));
+            }
+        } catch (error) {
+            logger.error('Error in processTransactions', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            throw error;
+        }
+    }
+
+    async getPostWithvote_options(post_id: string): Promise<PostWithvote_options | null> {
+        const post = await prisma.post.findUnique({
+            where: { id: post_id },
+            include: {
+                vote_options: true,
+                lock_likes: true
+            }
+        });
+
+        if (!post) return null;
+
+        // Transform the Prisma Post into our custom PostWithvote_options type
+        return {
+            id: post.id,
+            post_id: post.id,
+            type: post.isVote ? 'vote' : 'post',
+            content: post.content,
+            block_time: post.created_at,
+            sequence: 0, // Default value
+            parent_sequence: 0, // Default value
+            created_at: post.created_at,
+            updated_at: post.created_at, // Using created_at as updated_at
+            protocol: 'MAP', // Default protocol
+            sender_address: post.author_address,
+            block_height: post.block_height,
+            tx_id: post.tx_id,
+            image: post.raw_image_data,
+            lock_likes: post.lock_likes.map(like => ({
+                id: like.id,
+                tx_id: like.tx_id,
+                lock_amount: like.amount,
+                lock_duration: 0, // Default value
+                created_at: like.created_at,
+                updated_at: like.created_at, // Using created_at as updated_at
+                post_id: like.post_id
+            })),
+            vote_options: post.vote_options.map(option => ({
+                id: option.id,
+                post_id: option.post_id,
+                content: option.content,
+                index: option.optionIndex,
+                created_at: option.created_at,
+                updated_at: option.created_at, // Using created_at as updated_at
+                question_id: option.id // Using option.id as question_id
+            })),
+            vote_question: null // We don't have a voteQuestion model in Prisma
+        };
+    }
+
+    async cleanupTestData(): Promise<void> {
+        if (process.env.NODE_ENV !== 'test') {
+            throw new Error('Cleanup can only be run in test environment');
+        }
+        await this.withFreshClient(async (tx) => {
+            await tx.vote_option.deleteMany();
+            await tx.lock_like.deleteMany();
+            await tx.post.deleteMany();
+            await tx.processed_transaction.deleteMany();
+            logger.info('Test data cleaned up');
+        });
+    }
+
+    async verifyDatabaseContents(tx_id: string, testOutputDir: string) {
+        // Get the processed transaction
+        const processedTx = await this.getTransaction(tx_id);
+        if (!processedTx) {
+            throw new Error(`No processed transaction found for tx_id ${tx_id}`);
+        }
+
+        const metadata = processedTx.metadata as ProcessedTxMetadata;
+
+        // Get the post with vote data
+        const post = await this.getPostWithvote_options(metadata.post_id);
+        if (!post) {
+            throw new Error(`No post found for post_id ${metadata.post_id}`);
+        }
+
+        // Prepare verification results
+        const results = {
+            has_post: true,
+            has_image: !!post.image,
+            has_vote_question: post.vote_question !== null,
+            vote_options_count: post.vote_options?.length || 0,
+            has_lock_likes: post.lock_likes?.length > 0 || false,
+            tx_id,
+            post_id: post.id,
+            content_type: post.image ? 'Image + Text' : 'Text Only',
+            vote_question: post.vote_question ? {
+                question: post.vote_question.question,
+                total_options: post.vote_question.total_options,
+                options_hash: post.vote_question.options_hash
+            } : undefined,
+            vote_options: post.vote_options?.map(opt => ({
+                content: opt.content,
+                index: opt.index
+            })).sort((a, b) => a.index - b.index)
+        };
+
+        // Log verification results
+        logger.info('Database verification results', results);
+
+        // Save image if present
+        if (post.image) {
+            const ext = (metadata.image_metadata?.content_type?.split('/')[1] || 'jpg');
+            const imagePath = path.join(testOutputDir, `${tx_id}_image.${ext}`);
+            await fs.promises.writeFile(imagePath, post.image);
+            logger.info('Saved image to file', { path: imagePath });
+        }
+
+        // Write verification results to file
+        const outputPath = path.join(testOutputDir, `${tx_id}_verification.txt`);
+        const outputContent = [
+            `Transaction ID: ${tx_id}`,
+            `Post ID: ${post.id}`,
+            `Content Type: ${results.content_type}`,
+            `Block Time: ${post.created_at.toISOString()}`,
+            `Sender Address: ${post.sender_address || 'Not specified'}`,
+            '\nContent:',
+            post.content,
+            '\nTransaction Details:',
+            `- Has Image: ${results.has_image}`,
+            `- Has Vote Question: ${results.has_vote_question}`,
+            `- Vote Options Count: ${results.vote_options_count}`,
+            `- Has Lock Likes: ${results.has_lock_likes}`,
+            results.has_image ? [
+                '\nImage Metadata:',
+                `- Content Type: ${metadata.image_metadata?.content_type || 'Not specified'}`,
+                `- Filename: ${metadata.image_metadata?.filename || 'Not specified'}`,
+                `- Size: ${metadata.image_metadata?.size || 'Not specified'}`,
+                `- Dimensions: ${metadata.image_metadata?.width || '?'}x${metadata.image_metadata?.height || '?'}`
+            ].join('\n') : '',
+            results.has_vote_question ? [
+                '\nVote Details:',
+                `Question: ${post.vote_question?.question}`,
+                `Total Options: ${post.vote_question?.total_options}`,
+                `Options Hash: ${post.vote_question?.options_hash}`,
+                '\nVote Options:',
+                ...post.vote_options
+                    .sort((a, b) => a.index - b.index)
+                    .map((opt, i) => `${i + 1}. ${opt.content} (Index: ${opt.index})`)
+            ].join('\n') : '\nNo Vote Data'
+        ].join('\n');
+
+        await fs.promises.writeFile(outputPath, outputContent);
+        logger.info('Saved verification results to file', { path: outputPath });
+    }
+
+    /**
+     * Get the current blockchain height from the database
+     * @returns The current block height or null if not available
+     */
+    public async getCurrentblock_height(): Promise<number | null> {
+        try {
+            logger.debug('Getting current block height');
+            
+            // Try to get the latest block height from processed transactions
+            const latestTx = await prisma.processed_transaction.findFirst({
+                orderBy: {
+                    block_height: 'desc'
+                },
+                where: {
+                    block_height: {
+                        gt: 0
+                    }
+                }
+            });
+            
+            if (latestTx?.block_height) {
+                logger.debug(`Using latest transaction block height: ${latestTx.block_height}`);
+                return latestTx.block_height;
+            }
+            
+            // If we still don't have a height, return null
+            logger.warn('Could not determine current block height');
+            return null;
+        } catch (error) {
+            logger.error('Error getting current block height', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            return null;
+        }
+    }
+
+    // Save image data to database
+    public async saveImage(params: {
+        tx_id: string;
+        imageData: Buffer | string;
+        content_type: string;
+        filename?: string;
+        width?: number;
+        height?: number;
+        size?: number;
+    }): Promise<void> {
+        logger.debug('saveImage called with params', {
+            tx_id: params.tx_id,
+            content_type: params.content_type,
+            imageDataType: typeof params.imageData,
+            imageSize: typeof params.imageData === 'string' ? params.imageData.length : params.imageData?.length,
+            hasFilename: !!params.filename
+        });
+
+        return this.withFreshClient(async (client) => {
+            logger.debug('Inside withFreshClient callback', {
+                clientType: typeof client,
+                clientKeys: Object.keys(client),
+                hasPrismaClient: !!client
+            });
+
+            try {
+                // Convert image data to buffer based on format
+                let imageBuffer: Buffer;
+                if (typeof params.imageData === 'string') {
+                    if (params.imageData.startsWith('data:')) {
+                        // Handle data URI
+                        const base64Data = params.imageData.split(',')[1];
+                        imageBuffer = Buffer.from(base64Data, 'base64');
+                    } else {
+                        // Assume base64 string
+                        imageBuffer = Buffer.from(params.imageData, 'base64');
+                    }
+                } else if (Buffer.isBuffer(params.imageData)) {
+                    // Already a buffer
+                    imageBuffer = params.imageData;
+                } else {
+                    // Fallback
+                    imageBuffer = Buffer.from(params.imageData);
+                }
+
+                // Use upsert instead of update to handle cases where the post doesn't exist yet
+                await client.post.upsert({
+                    where: { tx_id: params.tx_id },
+                    update: {
+                        raw_image_data: imageBuffer,
+                        media_type: params.content_type
+                    },
+                    create: {
+                        tx_id: params.tx_id,
+                        content: '',  // Required field, can be updated later
+                        raw_image_data: imageBuffer,
+                        media_type: params.content_type,
+                        created_at: new Date()
+                    }
+                });
+
+                logger.info('Successfully saved image data', {
+                    tx_id: params.tx_id,
+                    content_type: params.content_type,
+                    size: params.size
+                });
+            } catch (error) {
+                logger.error('Failed to save image data', {
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    tx_id: params.tx_id
+                });
+                throw error;
+            }
+        });
+    }
+
+    /**
+     * Create a post from transaction data
+     * @param tx Transaction data
+     * @returns Created post
+     */
+    public async createPostFromTransaction(tx: ParsedTransaction): Promise<any> {
+        if (!tx || !tx.tx_id) {
+            throw new Error('Invalid transaction data');
+        }
+        
+        try {
+            // Extract metadata
+            const metadata = tx.metadata || {};
+            
+            // Create post with snake_case fields
+            const post = await this.withFreshClient(async (client) => {
+                return await client.post.create({
+                    data: {
+                        tx_id: tx.tx_id,
+                        content: metadata.content || '',
+                        author_address: tx.author_address || '',
+                        tags: metadata.tags || [],
+                        is_vote: metadata.is_vote === true,
+                        is_locked: metadata.is_locked === true,
+                        media_type: metadata.media_type || null,
+                        media_url: metadata.media_url || null,
+                        raw_image_data: metadata.raw_image_data || null,
+                        block_height: tx.block_height || 0,
+                        metadata: metadata
+                    }
+                });
+            });
+            
+            // If this is a vote post, create vote options
+            if (metadata.is_vote && Array.isArray(metadata.vote_options)) {
+                const voteOptions = metadata.vote_options;
+                
+                // Create each vote option
+                for (let i = 0; i < voteOptions.length; i++) {
+                    const option = voteOptions[i];
+                    
+                    await this.withFreshClient(async (client) => {
+                        await client.vote_option.create({
+                            data: {
+                                tx_id: `${tx.tx_id}_option_${i}`,
+                                content: option,
+                                author_address: tx.author_address || '',
+                                post_id: post.id,
+                                option_index: i,
+                                tags: []
+                            }
+                        });
+                    });
+                }
+            }
+            
+            return post;
+        } catch (error) {
+            logger.error(' DB: ERROR CREATING POST', {
+                tx_id: tx.tx_id,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            throw error;
+        }
     }
 
     private chunk<T>(arr: T[], size: number): T[][] {
