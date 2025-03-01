@@ -5,10 +5,11 @@ import { CONFIG } from "./config";
 import { logger } from "../utils/logger";
 
 export class Scanner {
-    private readonly start_block = 885675;  // Start earlier to catch all target blocks
+    private readonly start_block = 0;  // Start earlier to catch all target blocks
     private readonly subscription_id = CONFIG.JB_SUBSCRIPTION_ID;
     private readonly jungle_bus: JungleBusClient;
     private readonly parser: TransactionParser;
+    private readonly dbClient: DbClient;
     private pending_transactions: string[] = [];
     private processing_batch = false;
     private readonly batch_size = 5; // Process 5 transactions at a time
@@ -16,6 +17,7 @@ export class Scanner {
 
     constructor(parser: TransactionParser, dbClient: DbClient) {
         this.parser = parser;
+        this.dbClient = dbClient;
         this.jungle_bus = new JungleBusClient("junglebus.gorillapool.io", {
             useSSL: true,
             onConnected: (ctx) => {
@@ -129,25 +131,61 @@ export class Scanner {
         }
     }
 
+    /**
+     * Get the current block height from the database
+     * @returns The current block height or null if not available
+     */
+    public async getCurrentBlockHeight(): Promise<number | null> {
+        try {
+            return await this.dbClient.getCurrentBlockHeight();
+        } catch (error) {
+            logger.error('Error getting current block height', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            return null;
+        }
+    }
+
     public async start(): Promise<void> {
         try {
             logger.info(`🚀 Starting scanner from block ${this.start_block} with subscription ID ${this.subscription_id}`);
             
-            // Use the direct parameter approach instead of an object
-            await this.jungle_bus.Subscribe(
-                this.subscription_id,
-                this.start_block,
-                (tx: any) => this.handleTransaction(tx),
-                (status: any) => this.handleStatus(status),
-                (error: any) => this.handleError(error)
-            );
+            // If start_block is 0, try to get the latest block height from the database
+            if (this.start_block === 0) {
+                const latestBlockHeight = await this.getCurrentBlockHeight();
+                if (latestBlockHeight) {
+                    this.start_block = latestBlockHeight;
+                    logger.info(`Using latest block height from database: ${this.start_block}`);
+                } else {
+                    // Default to a reasonable starting point if we can't get the latest height
+                    this.start_block = CONFIG.DEFAULT_START_BLOCK;
+                    logger.info(`Using default start block: ${this.start_block}`);
+                }
+            }
             
-            logger.info(`✅ Scanner subscription ${this.subscription_id} started successfully`);
+            // Subscribe to the JungleBus
+            await this.jungle_bus.Subscribe({
+                id: this.subscription_id,
+                fromBlock: this.start_block,
+                onStatus: (status) => {
+                    logger.info(`JungleBus Status: ${status.status}`, status);
+                },
+                onError: (error) => {
+                    logger.error(`JungleBus Error: ${error.message}`, error);
+                },
+                onMempool: (tx) => {
+                    this.handleTransaction(tx);
+                },
+                onBlock: (tx) => {
+                    this.handleTransaction(tx);
+                }
+            });
+            
+            logger.info(`Scanner started successfully from block ${this.start_block}`);
         } catch (error) {
-            logger.error(`❌ Failed to start scanner`, {
+            logger.error('Failed to start scanner', {
                 error: error instanceof Error ? error.message : 'Unknown error',
-                subscription_id: this.subscription_id,
-                start_block: this.start_block
+                stack: error instanceof Error ? error.stack : undefined
             });
             throw error;
         }

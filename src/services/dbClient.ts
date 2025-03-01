@@ -137,6 +137,11 @@ export class DbClient {
                 metadata: JSON.stringify(tx.metadata).substring(0, 500) // Limit string length
             });
             
+            // Convert BigInt values to numbers
+            const safeBlockHeight = typeof tx.block_height === 'bigint' 
+                ? Number(tx.block_height) 
+                : (tx.block_height || 0);
+            
             // First, save the transaction to the ProcessedTransaction table
             await this.withFreshClient(async (client) => {
                 // Check if transaction already exists
@@ -151,7 +156,7 @@ export class DbClient {
                     await client.processed_transaction.update({
                         where: { tx_id: tx.tx_id },
                         data: {
-                            block_height: tx.block_height,
+                            block_height: safeBlockHeight,
                             block_time: tx.block_time ? new Date(tx.block_time) : new Date(),
                             author_address: tx.author_address,
                             metadata: tx.metadata || {}
@@ -165,7 +170,7 @@ export class DbClient {
                         data: {
                             tx_id: tx.tx_id,
                             type: tx.type || 'unknown',
-                            block_height: tx.block_height,
+                            block_height: safeBlockHeight,
                             block_time: tx.block_time ? new Date(tx.block_time) : new Date(),
                             author_address: tx.author_address,
                             metadata: tx.metadata || {}
@@ -265,7 +270,7 @@ export class DbClient {
                             tags: postData.tags,
                             is_vote: postData.is_vote,
                             is_locked: postData.is_locked,
-                            block_height: tx.block_height,
+                            block_height: safeBlockHeight,
                             metadata: postData.metadata,
                             ...(imageBuffer ? {
                                 raw_image_data: imageBuffer,
@@ -364,12 +369,17 @@ export class DbClient {
         try {
             logger.debug('Saving transaction', { tx_id: tx.tx_id });
             
+            // Convert BigInt values to numbers
+            const safeBlockHeight = typeof tx.block_height === 'bigint' 
+                ? Number(tx.block_height) 
+                : (tx.block_height || 0);
+            
             // Create the transaction data with snake_case fields
             const txData = {
                 tx_id: tx.tx_id,
                 type: tx.type || 'unknown',
                 author_address: tx.author_address || '',
-                block_height: tx.block_height || 0,
+                block_height: safeBlockHeight,
                 block_time: tx.block_time ? new Date(tx.block_time) : new Date(),
                 metadata: tx.metadata || {}
             };
@@ -738,7 +748,7 @@ export class DbClient {
      * Get the current blockchain height from the database
      * @returns The current block height or null if not available
      */
-    public async getCurrentblock_height(): Promise<number | null> {
+    public async getCurrentBlockHeight(): Promise<number | null> {
         try {
             logger.debug('Getting current block height');
             
@@ -860,6 +870,11 @@ export class DbClient {
             // Extract metadata
             const metadata = tx.metadata || {};
             
+            // Convert BigInt values to numbers
+            const safeBlockHeight = typeof tx.block_height === 'bigint' 
+                ? Number(tx.block_height) 
+                : (tx.block_height || 0);
+            
             // Create post with snake_case fields
             const post = await this.withFreshClient(async (client) => {
                 return await client.post.create({
@@ -873,7 +888,7 @@ export class DbClient {
                         media_type: metadata.media_type || null,
                         media_url: metadata.media_url || null,
                         raw_image_data: metadata.raw_image_data || null,
-                        block_height: tx.block_height || 0,
+                        block_height: safeBlockHeight,
                         metadata: metadata
                     }
                 });
@@ -1092,7 +1107,7 @@ export class DbClient {
      * Get the current blockchain height from the database
      * @returns The current block height or null if not available
      */
-    public async getCurrentblock_height(): Promise<number | null> {
+    public async getCurrentBlockHeight(): Promise<number | null> {
         try {
             logger.debug('Getting current block height');
             
@@ -1214,6 +1229,11 @@ export class DbClient {
             // Extract metadata
             const metadata = tx.metadata || {};
             
+            // Convert BigInt values to numbers
+            const safeBlockHeight = typeof tx.block_height === 'bigint' 
+                ? Number(tx.block_height) 
+                : (tx.block_height || 0);
+            
             // Create post with snake_case fields
             const post = await this.withFreshClient(async (client) => {
                 return await client.post.create({
@@ -1227,7 +1247,366 @@ export class DbClient {
                         media_type: metadata.media_type || null,
                         media_url: metadata.media_url || null,
                         raw_image_data: metadata.raw_image_data || null,
-                        block_height: tx.block_height || 0,
+                        block_height: safeBlockHeight,
+                        metadata: metadata
+                    }
+                });
+            });
+            
+            // If this is a vote post, create vote options
+            if (metadata.is_vote && Array.isArray(metadata.vote_options)) {
+                const voteOptions = metadata.vote_options;
+                
+                // Create each vote option
+                for (let i = 0; i < voteOptions.length; i++) {
+                    const option = voteOptions[i];
+                    
+                    await this.withFreshClient(async (client) => {
+                        await client.vote_option.create({
+                            data: {
+                                tx_id: `${tx.tx_id}_option_${i}`,
+                                content: option,
+                                author_address: tx.author_address || '',
+                                post_id: post.id,
+                                option_index: i,
+                                tags: []
+                            }
+                        });
+                    });
+                }
+            }
+            
+            return post;
+        } catch (error) {
+            logger.error(' DB: ERROR CREATING POST', {
+                tx_id: tx.tx_id,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            throw error;
+        }
+    }
+
+    async processTransactions(tx: ParsedTransaction | ParsedTransaction[]): Promise<void> {
+        try {
+            const transactions = Array.isArray(tx) ? tx : [tx];
+            logger.info('Processing transactions', {
+                count: transactions.length,
+                types: transactions.map(t => t.type),
+                tx_ids: transactions.map(t => t.tx_id)
+            });
+
+            // Handle single transaction
+            if (!Array.isArray(tx)) {
+                await this.processTransaction(tx);
+                return;
+            }
+
+            // Handle transaction array in chunks
+            const chunks = this.chunk(tx, 10);
+            for (const chunk of chunks) {
+                await Promise.all(chunk.map(t => this.processTransaction(t)));
+            }
+        } catch (error) {
+            logger.error('Error in processTransactions', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            throw error;
+        }
+    }
+
+    async getPostWithvote_options(post_id: string): Promise<PostWithvote_options | null> {
+        const post = await prisma.post.findUnique({
+            where: { id: post_id },
+            include: {
+                vote_options: true,
+                lock_likes: true
+            }
+        });
+
+        if (!post) return null;
+
+        // Transform the Prisma Post into our custom PostWithvote_options type
+        return {
+            id: post.id,
+            post_id: post.id,
+            type: post.isVote ? 'vote' : 'post',
+            content: post.content,
+            block_time: post.created_at,
+            sequence: 0, // Default value
+            parent_sequence: 0, // Default value
+            created_at: post.created_at,
+            updated_at: post.created_at, // Using created_at as updated_at
+            protocol: 'MAP', // Default protocol
+            sender_address: post.author_address,
+            block_height: post.block_height,
+            tx_id: post.tx_id,
+            image: post.raw_image_data,
+            lock_likes: post.lock_likes.map(like => ({
+                id: like.id,
+                tx_id: like.tx_id,
+                lock_amount: like.amount,
+                lock_duration: 0, // Default value
+                created_at: like.created_at,
+                updated_at: like.created_at, // Using created_at as updated_at
+                post_id: like.post_id
+            })),
+            vote_options: post.vote_options.map(option => ({
+                id: option.id,
+                post_id: option.post_id,
+                content: option.content,
+                index: option.optionIndex,
+                created_at: option.created_at,
+                updated_at: option.created_at, // Using created_at as updated_at
+                question_id: option.id // Using option.id as question_id
+            })),
+            vote_question: null // We don't have a voteQuestion model in Prisma
+        };
+    }
+
+    async cleanupTestData(): Promise<void> {
+        if (process.env.NODE_ENV !== 'test') {
+            throw new Error('Cleanup can only be run in test environment');
+        }
+        await this.withFreshClient(async (tx) => {
+            await tx.vote_option.deleteMany();
+            await tx.lock_like.deleteMany();
+            await tx.post.deleteMany();
+            await tx.processed_transaction.deleteMany();
+            logger.info('Test data cleaned up');
+        });
+    }
+
+    async verifyDatabaseContents(tx_id: string, testOutputDir: string) {
+        // Get the processed transaction
+        const processedTx = await this.getTransaction(tx_id);
+        if (!processedTx) {
+            throw new Error(`No processed transaction found for tx_id ${tx_id}`);
+        }
+
+        const metadata = processedTx.metadata as ProcessedTxMetadata;
+
+        // Get the post with vote data
+        const post = await this.getPostWithvote_options(metadata.post_id);
+        if (!post) {
+            throw new Error(`No post found for post_id ${metadata.post_id}`);
+        }
+
+        // Prepare verification results
+        const results = {
+            has_post: true,
+            has_image: !!post.image,
+            has_vote_question: post.vote_question !== null,
+            vote_options_count: post.vote_options?.length || 0,
+            has_lock_likes: post.lock_likes?.length > 0 || false,
+            tx_id,
+            post_id: post.id,
+            content_type: post.image ? 'Image + Text' : 'Text Only',
+            vote_question: post.vote_question ? {
+                question: post.vote_question.question,
+                total_options: post.vote_question.total_options,
+                options_hash: post.vote_question.options_hash
+            } : undefined,
+            vote_options: post.vote_options?.map(opt => ({
+                content: opt.content,
+                index: opt.index
+            })).sort((a, b) => a.index - b.index)
+        };
+
+        // Log verification results
+        logger.info('Database verification results', results);
+
+        // Save image if present
+        if (post.image) {
+            const ext = (metadata.image_metadata?.content_type?.split('/')[1] || 'jpg');
+            const imagePath = path.join(testOutputDir, `${tx_id}_image.${ext}`);
+            await fs.promises.writeFile(imagePath, post.image);
+            logger.info('Saved image to file', { path: imagePath });
+        }
+
+        // Write verification results to file
+        const outputPath = path.join(testOutputDir, `${tx_id}_verification.txt`);
+        const outputContent = [
+            `Transaction ID: ${tx_id}`,
+            `Post ID: ${post.id}`,
+            `Content Type: ${results.content_type}`,
+            `Block Time: ${post.created_at.toISOString()}`,
+            `Sender Address: ${post.sender_address || 'Not specified'}`,
+            '\nContent:',
+            post.content,
+            '\nTransaction Details:',
+            `- Has Image: ${results.has_image}`,
+            `- Has Vote Question: ${results.has_vote_question}`,
+            `- Vote Options Count: ${results.vote_options_count}`,
+            `- Has Lock Likes: ${results.has_lock_likes}`,
+            results.has_image ? [
+                '\nImage Metadata:',
+                `- Content Type: ${metadata.image_metadata?.content_type || 'Not specified'}`,
+                `- Filename: ${metadata.image_metadata?.filename || 'Not specified'}`,
+                `- Size: ${metadata.image_metadata?.size || 'Not specified'}`,
+                `- Dimensions: ${metadata.image_metadata?.width || '?'}x${metadata.image_metadata?.height || '?'}`
+            ].join('\n') : '',
+            results.has_vote_question ? [
+                '\nVote Details:',
+                `Question: ${post.vote_question?.question}`,
+                `Total Options: ${post.vote_question?.total_options}`,
+                `Options Hash: ${post.vote_question?.options_hash}`,
+                '\nVote Options:',
+                ...post.vote_options
+                    .sort((a, b) => a.index - b.index)
+                    .map((opt, i) => `${i + 1}. ${opt.content} (Index: ${opt.index})`)
+            ].join('\n') : '\nNo Vote Data'
+        ].join('\n');
+
+        await fs.promises.writeFile(outputPath, outputContent);
+        logger.info('Saved verification results to file', { path: outputPath });
+    }
+
+    /**
+     * Get the current blockchain height from the database
+     * @returns The current block height or null if not available
+     */
+    public async getCurrentBlockHeight(): Promise<number | null> {
+        try {
+            logger.debug('Getting current block height');
+            
+            // Try to get the latest block height from processed transactions
+            const latestTx = await prisma.processed_transaction.findFirst({
+                orderBy: {
+                    block_height: 'desc'
+                },
+                where: {
+                    block_height: {
+                        gt: 0
+                    }
+                }
+            });
+            
+            if (latestTx?.block_height) {
+                logger.debug(`Using latest transaction block height: ${latestTx.block_height}`);
+                return latestTx.block_height;
+            }
+            
+            // If we still don't have a height, return null
+            logger.warn('Could not determine current block height');
+            return null;
+        } catch (error) {
+            logger.error('Error getting current block height', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            return null;
+        }
+    }
+
+    // Save image data to database
+    public async saveImage(params: {
+        tx_id: string;
+        imageData: Buffer | string;
+        content_type: string;
+        filename?: string;
+        width?: number;
+        height?: number;
+        size?: number;
+    }): Promise<void> {
+        logger.debug('saveImage called with params', {
+            tx_id: params.tx_id,
+            content_type: params.content_type,
+            imageDataType: typeof params.imageData,
+            imageSize: typeof params.imageData === 'string' ? params.imageData.length : params.imageData?.length,
+            hasFilename: !!params.filename
+        });
+
+        return this.withFreshClient(async (client) => {
+            logger.debug('Inside withFreshClient callback', {
+                clientType: typeof client,
+                clientKeys: Object.keys(client),
+                hasPrismaClient: !!client
+            });
+
+            try {
+                // Convert image data to buffer based on format
+                let imageBuffer: Buffer;
+                if (typeof params.imageData === 'string') {
+                    if (params.imageData.startsWith('data:')) {
+                        // Handle data URI
+                        const base64Data = params.imageData.split(',')[1];
+                        imageBuffer = Buffer.from(base64Data, 'base64');
+                    } else {
+                        // Assume base64 string
+                        imageBuffer = Buffer.from(params.imageData, 'base64');
+                    }
+                } else if (Buffer.isBuffer(params.imageData)) {
+                    // Already a buffer
+                    imageBuffer = params.imageData;
+                } else {
+                    // Fallback
+                    imageBuffer = Buffer.from(params.imageData);
+                }
+
+                // Use upsert instead of update to handle cases where the post doesn't exist yet
+                await client.post.upsert({
+                    where: { tx_id: params.tx_id },
+                    update: {
+                        raw_image_data: imageBuffer,
+                        media_type: params.content_type
+                    },
+                    create: {
+                        tx_id: params.tx_id,
+                        content: '',  // Required field, can be updated later
+                        raw_image_data: imageBuffer,
+                        media_type: params.content_type,
+                        created_at: new Date()
+                    }
+                });
+
+                logger.info('Successfully saved image data', {
+                    tx_id: params.tx_id,
+                    content_type: params.content_type,
+                    size: params.size
+                });
+            } catch (error) {
+                logger.error('Failed to save image data', {
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    tx_id: params.tx_id
+                });
+                throw error;
+            }
+        });
+    }
+
+    /**
+     * Create a post from transaction data
+     * @param tx Transaction data
+     * @returns Created post
+     */
+    public async createPostFromTransaction(tx: ParsedTransaction): Promise<any> {
+        if (!tx || !tx.tx_id) {
+            throw new Error('Invalid transaction data');
+        }
+        
+        try {
+            // Extract metadata
+            const metadata = tx.metadata || {};
+            
+            // Convert BigInt values to numbers
+            const safeBlockHeight = typeof tx.block_height === 'bigint' 
+                ? Number(tx.block_height) 
+                : (tx.block_height || 0);
+            
+            // Create post with snake_case fields
+            const post = await this.withFreshClient(async (client) => {
+                return await client.post.create({
+                    data: {
+                        tx_id: tx.tx_id,
+                        content: metadata.content || '',
+                        author_address: tx.author_address || '',
+                        tags: metadata.tags || [],
+                        is_vote: metadata.is_vote === true,
+                        is_locked: metadata.is_locked === true,
+                        media_type: metadata.media_type || null,
+                        media_url: metadata.media_url || null,
+                        raw_image_data: metadata.raw_image_data || null,
+                        block_height: safeBlockHeight,
                         metadata: metadata
                     }
                 });
