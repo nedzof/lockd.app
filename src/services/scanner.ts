@@ -9,6 +9,10 @@ export class Scanner {
     private readonly subscription_id = CONFIG.JB_SUBSCRIPTION_ID;
     private readonly jungle_bus: JungleBusClient;
     private readonly parser: TransactionParser;
+    private pending_transactions: string[] = [];
+    private processing_batch = false;
+    private readonly batch_size = 5; // Process 5 transactions at a time
+    private readonly batch_interval = 5000; // 5 seconds between batches
 
     constructor(parser: TransactionParser, dbClient: DbClient) {
         this.parser = parser;
@@ -27,6 +31,51 @@ export class Scanner {
                 logger.error("❌ JungleBus ERROR", ctx);
             },
         });
+
+        // Start the batch processing loop
+        this.processBatches();
+    }
+
+    private async processBatches() {
+        while (true) {
+            try {
+                if (this.pending_transactions.length > 0 && !this.processing_batch) {
+                    this.processing_batch = true;
+                    
+                    // Take a batch of transactions
+                    const batch = this.pending_transactions.splice(0, this.batch_size);
+                    
+                    logger.info(`🔄 Processing batch of ${batch.length} transactions`, {
+                        batch_size: batch.length,
+                        remaining: this.pending_transactions.length
+                    });
+                    
+                    // Process each transaction in the batch
+                    const promises = batch.map(tx_id => {
+                        return this.parser.parseTransaction(tx_id).catch(error => {
+                            logger.error('❌ Error processing transaction in batch', {
+                                tx_id,
+                                error: error instanceof Error ? error.message : 'Unknown error'
+                            });
+                        });
+                    });
+                    
+                    // Wait for all transactions to be processed with a timeout
+                    const timeoutPromise = new Promise(resolve => setTimeout(resolve, 30000)); // 30 second timeout
+                    await Promise.race([Promise.all(promises), timeoutPromise]);
+                    
+                    this.processing_batch = false;
+                }
+            } catch (error) {
+                logger.error('❌ Error in batch processing loop', {
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+                this.processing_batch = false;
+            }
+            
+            // Wait before processing the next batch
+            await new Promise(resolve => setTimeout(resolve, this.batch_interval));
+        }
     }
 
     private async handleTransaction(tx: any): Promise<void> {
@@ -45,54 +94,8 @@ export class Scanner {
             type: 'incoming'
         });
 
-        // Process all transactions
-        try {
-            // Set a timeout to prevent hanging on a single transaction
-            const timeoutPromise = new Promise<void>((resolve) => {
-                setTimeout(() => {
-                    logger.warn('⏱️ TRANSACTION PROCESSING TIMEOUT', {
-                        tx_id,
-                        block
-                    });
-                    resolve();
-                }, 15000); // 15 second timeout
-            });
-
-            // Process the transaction
-            const processingPromise = this.parser.parseTransaction(tx_id);
-            
-            // Race the processing against the timeout
-            await Promise.race([processingPromise, timeoutPromise]);
-        } catch (error) {
-            // Check if this is a prepared statement error
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            if (errorMessage.includes('prepared statement') || errorMessage.includes('P2010')) {
-                logger.warn('⚠️ Prepared statement error, will retry later', {
-                    tx_id,
-                    block
-                });
-                
-                // For target tx_ids, retry with a delay
-                setTimeout(async () => {
-                    try {
-                        logger.info('🔄 Retrying transaction', { tx_id });
-                        await this.parser.parseTransaction(tx_id);
-                        logger.info('✅ Successfully processed transaction on retry', { tx_id });
-                    } catch (retryError) {
-                        logger.error('❌ Failed to process transaction on retry', {
-                            tx_id,
-                            error: retryError instanceof Error ? retryError.message : 'Unknown error'
-                        });
-                    }
-                }, 30000); // Retry after 30 seconds
-            } else {
-                logger.error('❌ Error processing transaction', {
-                    tx_id,
-                    block,
-                    error: errorMessage
-                });
-            }
-        }
+        // Add transaction to the pending list
+        this.pending_transactions.push(tx_id);
     }
 
     private async handleStatus(status: any): Promise<void> {

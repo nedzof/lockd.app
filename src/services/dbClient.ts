@@ -274,65 +274,62 @@ export class DbClient {
     }
 
     /**
-     * Normalizes transaction metadata to handle both snake_case and camelCase property names
-     * This ensures our code is resilient to changes in the naming convention
-     * @param metadata Transaction metadata object
-     * @returns Normalized metadata object with both naming conventions
+     * Normalize metadata to ensure both snake_case and camelCase versions exist
+     * @param metadata The metadata to normalize
+     * @returns Normalized metadata
      */
-    private normalizeMetadata(metadata: Record<string, any>): Record<string, any> {
-        if (!metadata || typeof metadata !== 'object') {
-            logger.debug(' DB: METADATA NORMALIZATION - Invalid metadata', {
-                metadataType: typeof metadata
-            });
+    private normalizeMetadata(metadata: any): any {
+        if (!metadata) {
             return {};
         }
         
-        // Log the original metadata keys
-        logger.debug(' DB: METADATA NORMALIZATION - Original keys', {
-            originalKeys: Object.keys(metadata)
-        });
+        // Create a copy to avoid modifying the original
+        const normalized = { ...metadata };
         
-        const normalized: Record<string, any> = { ...metadata };
-        
-        // Map between snake_case and camelCase for common fields
-        const fieldMappings: [string, string][] = [
-            ['block_height', 'block_height'],
-            ['block_time', 'block_time'],
-            ['post_id', 'post_id'],
-            ['lock_amount', 'lock_amount'],
-            ['lock_duration', 'lock_duration'],
-            ['sender_address', 'author_address'],
-            ['author_address', 'author_address'],
-            ['created_at', 'created_at'],
-            ['updated_at', 'updated_at'],
-            ['vote_options', 'vote_options'],
+        // Define field mappings [snake_case, camelCase]
+        const fieldMappings = [
+            ['post_id', 'postId'],
+            ['lock_amount', 'lockAmount'],
+            ['lock_duration', 'lockDuration'],
+            ['sender_address', 'senderAddress'],
+            ['author_address', 'authorAddress'],
+            ['created_at', 'createdAt'],
+            ['updated_at', 'updatedAt'],
+            ['vote_options', 'voteOptions'],
             ['vote_question', 'voteQuestion'],
-            ['content_type', 'content_type'],
-            ['media_type', 'media_type'],
-            ['raw_image_data', 'raw_image_data'],
-            ['image_metadata', 'imageMetadata']
+            ['content_type', 'contentType'],
+            ['media_type', 'mediaType'],
+            ['raw_image_data', 'rawImageData'],
+            ['image_metadata', 'imageMetadata'],
+            ['block_height', 'blockHeight'],
+            ['block_time', 'blockTime'],
+            ['is_vote', 'isVote'],
+            ['is_locked', 'isLocked'],
+            ['total_options', 'totalOptions'],
+            ['options_hash', 'optionsHash'],
+            ['option_index', 'optionIndex']
         ];
         
         // Track which fields were normalized
-        const normalizedFields: Record<string, { snakeCase: boolean, camelCase: boolean }> = {};
+        const normalizedFields: Record<string, { snake_case: boolean, camel_case: boolean }> = {};
         
         // Ensure both snake_case and camelCase versions exist
-        for (const [snakeCase, camelCase] of fieldMappings) {
+        for (const [snake_case, camel_case] of fieldMappings) {
             // Initialize tracking
-            normalizedFields[snakeCase] = { 
-                snakeCase: normalized[snakeCase] !== undefined,
-                camelCase: normalized[camelCase] !== undefined
+            normalizedFields[snake_case] = { 
+                snake_case: normalized[snake_case] !== undefined,
+                camel_case: normalized[camel_case] !== undefined
             };
             
             // If snake_case exists but camelCase doesn't, add camelCase
-            if (normalized[snakeCase] !== undefined && normalized[camelCase] === undefined) {
-                normalized[camelCase] = normalized[snakeCase];
-                normalizedFields[snakeCase].camelCase = true;
+            if (normalized[snake_case] !== undefined && normalized[camel_case] === undefined) {
+                normalized[camel_case] = normalized[snake_case];
+                normalizedFields[snake_case].camel_case = true;
             }
             // If camelCase exists but snake_case doesn't, add snake_case
-            else if (normalized[camelCase] !== undefined && normalized[snakeCase] === undefined) {
-                normalized[snakeCase] = normalized[camelCase];
-                normalizedFields[snakeCase].snakeCase = true;
+            else if (normalized[camel_case] !== undefined && normalized[snake_case] === undefined) {
+                normalized[snake_case] = normalized[camel_case];
+                normalizedFields[snake_case].snake_case = true;
             }
         }
         
@@ -507,215 +504,111 @@ export class DbClient {
         transaction: any; 
         post?: Post;
     }> {
+        if (!tx || !tx.tx_id) {
+            logger.error(' DB: INVALID TRANSACTION', { tx });
+            throw new Error('Invalid transaction data');
+        }
+        
         try {
-            logger.debug('Saving transaction to database', { 
-                tx_id: tx.tx_id,
-                type: tx.type,
-                block_height: tx.block_height,
-                block_time: tx.block_time
-            });
+            // Normalize metadata to ensure both snake_case and camelCase fields
+            const normalizedMetadata = this.normalizeMetadata(tx.metadata);
             
-            // Normalize metadata to handle both snake_case and camelCase
-            tx.metadata = this.normalizeMetadata(tx.metadata);
-
             // Use a timeout to prevent hanging queries
-            const timeoutPromise = new Promise<{transaction: any}>((resolve) => {
+            const timeoutPromise = new Promise((resolve) => {
                 setTimeout(() => {
                     logger.warn(' DB: TRANSACTION SAVE TIMEOUT', { tx_id: tx.tx_id });
-                    resolve({
-                        transaction: {
-                            id: '',
-                            tx_id: tx.tx_id,
-                            type: tx.type || 'unknown',
-                            protocol: tx.protocol || 'unknown',
-                            metadata: tx.metadata || {}
-                        }
-                    });
-                }, 10000); // 10 second timeout
+                    resolve(null);
+                }, 5000); // 5 second timeout
             });
-
-            // Save to ProcessedTransaction table
-            const dbPromise = this.withFreshClient(async (client) => {
-                try {
-                    // Check if transaction already exists
-                    const existingTx = await client.processedTransaction.findUnique({
-                        where: { tx_id: tx.tx_id },
-                        select: {
-                            id: true,
-                            tx_id: true
-                        }
-                    });
-
-                    if (existingTx) {
-                        // Update existing transaction with only the fields we know exist
-                        try {
-                            return {
-                                transaction: await client.processedTransaction.update({
-                                    where: { tx_id: tx.tx_id },
-                                    data: {
-                                        type: tx.type,
-                                        protocol: tx.protocol,
-                                        metadata: tx.metadata || {}
-                                    },
-                                    select: {
-                                        id: true,
-                                        tx_id: true,
-                                        type: true,
-                                        protocol: true,
-                                        metadata: true
-                                    }
-                                })
-                            };
-                        } catch (updateError) {
-                            logger.warn('Update failed, returning minimal transaction object', {
-                                error: updateError instanceof Error ? updateError.message : 'Unknown error',
-                                tx_id: tx.tx_id,
-                                timestamp: new Date().toISOString()
-                            });
-                            
-                            // Return a minimal transaction object
-                            return {
-                                transaction: {
-                                    id: existingTx.id,
-                                    tx_id: tx.tx_id,
-                                    type: tx.type || 'unknown',
-                                    protocol: tx.protocol || 'unknown',
-                                    metadata: tx.metadata || {}
-                                }
-                            };
-                        }
-                    } else {
-                        // Create new transaction with only the fields we know exist
-                        try {
-                            return {
-                                transaction: await client.processedTransaction.create({
-                                    data: {
-                                        tx_id: tx.tx_id,
-                                        type: tx.type,
-                                        protocol: tx.protocol,
-                                        metadata: tx.metadata || {}
-                                    },
-                                    select: {
-                                        id: true,
-                                        tx_id: true,
-                                        type: true,
-                                        protocol: true,
-                                        metadata: true
-                                    }
-                                })
-                            };
-                        } catch (createError) {
-                            logger.warn('Create failed, returning minimal transaction object', {
-                                error: createError instanceof Error ? createError.message : 'Unknown error',
-                                tx_id: tx.tx_id,
-                                timestamp: new Date().toISOString()
-                            });
-                            
-                            // Return a minimal transaction object
-                            return {
-                                transaction: {
-                                    id: '',
-                                    tx_id: tx.tx_id,
-                                    type: tx.type || 'unknown',
-                                    protocol: tx.protocol || 'unknown',
-                                    metadata: tx.metadata || {}
-                                }
-                            };
-                        }
-                    }
-                } catch (prismaError) {
-                    // If there's an error with the Prisma query, log it and return a minimal object
-                    logger.warn('DB: ERROR WITH PRISMA QUERY IN SAVE TRANSACTION', {
-                        error: prismaError instanceof Error ? prismaError.message : 'Unknown error',
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    // Return a minimal transaction object
-                    return {
-                        transaction: {
-                            id: '',
-                            tx_id: tx.tx_id,
-                            type: tx.type || 'unknown',
-                            protocol: tx.protocol || 'unknown',
-                            metadata: tx.metadata || {}
-                        }
-                    };
+            
+            // Execute the query
+            const queryPromise = prisma.processedTransaction.upsert({
+                where: {
+                    tx_id: tx.tx_id
+                },
+                update: {
+                    block_height: tx.block_height,
+                    block_time: tx.block_time,
+                    author_address: tx.author_address,
+                    metadata: normalizedMetadata
+                },
+                create: {
+                    tx_id: tx.tx_id,
+                    block_height: tx.block_height,
+                    block_time: tx.block_time,
+                    author_address: tx.author_address,
+                    metadata: normalizedMetadata
                 }
             });
             
-            // Race the database query against the timeout
-            return Promise.race([dbPromise, timeoutPromise]);
+            // Race the query against the timeout
+            const result = await Promise.race([queryPromise, timeoutPromise]);
+            
+            if (!result) {
+                throw new Error('Transaction save operation timed out');
+            }
+            
+            // Return the saved transaction with snake_case fields
+            return {
+                transaction: {
+                    tx_id: result.tx_id,
+                    block_height: result.block_height,
+                    block_time: result.block_time,
+                    author_address: result.author_address,
+                    metadata: normalizedMetadata
+                }
+            };
         } catch (error) {
-            logger.error('DB: FAILED TO SAVE TRANSACTION', {
+            logger.error(' DB: ERROR SAVING TRANSACTION', {
                 tx_id: tx.tx_id,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
-            
-            // Return a minimal transaction object
-            return {
-                transaction: {
-                    id: '',
-                    tx_id: tx.tx_id,
-                    type: tx.type || 'unknown',
-                    protocol: tx.protocol || 'unknown',
-                    metadata: tx.metadata || {}
-                }
-            };
+            throw error;
         }
     }
 
-    public async getTransaction(tx_id: string): Promise<ProcessedTransaction | null> {
+    public async getTransaction(tx_id: string): Promise<any | null> {
+        if (!tx_id) {
+            return null;
+        }
+        
         try {
-            logger.info(' DB: FETCHING TRANSACTION', { tx_id });
-            
             // Use a timeout to prevent hanging queries
-            const timeoutPromise = new Promise<null>((resolve) => {
+            const timeoutPromise = new Promise((resolve) => {
                 setTimeout(() => {
                     logger.warn(' DB: TRANSACTION FETCH TIMEOUT', { tx_id });
                     resolve(null);
                 }, 5000); // 5 second timeout
             });
             
-            // Database query with fresh client
-            const dbPromise = this.withFreshClient(async (client) => {
-                try {
-                    const tx = await client.processedTransaction.findUnique({
-                        where: { tx_id },
-                        select: {
-                            id: true,
-                            tx_id: true,
-                            type: true,
-                            protocol: true,
-                            metadata: true,
-                            block_height: true,
-                            block_time: true
-                        }
-                    });
-                    
-                    if (tx) {
-                        logger.debug(' DB: TRANSACTION FOUND', { tx_id });
-                    } else {
-                        logger.debug(' DB: TRANSACTION NOT FOUND', { tx_id });
-                    }
-                    
-                    return tx;
-                } catch (error) {
-                    logger.error(' DB: ERROR FETCHING TRANSACTION', {
-                        tx_id,
-                        error: error instanceof Error ? error.message : 'Unknown error'
-                    });
-                    return null;
+            // Execute the query
+            const queryPromise = prisma.processedTransaction.findUnique({
+                where: {
+                    tx_id: tx_id
                 }
             });
             
-            // Race the database query against the timeout
-            return Promise.race([dbPromise, timeoutPromise]);
+            // Race the query against the timeout
+            const result = await Promise.race([queryPromise, timeoutPromise]);
+            
+            if (!result) {
+                return null;
+            }
+            
+            // Normalize the result to ensure snake_case fields
+            return {
+                tx_id: result.tx_id,
+                block_height: result.block_height,
+                block_time: result.block_time,
+                author_address: result.author_address,
+                metadata: this.normalizeMetadata(result.metadata)
+            };
         } catch (error) {
-            logger.error(' DB: UNEXPECTED ERROR FETCHING TRANSACTION', {
+            logger.error(' DB: ERROR FETCHING TRANSACTION', {
                 tx_id,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
-            return null;
+            throw error;
         }
     }
 

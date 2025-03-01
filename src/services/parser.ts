@@ -626,32 +626,40 @@ export class TransactionParser {
             
             try {
                 // Parse the raw transaction using BSV
-                const rawTx = Buffer.from(tx.transaction, 'base64');
-                
-                // Process each output
-                for (let i = 0; i < tx.outputs.length; i++) {
-                    const output = tx.outputs[i];
+                try {
+                    const rawTx = Buffer.from(tx.transaction, 'base64');
+                    const bsvTx = bsv.Transaction.fromBuffer(rawTx);
                     
-                    // Check if this is an OP_RETURN output
-                    if (output.script && output.script.isDataOut()) {
-                        const chunks = output.script.chunks;
+                    // Process each output
+                    for (let i = 0; i < bsvTx.outputs.length; i++) {
+                        const output = bsvTx.outputs[i];
                         
-                        // Skip OP_RETURN (first chunk)
-                        for (let j = 1; j < chunks.length; j++) {
-                            const chunk = chunks[j];
-                            if (chunk.buf) {
-                                // Convert buffer to string
-                                try {
-                                    const str = sanitizeForDb(chunk.buf.toString('utf8'));
-                                    data.push(str);
-                                } catch {
-                                    // If UTF-8 conversion fails, try hex
-                                    const hex = chunk.buf.toString('hex');
-                                    data.push(hex);
+                        // Check if this is an OP_RETURN output
+                        if (output.script && output.script.isDataOut()) {
+                            const chunks = output.script.chunks;
+                            
+                            // Skip OP_RETURN (first chunk)
+                            for (let j = 1; j < chunks.length; j++) {
+                                const chunk = chunks[j];
+                                if (chunk.buf) {
+                                    // Convert buffer to string
+                                    try {
+                                        const str = sanitizeForDb(chunk.buf.toString('utf8'));
+                                        data.push(str);
+                                    } catch {
+                                        // If UTF-8 conversion fails, try hex
+                                        const hex = chunk.buf.toString('hex');
+                                        data.push(hex);
+                                    }
                                 }
                             }
                         }
                     }
+                } catch (bsvError) {
+                    logger.warn('Failed to parse with BSV library, falling back to raw outputs', {
+                        tx_id,
+                        error: bsvError instanceof Error ? bsvError.message : String(bsvError)
+                    });
                 }
                 
                 // If no data found in OP_RETURN outputs, try to extract from other outputs
@@ -688,7 +696,7 @@ export class TransactionParser {
                     }
                 }
             } catch (error) {
-                logger.warn('Failed to parse transaction with BSV library, falling back to raw outputs', {
+                logger.warn('Failed to parse transaction data, falling back to raw outputs', {
                     tx_id,
                     error: error instanceof Error ? error.message : String(error)
                 });
@@ -757,9 +765,25 @@ export class TransactionParser {
                 metadata: lockData
             };
 
-            // Save to database
-            await this.dbClient.saveTransaction(txRecord);
-            logger.info('Transaction saved successfully', { tx_id });
+            // Set a timeout for database operation
+            const dbTimeoutPromise = new Promise<void>((resolve) => {
+                setTimeout(() => {
+                    logger.warn('Database operation timed out', { tx_id });
+                    resolve();
+                }, 10000); // 10 second timeout
+            });
+
+            // Save to database with timeout
+            try {
+                const savePromise = this.dbClient.saveTransaction(txRecord);
+                await Promise.race([savePromise, dbTimeoutPromise]);
+                logger.info('Transaction saved successfully', { tx_id });
+            } catch (dbError) {
+                logger.error('Failed to save transaction to database', {
+                    tx_id,
+                    error: dbError instanceof Error ? dbError.message : String(dbError)
+                });
+            }
         } catch (error) {
             logger.error('Failed to parse transaction', {
                 tx_id,
