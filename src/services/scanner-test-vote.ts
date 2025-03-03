@@ -1,13 +1,11 @@
-import { TransactionParser } from "./parser";
-import { DbClient } from "./dbClient";
-import { logger } from "../utils/logger";
+import { parser } from '../parser/index.js';
+import { db_client } from '../db/index.js';
+import { logger } from '../utils/logger.js';
 
 // This script tests the transaction parser with a real vote transaction
 async function testVoteTransaction() {
     try {
-        // Create instances
-        const dbClient = new DbClient();
-        const parser = new TransactionParser(dbClient);
+        // Using the new parser and db_client singletons
         
         // Sample transaction ID with vote data
         // You can replace this with any transaction ID that contains vote data
@@ -15,11 +13,11 @@ async function testVoteTransaction() {
         
         logger.info('Starting vote transaction test', { tx_id });
         
-        // Parse the transaction
-        await parser.parseTransaction(tx_id);
+        // Parse the transaction using the new parser
+        await parser.parse_transaction(tx_id);
         
         // Fetch the saved transaction to verify
-        const savedTx = await dbClient.get_transaction(tx_id);
+        const savedTx = await db_client.get_transaction(tx_id);
         
         if (savedTx) {
             logger.info('Successfully retrieved transaction', { 

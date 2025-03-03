@@ -1,24 +1,22 @@
-import { JungleBusClient, ControlMessageStatusCode } from "@gorillapool/js-junglebus";
-import { TransactionParser } from "./parser";
-import { DbClient } from "./dbClient";
-import { CONFIG } from "./config";
-import { logger } from "../utils/logger";
+import { JungleBusClient, ControlMessageStatusCode } from '@gorillapool/js-junglebus';
+import { parser } from '../parser/index.js';
+import { db_client } from '../db/index.js';
+import { CONFIG } from './config.js';
+import { logger } from '../utils/logger.js';
 
 export class Scanner {
     private readonly start_block = 0;  // Start earlier to catch all target blocks
     private readonly jungle_bus: JungleBusClient;
-    private readonly parser: TransactionParser;
-    private readonly dbClient: DbClient;
     private pending_transactions: string[] = [];
     private processing_batch = false;
     private readonly batch_size = 5; // Process 5 transactions at a time
     private readonly batch_interval = 5000; // 5 seconds between batches
 
-    constructor(parser: TransactionParser, dbClient: DbClient) {
-        this.parser = parser;
-        this.dbClient = dbClient;
+    constructor() {
+        logger.info('Scanner initializing with new parser and db_client');
         this.jungle_bus = new JungleBusClient("junglebus.gorillapool.io", {
             useSSL: true,
+            protocol: 'json',
             onConnected: (ctx) => {
                 logger.info("🔌 JungleBus CONNECTED", ctx);
             },
@@ -53,7 +51,7 @@ export class Scanner {
                     
                     // Process each transaction in the batch
                     const promises = batch.map(tx_id => {
-                        return this.parser.parseTransaction(tx_id).catch(error => {
+                        return parser.parse_transaction(tx_id).catch(error => {
                             logger.error('❌ Error processing transaction in batch', {
                                 tx_id,
                                 error: error instanceof Error ? error.message : 'Unknown error'
@@ -115,7 +113,8 @@ export class Scanner {
     private async fetchSubscriptionDetails() {
         const subscription_id = process.env.JB_SUBSCRIPTION_ID || CONFIG.JB_SUBSCRIPTION_ID;
         try {
-            const response = await fetch(`${this.jungle_bus.url}/v1/subscription/${subscription_id}`);
+            // Direct API call to JungleBus
+            const response = await fetch(`https://junglebus.gorillapool.io/v1/subscription/${subscription_id}`);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -138,7 +137,7 @@ export class Scanner {
     public async getCurrentBlockHeight(): Promise<number | null> {
         try {
             // Try to get the block height from the database
-            const dbHeight = await this.dbClient.get_current_block_height();
+            const dbHeight = await db_client.get_current_block_height();
             if (dbHeight) {
                 return dbHeight;
             }
@@ -157,8 +156,31 @@ export class Scanner {
         }
     }
 
+    /**
+     * Cleans up the database by removing all processed transactions and related data
+     * @returns Promise<void>
+     */
+    public async cleanupDatabase(): Promise<void> {
+        try {
+            logger.info('Starting database cleanup');
+            await db_client.cleanup_database();
+            logger.info('Database cleanup completed successfully');
+        } catch (error) {
+            logger.error('Failed to clean up database', { 
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            throw error;
+        }
+    }
+
     public async start(): Promise<void> {
         try {
+            // Check if database cleanup is requested
+            if (process.env.CLEANUP_DB === 'true') {
+                logger.info('Database cleanup requested before scanning');
+                await this.cleanupDatabase();
+            }
             const subscription_id = process.env.JB_SUBSCRIPTION_ID || CONFIG.JB_SUBSCRIPTION_ID;
             logger.info(`🚀 Starting scanner from block ${this.start_block} with subscription ID ${subscription_id}`);
             
@@ -277,8 +299,6 @@ export class Scanner {
 
 // Check if this file is being run directly
 if (process.env.NODE_ENV !== 'test' && import.meta.url === new URL(import.meta.url).href) {
-    const parser = new TransactionParser(new DbClient());
-    const dbClient = new DbClient();
-    const scanner = new Scanner(parser, dbClient);
+    const scanner = new Scanner();
     scanner.start().catch(console.error);
 }

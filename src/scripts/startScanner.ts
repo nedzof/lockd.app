@@ -1,12 +1,8 @@
 import { Scanner } from '../services/scanner.js';
 import { logger } from '../utils/logger.js';
-import { DbClient } from '../services/dbClient.js';
-import { TransactionParser } from '../services/parser.js';
 
 async function main() {
-    const dbClient = DbClient.getInstance();
-    const parser = new TransactionParser(dbClient);
-    const scanner = new Scanner(parser, dbClient);
+    const scanner = new Scanner();
     
     process.on('SIGINT', async () => {
         logger.info('Received SIGINT. Shutting down...');

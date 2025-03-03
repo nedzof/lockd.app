@@ -12,14 +12,13 @@ export interface ParsedContent {
   data: any;
 }
 
-export interface vote_option {
-  id: string;
-  post_id: string;
-  content: string;
-  index: number;
-  created_at: Date;
+export interface VoteOption {
+  id?: string;
+  post_txid: string;
+  option_text: string;
+  option_index: number;
+  created_at?: Date;
   updated_at?: Date;
-  question_id?: string;
 }
 
 export interface VoteQuestion {
@@ -41,35 +40,34 @@ export interface Vote {
 
 export interface LockLike {
   id?: string;
-  tx_id?: string;
-  lock_amount: number;
-  lock_duration: number;
+  lock_txid: string;
+  target_txid: string;
+  lock_type: string;
+  action: LockAction;
+  block_height: number;
+  block_time: bigint;
   created_at?: Date;
   updated_at?: Date;
-  post_id?: string;
 }
 
 export interface Post {
-    id: string;
-    post_id: string;
-    type: string;
-    content: any;
-    block_time: Date;
-    sequence: number;
-    parent_sequence: number;
-    created_at: Date;
-    updated_at: Date;
-    protocol: string;
-    sender_address?: string | null;
-    block_height?: number | null;
-    tx_id?: string | null;
-    image?: Buffer | null;
+    id?: string;
+    post_txid: string;
+    type?: string;
+    content: string;
+    block_time: bigint;
+    block_height?: number;
+    is_deleted?: boolean;
+    parent_post_txid?: string | null;
+    orig_post_txid?: string | null;
+    created_at?: Date;
+    updated_at?: Date;
+    protocol?: string;
     lock_likes?: LockLike[];
-    vote_options?: vote_option[];
-    vote_question?: VoteQuestion | null;
+    vote_options?: VoteOption[];
 }
 
-export interface PostWithvote_options extends Post {
+export interface PostWithVoteOptions extends Post {
     vote_question: {
         id: string;
         post_id: string;
@@ -100,11 +98,30 @@ export interface PostWithvote_options extends Post {
     }[];
 }
 
+// New interfaces for the refactored DB clients
+
+export type LockAction = 'like' | 'unlike';
+
+export interface PostMetadata {
+    post_txid: string;
+    content: string;
+    is_deleted?: boolean;
+    parent_post_txid?: string;
+    orig_post_txid?: string;
+    vote_options?: string[];
+}
+
+export interface LockMetadata {
+    target_txid: string;
+    lock_type: string;
+    action?: string;
+}
+
 export interface ProcessedTransaction {
     id?: string;
     tx_id: string;  // Only required field
     block_height?: number;  // Maps to block_height in database
-    block_time?: number;    // Maps to block_time in database (BigInt in DB, Number in TS)
+    block_time?: bigint;    // Maps to block_time in database as BigInt
     type?: string;
     protocol?: string;
     metadata?: Record<string, any>;

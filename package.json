@@ -9,6 +9,7 @@
     "test": "NODE_ENV=test jest --forceExit --detectOpenHandles",
     "start": "node dist/index.js",
     "scanner": "tsx src/services/scanner.ts",
+    "scanner:cleanup": "CLEANUP_DB=true tsx src/services/scanner.ts",
     "generate-tags": "tsx scripts/generateTags.js",
     "download-model": "node scripts/download-model.js",
     "verify-tag-system": "node scripts/verify-tag-system.js",

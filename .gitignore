@@ -40,3 +40,6 @@ lerna-debug.log*
 
 # TypeScript
 *.tsbuildinfo 
+
+# windsurf rules
+.windsurfrules
