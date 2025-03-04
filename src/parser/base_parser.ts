@@ -16,20 +16,70 @@ export class BaseParser {
             // Handle common key variations
             const lowerKey = key.toLowerCase().trim();
             
+            // Convert camelCase to snake_case if detected
+            let normalized = lowerKey;
+            if (/[a-z][A-Z]/.test(key)) {
+                normalized = key
+                    .replace(/([a-z])([A-Z])/g, '$1_$2')
+                    .toLowerCase()
+                    .trim();
+            }
+            
             // Map common alternative spellings to standard keys
             const keyMap: Record<string, string> = {
+                // Content and media keys
                 'content_type': 'content_type',
                 'contenttype': 'content_type',
                 'contentType': 'content_type',
-                'type': 'content_type', // Sometimes 'type' is used instead of 'content_type'
+                'type': 'content_type', 
                 
+                // File and image keys
                 'filename': 'filename',
                 'file_name': 'filename',
                 'fileName': 'filename',
-                'name': 'filename', // Sometimes 'name' is used instead of 'filename'
+                'name': 'filename',
+                
+                // Lock protocol specific keys
+                'lock_amount': 'lock_amount',
+                'lockamount': 'lock_amount',
+                'lockAmount': 'lock_amount',
+                
+                'lock_duration': 'lock_duration',
+                'lockduration': 'lock_duration',
+                'lockDuration': 'lock_duration',
+                
+                'is_locked': 'is_locked',
+                'islocked': 'is_locked',
+                'isLocked': 'is_locked',
+                
+                'is_vote': 'is_vote',
+                'isvote': 'is_vote',
+                'isVote': 'is_vote',
+                
+                // Vote related keys
+                'options_hash': 'options_hash',
+                'optionshash': 'options_hash',
+                'optionsHash': 'options_hash',
+                
+                'vote_options': 'vote_options',
+                'voteoptions': 'vote_options',
+                'voteOptions': 'vote_options',
+                
+                'vote_question': 'vote_question',
+                'votequestion': 'vote_question',
+                'voteQuestion': 'vote_question',
+                
+                'total_options': 'total_options',
+                'totaloptions': 'total_options',
+                'totalOptions': 'total_options',
+                
+                // Post reference keys
+                'post_id': 'post_id',
+                'postid': 'post_id',
+                'postId': 'post_id',
             };
             
-            return keyMap[lowerKey] || lowerKey;
+            return keyMap[normalized] || normalized;
         } catch (error) {
             logger.warn('Error in normalizeKey', {
                 key,

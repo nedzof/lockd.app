@@ -6,7 +6,7 @@ import { TransactionDataParser } from './transaction_data_parser.js';
 import { LockProtocolParser } from './lock_protocol_parser.js';
 import { MediaParser } from './media_parser.js';
 import { VoteParser } from './vote_parser.js';
-import { ParsedTransaction, JungleBusResponse } from '../shared/types.js';
+import { ParsedTransaction, JungleBusResponse, LockProtocolData } from '../shared/types.js';
 import { db_client } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -101,9 +101,21 @@ export class MainParser extends BaseParser {
                 block_time: txRecord.block_time
             });
 
-            // Save to database
+            // Determine transaction type based on lock data
+            txRecord.type = this.determine_transaction_type(lockData);
+            txRecord.protocol = 'LOCK'; // Set the protocol explicitly
+            
+            // Debug log the transaction record
+            logger.debug('Determined transaction type', {
+                tx_id,
+                type: txRecord.type,
+                is_vote: lockData.is_vote,
+                is_locked: lockData.is_locked
+            });
+            
+            // Save to database using the new db_client.process_transaction method
             try {
-                const savePromise = db_client.save_transaction(txRecord);
+                const savePromise = db_client.process_transaction(txRecord);
                 const dbTimeoutPromise = new Promise<void>((resolve) => {
                     setTimeout(() => {
                         logger.warn('Database operation timed out', { tx_id });
@@ -112,9 +124,9 @@ export class MainParser extends BaseParser {
                 });
                 
                 await Promise.race([savePromise, dbTimeoutPromise]);
-                logger.info('Transaction saved successfully', { tx_id });
+                logger.info('Transaction processed and saved successfully', { tx_id });
             } catch (dbError) {
-                logger.error('Failed to save transaction to database', {
+                logger.error('Failed to process and save transaction to database', {
                     tx_id,
                     error: dbError instanceof Error ? dbError.message : String(dbError)
                 });
@@ -144,6 +156,40 @@ export class MainParser extends BaseParser {
         }
     }
 
+    /**
+     * Determine the transaction type based on lock data
+     * @param lockData The lock protocol data from a transaction
+     * @returns The transaction type string
+     */
+    private determine_transaction_type(lockData: LockProtocolData): string {
+        // Determine the type based on the lock protocol data
+        if (lockData.is_vote) {
+            return 'post'; // Vote posts are still considered posts
+        }
+        
+        if (lockData.is_locked) {
+            return 'like'; // Locked content is considered a 'like' action
+        }
+        
+        // Check for image type posts
+        if (lockData.image_metadata && lockData.image_metadata.is_image) {
+            return 'post'; // Image posts
+        }
+        
+        // Check for reply type
+        if (lockData.reply_to) {
+            return 'reply';
+        }
+        
+        // Check for repost type
+        if (lockData.repost_of) {
+            return 'repost';
+        }
+        
+        // Default to standard post type
+        return 'post';
+    }
+    
     /**
      * Prune the transaction cache if it exceeds the maximum size
      */

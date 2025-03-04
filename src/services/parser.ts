@@ -6,7 +6,7 @@ import { logger } from '../utils/logger.js';
 import { DbClient } from './dbClient.js';
 import { JungleBusClient } from '@gorillapool/js-junglebus';
 import { LockProtocolData, ParsedTransaction } from '../shared/types.js';
-import * as bsv from 'bsv';
+import bsv from 'bsv';
 
 // Import the new parser and utilities
 import { 
