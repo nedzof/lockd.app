@@ -5,7 +5,7 @@ export const CONFIG = {
     JB_SUBSCRIPTION_ID: process.env.JB_SUBSCRIPTION_ID || 'lockd-app',
     
     // Default start block if none is specified
-    DEFAULT_START_BLOCK: 885675,
+    DEFAULT_START_BLOCK: 885872,
     
     // Database connection timeout in milliseconds
     DB_TIMEOUT_MS: 30000, // 30 seconds

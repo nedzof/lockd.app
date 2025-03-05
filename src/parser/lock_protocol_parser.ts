@@ -42,7 +42,8 @@ export class LockProtocolParser extends BaseParser {
                 filename: '',
                 content_type: '',
                 is_image: false
-            }
+            },
+            author_address: this.get_sender_address(tx) // Add author_address from tx
         };
         
         try {
@@ -459,6 +460,29 @@ export class LockProtocolParser extends BaseParser {
                 // Store other key-value pairs
                 metadata[key] = value;
                 break;
+        }
+    }
+
+    /**
+     * Get the sender address from the transaction
+     * @param tx Transaction object
+     * @returns Sender address or empty string if not found
+     */
+    private get_sender_address(tx: JungleBusResponse): string {
+        try {
+            // First try to get from addresses array
+            if (tx.addresses && tx.addresses.length > 0) {
+                return tx.addresses[0];
+            }
+            
+            // Fallback to inputs
+            return tx.inputs && tx.inputs[0] ? tx.inputs[0].address : '';
+        } catch (error) {
+            this.logError('Error getting sender address', {
+                error: error instanceof Error ? error.message : String(error),
+                tx_id: tx?.id || 'unknown'
+            });
+            return '';
         }
     }
 }

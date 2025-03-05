@@ -221,6 +221,12 @@ export interface LockProtocolData {
     options_hash?: string;
     tags?: string[];
     total_options?: number;
+    raw_image_data?: Buffer | null;
+    media_type?: string | null;
+    created_at?: Date | null;
+    is_locked?: boolean;
+    post_txid?: string;
+    author_address?: string;
 }
 
 export interface TransactionMetadata {

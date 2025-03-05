@@ -1,5 +1,5 @@
 generator client {
-  provider        = "prisma-client-js"
+  provider         = "prisma-client-js"
   preview_features = ["views"]
 }
 
@@ -65,7 +65,7 @@ model processed_transaction {
   @@index([protocol])
   @@index([tx_id])
   @@index([type])
-  @@index([block_height], map: "processed_transaction_block_height_idx")
+  @@index([block_height])
 }
 
 model tag {
@@ -82,16 +82,16 @@ model tag {
 }
 
 model vote_option {
-  id             String     @id @default(dbgenerated("gen_random_uuid()")) @map("id")
-  content        String     @map("content")
-  author_address String?    @map("author_address")
-  created_at     DateTime   @default(now()) @map("created_at")
-  post_id        String     @map("post_id")
-  tags           String[]   @default([]) @map("tags")
-  tx_id          String     @unique @map("tx_id")
-  option_index   Int        @default(0) @map("option_index")
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @map("id")
+  content        String      @map("content")
+  author_address String?     @map("author_address")
+  created_at     DateTime    @default(now()) @map("created_at")
+  post_id        String      @map("post_id")
+  tags           String[]    @default([]) @map("tags")
+  tx_id          String      @unique @map("tx_id")
+  option_index   Int         @default(0) @map("option_index")
   lock_likes     lock_like[]
-  post           post       @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  post           post        @relation(fields: [post_id], references: [id], onDelete: Cascade)
 
   @@index([created_at])
   @@index([option_index])
@@ -109,17 +109,17 @@ model bsv_price_history {
 }
 
 model stats {
-  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
-  total_posts        Int      @map("total_posts")
-  total_votes        Int      @map("total_votes")
-  total_lock_likes   Int      @map("total_lock_likes")
-  total_users        Int      @map("total_users")
-  total_bsv_locked   Float    @map("total_bsv_locked")
-  avg_lock_duration  Float    @map("avg_lock_duration")
-  most_used_tag      String?  @map("most_used_tag")
-  most_active_user   String?  @map("most_active_user")
-  last_updated       DateTime @default(now()) @map("last_updated")
-  current_bsv_price  Float?   @map("current_bsv_price")
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
+  total_posts       Int      @map("total_posts")
+  total_votes       Int      @map("total_votes")
+  total_lock_likes  Int      @map("total_lock_likes")
+  total_users       Int      @map("total_users")
+  total_bsv_locked  Float    @map("total_bsv_locked")
+  avg_lock_duration Float    @map("avg_lock_duration")
+  most_used_tag     String?  @map("most_used_tag")
+  most_active_user  String?  @map("most_active_user")
+  last_updated      DateTime @default(now()) @map("last_updated")
+  current_bsv_price Float?   @map("current_bsv_price")
 
   @@map("stats")
 }

@@ -20,11 +20,11 @@ export class PostClient extends BaseDbClient {
             const metadata = tx.metadata as PostMetadata;
             
             if (!metadata || !metadata.post_txid) {
-                logger.warn('Missing post_txid in transaction metadata', { tx_id: tx.tx_id });
+                logger.warn('⚠️ Missing post_txid', { tx_id: tx.tx_id });
                 return null;
             }
             
-            logger.debug('Creating or updating post', { 
+            logger.debug('📝 Creating/updating post', { 
                 tx_id: tx.tx_id, 
                 post_txid: metadata.post_txid
             });
@@ -36,7 +36,7 @@ export class PostClient extends BaseDbClient {
                 block_height: typeof tx.block_height !== 'undefined' && tx.block_height !== null && !isNaN(Number(tx.block_height))
                     ? Number(tx.block_height)
                     : null,
-                author_address: metadata.author_address || null,
+                author_address: metadata.author_address || tx.author_address || null,
                 is_vote: metadata.is_vote === true,
                 is_locked: metadata.is_locked === true,
                 metadata: {
@@ -57,13 +57,14 @@ export class PostClient extends BaseDbClient {
                 });
             });
             
-            logger.debug('Post created or updated successfully', { 
-                tx_id: post.tx_id 
+            logger.debug('✅ Post saved', { 
+                tx_id: post.tx_id,
+                author: post.author_address
             });
             
             return post;
         } catch (error) {
-            logger.error('Error creating or updating post', {
+            logger.error('❌ Error saving post', {
                 tx_id: tx.tx_id,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
@@ -89,7 +90,7 @@ export class PostClient extends BaseDbClient {
             const metadata = tx.metadata as PostMetadata;
             
             if (!metadata || !metadata.vote_options || !Array.isArray(metadata.vote_options)) {
-                logger.debug('No vote options to create', { tx_id: tx.tx_id });
+                logger.debug('👀 No vote options to create', { tx_id: tx.tx_id });
                 return [];
             }
             
@@ -97,11 +98,11 @@ export class PostClient extends BaseDbClient {
             const post = await this.get_post(post_txid);
             
             if (!post || !post.id) {
-                logger.error('Post not found for vote options', { post_txid });
+                logger.error('🚨 Post not found for vote options', { post_txid });
                 throw new Error('Post not found for vote options');
             }
             
-            logger.debug('Creating vote options', { 
+            logger.debug('📝 Creating vote options', { 
                 tx_id: tx.tx_id,
                 post_txid,
                 count: metadata.vote_options.length
@@ -135,14 +136,14 @@ export class PostClient extends BaseDbClient {
                 return options;
             });
             
-            logger.debug('Vote options created successfully', { 
+            logger.debug('✅ Vote options created', { 
                 post_txid,
                 count: vote_options.length
             });
             
             return vote_options;
         } catch (error) {
-            logger.error('Error creating vote options', {
+            logger.error('❌ Error creating vote options', {
                 tx_id: tx.tx_id,
                 post_txid,
                 error: error instanceof Error ? error.message : 'Unknown error'
@@ -166,7 +167,7 @@ export class PostClient extends BaseDbClient {
         }
         
         try {
-            logger.debug('Getting post', { post_txid });
+            logger.debug('🔍 Getting post', { post_txid });
             
             // Get the post
             const post = await this.with_fresh_client(async (client) => {
@@ -179,15 +180,15 @@ export class PostClient extends BaseDbClient {
             });
             
             if (!post) {
-                logger.debug('Post not found', { post_txid });
+                logger.debug('👀 Post not found', { post_txid });
                 return null;
             }
             
-            logger.debug('Post found', { post_txid });
+            logger.debug('📝 Post found', { post_txid });
             
             return post;
         } catch (error) {
-            logger.error('Error getting post', {
+            logger.error('❌ Error getting post', {
                 post_txid,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
@@ -201,15 +202,15 @@ export class PostClient extends BaseDbClient {
      */
     public async cleanup_vote_options(): Promise<void> {
         try {
-            logger.info('Cleaning up all vote options');
+            logger.info('🧹 Cleaning up all vote options');
             
             const deleted = await this.with_fresh_client(async (client) => {
                 return await client.vote_option.deleteMany({});
             });
             
-            logger.info(`Successfully deleted ${deleted.count} vote options`);
+            logger.info(`✅ Successfully deleted ${deleted.count} vote options`);
         } catch (error) {
-            logger.error('Error cleaning up vote options', {
+            logger.error('❌ Error cleaning up vote options', {
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
             throw error;
@@ -222,15 +223,15 @@ export class PostClient extends BaseDbClient {
      */
     public async cleanup_posts(): Promise<void> {
         try {
-            logger.info('Cleaning up all posts');
+            logger.info('🧹 Cleaning up all posts');
             
             const deleted = await this.with_fresh_client(async (client) => {
                 return await client.post.deleteMany({});
             });
             
-            logger.info(`Successfully deleted ${deleted.count} posts`);
+            logger.info(`✅ Successfully deleted ${deleted.count} posts`);
         } catch (error) {
-            logger.error('Error cleaning up posts', {
+            logger.error('❌ Error cleaning up posts', {
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
             throw error;

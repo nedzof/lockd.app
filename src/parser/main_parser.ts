@@ -26,7 +26,7 @@ export class MainParser extends BaseParser {
         this.media_parser = new MediaParser();
         this.vote_parser = new VoteParser();
         
-        logger.info('MainParser initialized');
+        logger.info('🧩 MainParser initialized');
     }
 
     /**
@@ -36,23 +36,23 @@ export class MainParser extends BaseParser {
     public async parse_transaction(tx_id: string): Promise<void> {
         // Check if transaction is already in cache
         if (this.transactionCache.has(tx_id)) {
-            logger.info('Transaction already in cache, skipping parse', { tx_id });
+            logger.info('🔄 Transaction already in cache', { tx_id });
             return; // Assume already processed
         }
 
         try {
             if (!tx_id || typeof tx_id !== 'string') {
-                logger.error('Invalid transaction ID', { tx_id });
+                logger.error('❌ Invalid transaction ID', { tx_id });
                 return;
             }
 
-            logger.info('Parsing transaction', { tx_id });
+            logger.info('🔍 Parsing transaction', { tx_id });
 
             // Fetch transaction from JungleBus
             const tx = await this.transaction_data_parser.fetch_transaction(tx_id);
             
             if (!tx || !tx.transaction) {
-                logger.warn('Transaction not found or invalid', { tx_id });
+                logger.warn('⚠️ Transaction not found', { tx_id });
                 return;
             }
 
@@ -60,7 +60,7 @@ export class MainParser extends BaseParser {
             const data = this.transaction_data_parser.extract_data_from_transaction(tx);
 
             if (data.length === 0) {
-                logger.warn('No data found in transaction', { tx_id });
+                logger.warn('⚠️ No data in transaction', { tx_id });
                 return;
             }
 
@@ -68,7 +68,7 @@ export class MainParser extends BaseParser {
             const lockData = this.lock_protocol_parser.extract_lock_protocol_data(data, tx);
 
             if (!lockData) {
-                logger.info('Not a Lock protocol transaction, skipping', { tx_id });
+                logger.info('⏭️ Not a Lock protocol tx', { tx_id });
                 return;
             }
 
@@ -95,7 +95,7 @@ export class MainParser extends BaseParser {
             };
 
             // Debug log the transaction record
-            logger.debug('Saving transaction', {
+            logger.debug('💾 Saving transaction', {
                 tx_id,
                 block_time_type: typeof txRecord.block_time,
                 block_time: txRecord.block_time
@@ -106,7 +106,7 @@ export class MainParser extends BaseParser {
             txRecord.protocol = 'LOCK'; // Set the protocol explicitly
             
             // Debug log the transaction record
-            logger.debug('Determined transaction type', {
+            logger.debug('🏷️ Transaction type', {
                 tx_id,
                 type: txRecord.type,
                 is_vote: lockData.is_vote,
@@ -118,21 +118,21 @@ export class MainParser extends BaseParser {
                 const savePromise = db_client.process_transaction(txRecord);
                 const dbTimeoutPromise = new Promise<void>((resolve) => {
                     setTimeout(() => {
-                        logger.warn('Database operation timed out', { tx_id });
+                        logger.warn('⏱️ DB operation timeout', { tx_id });
                         resolve();
                     }, 10000); // 10 second timeout
                 });
                 
                 await Promise.race([savePromise, dbTimeoutPromise]);
-                logger.info('Transaction processed and saved successfully', { tx_id });
+                logger.info('✅ Transaction saved', { tx_id });
             } catch (dbError) {
-                logger.error('Failed to process and save transaction to database', {
+                logger.error('❌ Failed to save transaction', {
                     tx_id,
                     error: dbError instanceof Error ? dbError.message : String(dbError)
                 });
             }
         } catch (error) {
-            logger.error('Failed to parse transaction', {
+            logger.error('❌ Failed to parse transaction', {
                 tx_id,
                 error: error instanceof Error ? error.message : String(error)
             });
@@ -206,7 +206,7 @@ export class MainParser extends BaseParser {
                 this.transactionCache.delete(key);
             }
             
-            logger.info('Pruned transaction cache', {
+            logger.info('🧹 Pruned transaction cache', {
                 pruned: pruneCount,
                 remaining: this.transactionCache.size
             });
