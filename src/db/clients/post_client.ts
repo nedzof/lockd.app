@@ -31,28 +31,34 @@ export class PostClient extends BaseDbClient {
             
             // Prepare post data
             const post_data = {
-                post_txid: metadata.post_txid,
+                tx_id: metadata.post_txid,
                 content: metadata.content || '',
                 block_height: typeof tx.block_height !== 'undefined' && tx.block_height !== null && !isNaN(Number(tx.block_height))
                     ? Number(tx.block_height)
-                    : 0,
-                block_time: this.create_block_time_bigint(tx.block_time),
-                is_deleted: metadata.is_deleted === true,
-                parent_post_txid: metadata.parent_post_txid || null,
-                orig_post_txid: metadata.orig_post_txid || null
+                    : null,
+                author_address: metadata.author_address || null,
+                is_vote: metadata.is_vote === true,
+                is_locked: metadata.is_locked === true,
+                metadata: {
+                    ...metadata,
+                    block_time: this.create_block_time_bigint(tx.block_time),
+                    is_deleted: metadata.is_deleted === true,
+                    parent_post_txid: metadata.parent_post_txid || null,
+                    orig_post_txid: metadata.orig_post_txid || null
+                }
             };
             
             // Create or update the post
             const post = await this.with_fresh_client(async (client) => {
                 return await client.post.upsert({
-                    where: { post_txid: metadata.post_txid },
+                    where: { tx_id: metadata.post_txid },
                     update: post_data,
                     create: post_data
                 });
             });
             
             logger.debug('Post created or updated successfully', { 
-                post_txid: post.post_txid 
+                tx_id: post.tx_id 
             });
             
             return post;
@@ -87,6 +93,14 @@ export class PostClient extends BaseDbClient {
                 return [];
             }
             
+            // First, get the post to get its ID
+            const post = await this.get_post(post_txid);
+            
+            if (!post || !post.id) {
+                logger.error('Post not found for vote options', { post_txid });
+                throw new Error('Post not found for vote options');
+            }
+            
             logger.debug('Creating vote options', { 
                 tx_id: tx.tx_id,
                 post_txid,
@@ -95,16 +109,17 @@ export class PostClient extends BaseDbClient {
             
             // Prepare vote option data
             const vote_option_data = metadata.vote_options.map((option, index) => ({
-                post_txid,
-                option_index: index,
-                option_text: option || `Option ${index + 1}`
+                tx_id: `${tx.tx_id}_option_${index}`,
+                post_id: post.id,
+                content: option || `Option ${index + 1}`,
+                option_index: index
             }));
             
             // Create vote options
             const vote_options = await this.with_fresh_client(async (client) => {
                 // First, delete any existing vote options for this post
                 await client.vote_option.deleteMany({
-                    where: { post_txid }
+                    where: { post_id: post.id }
                 });
                 
                 // Then create the new vote options
@@ -156,7 +171,7 @@ export class PostClient extends BaseDbClient {
             // Get the post
             const post = await this.with_fresh_client(async (client) => {
                 return await client.post.findUnique({
-                    where: { post_txid },
+                    where: { tx_id: post_txid },
                     include: {
                         vote_options: include_vote_options
                     }

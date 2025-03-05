@@ -18,7 +18,11 @@
     "update-stats-price": "tsx scripts/update-stats-bsv-price.ts",
     "setup-bsv-price-cron": "bash scripts/setup-bsv-price-cron.sh",
     "dev": "USE_DIRECT_URL=true concurrently \"vite --port 3000 --strictPort\" \"PORT=3003 tsx watch src/server.ts\"",
-    "test:parser": "NODE_ENV=test jest --forceExit --silent src/services/tests/parser.integration.test.ts"
+    "test:parser": "NODE_ENV=test jest --forceExit --silent src/services/tests/parser.integration.test.ts",
+    "prisma:sync": "tsx scripts/sync-prisma-schema.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:validate": "prisma validate"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

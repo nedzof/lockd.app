@@ -117,6 +117,7 @@ export class LockProtocolParser extends BaseParser {
             // Process lock protocol data
             const lockData: Record<string, any> = {
                 post_id: '',
+                post_txid: '',
                 created_at: new Date().toISOString(),
                 content: '',
                 tags: [],
@@ -310,6 +311,8 @@ export class LockProtocolParser extends BaseParser {
 
             // Set post ID
             lockData.post_id = tx.id || '';
+            // Also set post_txid to match post_id (transaction ID)
+            lockData.post_txid = tx.id || '';
 
             // Merge lockData into metadata
             Object.assign(metadata, lockData);
@@ -444,6 +447,12 @@ export class LockProtocolParser extends BaseParser {
             case 'postid':
                 metadata.post_id = value;
                 this.logDebug('Found reference post ID', { post_id: value, tx_id: metadata.post_id || 'unknown' });
+                break;
+                
+            case 'post_txid':
+            case 'posttxid':
+                metadata.post_txid = value;
+                this.logDebug('Found explicit post_txid', { post_txid: value, tx_id: metadata.post_id || 'unknown' });
                 break;
                 
             default:

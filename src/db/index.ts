@@ -66,7 +66,7 @@ export class DbClient {
                         typeof tx.metadata === 'object' && 
                         'vote_options' in tx.metadata && 
                         Array.isArray(tx.metadata.vote_options)) {
-                        await this.post_client.create_vote_options(tx, post.post_txid);
+                        await this.post_client.create_vote_options(tx, post.tx_id);
                     }
                     break;
                     
