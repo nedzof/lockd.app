@@ -88,84 +88,60 @@ export class TransactionDataParser extends BaseParser {
             try {
                 const rawTx = Buffer.from(tx.transaction, 'base64');
                 
-                // Try different approaches to create the transaction object
-                let bsvTx;
+                // Try to parse the transaction using BSV library
+                let bsvTx: bsv.Transaction | null = null;
+                
+                // Try using the BSV library
                 try {
-                    // First approach: using direct constructor
                     bsvTx = new bsv.Transaction(rawTx);
-                } catch (constructorErr) {
+                } catch (bsvError) {
+                    this.logWarn('Failed to parse with BSV library, trying alternative methods', {
+                        tx_id: tx?.id || 'unknown',
+                        error: bsvError instanceof Error ? bsvError.message : String(bsvError)
+                    });
+                    
+                    // Try alternative methods
                     try {
-                        // Second approach: using fromBuffer
+                        // Try with fromBuffer
                         bsvTx = bsv.Transaction.fromBuffer(rawTx);
-                    } catch (fromBufferErr) {
+                    } catch (fromBufferError) {
                         try {
-                            // Third approach: using fromHex
+                            // Try with fromHex
                             const rawTxHex = rawTx.toString('hex');
                             bsvTx = bsv.Transaction.fromHex(rawTxHex);
-                        } catch (fromHexErr) {
-                            // If all approaches fail, rethrow the original error
-                            throw constructorErr;
+                        } catch (fromHexError) {
+                            this.logWarn('All BSV parsing methods failed', {
+                                tx_id: tx?.id || 'unknown'
+                            });
                         }
                     }
                 }
                 
-                // Process each output
-                for (let i = 0; i < bsvTx.outputs.length; i++) {
-                    const output = bsvTx.outputs[i];
-                    
-                    // Check if this is an OP_RETURN output
-                    if (output.script && output.script.isDataOut()) {
-                        const chunks = output.script.chunks;
+                // If we have a valid transaction, process its outputs
+                if (bsvTx) {
+                    // Process each output
+                    for (let i = 0; i < bsvTx.outputs.length; i++) {
+                        const output = bsvTx.outputs[i];
                         
-                        // Skip OP_RETURN (first chunk)
-                        for (let j = 1; j < chunks.length; j++) {
-                            const chunk = chunks[j];
-                            if (chunk.buf) {
-                                // Convert buffer to string
-                                try {
-                                    // First try UTF-8 conversion
-                                    const str = sanitize_for_db(chunk.buf.toString('utf8'));
-                                    
-                                    // Check if the string contains invalid characters (often means it wasn't really UTF-8)
-                                    if (str.includes('\ufffd') || /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(str)) {
-                                        // If the string has invalid characters, use hex instead
-                                        const hex = chunk.buf.toString('hex');
-                                        this.logDebug('OP_RETURN chunk contains invalid UTF-8, using hex', {
-                                            tx_id: tx?.id || 'unknown',
-                                            hex_preview: hex.substring(0, 20) + '...'
-                                        });
-                                        data.push(hex);
-                                    } else {
-                                        // Use the UTF-8 string if it looks valid
-                                        data.push(str);
-                                        
-                                        // Add additional debug logging for specific Lock protocol indicators
-                                        if (str.includes('LOCK') || str.includes('app=lockd.app') || 
-                                            str.includes('lock_amount=') || str.includes('lock_duration=')) {
-                                            this.logDebug('Found potential Lock protocol data in OP_RETURN', {
-                                                tx_id: tx?.id || 'unknown',
-                                                data: str.substring(0, 100) + (str.length > 100 ? '...' : '')
-                                            });
-                                        }
-                                    }
-                                } catch (strError) {
-                                    // If UTF-8 conversion fails entirely, use hex
-                                    const hex = chunk.buf.toString('hex');
-                                    this.logDebug('Error converting OP_RETURN chunk to UTF-8, using hex', {
-                                        tx_id: tx?.id || 'unknown',
-                                        error: strError instanceof Error ? strError.message : String(strError),
-                                        hex_preview: hex.substring(0, 20) + '...'
-                                    });
-                                    data.push(hex);
+                        // Check if this is an OP_RETURN output
+                        if (output.script && output.script.isDataOut()) {
+                            const chunks = output.script.chunks;
+                            
+                            // Skip OP_RETURN (first chunk)
+                            for (let j = 1; j < chunks.length; j++) {
+                                const chunk = chunks[j];
+                                if (chunk.buf) {
+                                    // Process the buffer data
+                                    this.processBufferData(chunk.buf, data, tx?.id || 'unknown');
                                 }
                             }
                         }
                     }
                 }
-            } catch (bsvError) {
-                this.logWarn('Failed to parse with BSV library, falling back to raw outputs', {
+            } catch (parseError) {
+                this.logWarn('Failed to parse transaction with BSV', {
                     tx_id: tx?.id || 'unknown',
-                    error: bsvError instanceof Error ? bsvError.message : String(bsvError)
+                    error: parseError instanceof Error ? parseError.message : String(parseError)
                 });
             }
             
@@ -199,48 +175,451 @@ export class TransactionDataParser extends BaseParser {
                                         } else {
                                             // If no key-value pairs found, split by common delimiters
                                             const parts = decoded.split(/[\s\t\n\r\x00-\x1F]+/).filter(Boolean);
-                                            data.push(...parts);
+                                            if (parts.length > 0) {
+                                                data.push(...parts);
+                                            }
                                         }
                                     }
                                 } else {
-                                    // Add as is
+                                    // Not hex, try to process as-is
                                     data.push(output);
                                 }
                             } catch (decodeError) {
-                                // If decoding fails, add as is
-                                this.logWarn('Error decoding hex output', {
+                                this.logWarn('Error decoding output', {
                                     tx_id: tx?.id || 'unknown',
-                                    error: decodeError instanceof Error ? decodeError.message : String(decodeError),
-                                    output_preview: output.substring(0, 50) + (output.length > 50 ? '...' : '')
+                                    error: decodeError instanceof Error ? decodeError.message : String(decodeError)
                                 });
-                                data.push(output);
                             }
                         }
                     }
                 }
             }
+            
+            // If we still have no data, try to process the raw transaction
+            if (data.length === 0 && tx.transaction) {
+                try {
+                    const rawTx = Buffer.from(tx.transaction, 'base64');
+                    const rawTxHex = rawTx.toString('hex');
+                    
+                    // Try to find OP_RETURN patterns in the raw transaction
+                    const opReturnPattern = /6a([0-9a-fA-F]{2,})/g;
+                    let match;
+                    
+                    while ((match = opReturnPattern.exec(rawTxHex)) !== null) {
+                        const dataHex = match[1];
+                        try {
+                            const buf = Buffer.from(dataHex, 'hex');
+                            this.processBufferData(buf, data, tx?.id || 'unknown');
+                        } catch (bufferError) {
+                            this.logWarn('Error processing OP_RETURN data from raw transaction', {
+                                tx_id: tx?.id || 'unknown',
+                                error: bufferError instanceof Error ? bufferError.message : String(bufferError)
+                            });
+                        }
+                    }
+                } catch (rawError) {
+                    this.logWarn('Error processing raw transaction data', {
+                        tx_id: tx?.id || 'unknown',
+                        error: rawError instanceof Error ? rawError.message : String(rawError)
+                    });
+                }
+            }
+            
+            this.logInfo('Successfully extracted data from transaction', {
+                tx_id: tx?.id || 'unknown',
+                data_items_count: data.length,
+                first_few_items: data.slice(0, 3)
+            });
+            
+            return data;
         } catch (error) {
             this.logError('Error extracting data from transaction', {
                 tx_id: tx?.id || 'unknown',
                 error: error instanceof Error ? error.message : String(error)
             });
+            return [];
+        }
+    }
+    
+    /**
+     * Process buffer data and add to data array
+     * @param buf Buffer to process
+     * @param data Array to add processed data to
+     * @param txId Transaction ID for logging
+     */
+    private processBufferData(buf: Buffer, data: string[], txId: string): void {
+        // First check for common binary file signatures
+        if (this.isBinaryData(buf)) {
+            // For binary data, use hex encoding with a prefix
+            const hex = buf.toString('hex');
+            data.push(`hex:${hex}`);
+            return;
         }
         
-        // Log summary of data extracted
-        if (data.length > 0) {
-            this.logInfo('Successfully extracted data from transaction', {
-                tx_id: tx?.id || 'unknown',
-                data_items_count: data.length,
-                first_few_items: data.slice(0, 3).map(item => 
-                    typeof item === 'string' ? 
-                        (item.length > 50 ? item.substring(0, 50) + '...' : item) : 
-                        'non-string item')
+        // Try UTF-8 conversion
+        try {
+            const str = sanitize_for_db(buf.toString('utf8'));
+            
+            // Check if the string contains invalid characters (often means it wasn't really UTF-8)
+            if (str.includes('\ufffd') || /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(str)) {
+                // If the string has invalid characters, use hex instead
+                const hex = buf.toString('hex');
+                this.logDebug('Buffer contains invalid UTF-8, using hex', {
+                    tx_id: txId,
+                    hex_preview: hex.substring(0, 20) + '...'
+                });
+                data.push(`hex:${hex}`);
+            } else {
+                // Use the UTF-8 string if it looks valid
+                data.push(str);
+                
+                // Add additional debug logging for specific Lock protocol indicators
+                if (str.includes('LOCK') || str.includes('app=lockd.app') || 
+                    str.includes('lock_amount=') || str.includes('lock_duration=')) {
+                    this.logDebug('Found potential Lock protocol data', {
+                        tx_id: txId,
+                        data: str.substring(0, 100) + (str.length > 100 ? '...' : '')
+                    });
+                }
+            }
+        } catch (strError) {
+            // If UTF-8 conversion fails entirely, use hex
+            const hex = buf.toString('hex');
+            this.logDebug('Error converting buffer to UTF-8, using hex', {
+                tx_id: txId,
+                error: strError instanceof Error ? strError.message : String(strError),
+                hex_preview: hex.substring(0, 20) + '...'
             });
-        } else {
-            this.logWarn('No data extracted from transaction', { tx_id: tx?.id || 'unknown' });
+            data.push(`hex:${hex}`);
+        }
+    }
+    
+    /**
+     * Check if buffer contains binary data
+     * @param buf Buffer to check
+     * @returns true if buffer contains binary data
+     */
+    private isBinaryData(buf: Buffer): boolean {
+        // Check for common binary file signatures
+        if (buf.length >= 4) {
+            // Check for PNG signature
+            if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
+                return true;
+            }
+            
+            // Check for JPEG signature
+            if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) {
+                return true;
+            }
+            
+            // Check for GIF signature
+            if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
+                return true;
+            }
+            
+            // Check for PDF signature
+            if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) {
+                return true;
+            }
         }
         
-        return data;
+        // Check for binary data by looking for control characters and high-bit characters
+        let binaryCount = 0;
+        const sampleSize = Math.min(buf.length, 100); // Check first 100 bytes
+        
+        for (let i = 0; i < sampleSize; i++) {
+            const byte = buf[i];
+            // Control characters (except common whitespace) or high-bit characters
+            if ((byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) || byte >= 127) {
+                binaryCount++;
+            }
+        }
+        
+        // If more than 10% of the sample is binary, consider it binary data
+        return binaryCount > sampleSize * 0.1;
+    }
+
+    /**
+     * Process transaction data and extract relevant information
+     * @param data Array of data strings extracted from transaction
+     * @param tx_id Transaction ID for logging
+     * @returns Processed transaction data
+     */
+    public process_transaction_data(data: string[], tx_id: string): any {
+        if (!data || !Array.isArray(data) || data.length === 0) {
+            this.logWarn('No data to process', { tx_id });
+            return {
+                content: '',
+                post_id: tx_id,
+                is_vote: false,
+                tags: []
+            };
+        }
+
+        this.logInfo('Processing transaction data', { 
+            tx_id, 
+            data_items_count: data.length,
+            first_few: data.slice(0, 3).map(item => 
+                typeof item === 'string' ? 
+                    (item.length > 50 ? item.substring(0, 50) + '...' : item) : 
+                    'non-string item'
+            )
+        });
+
+        // Initialize result object
+        const result: any = {
+            content: '',
+            post_id: tx_id,
+            is_vote: false,
+            tags: [],
+            lock_amount: 0,
+            lock_duration: 0,
+            app: '',
+            author_name: '',
+            media_type: '',
+            media_url: '',
+            options_hash: '',
+            vote_options: [],
+            vote_question: ''
+        };
+
+        // Track if content has been found in tx.data array
+        let contentFromTxData = false;
+        
+        // Process each data item
+        for (const item of data) {
+            if (!item || typeof item !== 'string') continue;
+            
+            // Handle hex-encoded binary data
+            if (item.startsWith('hex:')) {
+                const hexData = item.substring(4);
+                try {
+                    // Try to decode hex data - might contain useful information
+                    const decoded = Buffer.from(hexData, 'hex').toString('utf8');
+                    this.logDebug('Decoded hex data', { 
+                        tx_id,
+                        decoded_preview: decoded.substring(0, 100) + (decoded.length > 100 ? '...' : '')
+                    });
+                    
+                    // Process the decoded data for key-value pairs
+                    this.process_key_value_pairs(decoded, result, contentFromTxData);
+                } catch (error) {
+                    this.logWarn('Failed to decode hex data', {
+                        tx_id,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+                continue;
+            }
+            
+            // Process regular data item
+            this.process_key_value_pairs(item, result, contentFromTxData);
+            
+            // Check for vote-related keywords
+            if (item.includes('vote_question=') || 
+                item.includes('vote_options=') || 
+                item.includes('options_hash=')) {
+                result.is_vote = true;
+                this.logDebug('Identified as vote transaction', { tx_id });
+            }
+            
+            // Check for Lock protocol keywords
+            if (item.includes('lock_amount=') || 
+                item.includes('lock_duration=') || 
+                item.includes('app=lockd.app')) {
+                this.logDebug('Identified as Lock protocol transaction', { tx_id });
+            }
+        }
+        
+        // Clean up and finalize the result
+        if (result.tags && Array.isArray(result.tags)) {
+            // Remove duplicates and empty tags
+            result.tags = [...new Set(result.tags)].filter(Boolean);
+        } else {
+            result.tags = [];
+        }
+        
+        // Ensure content is a string
+        if (!result.content || typeof result.content !== 'string') {
+            result.content = '';
+        }
+        
+        // Truncate content if it's too long
+        if (result.content.length > 10000) {
+            this.logWarn('Content too long, truncating', { 
+                tx_id, 
+                original_length: result.content.length 
+            });
+            result.content = result.content.substring(0, 10000);
+        }
+        
+        // Log the processed result
+        this.logInfo('Processed transaction data', {
+            tx_id,
+            content_length: result.content.length,
+            is_vote: result.is_vote,
+            tags_count: result.tags.length
+        });
+        
+        return result;
+    }
+    
+    /**
+     * Process key-value pairs from a data string
+     * @param data Data string to process
+     * @param result Result object to update
+     * @param skipContentUpdate Whether to skip updating content (used when content is from tx.data)
+     */
+    private process_key_value_pairs(data: string, result: any, skipContentUpdate: boolean = false): void {
+        if (!data || typeof data !== 'string') return;
+        
+        // Check for common key-value pair formats
+        const keyValuePairs = this.extractKeyValuePairs(data);
+        
+        if (keyValuePairs.length > 0) {
+            // Process each key-value pair
+            for (const pair of keyValuePairs) {
+                const [key, value] = pair.split('=').map(part => part.trim());
+                if (!key || !value) continue;
+                
+                // Process specific keys
+                switch (key.toLowerCase()) {
+                    case 'content':
+                        if (!skipContentUpdate) {
+                            result.content = value;
+                        }
+                        break;
+                    case 'app':
+                        result.app = value;
+                        break;
+                    case 'tags':
+                        // Split tags by common delimiters
+                        const tags = value.split(/[,;|]+/).map(tag => tag.trim()).filter(Boolean);
+                        if (!result.tags) result.tags = [];
+                        result.tags.push(...tags);
+                        break;
+                    case 'author_name':
+                        result.author_name = value;
+                        break;
+                    case 'lock_amount':
+                        result.lock_amount = parseInt(value, 10) || 0;
+                        break;
+                    case 'lock_duration':
+                        result.lock_duration = parseInt(value, 10) || 0;
+                        break;
+                    case 'media_type':
+                        result.media_type = value;
+                        break;
+                    case 'media_url':
+                        result.media_url = value;
+                        break;
+                    case 'vote_question':
+                        result.vote_question = value;
+                        result.is_vote = true;
+                        break;
+                    case 'vote_options':
+                        try {
+                            // Try to parse as JSON
+                            const options = JSON.parse(value);
+                            if (Array.isArray(options)) {
+                                result.vote_options = options;
+                            } else {
+                                // If not an array, try to split by common delimiters
+                                result.vote_options = value.split(/[,;|]+/).map(opt => opt.trim()).filter(Boolean);
+                            }
+                        } catch (error) {
+                            // If parsing fails, split by common delimiters
+                            result.vote_options = value.split(/[,;|]+/).map(opt => opt.trim()).filter(Boolean);
+                        }
+                        result.is_vote = true;
+                        break;
+                    case 'options_hash':
+                        result.options_hash = value;
+                        result.is_vote = true;
+                        break;
+                    default:
+                        // Store other key-value pairs directly
+                        const normalizedKey = this.normalizeKey(key);
+                        if (normalizedKey) {
+                            result[normalizedKey] = value;
+                        }
+                }
+            }
+        } else if (!skipContentUpdate && data.trim().length > 0) {
+            // If no key-value pairs found and content update is not skipped,
+            // use the data as content if it's not already set
+            if (!result.content || result.content.length === 0) {
+                result.content = data.trim();
+            }
+        }
+    }
+    
+    /**
+     * Extract key-value pairs from a data string
+     * @param data Data string to extract key-value pairs from
+     * @returns Array of key-value pair strings
+     */
+    private extractKeyValuePairs(data: string): string[] {
+        if (!data || typeof data !== 'string') return [];
+        
+        const pairs: string[] = [];
+        
+        // Match key=value patterns
+        const keyValueRegex = /([a-zA-Z0-9_]+)=([^&]+)(?:&|$)/g;
+        let match;
+        
+        while ((match = keyValueRegex.exec(data)) !== null) {
+            pairs.push(`${match[1]}=${match[2]}`);
+        }
+        
+        // Also try to match JSON-like structures
+        try {
+            if (data.trim().startsWith('{') && data.trim().endsWith('}')) {
+                const jsonData = JSON.parse(data);
+                for (const [key, value] of Object.entries(jsonData)) {
+                    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                        pairs.push(`${key}=${value}`);
+                    } else if (value !== null && typeof value === 'object') {
+                        // For objects and arrays, stringify them
+                        pairs.push(`${key}=${JSON.stringify(value)}`);
+                    }
+                }
+            }
+        } catch (error) {
+            // Ignore JSON parsing errors
+        }
+        
+        return pairs;
+    }
+    
+    /**
+     * Check if a transaction is a vote transaction
+     * @param parsedData Parsed transaction data
+     * @returns True if it's a vote transaction
+     */
+    public is_vote_transaction(parsedData: any): boolean {
+        if (!parsedData) return false;
+        
+        // Check if is_vote flag is set
+        if (parsedData.is_vote === true) return true;
+        
+        // Check for vote-specific fields
+        if (parsedData.vote_question || 
+            (parsedData.vote_options && Array.isArray(parsedData.vote_options) && parsedData.vote_options.length > 0) ||
+            parsedData.options_hash) {
+            return true;
+        }
+        
+        // Check content for vote-related keywords
+        if (parsedData.content && typeof parsedData.content === 'string') {
+            const content = parsedData.content.toLowerCase();
+            if (content.includes('vote') && 
+                (content.includes('option') || content.includes('choice') || content.includes('poll'))) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     /**

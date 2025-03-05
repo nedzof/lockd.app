@@ -3,6 +3,9 @@ import { parser } from '../parser/index.js';
 import { db_client } from '../db/index.js';
 import { CONFIG } from './config.js';
 import { logger } from '../utils/logger.js';
+import { VoteTransactionService } from './vote-transaction-service.js';
+import { PrismaClient } from '@prisma/client';
+import { TransactionDataParser } from '../parser/transaction_data_parser.js';
 
 export class Scanner {
     private readonly start_block = CONFIG.DEFAULT_START_BLOCK;  // Use the configured default start block
@@ -11,6 +14,10 @@ export class Scanner {
     private processing_batch = false;
     private readonly batch_size = 5; // Process 5 transactions at a time
     private readonly batch_interval = 5000; // 5 seconds between batches
+    private voteService: VoteTransactionService;
+    private txDataParser: TransactionDataParser;
+    private prisma: PrismaClient;
+    private isPolling = false;
 
     constructor() {
         logger.info('🔧 Scanner initializing with new parser and db_client');
@@ -30,6 +37,11 @@ export class Scanner {
                 logger.error("❌ JungleBus ERROR", ctx);
             },
         });
+
+        // Initialize Prisma client and services
+        this.prisma = new PrismaClient();
+        this.voteService = new VoteTransactionService(this.prisma);
+        this.txDataParser = new TransactionDataParser();
 
         // Start the batch processing loop
         this.processBatches();
@@ -51,7 +63,7 @@ export class Scanner {
                     
                     // Process each transaction in the batch
                     const promises = batch.map(tx_id => {
-                        return parser.parse_transaction(tx_id).catch(error => {
+                        return this.processTransaction(tx_id).catch(error => {
                             logger.error('❌ Error processing transaction in batch', {
                                 tx_id,
                                 error: error instanceof Error ? error.message : 'Unknown error'
@@ -75,6 +87,115 @@ export class Scanner {
             // Wait before processing the next batch
             await new Promise(resolve => setTimeout(resolve, this.batch_interval));
         }
+    }
+
+    /**
+     * Process a transaction by its ID
+     * This handles both regular transactions and vote transactions
+     * 
+     * @param tx_id - The transaction ID to process
+     */
+    public async processTransaction(tx_id: string): Promise<void> {
+        try {
+            logger.info('🔍 Processing transaction', { tx_id });
+            
+            // First, try to parse the transaction with the standard parser
+            const parsedTx = await parser.parse_transaction(tx_id);
+            
+            // If the transaction is successfully parsed, check if it's a vote transaction
+            if (parsedTx) {
+                // Check if this might be a vote transaction
+                const isVote = this.isVoteTransaction(parsedTx);
+                
+                if (isVote) {
+                    logger.info('🗳️ Detected vote transaction, processing with VoteTransactionService', { tx_id });
+                    
+                    // Fetch the full transaction data if needed
+                    let fullTx = parsedTx;
+                    
+                    // If the transaction doesn't have a data array, try to fetch it
+                    if (!fullTx.data || !Array.isArray(fullTx.data) || fullTx.data.length === 0) {
+                        try {
+                            // Try to fetch the transaction data
+                            const txData = await this.txDataParser.fetch_transaction(tx_id);
+                            
+                            if (txData) {
+                                // Extract data from the transaction
+                                const data = this.txDataParser.extract_data_from_transaction(txData);
+                                
+                                if (data && data.length > 0) {
+                                    fullTx.data = data;
+                                }
+                            }
+                        } catch (fetchError) {
+                            logger.warn('⚠️ Error fetching additional transaction data', {
+                                tx_id,
+                                error: fetchError instanceof Error ? fetchError.message : 'Unknown error'
+                            });
+                        }
+                    }
+                    
+                    // Process the vote transaction
+                    const voteResult = await this.voteService.processVoteTransaction(fullTx);
+                    
+                    if (voteResult) {
+                        logger.info('✅ Vote transaction processed successfully', {
+                            tx_id,
+                            post_id: voteResult.post.id,
+                            options_count: voteResult.voteOptions.length
+                        });
+                    } else {
+                        logger.warn('⚠️ Vote transaction processing failed', { tx_id });
+                    }
+                }
+            }
+        } catch (error) {
+            logger.error('❌ Error processing transaction', {
+                tx_id,
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+        }
+    }
+
+    /**
+     * Check if a transaction is a vote transaction
+     * 
+     * @param tx - The transaction to check
+     * @returns True if this is a vote transaction
+     */
+    private isVoteTransaction(tx: any): boolean {
+        // Check if the transaction has vote indicators
+        if (!tx) return false;
+        
+        // Check if it's explicitly marked as a vote
+        if (tx.type === 'vote' || 
+            (tx.metadata && tx.metadata.is_vote === true)) {
+            return true;
+        }
+        
+        // Check the data array for vote indicators
+        if (Array.isArray(tx.data)) {
+            // Check for vote indicators in the data array
+            return tx.data.some((item: any) => {
+                if (typeof item === 'string') {
+                    return item === 'is_vote=true' || 
+                           item === 'vote=true' || 
+                           item.includes('vote_question') || 
+                           item.includes('vote_option');
+                } else if (item && typeof item === 'object') {
+                    return (item.key === 'vote' && item.value === 'true') || 
+                           (item.key === 'is_vote' && item.value === 'true') ||
+                           item.key === 'question' || 
+                           item.key === 'vote_question' ||
+                           item.key === 'option' || 
+                           item.key === 'vote_option';
+                }
+                return false;
+            });
+        }
+        
+        return false;
     }
 
     private async handleTransaction(tx: any): Promise<void> {
@@ -256,7 +377,10 @@ export class Scanner {
         // Poll every 30 seconds
         const POLL_INTERVAL = 30000;
         
-        while (true) {
+        // Set a flag to control the polling loop
+        this.isPolling = true;
+        
+        while (this.isPolling) {
             try {
                 logger.info('🔄 Polling for new transactions');
                 
@@ -271,12 +395,42 @@ export class Scanner {
                 await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
             }
         }
+        
+        logger.info('🛑 Polling loop stopped');
     }
 
     public async stop(): Promise<void> {
         try {
             logger.info('🛑 STOPPING SCANNER');
-            await this.jungle_bus.Disconnect();
+            
+            // Stop the polling loop
+            this.isPolling = false;
+            
+            // Safely disconnect from JungleBus
+            try {
+                if (this.jungle_bus) {
+                    await Promise.race([
+                        this.jungle_bus.Disconnect(),
+                        new Promise(resolve => setTimeout(resolve, 5000)) // 5 second timeout
+                    ]);
+                }
+            } catch (disconnectError) {
+                logger.warn('⚠️ Error disconnecting from JungleBus', {
+                    error: disconnectError instanceof Error ? disconnectError.message : 'Unknown error'
+                });
+            }
+            
+            // Close the Prisma client
+            try {
+                if (this.prisma) {
+                    await this.prisma.$disconnect();
+                }
+            } catch (prismaError) {
+                logger.warn('⚠️ Error disconnecting Prisma client', {
+                    error: prismaError instanceof Error ? prismaError.message : 'Unknown error'
+                });
+            }
+            
             logger.info('👋 SCANNER STOPPED');
         } catch (error) {
             logger.error('❌ Failed to stop scanner', {

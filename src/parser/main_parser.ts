@@ -9,12 +9,16 @@ import { VoteParser } from './vote_parser.js';
 import { ParsedTransaction, JungleBusResponse, LockProtocolData } from '../shared/types.js';
 import { db_client } from '../db/index.js';
 import { logger } from '../utils/logger.js';
+import { PrismaClient } from '@prisma/client';
+import { VoteTransactionService } from '../services/vote-transaction-service.js';
 
 export class MainParser extends BaseParser {
     private transaction_data_parser: TransactionDataParser;
     private lock_protocol_parser: LockProtocolParser;
     private media_parser: MediaParser;
     private vote_parser: VoteParser;
+    private vote_transaction_service: VoteTransactionService;
+    private prisma: PrismaClient;
     private transactionCache = new Map<string, boolean>();
     private readonly MAX_CACHE_SIZE = 10000;
 
@@ -25,8 +29,10 @@ export class MainParser extends BaseParser {
         this.lock_protocol_parser = new LockProtocolParser();
         this.media_parser = new MediaParser();
         this.vote_parser = new VoteParser();
+        this.prisma = new PrismaClient();
+        this.vote_transaction_service = new VoteTransactionService(this.prisma);
         
-        logger.info('🧩 MainParser initialized');
+        logger.info('🧩 MainParser initialized with VoteTransactionService');
     }
 
     /**
@@ -80,6 +86,46 @@ export class MainParser extends BaseParser {
                     lockData.vote_options = voteData.options;
                     lockData.total_options = voteData.total_options;
                     lockData.options_hash = voteData.options_hash;
+                    
+                    // Try to process as a vote transaction using the VoteTransactionService
+                    try {
+                        // Format the transaction for the vote service
+                        const voteTransaction = {
+                            id: tx_id,
+                            block_height: tx.block_height || 0,
+                            block_time: tx.block_time || Math.floor(Date.now() / 1000),
+                            data: data,
+                            author_address: this.transaction_data_parser.get_sender_address(tx)
+                        };
+                        
+                        logger.info('🗳️ Processing vote transaction', { 
+                            tx_id, 
+                            question: lockData.vote_question,
+                            options_count: lockData.vote_options?.length || 0
+                        });
+                        
+                        // Process the vote transaction
+                        const voteResult = await this.vote_transaction_service.processVoteTransaction(voteTransaction);
+                        
+                        if (voteResult) {
+                            logger.info('✅ Vote transaction processed successfully', { 
+                                tx_id,
+                                post_id: voteResult.post.id,
+                                options_count: voteResult.voteOptions.length
+                            });
+                            
+                            // If vote was processed successfully, we can skip the regular processing
+                            this.transactionCache.set(tx_id, true);
+                            this.prune_cache();
+                            return;
+                        }
+                    } catch (voteError) {
+                        logger.error('❌ Error processing vote transaction', {
+                            tx_id,
+                            error: voteError instanceof Error ? voteError.message : String(voteError)
+                        });
+                        // Continue with regular processing as fallback
+                    }
                 }
             }
 
@@ -164,7 +210,7 @@ export class MainParser extends BaseParser {
     private determine_transaction_type(lockData: LockProtocolData): string {
         // Determine the type based on the lock protocol data
         if (lockData.is_vote) {
-            return 'post'; // Vote posts are still considered posts
+            return 'vote'; // Changed to 'vote' to better identify vote transactions
         }
         
         if (lockData.is_locked) {
@@ -200,15 +246,13 @@ export class MainParser extends BaseParser {
             
             // Remove oldest entries (first 20% of the cache)
             const pruneCount = Math.floor(this.MAX_CACHE_SIZE * 0.2);
-            const keysToRemove = keys.slice(0, pruneCount);
-            
-            for (const key of keysToRemove) {
-                this.transactionCache.delete(key);
+            for (let i = 0; i < pruneCount; i++) {
+                this.transactionCache.delete(keys[i]);
             }
             
-            logger.info('🧹 Pruned transaction cache', {
+            logger.debug('🧹 Pruned transaction cache', { 
                 pruned: pruneCount,
-                remaining: this.transactionCache.size
+                new_size: this.transactionCache.size
             });
         }
     }

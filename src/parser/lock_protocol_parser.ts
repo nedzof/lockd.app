@@ -5,6 +5,7 @@ import { BaseParser } from './base_parser.js';
 import { LockProtocolData, JungleBusResponse } from '../shared/types.js';
 import { extract_tags, decode_hex_string } from './utils/helpers.js';
 import { MediaParser } from './media_parser.js';
+import { BsvContentParser } from './bsv_content_parser.js';
 
 export class LockProtocolParser extends BaseParser {
     private media_parser: MediaParser;
@@ -15,106 +16,26 @@ export class LockProtocolParser extends BaseParser {
     }
 
     /**
-     * Extract Lock protocol data from transaction data
-     * @param data Array of strings containing transaction data
-     * @param tx Transaction object
-     * @returns LockProtocolData object or null if not a Lock protocol transaction
+     * Extract Lock protocol data from transaction
+     * @param tx The transaction object
+     * @returns The extracted Lock protocol data
      */
-    public extract_lock_protocol_data(data: string[], tx: JungleBusResponse): LockProtocolData | null {
-        // Create initial metadata structure
-        const metadata: LockProtocolData = {
-            post_id: '',
-            created_at: null,
-            content: '',
-            tags: [],
-            is_vote: false,
-            is_locked: false,
-            lock_amount: 0,
-            lock_duration: 0,
-            raw_image_data: null,
-            media_type: null,
-            vote_options: null,
-            vote_question: null,
-            total_options: null,
-            options_hash: null,
-            image: null,
-            image_metadata: {
-                filename: '',
-                content_type: '',
-                is_image: false
-            },
-            author_address: this.get_sender_address(tx) // Add author_address from tx
-        };
-        
+    public extract_lock_protocol_data(tx: any): LockProtocolData | null {
         try {
-            // Check if this is a LOCK protocol transaction - expanded to catch more cases
-            // First, look for "app=lockd.app" indicator
-            const isLockApp = data.some(item => {
-                if (typeof item !== 'string') return false;
-                
-                // Direct check for app identifier
-                if (item.includes('app=lockd.app') || item.includes('app=lock')) {
-                    return true;
-                }
-                
-                // Check hex-encoded app identifier
-                if (item.match(/^[0-9a-fA-F]+$/)) {
-                    try {
-                        const decoded = decode_hex_string(item);
-                        if (decoded.includes('app=lockd.app') || decoded.includes('app=lock')) {
-                            return true;
-                        }
-                    } catch (e) {
-                        // Ignore decode errors
-                    }
-                }
-                
-                return false;
-            });
-            
-            // Second, look for "LOCK" protocol indicator
-            const hasLockProtocol = data.some(item => {
-                if (typeof item !== 'string') return false;
-                return item === 'LOCK' || 
-                       (item.startsWith('LOCK') && item.length < 10) || // Avoid matching content that happens to start with LOCK
-                       item === 'lock' || 
-                       (item.startsWith('lock') && item.length < 10);
-            });
-            
-            // Third, look for lock amount indicators
-            const hasLockIndicators = data.some(item => {
-                if (typeof item !== 'string') return false;
-                return item.includes('lock_amount=') || 
-                       item.includes('lockAmount=') || 
-                       item.includes('lock_duration=') || 
-                       item.includes('lockDuration=') || 
-                       item.includes('is_locked=true');
-            });
-            
-            // Consider it a Lock protocol transaction if any of these conditions are met
-            const isLockProtocolTx = isLockApp || hasLockProtocol || hasLockIndicators;
-            
-            if (!isLockProtocolTx) {
-                this.logWarn('Not a Lock protocol transaction', { 
-                    tx_id: tx?.id || 'unknown',
-                    data_sample: data.slice(0, 3).map(item => typeof item === 'string' ? item.substring(0, 50) : 'non-string'),
-                    data_length: data.length
-                });
+            if (!tx) {
+                this.logError('No transaction provided');
                 return null;
             }
-            
-            this.logInfo('Found Lock protocol transaction indicators', { 
-                tx_id: tx?.id || 'unknown', 
-                isLockApp, 
-                hasLockProtocol, 
-                hasLockIndicators 
-            });
 
-            // Already logged above with more details
+            const data = this.extract_data_from_transaction(tx);
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                this.logError('No data extracted from transaction', { tx_id: tx?.id || 'unknown' });
+                return null;
+            }
 
-            // Initialize isLockProtocol flag
             let isLockProtocol = false;
-
+            const isLockApp = data.some(item => item.includes('app=lockd.app'));
+            
             // Process lock protocol data
             const lockData: Record<string, any> = {
                 post_id: '',
@@ -125,6 +46,23 @@ export class LockProtocolParser extends BaseParser {
                 is_vote: false,
                 is_locked: false
             };
+
+            // First, check if we have a data array in the transaction
+            let contentFromTxData = '';
+            if (tx.data && Array.isArray(tx.data)) {
+                // Look for content in the data array
+                for (const dataItem of tx.data) {
+                    if (typeof dataItem === 'string' && dataItem.toLowerCase().startsWith('content=')) {
+                        contentFromTxData = dataItem.substring(dataItem.indexOf('=') + 1);
+                        lockData.content = contentFromTxData;
+                        this.logDebug('Found content in tx.data array', { 
+                            content: contentFromTxData,
+                            tx_id: tx?.id || 'unknown'
+                        });
+                        break;
+                    }
+                }
+            }
 
             // Parse the data array for lock protocol data
             for (let i = 0; i < data.length; i++) {
@@ -144,198 +82,211 @@ export class LockProtocolParser extends BaseParser {
                     continue;
                 }
                 
-                // Check for content
-                if (item.startsWith('content=')) {
+                // Check for content (only if not already set from tx.data)
+                if (item.startsWith('content=') && !contentFromTxData) {
                     lockData.content = item.replace('content=', '');
                     this.logDebug('Found content with explicit key', { 
                         content_preview: lockData.content.substring(0, 50) + (lockData.content.length > 50 ? '...' : ''), 
                         tx_id: tx?.id || 'unknown' 
                     });
                     continue;
-                } else if (item.length > 0 && !lockData.content && 
+                } else if (item.length > 0 && !lockData.content && !contentFromTxData && 
                     item !== 'LOCK' && item !== 'lock' && 
                     !item.startsWith('app=') && 
                     !item.includes('=')) {
-                    // This is a fallback for content without explicit key
-                    // Check if it contains special patterns like `options_hash@`
-                    if (item.includes('@')) {
-                        // This might be a data reference like options_hash@value
-                        const parts = item.split('@');
-                        if (parts.length === 2) {
-                            const key = this.normalizeKey(parts[0]);
-                            const value = parts[1];
-                            // Set the value in lockData
-                            lockData[key] = value;
-                            this.logDebug(`Found ${key} with special format`, { 
-                                key, 
-                                value_preview: value.substring(0, 30) + (value.length > 30 ? '...' : ''),
-                                tx_id: tx?.id || 'unknown' 
-                            });
-                            continue; // Skip normal content assignment
-                        }
-                    }
-                    
-                    // Check if this content has binary data (shown as �� in the output)
-                    if (/\u{FFFD}/u.test(item) || /[^\x20-\x7E]/.test(item)) {
-                        this.logDebug('Found potential binary data in content, skipping', { 
-                            content_preview: item.substring(0, 20) + (item.length > 20 ? '...' : ''), 
-                            tx_id: tx?.id || 'unknown' 
-                        });
-                        // Let's not set this as content - it's likely binary data
-                        // Instead, look for Bitcoin addresses which might be valuable information
-                        const btcAddressMatch = item.match(/([13][a-km-zA-HJ-NP-Z1-9]{25,34})/g);
-                        if (btcAddressMatch && btcAddressMatch.length > 0) {
-                            this.logDebug('Found Bitcoin address in binary data', { 
-                                address: btcAddressMatch[0], 
-                                tx_id: tx?.id || 'unknown' 
-                            });
-                            // Use the Bitcoin address as content instead of binary data
-                            lockData.content = btcAddressMatch[0];
-                        }
-                        continue;
-                    }
-                    
-                    // Regular content assignment for valid text content
                     lockData.content = item;
                     this.logDebug('Found content without explicit key', { 
-                        content_preview: item.substring(0, 50) + (item.length > 50 ? '...' : ''), 
+                        content_preview: lockData.content.substring(0, 50) + (lockData.content.length > 50 ? '...' : ''), 
                         tx_id: tx?.id || 'unknown' 
                     });
                     continue;
                 }
                 
-                // Check for vote
-                if (item === 'VOTE' || item === 'vote' || 
-                    item.includes('VOTE') || item.includes('vote') || 
-                    item.includes('is_vote=true') || item.includes('isVote=true')) {
+                // Check for is_vote flag
+                if (item === 'is_vote=true') {
                     lockData.is_vote = true;
-                    this.logDebug('Found vote indicator', { item, tx_id: tx?.id || 'unknown' });
+                    this.logDebug('Found is_vote=true flag', { tx_id: tx?.id || 'unknown' });
                     continue;
                 }
                 
-                // Initialize vote options array if it doesn't exist
-                if (lockData.is_vote && !lockData.vote_options) {
-                    lockData.vote_options = [];
-                    lockData.total_options = 0;
-                }
-                
-                // Handle vote question
-                if (lockData.is_vote && item.startsWith('vote_question=')) {
-                    lockData.vote_question = item.replace('vote_question=', '');
-                    this.logDebug('Found vote question with explicit key', { 
-                        question: lockData.vote_question,
-                        tx_id: tx?.id || 'unknown'
-                    });
+                // Check for is_locked flag
+                if (item === 'is_locked=true') {
+                    lockData.is_locked = true;
+                    this.logDebug('Found is_locked=true flag', { tx_id: tx?.id || 'unknown' });
                     continue;
                 }
                 
-                // Identify vote option by index
-                if (lockData.is_vote && item.startsWith('optionIndex=')) {
-                    // Found an option index, the next item should be the option text
-                    const optionIndex = item.replace('optionIndex=', '');
-                    this.logDebug('Found option index', { optionIndex, tx_id: tx?.id || 'unknown' });
-                    continue;
-                }
-                
-                // If this is a vote but no explicit question is set and no content exists,
-                // use the content as the vote question
-                if (lockData.is_vote && !lockData.vote_question && lockData.content) {
-                    lockData.vote_question = lockData.content;
-                    this.logDebug('Using content as vote question', { 
-                        question: lockData.vote_question,
-                        tx_id: tx?.id || 'unknown'
-                    });
-                }
-                
-                // Add vote options - any text item might be an option if no better structure is found
-                if (lockData.is_vote && lockData.vote_options && 
-                    item.length > 0 && 
-                    !item.includes('=') && 
-                    item !== 'LOCK' && item !== 'lock' && 
-                    item !== 'VOTE' && item !== 'vote' && 
-                    item !== lockData.vote_question && 
-                    item !== lockData.content) {
-                    
-                    lockData.vote_options.push(item);
-                    lockData.total_options = lockData.vote_options.length;
-                    this.logDebug('Added vote option', { 
-                        option: item,
-                        option_count: lockData.vote_options.length,
-                        tx_id: tx?.id || 'unknown'
-                    });
-                    continue;
-                }
-                
-                // Check for lock amount
-                if (item.startsWith('lock_amount=') || item.startsWith('lockAmount=')) {
-                    const valueStr = item.includes('lock_amount=') ? 
-                        item.replace('lock_amount=', '') : 
-                        item.replace('lockAmount=', '');
-                    const lockAmount = parseInt(valueStr, 10);
-                    if (!isNaN(lockAmount)) {
-                        lockData.lock_amount = lockAmount;
-                        lockData.is_locked = true;
-                        this.logDebug('Found lock amount', { lock_amount: lockAmount, tx_id: tx?.id || 'unknown' });
-                    }
-                    continue;
-                }
-                
-                // Check for lock duration
-                if (item.startsWith('lock_duration=') || item.startsWith('lockDuration=')) {
-                    const valueStr = item.includes('lock_duration=') ? 
-                        item.replace('lock_duration=', '') : 
-                        item.replace('lockDuration=', '');
-                    const lockDuration = parseInt(valueStr, 10);
-                    if (!isNaN(lockDuration)) {
-                        lockData.lock_duration = lockDuration;
-                        this.logDebug('Found lock duration', { lock_duration: lockDuration, tx_id: tx?.id || 'unknown' });
-                    }
-                    continue;
-                }
-
-                // Process key-value pairs
+                // Check for key-value pairs
                 if (item.includes('=')) {
                     const parts = item.split('=');
                     if (parts.length === 2) {
                         const key = this.normalizeKey(parts[0]);
                         const value = parts[1];
-                        this.process_key_value_pair(key, value, lockData);
+                        this.process_key_value_pair(key, value, lockData, contentFromTxData !== '');
                     }
                 }
+            }
+
+            // Process key-value pairs from the data array
+            for (let i = 0; i < data.length; i++) {
+                const item = data[i];
+                
+                // Skip items that don't contain key-value pairs
+                if (!item.includes('=')) {
+                    continue;
+                }
+                
+                // Split the item into key and value
+                const parts = item.split('=');
+                if (parts.length < 2) {
+                    continue;
+                }
+                
+                const key = this.normalizeKey(parts[0]);
+                // Skip processing content key if we already have content from tx.data
+                if (key === 'content' && contentFromTxData) {
+                    continue;
+                }
+                
+                const value = parts.slice(1).join('='); // Rejoin in case value contains =
+                this.process_key_value_pair(key, value, lockData, contentFromTxData !== '');
             }
 
             // Extract tags
             const tags = extract_tags(data);
             if (tags.length > 0) {
-                lockData.tags = [...(lockData.tags || []), ...tags];
+                lockData.tags = tags;
             }
-
-            // Set post ID
-            lockData.post_id = tx.id || '';
-            // Also set post_txid to match post_id (transaction ID)
+            
+            // Extract image data
+            const imageData = this.media_parser.extract_image_data(tx);
+            if (imageData) {
+                lockData.image = imageData;
+                lockData.media_type = 'image';
+                
+                // If we have image data but no content, use the image alt text as content
+                if (!lockData.content && imageData.alt_text) {
+                    lockData.content = imageData.alt_text;
+                    this.logDebug('Using image alt_text as content', { 
+                        content: lockData.content, 
+                        tx_id: tx?.id || 'unknown' 
+                    });
+                }
+            }
+            
+            // If this is a vote, extract vote content
+            if (lockData.is_vote) {
+                const voteContent = this.extract_vote_content(tx);
+                
+                if (voteContent.question) {
+                    lockData.vote_question = voteContent.question;
+                    
+                    // If we don't have content yet, use the vote question
+                    if (!lockData.content) {
+                        lockData.content = voteContent.question;
+                        this.logDebug('Using vote question as content', { 
+                            content: lockData.content, 
+                            tx_id: tx?.id || 'unknown' 
+                        });
+                    }
+                }
+                
+                if (voteContent.options && voteContent.options.length > 0) {
+                    lockData.vote_options = voteContent.options;
+                    lockData.total_options = voteContent.options.length;
+                }
+            }
+            
+            // Set post_txid
             lockData.post_txid = tx.id || '';
-
-            // Merge lockData into metadata
-            Object.assign(metadata, lockData);
-
-            // Return the extracted data
-            // Log the final extracted data
-            this.logInfo('Successfully extracted Lock protocol data', { 
-                tx_id: tx?.id || 'unknown',
-                is_vote: lockData.is_vote,
-                is_locked: lockData.is_locked,
-                has_content: !!lockData.content && lockData.content.length > 0,
-                content_length: lockData.content ? lockData.content.length : 0,
-                tag_count: lockData.tags ? lockData.tags.length : 0
+            
+            // Get sender address
+            try {
+                const senderAddress = this.get_sender_address(tx);
+                if (senderAddress) {
+                    lockData.author_address = senderAddress;
+                }
+            } catch (error) {
+                this.logError('Error getting sender address', { 
+                    error: error instanceof Error ? error.message : String(error),
+                    tx_id: tx?.id || 'unknown'
+                });
+            }
+            
+            // Determine if this is a Lock protocol transaction
+            const hasLockIndicators = isLockProtocol || isLockApp;
+            
+            this.logInfo('Found Lock protocol transaction indicators', { 
+                hasLockIndicators,
+                hasLockProtocol: isLockProtocol,
+                isLockApp,
+                tx_id: tx?.id || 'unknown'
             });
             
-            return metadata;
-        } catch (error) {
-            this.logError('Error extracting Lock protocol data', {
+            if (!hasLockIndicators) {
+                return null;
+            }
+            
+            // Validate the data
+            if (!lockData.content) {
+                this.logWarn('No content found in Lock protocol data', { tx_id: tx?.id || 'unknown' });
+            }
+            
+            this.logInfo('Successfully extracted Lock protocol data', { 
                 tx_id: tx?.id || 'unknown',
-                error: error instanceof Error ? error.message : String(error)
+                has_content: !!lockData.content,
+                content_length: lockData.content ? lockData.content.length : 0,
+                tag_count: lockData.tags.length,
+                is_vote: lockData.is_vote,
+                is_locked: lockData.is_locked
+            });
+            
+            return lockData as LockProtocolData;
+        } catch (error) {
+            this.logError('Error extracting Lock protocol data', { 
+                error: error instanceof Error ? error.message : String(error),
+                tx_id: tx?.id || 'unknown'
             });
             return null;
+        }
+    }
+
+    /**
+     * Extract vote content from transaction data
+     * 
+     * @param tx - The transaction object
+     * @returns Object containing vote question and options
+     */
+    public extract_vote_content(tx: any): { 
+        question: string;
+        options: string[];
+        post_id?: string;
+        timestamp?: string;
+        total_options?: number;
+        is_locked?: boolean;
+    } {
+        try {
+            if (!tx || !tx.data || !Array.isArray(tx.data)) {
+                this.logDebug('No transaction data array found');
+                return { question: '', options: [] };
+            }
+            
+            const bsvParser = new BsvContentParser();
+            const voteContent = bsvParser.extractVoteContent(tx.data);
+            
+            this.logDebug('Extracted vote content', { 
+                question: voteContent.question,
+                options_count: voteContent.options.length,
+                tx_id: tx?.id || 'unknown'
+            });
+            
+            return voteContent;
+        } catch (error) {
+            this.logError('Error extracting vote content', { 
+                error: error instanceof Error ? error.message : String(error),
+                tx_id: tx?.id || 'unknown'
+            });
+            return { question: '', options: [] };
         }
     }
 
@@ -344,9 +295,20 @@ export class LockProtocolParser extends BaseParser {
      * @param key The key from the key-value pair
      * @param value The value from the key-value pair
      * @param metadata The metadata object to update
+     * @param skipContentUpdate If true, don't update the content field
      */
-    private process_key_value_pair(key: string, value: string, metadata: Record<string, any>): void {
+    private process_key_value_pair(
+        key: string, 
+        value: string, 
+        metadata: Record<string, any>,
+        skipContentUpdate: boolean = false
+    ): void {
         this.logDebug('Processing key-value pair', { key, value_preview: value.substring(0, 30) + (value.length > 30 ? '...' : ''), tx_id: metadata.post_id || 'unknown' });
+        
+        // Skip content updates if requested
+        if (key === 'content' && skipContentUpdate) {
+            return;
+        }
         
         switch (key) {
             case 'content_type':
@@ -483,6 +445,95 @@ export class LockProtocolParser extends BaseParser {
                 tx_id: tx?.id || 'unknown'
             });
             return '';
+        }
+    }
+
+    /**
+     * Extract data from transaction
+     * @param tx The transaction object
+     * @returns Array of strings containing transaction data
+     */
+    private extract_data_from_transaction(tx: any): string[] {
+        try {
+            if (!tx) {
+                this.logError('No transaction provided');
+                return [];
+            }
+            
+            // If tx.data is already an array of strings, use it directly
+            if (tx.data && Array.isArray(tx.data)) {
+                this.logDebug('Using tx.data array directly', { 
+                    data_length: tx.data.length,
+                    tx_id: tx?.id || 'unknown'
+                });
+                return tx.data;
+            }
+            
+            // Otherwise, try to extract data from transaction outputs
+            const data: string[] = [];
+            
+            // Check if we have outputs
+            if (tx.outputs && Array.isArray(tx.outputs)) {
+                for (const output of tx.outputs) {
+                    // Check for OP_RETURN outputs
+                    if (output.script && output.script.startsWith('006a')) {
+                        try {
+                            // Decode the script
+                            const hexData = output.script.substring(4); // Remove OP_RETURN prefix
+                            const decodedData = decode_hex_string(hexData);
+                            
+                            // Split by newlines and add to data array
+                            const lines = decodedData.split('\n');
+                            for (const line of lines) {
+                                if (line.trim()) {
+                                    data.push(line.trim());
+                                }
+                            }
+                            
+                            this.logDebug('Extracted data from OP_RETURN output', { 
+                                data_length: lines.length,
+                                tx_id: tx?.id || 'unknown'
+                            });
+                        } catch (error) {
+                            this.logError('Error decoding OP_RETURN data', { 
+                                error: error instanceof Error ? error.message : String(error),
+                                tx_id: tx?.id || 'unknown'
+                            });
+                        }
+                    }
+                }
+            }
+            
+            // If we have no data yet, check for tx.tx_data
+            if (data.length === 0 && tx.tx_data) {
+                try {
+                    // Split by newlines and add to data array
+                    const lines = tx.tx_data.split('\n');
+                    for (const line of lines) {
+                        if (line.trim()) {
+                            data.push(line.trim());
+                        }
+                    }
+                    
+                    this.logDebug('Extracted data from tx.tx_data', { 
+                        data_length: lines.length,
+                        tx_id: tx?.id || 'unknown'
+                    });
+                } catch (error) {
+                    this.logError('Error processing tx.tx_data', { 
+                        error: error instanceof Error ? error.message : String(error),
+                        tx_id: tx?.id || 'unknown'
+                    });
+                }
+            }
+            
+            return data;
+        } catch (error) {
+            this.logError('Error extracting data from transaction', { 
+                error: error instanceof Error ? error.message : String(error),
+                tx_id: tx?.id || 'unknown'
+            });
+            return [];
         }
     }
 }

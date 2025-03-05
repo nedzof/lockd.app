@@ -69,6 +69,33 @@ export class DbClient {
                         await this.post_client.create_vote_options(tx, post.tx_id);
                     }
                     break;
+                
+                case 'vote':
+                    // Handle vote transactions
+                    logger.info('Processing vote transaction', { tx_id: tx.tx_id });
+                    
+                    // Create the post with is_vote=true
+                    const votePost = await this.post_client.create_or_update_post({
+                        ...tx,
+                        metadata: {
+                            ...tx.metadata,
+                            is_vote: true,
+                            post_txid: tx.tx_id // Use the transaction ID as the post ID
+                        }
+                    });
+                    
+                    // Create vote options
+                    if (votePost && tx.metadata && 
+                        typeof tx.metadata === 'object' && 
+                        'vote_options' in tx.metadata && 
+                        Array.isArray(tx.metadata.vote_options)) {
+                        await this.post_client.create_vote_options(tx, votePost.tx_id);
+                        logger.info('Created vote options', { 
+                            tx_id: tx.tx_id, 
+                            options_count: tx.metadata.vote_options.length 
+                        });
+                    }
+                    break;
                     
                 case 'like':
                 case 'unlike':
@@ -200,5 +227,8 @@ export class DbClient {
     }
 }
 
-// Export singleton instance
-export const db_client = DbClient.get_instance();
+// Create a singleton instance of the DbClient
+const db_client = DbClient.get_instance();
+
+// Export the singleton instance
+export { db_client };
