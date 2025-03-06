@@ -16,7 +16,7 @@ export { LockProtocolParser } from './lock_protocol_parser.js';
 export { MediaParser } from './media_parser.js';
 export { VoteParser } from './vote_parser.js';
 export { MainParser } from './main_parser.js';
-export { BsvContentParser } from './bsv_content_parser.js';
+// BsvContentParser has been consolidated into TransactionDataParser
 
 // Export helper functions
 export * from './utils/helpers.js';

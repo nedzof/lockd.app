@@ -1,17 +1,32 @@
 /**
  * MediaParser: Responsible for processing media content from transactions
+ * 
+ * This class handles the identification, extraction, and processing of media content
+ * (primarily images) from transaction data. Its responsibilities include:
+ * 
+ * 1. Detecting binary media data in transactions
+ * 2. Identifying specific media formats based on file signatures
+ * 3. Extracting and processing image data
+ * 4. Saving media content to database
+ * 
+ * MediaParser is part of the transaction processing pipeline and works in
+ * conjunction with TransactionDataParser and LockProtocolParser.
  */
 import { BaseParser } from './base_parser.js';
-import { logger } from '../utils/logger.js';
 import { db_client } from '../db/index.js';
+import { is_binary_data } from './utils/helpers.js';
 
 export class MediaParser extends BaseParser {
     /**
      * Process image data and save to database
+     * 
+     * Takes binary image data, extracts metadata if available, and persists
+     * the image to the database with appropriate content type and sizing information.
+     * 
      * @param image_data The image buffer data to process
-     * @param metadata Metadata for the image
-     * @param tx_id Transaction ID associated with the image
-     * @returns void
+     * @param metadata Metadata for the image (content type, dimensions, etc.)
+     * @param tx_id Transaction ID associated with the image for reference
+     * @returns Promise that resolves when the image is saved
      */
     public async process_image(
         image_data: Buffer, 
@@ -62,7 +77,16 @@ export class MediaParser extends BaseParser {
 
     /**
      * Extract image data from a buffer
-     * @param buffer The buffer containing the image data
+     * 
+     * Analyzes a buffer to determine if it contains image data, and if so:
+     * 1. Identifies the specific image format based on file signatures
+     * 2. Determines the appropriate content type
+     * 3. Returns the image data with format information
+     * 
+     * Supports detection of JPEG, PNG, GIF, BMP, WebP, and TIFF formats.
+     * For unrecognized binary data, returns with an 'unknown' format.
+     * 
+     * @param buffer The buffer containing potential image data
      * @returns Object containing the extracted image and format information
      */
     public extract_image_data(buffer: Buffer): { 
@@ -79,6 +103,13 @@ export class MediaParser extends BaseParser {
         try {
             if (!buffer || buffer.length === 0) {
                 this.logWarn('Empty buffer provided to extract_image_data');
+                return result;
+            }
+
+            // First check if it's binary data using the helper function
+            // This leverages the robust binary detection from TransactionDataParser improvements
+            if (!is_binary_data(buffer)) {
+                this.logDebug('Buffer does not appear to be binary data');
                 return result;
             }
 
@@ -150,8 +181,9 @@ export class MediaParser extends BaseParser {
                 }
             }
 
-            // No recognized image format
-            this.logWarn('Unrecognized image format', {
+            // No recognized image format, but it's still binary data
+            // We still return it as binary data for proper handling in the transaction pipeline
+            this.logDebug('Unrecognized image format but confirmed binary data', {
                 buffer_length: buffer.length,
                 first_bytes: buffer.length >= 4 ? 
                     `${buffer[0].toString(16)}-${buffer[1].toString(16)}-${buffer[2].toString(16)}-${buffer[3].toString(16)}` : 
@@ -169,6 +201,178 @@ export class MediaParser extends BaseParser {
                 buffer_length: buffer ? buffer.length : 0
             });
             return result;
+        }
+    }
+    
+    /**
+     * Extract image data from a transaction object
+     * 
+     * This method analyzes a transaction to find and extract image data:
+     * 1. Examines transaction outputs for binary data
+     * 2. Identifies image content using file signatures
+     * 3. Extracts metadata like alt text and dimensions when available
+     * 
+     * @param tx Transaction object from JungleBus or other source
+     * @returns Image data object with format, content type and metadata (or null if no image)
+     */
+    public extract_image_data_from_transaction(tx: any): {
+        image: Buffer | null;
+        format: string | null;
+        content_type: string | null;
+        alt_text?: string;
+        width?: number;
+        height?: number;
+    } | null {
+        try {
+            if (!tx) {
+                return null;
+            }
+            
+            // Check for binary data in outputs
+            if (tx.outputs && Array.isArray(tx.outputs)) {
+                for (const output of tx.outputs) {
+                    if (output && output.script && Buffer.isBuffer(output.script)) {
+                        const imageData = this.extract_image_data(output.script);
+                        if (imageData.image) {
+                            this.logInfo('Found image data in transaction output', {
+                                tx_id: tx.id || 'unknown',
+                                format: imageData.format,
+                                content_type: imageData.content_type,
+                                size: imageData.image.length
+                            });
+                            
+                            // Check for metadata in tx.data array
+                            const alt_text = this.extract_alt_text_from_transaction(tx);
+                            const dimensions = this.extract_dimensions_from_transaction(tx);
+                            
+                            return {
+                                ...imageData,
+                                alt_text,
+                                width: dimensions?.width,
+                                height: dimensions?.height
+                            };
+                        }
+                    }
+                }
+            }
+            
+            // Check raw transaction data if available
+            if (tx.transaction && typeof tx.transaction === 'string') {
+                try {
+                    const buffer = Buffer.from(tx.transaction, 'base64');
+                    const imageData = this.extract_image_data(buffer);
+                    
+                    if (imageData.image) {
+                        this.logInfo('Found image data in raw transaction', {
+                            tx_id: tx.id || 'unknown',
+                            format: imageData.format,
+                            content_type: imageData.content_type,
+                            size: imageData.image.length
+                        });
+                        
+                        // Check for metadata in tx.data array
+                        const alt_text = this.extract_alt_text_from_transaction(tx);
+                        const dimensions = this.extract_dimensions_from_transaction(tx);
+                        
+                        return {
+                            ...imageData,
+                            alt_text,
+                            width: dimensions?.width,
+                            height: dimensions?.height
+                        };
+                    }
+                } catch (bufferError) {
+                    this.logWarn('Error processing raw transaction data for image', {
+                        error: bufferError instanceof Error ? bufferError.message : String(bufferError),
+                        tx_id: tx.id || 'unknown'
+                    });
+                }
+            }
+            
+            return null;
+        } catch (error) {
+            this.logError('Error extracting image from transaction', {
+                error: error instanceof Error ? error.message : String(error),
+                tx_id: tx?.id || 'unknown'
+            });
+            return null;
+        }
+    }
+    
+    /**
+     * Extract alt text from transaction data
+     * @param tx Transaction object
+     * @returns Alt text if found, undefined otherwise
+     */
+    private extract_alt_text_from_transaction(tx: any): string | undefined {
+        try {
+            if (tx.data && Array.isArray(tx.data)) {
+                // Look for alt_text in data array
+                const altTextItem = tx.data.find((item: string) => 
+                    item && typeof item === 'string' && item.startsWith('alt_text='));
+                
+                if (altTextItem) {
+                    return altTextItem.replace('alt_text=', '');
+                }
+                
+                // Also check for alt= format
+                const altItem = tx.data.find((item: string) => 
+                    item && typeof item === 'string' && item.startsWith('alt='));
+                
+                if (altItem) {
+                    return altItem.replace('alt=', '');
+                }
+            }
+            
+            return undefined;
+        } catch (error) {
+            this.logWarn('Error extracting alt text', {
+                error: error instanceof Error ? error.message : String(error),
+                tx_id: tx?.id || 'unknown'
+            });
+            return undefined;
+        }
+    }
+    
+    /**
+     * Extract image dimensions from transaction data
+     * @param tx Transaction object
+     * @returns Object with width and height if found
+     */
+    private extract_dimensions_from_transaction(tx: any): { width?: number, height?: number } | undefined {
+        try {
+            const dimensions: { width?: number, height?: number } = {};
+            
+            if (tx.data && Array.isArray(tx.data)) {
+                // Look for width and height in data array
+                tx.data.forEach((item: string) => {
+                    if (item && typeof item === 'string') {
+                        if (item.startsWith('width=')) {
+                            const width = parseInt(item.replace('width=', ''), 10);
+                            if (!isNaN(width)) {
+                                dimensions.width = width;
+                            }
+                        } else if (item.startsWith('height=')) {
+                            const height = parseInt(item.replace('height=', ''), 10);
+                            if (!isNaN(height)) {
+                                dimensions.height = height;
+                            }
+                        }
+                    }
+                });
+                
+                if (dimensions.width || dimensions.height) {
+                    return dimensions;
+                }
+            }
+            
+            return undefined;
+        } catch (error) {
+            this.logWarn('Error extracting image dimensions', {
+                error: error instanceof Error ? error.message : String(error),
+                tx_id: tx?.id || 'unknown'
+            });
+            return undefined;
         }
     }
 }
