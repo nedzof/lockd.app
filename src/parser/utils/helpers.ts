@@ -348,17 +348,62 @@ export function normalize_key(key: string): string {
  * Helper function to process buffer data and handle binary content
  * @param buf Buffer to process
  * @param txId Transaction ID for logging
- * @returns Processed string or hex-encoded string for binary data
+ * @returns Processed string or hex-encoded string for binary data, with content type metadata
  */
 export function process_buffer_data(buf: Buffer, txId: string): string {
-    // First check for common binary file signatures
-    if (is_binary_data(buf)) {
+    // First check for common binary file signatures to determine content type
+    let contentType = '';
+    let isMedia = false;
+    
+    // Check for common file signatures
+    if (buf.length >= 4) {
+        // Check for PNG signature: 89 50 4E 47
+        if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
+            contentType = 'image/png';
+            isMedia = true;
+        } 
+        // Check for JPEG signature: FF D8 FF
+        else if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) {
+            contentType = 'image/jpeg';
+            isMedia = true;
+        }
+        // Check for GIF signature: 47 49 46 38 (GIF8)
+        else if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) {
+            contentType = 'image/gif';
+            isMedia = true;
+            logger.info('Detected GIF image data', {
+                tx_id: txId,
+                size: buf.length,
+                signature: 'GIF8'
+            });
+        }
+        // Check for PDF signature: 25 50 44 46
+        else if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) {
+            contentType = 'application/pdf';
+            isMedia = true;
+        }
+    }
+    
+    // If any media type was detected above or general binary data is detected
+    if (isMedia || is_binary_data(buf)) {
         // For binary data, use hex encoding with a prefix
         const hex = buf.toString('hex');
+        
+        // Add content type metadata if available
+        if (contentType) {
+            logger.info('Encoded binary data with content type', {
+                tx_id: txId,
+                content_type: contentType,
+                data_size: buf.length
+            });
+            // Include content type in the metadata to help Scanner and TransactionDataParser
+            return `hex:${hex}|content_type=${contentType}`;
+        }
+        
         return `hex:${hex}`;
     }
     
-    // Try UTF-8 conversion
+    // Try UTF-8 conversion for non-binary data
     try {
         const str = sanitize_for_db(buf.toString('utf8'));
         

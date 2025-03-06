@@ -184,17 +184,33 @@ export class MainParser extends BaseParser {
                 }
             }
 
-            // Create transaction record
+            // Extract transaction content
+            const txContent = lockData.content || '';
+            const isVote = !!lockData.is_vote;
+            
+            // Debug log content extraction
+            logger.info('📄 Content extraction', {
+                tx_id,
+                content_length: txContent.length,
+                content_sample: txContent.substring(0, 50) + (txContent.length > 50 ? '...' : ''),
+                content_type: lockData.content_type || 'text/plain',
+                is_vote: isVote
+            });
+
+            // Create transaction record with properly extracted content
             const txRecord: ParsedTransaction = {
                 tx_id,
-                content: lockData.content || '', // Include content from lock data
-                content_type: lockData.content_type || 'text/plain', // Include content type
+                content: txContent, // Ensure content is included
+                content_type: lockData.content_type || 'text/plain',
                 block_height: tx.block_height || 0,
                 block_time: tx.block_time 
                     ? String(tx.block_time) // Keep as string, dbClient will convert to BigInt
                     : String(Math.floor(Date.now() / 1000)),
                 author_address: this.transaction_data_parser.get_sender_address(tx),
-                metadata: lockData
+                metadata: {
+                    ...lockData,
+                    is_vote: isVote, // Ensure is_vote flag is properly set
+                }
             };
             
             // Ensure post_txid is set in metadata to facilitate post creation
@@ -202,13 +218,20 @@ export class MainParser extends BaseParser {
                 if (!txRecord.metadata.post_txid) {
                     txRecord.metadata.post_txid = tx_id;
                 }
+                
+                // Make sure content is also in metadata for proper post creation
+                if (!txRecord.metadata.content && txContent) {
+                    txRecord.metadata.content = txContent;
+                }
             }
 
-            // Debug log the transaction record
+            // Enhanced logging for transaction processing
             logger.debug('💾 Saving transaction', {
                 tx_id,
                 content_length: txRecord.content?.length || 0,
                 has_content: !!txRecord.content,
+                content_preview: txRecord.content?.substring(0, 30) || 'NO CONTENT',
+                metadata_content_length: txRecord.metadata?.content?.length || 0,
                 block_time_type: typeof txRecord.block_time,
                 block_time: txRecord.block_time
             });
@@ -216,6 +239,13 @@ export class MainParser extends BaseParser {
             // Determine transaction type based on lock data
             // This classification system handles various transaction types including votes and media
             txRecord.type = this.determine_transaction_type(lockData);
+            
+            // If is_vote is true, explicitly set type to 'vote'
+            if (isVote && txRecord.metadata) {
+                txRecord.type = 'vote';
+                logger.info('🗳️ Detected vote transaction', { tx_id });
+            }
+            
             txRecord.protocol = 'LOCK'; // Set the protocol explicitly for consistency
             
             // Debug log the final transaction classification

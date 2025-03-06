@@ -65,6 +65,11 @@ export interface Post {
     protocol?: string;
     lock_likes?: LockLike[];
     vote_options?: VoteOption[];
+    // Binary content fields
+    media_type?: string | null;
+    content_type?: string | null;
+    raw_image_data?: string | null;
+    image_metadata?: Record<string, any> | null;
 }
 
 export interface PostWithVoteOptions extends Post {
@@ -109,6 +114,12 @@ export interface PostMetadata {
     parent_post_txid?: string;
     orig_post_txid?: string;
     vote_options?: string[];
+    // Binary content fields
+    content_type?: string;
+    media_type?: string;
+    raw_image_data?: string;
+    image_metadata?: Record<string, any>;
+    is_binary?: boolean;
 }
 
 export interface LockMetadata {
@@ -127,6 +138,11 @@ export interface ProcessedTransaction {
     metadata?: Record<string, any>;
     created_at?: Date;      // Maps to created_at in database
     updated_at?: Date;      // Maps to updated_at in database
+    // Binary content fields
+    content_type?: string;
+    media_type?: string;
+    raw_image_data?: string;
+    image_metadata?: Record<string, any>;
 }
 
 export interface JungleBusTransaction {
@@ -179,6 +195,11 @@ export interface ParsedTransaction {
     block_height?: number;
     block_time?: string;
     author_address?: string;
+    // Binary content fields
+    content_type?: string;
+    media_type?: string;
+    raw_image_data?: string;
+    image_metadata?: Record<string, any>;
 }
 
 export interface DecodedTransaction {

@@ -30,39 +30,89 @@ export class VoteParser extends BaseParser {
         if (!Array.isArray(txData) || txData.length === 0) return false;
         
         try {
+            // Log the txData for debugging
+            this.logInfo('Checking for vote transaction', {
+                data_length: txData.length,
+                data_sample: txData.slice(0, 3)
+            });
+            
             // Define all vote-related indicators in one place for consistency
             const voteKeywords = [
                 'vote=', 'vote_question=', 'vote_option', 'poll=', 'poll_question=',
-                'options_hash=', 'vote_hash='
+                'options_hash=', 'vote_hash=', 'is_vote=', 'vote_options=', 'question='
             ];
+            
+            // Enhanced vote options detection
+            let hasVoteOptions = false;
+            let hasVoteIndicator = false;
             
             // Look for direct vote keywords in any field
             for (const item of txData) {
                 if (typeof item !== 'string') continue;
                 
                 const lowerItem = item.toLowerCase();
+                
+                // Check for is_vote=true explicitly
+                if (lowerItem === 'is_vote=true' || lowerItem === 'vote=true' || lowerItem === 'poll=true') {
+                    this.logInfo('Found explicit vote indicator', { indicator: lowerItem });
+                    return true;
+                }
+                
+                // Check for vote options arrays
+                if (lowerItem.startsWith('vote_options=') || lowerItem.startsWith('options=')) {
+                    hasVoteOptions = true;
+                    this.logInfo('Found vote options', { item: lowerItem });
+                }
+                
+                // Check for other vote keywords
                 for (const keyword of voteKeywords) {
                     if (lowerItem.startsWith(keyword)) {
-                        this.logDebug(`Found vote keyword: ${keyword}`);
-                        return true;
+                        hasVoteIndicator = true;
+                        this.logInfo(`Found vote keyword: ${keyword}`, { item: lowerItem });
+                        
+                        // If we have both indicators, it's definitely a vote
+                        if (hasVoteOptions && hasVoteIndicator) {
+                            return true;
+                        }
                     }
                 }
             }
             
+            // If we have vote options, that's a strong indicator
+            if (hasVoteOptions) {
+                return true;
+            }
+            
             // Check content fields for vote-related terminology
             const contentItems = txData.filter(item => 
-                typeof item === 'string' && item.startsWith('content='));
+                typeof item === 'string' && item.toLowerCase().startsWith('content='));
             
             for (const contentItem of contentItems) {
                 const content = contentItem.substring(8).toLowerCase();
+                
                 // More comprehensive check for vote-related terminology
-                if (content.includes('vote') || content.includes('poll')) {
-                    if (content.includes('option') || content.includes('choice') || 
-                        content.includes('ballot') || content.includes('election')) {
-                        this.logDebug('Found vote-related keywords in content');
-                        return true;
-                    }
+                if ((content.includes('vote') || content.includes('poll') || content.includes('question'))  && 
+                    (content.includes('option') || content.includes('choice') || 
+                     content.includes('ballot') || content.includes('election') || 
+                     content.includes('yes') || content.includes('no'))) {
+                    
+                    this.logInfo('Found vote-related keywords in content', { content_preview: content.substring(0, 50) });
+                    return true;
                 }
+                
+                // Look for question mark patterns with options
+                if (content.includes('?') && 
+                    (content.includes('option') || content.includes('choices') || 
+                     (content.includes('yes') && content.includes('no')))) {
+                    
+                    this.logInfo('Found question with options pattern', { content_preview: content.substring(0, 50) });
+                    return true;
+                }
+            }
+            
+            // If we have a vote indicator, treat as vote even without options
+            if (hasVoteIndicator) {
+                return true;
             }
             
             return false;

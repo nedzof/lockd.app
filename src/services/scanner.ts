@@ -103,7 +103,22 @@ export class Scanner {
             const block_height = this.txBlockHeights.get(tx_id) || 0;
             logger.info('🔍 Processing transaction', { tx_id, block_height });
             
-            // First, try to parse the transaction with the standard parser
+            // First, try to fetch raw transaction data for specialized content extraction
+            let rawTxData: any = null;
+            try {
+                rawTxData = await this.txDataParser.fetch_transaction(tx_id);
+                logger.debug('📄 Fetched raw transaction data', { 
+                    tx_id, 
+                    has_data: !!rawTxData 
+                });
+            } catch (fetchError) {
+                logger.warn('⚠️ Error fetching raw transaction data', {
+                    tx_id,
+                    error: fetchError instanceof Error ? fetchError.message : 'Unknown error'
+                });
+            }
+            
+            // Try to parse the transaction with the standard parser
             let parsedTx: any = null;
             try {
                 parsedTx = await parser.parse_transaction(tx_id);
@@ -112,6 +127,68 @@ export class Scanner {
                 if (block_height > 0 && parsedTx) {
                     parsedTx.block_height = block_height;
                 }
+                
+                // If we have raw data but no extracted data in parsedTx, extract it now
+                if (rawTxData && (!parsedTx.data || !Array.isArray(parsedTx.data) || parsedTx.data.length === 0)) {
+                    parsedTx.data = this.txDataParser.extract_data_from_transaction(rawTxData) || [];
+                    logger.info('Added extracted data to parsed transaction', { 
+                        tx_id, 
+                        data_count: parsedTx.data.length 
+                    });
+                }
+                
+                // Check for binary content in raw data and update content_type if needed
+                if (rawTxData) {
+                    const extractedData = this.txDataParser.extract_data_from_transaction(rawTxData) || [];
+                    const specializedContent = this.txDataParser.extract_specialized_content(extractedData, tx_id);
+                    
+                    // If this is binary content, make sure it's properly identified
+                    if (specializedContent.content_type.startsWith('image/') || 
+                        specializedContent.content_type === 'binary' ||
+                        specializedContent.content_type === 'application/pdf') {
+                        
+                        parsedTx.content_type = specializedContent.content_type;
+                        parsedTx.content = specializedContent.content;
+                        
+                        // Handle specific image types
+                        if (specializedContent.content_type === 'image/gif') {
+                            logger.info('📸 Detected GIF image in transaction', { tx_id });
+                            parsedTx.media_type = 'image/gif';
+                            
+                            // Ensure metadata includes image information
+                            if (specializedContent.metadata && specializedContent.metadata.raw_image_data) {
+                                // Make sure raw_image_data is propagated to parsedTx
+                                parsedTx.raw_image_data = specializedContent.metadata.raw_image_data;
+                            }
+                            
+                            // Ensure image metadata is preserved
+                            if (specializedContent.metadata && specializedContent.metadata.image_metadata) {
+                                parsedTx.image_metadata = specializedContent.metadata.image_metadata;
+                            } else {
+                                parsedTx.image_metadata = { format: 'gif' };
+                            }
+                        } else if (specializedContent.content_type === 'image/png') {
+                            parsedTx.media_type = 'image/png';
+                            parsedTx.image_metadata = specializedContent.metadata?.image_metadata || { format: 'png' };
+                        } else if (specializedContent.content_type === 'image/jpeg') {
+                            parsedTx.media_type = 'image/jpeg';
+                            parsedTx.image_metadata = specializedContent.metadata?.image_metadata || { format: 'jpeg' };
+                        }
+                        
+                        // Merge any other metadata
+                        parsedTx.metadata = {
+                            ...parsedTx.metadata,
+                            ...specializedContent.metadata,
+                            content_type: specializedContent.content_type
+                        };
+                        
+                        logger.info('📊 Updated transaction with binary content info', { 
+                            tx_id, 
+                            content_type: parsedTx.content_type,
+                            media_type: parsedTx.media_type || 'none'
+                        });
+                    }
+                }
             } catch (parseError) {
                 logger.warn('⚠️ Error parsing transaction', { 
                     tx_id, 
@@ -119,57 +196,49 @@ export class Scanner {
                 });
             }
             
-            // If we couldn't parse the transaction, try to get minimal data directly from TransactionDataParser
-            if (!parsedTx) {
+            // If we couldn't parse the transaction, create a transaction object from raw data
+            if (!parsedTx && rawTxData) {
                 try {
-                    // Try to fetch raw transaction data
-                    const rawTxData = await this.txDataParser.fetch_transaction(tx_id);
+                    // Extract data from the transaction
+                    const extractedData = this.txDataParser.extract_data_from_transaction(rawTxData) || [];
+                    const specializedContent = this.txDataParser.extract_specialized_content(extractedData, tx_id);
                     
-                    if (rawTxData) {
-                        // Create a minimal transaction object with available data
-                        parsedTx = {
-                            tx_id,
-                            content: '',
-                            content_type: 'text',
-                            block_height: this.txBlockHeights.get(tx_id) || 0,
-                            timestamp: new Date().toISOString(),
-                            type: 'post', // Default to post type to ensure post creation
-                            metadata: {},
-                            data: this.txDataParser.extract_data_from_transaction(rawTxData) || []
-                        };
-                        logger.info('🔧 Created minimal transaction object from raw data', { tx_id });
-                    } else {
-                        // If we still have no data, create an empty placeholder
-                        parsedTx = {
-                            tx_id,
-                            content: '',
-                            content_type: 'text',
-                            block_height: this.txBlockHeights.get(tx_id) || 0,
-                            timestamp: new Date().toISOString(),
-                            type: 'post', // Default to post type to ensure post creation
-                            metadata: {},
-                            data: []
-                        };
-                        logger.info('🔧 Created empty placeholder transaction object', { tx_id });
-                    }
-                } catch (fetchError) {
-                    logger.warn('⚠️ Unable to fetch raw transaction data', {
-                        tx_id,
-                        error: fetchError instanceof Error ? fetchError.message : 'Unknown error'
-                    });
-                    
-                    // Still create a minimal record
+                    // Create a transaction object with the extracted data
                     parsedTx = {
                         tx_id,
-                        content: '',
-                        content_type: 'text',
+                        content: specializedContent.content || '',
+                        content_type: specializedContent.content_type || 'text',
                         block_height: this.txBlockHeights.get(tx_id) || 0,
                         timestamp: new Date().toISOString(),
                         type: 'post', // Default to post type to ensure post creation
-                        metadata: { error: 'Failed to parse transaction' },
-                        data: []
+                        metadata: specializedContent.metadata || {},
+                        data: extractedData
                     };
+                    logger.info('🔧 Created transaction object from raw data', { 
+                        tx_id,
+                        content_type: parsedTx.content_type
+                    });
+                } catch (processError) {
+                    logger.warn('⚠️ Error processing raw transaction data', {
+                        tx_id,
+                        error: processError instanceof Error ? processError.message : 'Unknown error'
+                    });
                 }
+            }
+            
+            // If we still have no parsed transaction, create a minimal placeholder
+            if (!parsedTx) {
+                parsedTx = {
+                    tx_id,
+                    content: '',
+                    content_type: 'text',
+                    block_height: this.txBlockHeights.get(tx_id) || 0,
+                    timestamp: new Date().toISOString(),
+                    type: 'post', // Default to post type to ensure post creation
+                    metadata: { error: 'Failed to parse transaction' },
+                    data: []
+                };
+                logger.info('🔧 Created empty placeholder transaction object', { tx_id });
             }
             
             // Check if this might be a vote transaction
@@ -178,27 +247,18 @@ export class Scanner {
             if (isVote) {
                 logger.info('🗳️ Detected vote transaction, processing with VoteTransactionService', { tx_id });
                 
-                // If the transaction doesn't have a data array, try to fetch it
+                // If the transaction doesn't have a data array, try to use the data we've already fetched
                 if (!parsedTx.data || !Array.isArray(parsedTx.data) || parsedTx.data.length === 0) {
-                    try {
-                        // Try to fetch the transaction data
-                        const txData = await this.txDataParser.fetch_transaction(tx_id);
-                        
-                        if (txData) {
-                            // Extract data from the transaction
-                            const data = this.txDataParser.extract_data_from_transaction(txData);
-                            
-                            if (data && data.length > 0) {
-                                parsedTx.data = data;
-                            }
+                    if (rawTxData) {
+                        const extractedData = this.txDataParser.extract_data_from_transaction(rawTxData);
+                        if (extractedData && extractedData.length > 0) {
+                            parsedTx.data = extractedData;
+                            logger.info('Added extracted data to vote transaction', { 
+                                tx_id, 
+                                data_count: parsedTx.data.length 
+                            });
                         }
-                    } catch (fetchError) {
-                        logger.warn('⚠️ Error fetching additional transaction data', {
-                            tx_id,
-                            error: fetchError instanceof Error ? fetchError.message : 'Unknown error'
-                        });
                     }
-                }
                 
                 // Process the vote transaction
                 const voteResult = await this.voteService.processVoteTransaction(parsedTx);

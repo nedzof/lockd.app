@@ -29,22 +29,64 @@ export class PostClient extends BaseDbClient {
                 post_txid: metadata.post_txid
             });
             
+            // Prioritize transaction content over metadata content
+            const content = tx.content || metadata.content || '';
+            
+            // Log content details
+            logger.info('🔍 Post content check', { 
+                tx_id: tx.tx_id, 
+                content_exists: !!content,
+                content_length: content.length,
+                content_preview: content.substring(0, 50) + (content.length > 50 ? '...' : ''),
+                from_tx: !!tx.content,
+                from_metadata: !!metadata.content
+            });
+            
+            // Check for binary content and media types
+            const has_binary_content = (
+                (tx.content_type && tx.content_type.startsWith('image/')) ||
+                (tx.media_type && tx.media_type.startsWith('image/')) ||
+                (metadata.content_type && metadata.content_type.startsWith('image/'))
+            );
+            
+            // Handle GIF and other binary image types
+            if (has_binary_content) {
+                logger.info('🖼️ Detected binary image content in post', { 
+                    tx_id: tx.tx_id,
+                    post_txid: metadata.post_txid,
+                    content_type: tx.content_type || metadata.content_type || 'unknown',
+                    media_type: tx.media_type || metadata.media_type || 'unknown'
+                });
+            }
+            
             // Prepare post data
             const post_data = {
                 tx_id: metadata.post_txid,
-                content: metadata.content || '',
+                content: content, // Use the prioritized content from above
                 block_height: typeof tx.block_height !== 'undefined' && tx.block_height !== null && !isNaN(Number(tx.block_height))
                     ? Number(tx.block_height)
                     : null,
                 author_address: metadata.author_address || tx.author_address || null,
                 is_vote: metadata.is_vote === true,
                 is_locked: metadata.is_locked === true,
+                // Set media_type if present in transaction or metadata
+                media_type: tx.media_type || metadata.media_type || null,
+                // Store content_type from transaction or metadata
+                content_type: tx.content_type || metadata.content_type || null,
+                // Store raw image data if present
+                raw_image_data: tx.raw_image_data || metadata.raw_image_data || null,
                 metadata: {
                     ...metadata,
+                    content: content, // Also store content in metadata for consistency
                     block_time: this.create_block_time_bigint(tx.block_time),
                     is_deleted: metadata.is_deleted === true,
                     parent_post_txid: metadata.parent_post_txid || null,
-                    orig_post_txid: metadata.orig_post_txid || null
+                    orig_post_txid: metadata.orig_post_txid || null,
+                    // Include image metadata if available
+                    image_metadata: tx.image_metadata || metadata.image_metadata || null,
+                    // Include additional fields for binary content
+                    media_type: tx.media_type || metadata.media_type || null,
+                    content_type: tx.content_type || metadata.content_type || null
                 }
             };
             
@@ -99,7 +141,25 @@ export class PostClient extends BaseDbClient {
             
             if (!post || !post.id) {
                 logger.error('🚨 Post not found for vote options', { post_txid });
-                throw new Error('Post not found for vote options');
+                
+                // Try to create the post if it doesn't exist (recovery mechanism)
+                logger.info('🔄 Attempting to create missing post for vote options', { post_txid });
+                
+                const recoveryPost = await this.create_or_update_post({
+                    ...tx,
+                    metadata: {
+                        ...tx.metadata as any,
+                        post_txid: post_txid,
+                        is_vote: true
+                    }
+                });
+                
+                if (!recoveryPost) {
+                    throw new Error('Failed to create missing post for vote options');
+                }
+                
+                logger.info('✅ Created missing post for vote options', { post_id: recoveryPost.id });
+                return await this.create_vote_options(tx, post_txid); // Retry with the new post
             }
             
             logger.debug('📝 Creating vote options', { 
@@ -108,13 +168,27 @@ export class PostClient extends BaseDbClient {
                 count: metadata.vote_options.length
             });
             
-            // Prepare vote option data
-            const vote_option_data = metadata.vote_options.map((option, index) => ({
-                tx_id: `${tx.tx_id}_option_${index}`,
+            // Log vote options before creating
+            logger.info('📊 Vote options data', {
+                tx_id: tx.tx_id,
                 post_id: post.id,
-                content: option || `Option ${index + 1}`,
-                option_index: index
-            }));
+                options: metadata.vote_options
+            });
+            
+            // Prepare vote option data
+            const vote_option_data = metadata.vote_options.map((option, index) => {
+                // Handle both string options and object options with text property
+                const optionContent = typeof option === 'string' 
+                    ? option 
+                    : (option?.text || option?.content || `Option ${index + 1}`);
+                
+                return {
+                    tx_id: `${tx.tx_id}_option_${index}`,
+                    post_id: post.id,
+                    content: optionContent,
+                    option_index: index
+                };
+            });
             
             // Create vote options
             const vote_options = await this.with_fresh_client(async (client) => {

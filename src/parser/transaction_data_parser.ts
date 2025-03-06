@@ -339,9 +339,52 @@ export class TransactionDataParser extends BaseParser {
             
             // Handle hex-encoded binary data
             if (item.startsWith('hex:')) {
-                const hexData = item.substring(4);
+                // Check if it has content type metadata (added by process_buffer_data)
+                let hexData = '';
+                let contentType = '';
+                
+                if (item.includes('|content_type=')) {
+                    // Format: hex:<hexdata>|content_type=<mimetype>
+                    const parts = item.split('|content_type=');
+                    hexData = parts[0].substring(4); // Remove 'hex:' prefix
+                    contentType = parts[1];
+                    
+                    this.logInfo('Found binary data with content type', { 
+                        tx_id,
+                        content_type: contentType,
+                        data_size: hexData.length / 2 // Since each byte is 2 hex chars
+                    });
+                    
+                    // Set media type and content type in the result
+                    result.media_type = contentType;
+                    result.content_type = contentType;
+                    
+                    // If this is an image, mark it as binary content
+                    if (contentType.startsWith('image/')) {
+                        result.content = `Binary image data (${contentType})`;
+                        result.raw_image_data = hexData;
+                        
+                        // Handle specific image types
+                        if (contentType === 'image/gif') {
+                            this.logInfo('Processing GIF image data', { tx_id });
+                            result.image_metadata = { format: 'gif', size: hexData.length / 2 };
+                        } else if (contentType === 'image/png') {
+                            result.image_metadata = { format: 'png', size: hexData.length / 2 };
+                        } else if (contentType === 'image/jpeg') {
+                            result.image_metadata = { format: 'jpeg', size: hexData.length / 2 };
+                        }
+                        
+                        // If we have binary content, we'll skip extracting text content from it
+                        contentFromTxData = true;
+                        continue;
+                    }
+                } else {
+                    // Regular hex data without content type
+                    hexData = item.substring(4);
+                }
+                
                 try {
-                    // Try to decode hex data - might contain useful information
+                    // Try to decode hex data - might contain useful information if it's not binary
                     const decoded = Buffer.from(hexData, 'hex').toString('utf8');
                     this.logDebug('Decoded hex data', { 
                         tx_id,
@@ -402,15 +445,212 @@ export class TransactionDataParser extends BaseParser {
             result.content = result.content.substring(0, 10000);
         }
         
+        // Add binary detection flag if binary content is detected
+        if ((result.media_type && result.media_type.startsWith('image/')) || 
+            (result.content_type && result.content_type.startsWith('image/'))) {
+            result.is_binary = true;
+            
+            // Make sure content type is set if we have media type
+            if (!result.content_type && result.media_type) {
+                result.content_type = result.media_type;
+            }
+            
+            // Make sure media type is set if we have content type
+            if (!result.media_type && result.content_type) {
+                result.media_type = result.content_type;
+            }
+            
+            // Ensure raw_image_data exists when we have image content
+            if (result.raw_image_data) {
+                // Ensure image_metadata is properly set
+                if (!result.image_metadata) {
+                    const format = result.media_type.split('/')[1] || 'unknown';
+                    result.image_metadata = {
+                        format,
+                        size: result.raw_image_data.length / 2
+                    };
+                }
+                
+                // Special handling for GIF images
+                if (result.media_type === 'image/gif' || result.content_type === 'image/gif') {
+                    this.logInfo('🎬 Enhanced GIF image data processing', { tx_id });
+                    // Ensure GIF-specific metadata is properly set
+                    if (!result.image_metadata.format || result.image_metadata.format !== 'gif') {
+                        result.image_metadata.format = 'gif';
+                    }
+                }
+            }
+        } else {
+            // Check for hex-encoded content that might be binary
+            if (result.content && typeof result.content === 'string' && result.content.startsWith('hex:')) {
+                result.is_binary = true;
+                
+                // Try to determine binary type from the content
+                try {
+                    const hexPart = result.content.substring(4).split('|')[0]; // Remove 'hex:' prefix
+                    const buffer = Buffer.from(hexPart.substring(0, 50), 'hex');
+                    
+                    // Check file signatures
+                    if (buffer.length >= 4) {
+                        let detectedType = null;
+                        
+                        // GIF signature: 47 49 46 38 (GIF8)
+                        if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+                            detectedType = 'image/gif';
+                            this.logInfo('🎬 Detected GIF image from hex content', { tx_id });
+                        }
+                        // PNG signature: 89 50 4E 47
+                        else if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+                            detectedType = 'image/png';
+                        }
+                        // JPEG signature: FF D8 FF
+                        else if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+                            detectedType = 'image/jpeg';
+                        }
+                        
+                        if (detectedType) {
+                            result.content_type = detectedType;
+                            result.media_type = detectedType;
+                            result.raw_image_data = hexPart;
+                            result.image_metadata = {
+                                format: detectedType.split('/')[1],
+                                size: hexPart.length / 2
+                            };
+                        }
+                    }
+                } catch (error) {
+                    this.logWarn('Error analyzing potential binary content', {
+                        tx_id,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+            }
+        }
+        
         // Log the processed result
         this.logInfo('Processed transaction data', {
             tx_id,
-            content_length: result.content.length,
+            content_length: result.content ? result.content.length : 0,
+            is_binary: result.is_binary || false,
+            content_type: result.content_type || '',
+            media_type: result.media_type || '',
+            has_raw_image_data: !!result.raw_image_data,
             is_vote: result.is_vote,
             tags_count: result.tags.length
         });
         
         return result;
+    }
+    
+    /**
+     * Detects if content is likely binary data
+     * 
+     * This method uses multiple strategies to identify binary data:
+     * 1. Checks for hex: prefix indicating hex-encoded binary data
+     * 2. Examines content for binary signatures (GIF, PNG, JPEG, etc.)
+     * 3. Performs statistical analysis to identify non-text content
+     * 
+     * @param content The content to analyze
+     * @returns True if the content appears to be binary data
+     */
+    public detectBinaryContent(content: string | null | undefined): boolean {
+        if (!content) return false;
+        
+        // Check if it's already encoded as hex
+        if (content.startsWith('hex:')) {
+            return true;
+        }
+        
+        // Check for binary file signatures in the first few bytes if this might be raw binary data
+        try {
+            // For very short strings, this might be a base64 or hex representation of binary data
+            if (content.length > 5 && content.length < 10000) {
+                // Test if it's a valid hex string
+                if (/^[0-9a-fA-F]+$/.test(content)) {
+                    // Try to decode it and check for file signatures
+                    try {
+                        const buffer = Buffer.from(content, 'hex');
+                        
+                        // Check common file signatures
+                        if (buffer.length >= 4) {
+                            // GIF signature: 47 49 46 38 (GIF8)
+                            if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+                                this.logInfo('🎬 Detected hex-encoded GIF image');
+                                return true;
+                            }
+                            // PNG signature: 89 50 4E 47
+                            else if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+                                return true;
+                            }
+                            // JPEG signature: FF D8 FF
+                            else if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+                                return true;
+                            }
+                        }
+                    } catch (e) {
+                        // Not valid hex data, continue with other checks
+                    }
+                }
+                
+                // Test if it's a valid base64 string
+                if (/^[A-Za-z0-9+/=]+$/.test(content)) {
+                    // Try to decode it and check for file signatures
+                    try {
+                        const buffer = Buffer.from(content, 'base64');
+                        
+                        // Check common file signatures
+                        if (buffer.length >= 4) {
+                            // GIF signature
+                            if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+                                this.logInfo('🎬 Detected base64-encoded GIF image');
+                                return true;
+                            }
+                            // PNG signature
+                            else if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+                                return true;
+                            }
+                            // JPEG signature
+                            else if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+                                return true;
+                            }
+                        }
+                    } catch (e) {
+                        // Not valid base64 data, continue with other checks
+                    }
+                }
+            }
+            
+            // Statistical analysis of content to detect binary data
+            // Binary data typically has a high proportion of non-printable characters
+            const contentSample = content.substring(0, Math.min(1000, content.length));
+            let nonTextCount = 0;
+            
+            for (let i = 0; i < contentSample.length; i++) {
+                const code = contentSample.charCodeAt(i);
+                
+                // Count characters outside common text ranges
+                // ASCII printable range (32-126) plus common whitespace (9-13) plus UTF-8 above 127
+                if ((code < 9 || (code > 13 && code < 32) || (code > 126 && code < 160))) {
+                    nonTextCount++;
+                }
+            }
+            
+            // If more than 15% non-text characters, likely binary
+            const nonTextRatio = nonTextCount / contentSample.length;
+            if (nonTextRatio > 0.15) {
+                this.logDebug('Detected probable binary content through statistical analysis', {
+                    sample_length: contentSample.length,
+                    non_text_ratio: nonTextRatio
+                });
+                return true;
+            }
+        } catch (error) {
+            this.logWarn('Error in binary content detection', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+        
+        return false;
     }
     
     /**
@@ -562,63 +802,143 @@ export class TransactionDataParser extends BaseParser {
     public extract_specialized_content(txData: string[], txId: string): {
         content: string;
         content_type: string;
+        raw_image_data?: string;
+        media_type?: string;
+        image_metadata?: Record<string, any>;
         metadata: Record<string, any>;
     } {
         try {
             this.logDebug('Extracting specialized content', { txId, data_length: txData.length });
             
-            // Default result structure
+            // Default result structure with enhanced fields for binary content
             const result = {
                 content: '',
                 content_type: 'text',
+                raw_image_data: undefined,
+                media_type: undefined,
+                image_metadata: undefined,
                 metadata: {}
             };
             
             // Check for binary content first
             const binaryItems = txData.filter(item => item.startsWith('hex:'));
             if (binaryItems.length > 0) {
-                // Extract the first binary item content
-                const hexData = binaryItems[0].substring(4);
-                result.content = `hex:${hexData}`;
-                result.content_type = 'binary';
-                result.metadata.binary_items_count = binaryItems.length;
+                // Process the first binary item
+                const firstBinaryItem = binaryItems[0];
+                let hexData = '';
+                let contentType = 'binary'; // Default content type
                 
-                // Try to determine binary type via file signature
-                try {
-                    const buffer = Buffer.from(hexData.substring(0, 50), 'hex');
-                    // Check for common file signatures
-                    if (buffer.length >= 4) {
-                        // PNG signature: 89 50 4E 47
-                        if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
-                            result.content_type = 'image/png';
-                        } 
-                        // JPEG signature: FF D8 FF
-                        else if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
-                            result.content_type = 'image/jpeg';
-                        }
-                        // GIF signature: 47 49 46 38
-                        else if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
-                            result.content_type = 'image/gif';
-                        }
-                        // PDF signature: 25 50 44 46
-                        else if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
-                            result.content_type = 'application/pdf';
-                        }
-                    }
-                } catch (error) {
-                    this.logError('Error analyzing binary data', { 
-                        error: error instanceof Error ? error.message : String(error),
-                        txId
+                // Check if it includes content type metadata
+                if (firstBinaryItem.includes('|content_type=')) {
+                    // Format: hex:<hexdata>|content_type=<mimetype>
+                    const parts = firstBinaryItem.split('|content_type=');
+                    hexData = parts[0].substring(4); // Remove 'hex:' prefix
+                    contentType = parts[1];
+                    
+                    this.logInfo('Found binary data with explicit content type', { 
+                        txId,
+                        content_type: contentType,
+                        data_size: hexData.length / 2 // Since each byte is 2 hex chars
                     });
+                    
+                    // For GIF images, add special handling
+                    if (contentType === 'image/gif') {
+                        this.logInfo('🎨 Processing GIF image data from content-type metadata', { txId });
+                        result.content = `Binary image data (${contentType})`;
+                        result.content_type = contentType;
+                        result.media_type = contentType;
+                        result.raw_image_data = hexData;
+                        result.image_metadata = { format: 'gif', size: hexData.length / 2 };
+                        result.metadata = {
+                            ...result.metadata,
+                            raw_image_data: hexData,
+                            image_metadata: { format: 'gif', size: hexData.length / 2 },
+                            binary_items_count: binaryItems.length,
+                            media_type: contentType,
+                            content_type: contentType
+                        };
+                        return result;
+                    }
+                } else {
+                    // Regular hex data without content type
+                    hexData = firstBinaryItem.substring(4);
+                    
+                    // Try to determine binary type via file signature
+                    try {
+                        const buffer = Buffer.from(hexData.substring(0, 50), 'hex');
+                        // Check for common file signatures
+                        if (buffer.length >= 4) {
+                            // PNG signature: 89 50 4E 47
+                            if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+                                contentType = 'image/png';
+                            } 
+                            // JPEG signature: FF D8 FF
+                            else if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+                                contentType = 'image/jpeg';
+                            }
+                            // GIF signature: 47 49 46 38 (GIF8)
+                            else if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+                                contentType = 'image/gif';
+                                this.logInfo('🎬 Detected GIF image from file signature', { txId });
+                            }
+                            // PDF signature: 25 50 44 46
+                            else if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+                                contentType = 'application/pdf';
+                            }
+                        }
+                    } catch (error) {
+                        this.logError('Error analyzing binary data', { 
+                            error: error instanceof Error ? error.message : String(error),
+                            txId
+                        });
+                    }
                 }
+                
+                // Set content and metadata based on detected or provided content type
+                if (contentType.startsWith('image/')) {
+                    this.logInfo(`📸 Processing ${contentType} image data`, { txId });
+                    result.content = `Binary image data (${contentType})`;
+                    result.content_type = contentType;
+                    result.media_type = contentType;
+                    result.raw_image_data = hexData;
+                    result.image_metadata = {
+                        format: contentType.split('/')[1],
+                        size: hexData.length / 2
+                    };
+                    result.metadata.raw_image_data = hexData;
+                    result.metadata.image_metadata = {
+                        format: contentType.split('/')[1],
+                        size: hexData.length / 2
+                    };
+                    result.metadata.media_type = contentType;
+                    result.metadata.content_type = contentType;
+                } else {
+                    result.content = `hex:${hexData}`;
+                    result.content_type = contentType;
+                    result.metadata.content_type = contentType;
+                }
+                
+                result.content_type = contentType;
+                result.metadata.binary_items_count = binaryItems.length;
                 
                 return result;
             }
             
             // Look for structured content like vote data
             // First, check if this is a vote transaction
-            if (this.voteParser.is_vote_transaction(txData)) {
+            const isVote = this.voteParser.is_vote_transaction(txData);
+            
+            this.logInfo('Vote detection result', { 
+                txId, 
+                isVote, 
+                data_length: txData.length,
+                data_sample: txData.slice(0, 2)
+            });
+            
+            if (isVote) {
                 result.content_type = 'vote';
+                // Set is_vote flag explicitly - this is critical for correct processing
+                result.metadata.is_vote = true;
                 
                 // Get detailed vote content from VoteParser's specialized extraction
                 const voteContent = this.voteParser.extractVoteContent(txData);
@@ -629,22 +949,33 @@ export class TransactionDataParser extends BaseParser {
                     result.metadata.vote_question = voteContent.question;
                 }
                 
+                // Ensure we have vote options, even if they're basic yes/no
                 if (voteContent.options && voteContent.options.length > 0) {
                     result.metadata.vote_options = voteContent.options;
                     result.metadata.options_count = voteContent.options.length;
+                } else {
+                    // Add default options if none provided
+                    result.metadata.vote_options = ['Yes', 'No'];
+                    result.metadata.options_count = 2;
                 }
                 
                 // Include all metadata from vote extraction
-                result.metadata = { ...result.metadata, ...voteContent.metadata };
+                result.metadata = { 
+                    ...result.metadata, 
+                    ...voteContent.metadata,
+                    type: 'vote' // Explicitly set type to vote
+                };
                 
                 // Add any specific properties directly to the result
                 if (voteContent.post_id) result.metadata.post_id = voteContent.post_id;
                 if (voteContent.timestamp) result.metadata.timestamp = voteContent.timestamp;
                 if (voteContent.creator) result.metadata.creator = voteContent.creator;
                 
-                this.logDebug('Extracted vote content', { 
+                this.logInfo('✅ Extracted vote content', { 
+                    txId,
                     content_length: result.content.length,
                     options_count: result.metadata.options_count || 0,
+                    options: result.metadata.vote_options,
                     metadata_keys: Object.keys(result.metadata).join(', ')
                 });
                 

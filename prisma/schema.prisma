@@ -35,12 +35,14 @@ model post {
   created_at     DateTime      @default(now()) @map("created_at")
   is_vote        Boolean       @default(false) @map("is_vote")
   media_type     String?       @map("media_type")
+  content_type   String?       @map("content_type")
   tags           String[]      @default([]) @map("tags")
   media_url      String?       @map("media_url")
   raw_image_data Bytes?        @map("raw_image_data")
   block_height   Int?          @map("block_height")
   metadata       Json?         @map("metadata")
   is_locked      Boolean       @default(false) @map("is_locked")
+  image_metadata Json?         @map("image_metadata")
   lock_likes     lock_like[]
   vote_options   vote_option[]
 

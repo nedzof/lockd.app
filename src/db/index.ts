@@ -45,9 +45,13 @@ export class DbClient {
         }
         
         try {
+            // Check for binary content
+            const hasBinaryContent = this.detectBinaryContent(tx);
+            
             logger.debug('Processing transaction', { 
                 tx_id: tx.tx_id,
-                type: tx.type 
+                type: tx.type,
+                has_binary: hasBinaryContent
             });
             
             // First, save the transaction
@@ -71,12 +75,43 @@ export class DbClient {
                         logger.debug('Setting post_txid to tx_id', { tx_id: tx.tx_id });
                     }
                     
+                    // Check for binary content and ensure proper metadata setup
+                    if (hasBinaryContent) {
+                        // Ensure metadata for binary content is properly set
+                        if (tx.content_type) {
+                            tx.metadata.content_type = tx.content_type;
+                        }
+                        
+                        if (tx.media_type) {
+                            tx.metadata.media_type = tx.media_type;
+                        }
+                        
+                        if (tx.raw_image_data) {
+                            tx.metadata.raw_image_data = tx.raw_image_data;
+                        }
+                        
+                        if (tx.image_metadata) {
+                            tx.metadata.image_metadata = tx.image_metadata;
+                        }
+                        
+                        // Special handling for GIF images
+                        if ((tx.content_type === 'image/gif' || tx.media_type === 'image/gif' || 
+                             tx.metadata.content_type === 'image/gif' || tx.metadata.media_type === 'image/gif')) {
+                            logger.info('🎬 Processing GIF image in transaction', { 
+                                tx_id: tx.tx_id,
+                                post_txid: tx.metadata.post_txid,
+                                content_type: tx.content_type || tx.metadata.content_type
+                            });
+                        }
+                    }
+                    
                     // Create or update the post
                     const post = await this.post_client.create_or_update_post(tx);
                     logger.info('Created/updated post', { 
                         tx_id: tx.tx_id, 
                         post_id: post?.id,
-                        success: post !== null
+                        success: post !== null,
+                        has_binary: hasBinaryContent
                     });
                     
                     // Create vote options if this is a poll post
@@ -89,13 +124,30 @@ export class DbClient {
                     break;
                 
                 case 'vote':
-                    // Handle vote transactions
-                    logger.info('Processing vote transaction', { tx_id: tx.tx_id });
+                    // Handle vote transactions with enhanced logging
+                    logger.info('🗳️ Processing vote transaction', { 
+                        tx_id: tx.tx_id,
+                        content_length: tx.content?.length || 0,
+                        has_content: !!tx.content,
+                        has_metadata: !!tx.metadata
+                    });
                     
                     // Ensure metadata is an object
                     if (!tx.metadata || typeof tx.metadata !== 'object') {
                         tx.metadata = {};
                     }
+                    
+                    // Check for vote options in metadata
+                    const voteOptions = tx.metadata.vote_options || [];
+                    const hasVoteOptions = Array.isArray(voteOptions) && voteOptions.length > 0;
+                    
+                    // Enhanced logging for vote options
+                    logger.info('📊 Vote options detected', { 
+                        tx_id: tx.tx_id,
+                        has_options: hasVoteOptions,
+                        options_count: hasVoteOptions ? voteOptions.length : 0,
+                        options: hasVoteOptions ? voteOptions : null
+                    });
                     
                     // Create the post with is_vote=true
                     const votePost = await this.post_client.create_or_update_post({
@@ -107,21 +159,36 @@ export class DbClient {
                         }
                     });
                     
-                    logger.info('Created vote post', { 
+                    if (!votePost) {
+                        logger.error('❌ Failed to create vote post', { tx_id: tx.tx_id });
+                        break;
+                    }
+                    
+                    logger.info('✅ Created vote post', { 
                         tx_id: tx.tx_id, 
-                        post_id: votePost?.id,
-                        success: votePost !== null
+                        post_id: votePost.id,
+                        is_vote: votePost.is_vote
                     });
                     
-                    // Create vote options
-                    if (votePost && tx.metadata && 
-                        typeof tx.metadata === 'object' && 
-                        'vote_options' in tx.metadata && 
-                        Array.isArray(tx.metadata.vote_options)) {
-                        await this.post_client.create_vote_options(tx, votePost.tx_id);
-                        logger.info('Created vote options', { 
+                    // Create vote options - if no options exist, create default ones
+                    if (!hasVoteOptions) {
+                        // Create default Yes/No options if none provided
+                        logger.info('⚠️ No vote options found, creating defaults', { tx_id: tx.tx_id });
+                        tx.metadata.vote_options = ['Yes', 'No'];
+                    }
+                    
+                    try {
+                        const createdOptions = await this.post_client.create_vote_options(tx, votePost.tx_id);
+                        logger.info('✅ Created vote options', { 
                             tx_id: tx.tx_id, 
-                            options_count: tx.metadata.vote_options.length 
+                            post_id: votePost.id,
+                            options_count: createdOptions.length,
+                            options: createdOptions.map(opt => opt.content)
+                        });
+                    } catch (optionError) {
+                        logger.error('❌ Failed to create vote options', { 
+                            tx_id: tx.tx_id,
+                            error: optionError instanceof Error ? optionError.message : 'Unknown error'
                         });
                     }
                     break;
@@ -254,6 +321,118 @@ export class DbClient {
     }
     
     /**
+     * Check for posts in the database and log the results
+     * @returns Promise<number> The number of posts found
+     */
+    public async check_posts(): Promise<number> {
+        try {
+            logger.info('Checking posts in the database...');
+            
+            // Use the post_client's with_fresh_client method to execute the operation
+            const posts = await this.post_client.with_fresh_client(async (client) => {
+                return await client.post.findMany();
+            });
+            
+            logger.info(`Found ${posts.length} posts in the database`);
+            
+            // Log some details of the posts if available
+            if (posts.length > 0) {
+                for (let i = 0; i < Math.min(posts.length, 5); i++) {
+                    const post = posts[i];
+                    logger.info(`Post ${i+1}: ID=${post.id}, TX=${post.tx_id}, Content=${post.content?.substring(0, 50) || 'empty'}...`);
+                }
+            }
+            
+            return posts.length;
+        } catch (error) {
+            logger.error('Error checking posts', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return 0;
+        }
+    }
+    
+    /**
+     * Check for vote options in the database and log the results
+     * @returns Promise<number> The number of vote options found
+     */
+    public async check_vote_options(): Promise<number> {
+        try {
+            logger.info('Checking vote options in the database...');
+            
+            // Use the transaction_client's with_fresh_client method to execute the operation
+            const voteOptions = await this.transaction_client.with_fresh_client(async (client) => {
+                return await client.vote_option.findMany();
+            });
+            
+            logger.info(`Found ${voteOptions.length} vote options in the database`);
+            
+            // Log some details of the vote options if available
+            if (voteOptions.length > 0) {
+                for (let i = 0; i < Math.min(voteOptions.length, 5); i++) {
+                    const option = voteOptions[i];
+                    logger.info(`Option ${i+1}: ID=${option.id}, Post ID=${option.post_id}, Text=${option.option_text}`);
+                }
+            }
+            
+            return voteOptions.length;
+        } catch (error) {
+            logger.error('Error checking vote options', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return 0;
+        }
+    }
+    
+    /**
+     * Check for transactions with block heights in the database and log the results
+     * @returns Promise<number> The number of transactions with valid block heights
+     */
+    public async check_transactions_with_block_heights(): Promise<number> {
+        try {
+            logger.info('Checking block heights in processed transactions...');
+            
+            // Use the transaction_client's with_fresh_client method to execute the operation
+            const transactions = await this.transaction_client.with_fresh_client(async (client) => {
+                return await client.transaction.findMany({
+                    where: {
+                        block_height: {
+                            gt: 0
+                        }
+                    }
+                });
+            });
+            
+            logger.info(`Found ${transactions.length} transactions with valid block heights`);
+            
+            // Get block height distribution for analytics
+            if (transactions.length > 0) {
+                const blockHeightMap = new Map<number, number>();
+                transactions.forEach(tx => {
+                    const height = tx.block_height;
+                    if (height) {
+                        blockHeightMap.set(height, (blockHeightMap.get(height) || 0) + 1);
+                    }
+                });
+                
+                // Convert to array and sort for logging
+                const blockStats = Array.from(blockHeightMap.entries())
+                    .map(([block_height, tx_count]) => ({ block_height, tx_count }))
+                    .sort((a, b) => b.block_height - a.block_height);
+                
+                logger.info('Block height distribution:', { stats: blockStats });
+            }
+            
+            return transactions.length;
+        } catch (error) {
+            logger.error('Error checking transactions with block heights', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return 0;
+        }
+    }
+    
+    /**
      * Cleans up the database by removing all processed transactions and related data
      * @returns Promise<void>
      */
@@ -286,6 +465,68 @@ export class DbClient {
             });
             throw error;
         }
+    }
+    
+    /**
+     * Detect if a transaction contains binary content
+     * @param tx Transaction to check for binary content
+     * @returns Boolean indicating if binary content was detected
+     */
+    private detectBinaryContent(tx: ParsedTransaction): boolean {
+        // Check if transaction has content_type or media_type indicating binary content
+        const hasBinaryContentType = (
+            (tx.content_type && (
+                tx.content_type.startsWith('image/') ||
+                tx.content_type === 'application/pdf' ||
+                tx.content_type === 'binary'
+            )) ||
+            (tx.media_type && tx.media_type.startsWith('image/'))
+        );
+        
+        // Check metadata for binary content indicators
+        const hasMetadataBinaryIndicators = (
+            tx.metadata && typeof tx.metadata === 'object' && (
+                (tx.metadata.content_type && (
+                    tx.metadata.content_type.startsWith('image/') ||
+                    tx.metadata.content_type === 'application/pdf' ||
+                    tx.metadata.content_type === 'binary'
+                )) ||
+                (tx.metadata.media_type && tx.metadata.media_type.startsWith('image/')) ||
+                tx.metadata.raw_image_data ||
+                tx.metadata.image_metadata
+            )
+        );
+        
+        // Check specifically for GIF image data
+        const hasGifContent = (
+            (tx.content_type === 'image/gif') ||
+            (tx.media_type === 'image/gif') ||
+            (tx.metadata && tx.metadata.content_type === 'image/gif') ||
+            (tx.metadata && tx.metadata.media_type === 'image/gif') ||
+            (tx.raw_image_data && tx.raw_image_data.length > 0) ||
+            (tx.metadata && tx.metadata.raw_image_data && tx.metadata.raw_image_data.length > 0)
+        );
+        
+        // Check for hex-encoded content indicators in the actual content
+        const hasHexEncodedContent = (
+            tx.content && 
+            typeof tx.content === 'string' && 
+            tx.content.startsWith('hex:')
+        );
+        
+        const isBinary = hasBinaryContentType || hasMetadataBinaryIndicators || hasGifContent || hasHexEncodedContent;
+        
+        if (isBinary) {
+            logger.info('Detected binary content in transaction', {
+                tx_id: tx.tx_id,
+                content_type: tx.content_type || (tx.metadata && tx.metadata.content_type) || 'unknown',
+                media_type: tx.media_type || (tx.metadata && tx.metadata.media_type) || 'unknown',
+                has_raw_image_data: !!(tx.raw_image_data || (tx.metadata && tx.metadata.raw_image_data)),
+                is_gif: hasGifContent
+            });
+        }
+        
+        return isBinary;
     }
 }
 
