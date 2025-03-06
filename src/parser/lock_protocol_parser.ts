@@ -78,9 +78,10 @@ export class LockProtocolParser extends BaseParser {
             // Process lock protocol data
             const lockData: Record<string, any> = {
                 post_id: '',
-                post_txid: '',
+                post_txid: tx?.id || '',  // Ensure post_txid is set from the transaction ID
                 created_at: new Date().toISOString(),
                 content: '',
+                content_type: 'text/plain',  // Default content type
                 tags: [],
                 is_vote: false,
                 is_locked: false
@@ -201,8 +202,10 @@ export class LockProtocolParser extends BaseParser {
                 }
             }
             
-            // Set post_txid
-            lockData.post_txid = tx.id || '';
+            // Set post_txid if not already set
+            if (!lockData.post_txid && tx.id) {
+                lockData.post_txid = tx.id;
+            }
             
             // Get sender address
             try {
@@ -234,12 +237,27 @@ export class LockProtocolParser extends BaseParser {
             // Validate the data
             if (!lockData.content) {
                 this.logWarn('No content found in Lock protocol data', { tx_id: tx?.id || 'unknown' });
+                // Ensure at least an empty string for content
+                lockData.content = '';
+            }
+            
+            // Make sure content_type is set
+            if (!lockData.content_type) {
+                // Try to determine content type from content
+                if (lockData.content.startsWith('hex:')) {
+                    lockData.content_type = 'application/octet-stream';
+                } else if (lockData.image) {
+                    lockData.content_type = 'image/png'; // Default image type
+                } else {
+                    lockData.content_type = 'text/plain';
+                }
             }
             
             this.logInfo('Successfully extracted Lock protocol data', { 
                 tx_id: tx?.id || 'unknown',
                 has_content: !!lockData.content,
                 content_length: lockData.content ? lockData.content.length : 0,
+                content_type: lockData.content_type,
                 tag_count: lockData.tags.length,
                 is_vote: lockData.is_vote,
                 is_locked: lockData.is_locked

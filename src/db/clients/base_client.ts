@@ -7,8 +7,9 @@ import { logger } from '../../utils/logger.js';
  */
 export class BaseDbClient {
     protected instance_id: number;
-    protected readonly MAX_RETRIES = 3;
+    protected readonly MAX_RETRIES = 5;
     protected readonly RETRY_DELAY = 1000; // 1 second
+    protected readonly CONNECTION_TIMEOUT = 10000; // 10 seconds
 
     constructor() {
         this.instance_id = Date.now();
@@ -28,18 +29,36 @@ export class BaseDbClient {
         
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
-                // Create a fresh client for each operation
+                // Create a fresh client for each operation with optimized connection settings
                 const client = new PrismaClient({
                     datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL,
                     log: [
                         { level: 'error', emit: 'stdout' },
                         { level: 'warn', emit: 'stdout' },
                     ],
+                    // Prisma doesn't support direct connection pool settings
+                    // We'll handle timeouts separately
+                });
+                
+                // Set a shorter query timeout (this is just for logging, not actual effect)
+                logger.debug('Setting up DB client with timeout', { 
+                    timeout_ms: this.CONNECTION_TIMEOUT,
+                    attempt
+                });
+                
+                // Add a timeout for the entire operation
+                const timeoutPromise = new Promise<never>((_, reject) => {
+                    setTimeout(() => {
+                        reject(new Error(`DB operation overall timeout after ${this.CONNECTION_TIMEOUT}ms`));
+                    }, this.CONNECTION_TIMEOUT);
                 });
                 
                 try {
-                    // Execute the operation
-                    const result = await operation(client);
+                    // Execute the operation with a timeout
+                    const result = await Promise.race([
+                        operation(client),
+                        timeoutPromise
+                    ]);
                     return result;
                 } finally {
                     // Always disconnect the client when done
@@ -93,11 +112,27 @@ export class BaseDbClient {
      * @returns True if error is retryable, false otherwise
      */
     protected is_retryable_error(error: unknown): boolean {
+        if (!error) return false;
+        
+        // Handle both Prisma errors and generic errors
+        const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
         const db_error = error as DbError;
-        // Retry on connection errors or deadlocks
-        return db_error.code === '40001' || // serialization failure
+        
+        // Check for timeout errors in the error message
+        const isTimeoutError = errorMessage.includes('timeout') || 
+                              errorMessage.includes('timed out') ||
+                              errorMessage.includes('connection refused') ||
+                              errorMessage.includes('connection error');
+        
+        // Retry on connection errors, deadlocks, or timeouts
+        return isTimeoutError ||
+               db_error.code === '40001' || // serialization failure
                db_error.code === '40P01' || // deadlock
-               db_error.code === '57P01';   // connection lost
+               db_error.code === '57P01' || // connection lost
+               db_error.code === 'P1001' || // Connection error
+               db_error.code === 'P1002' || // Timeout
+               db_error.code === 'P1008' || // Operation timeout
+               db_error.code === 'P1017';   // Connection pooling timeout
     }
 
     /**

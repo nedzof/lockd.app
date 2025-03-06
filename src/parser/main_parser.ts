@@ -187,6 +187,8 @@ export class MainParser extends BaseParser {
             // Create transaction record
             const txRecord: ParsedTransaction = {
                 tx_id,
+                content: lockData.content || '', // Include content from lock data
+                content_type: lockData.content_type || 'text/plain', // Include content type
                 block_height: tx.block_height || 0,
                 block_time: tx.block_time 
                     ? String(tx.block_time) // Keep as string, dbClient will convert to BigInt
@@ -194,10 +196,19 @@ export class MainParser extends BaseParser {
                 author_address: this.transaction_data_parser.get_sender_address(tx),
                 metadata: lockData
             };
+            
+            // Ensure post_txid is set in metadata to facilitate post creation
+            if (txRecord.metadata && typeof txRecord.metadata === 'object') {
+                if (!txRecord.metadata.post_txid) {
+                    txRecord.metadata.post_txid = tx_id;
+                }
+            }
 
             // Debug log the transaction record
             logger.debug('💾 Saving transaction', {
                 tx_id,
+                content_length: txRecord.content?.length || 0,
+                has_content: !!txRecord.content,
                 block_time_type: typeof txRecord.block_time,
                 block_time: txRecord.block_time
             });

@@ -59,7 +59,25 @@ export class DbClient {
                 case 'repost':
                 case 'reply':
                     // Handle post-related transactions
+                    
+                    // Make sure post_txid is set in metadata
+                    if (!tx.metadata || typeof tx.metadata !== 'object') {
+                        tx.metadata = {};
+                    }
+                    
+                    // If post_txid is missing, use the transaction ID
+                    if (!tx.metadata.post_txid) {
+                        tx.metadata.post_txid = tx.tx_id;
+                        logger.debug('Setting post_txid to tx_id', { tx_id: tx.tx_id });
+                    }
+                    
+                    // Create or update the post
                     const post = await this.post_client.create_or_update_post(tx);
+                    logger.info('Created/updated post', { 
+                        tx_id: tx.tx_id, 
+                        post_id: post?.id,
+                        success: post !== null
+                    });
                     
                     // Create vote options if this is a poll post
                     if (post && tx.metadata && 
@@ -74,6 +92,11 @@ export class DbClient {
                     // Handle vote transactions
                     logger.info('Processing vote transaction', { tx_id: tx.tx_id });
                     
+                    // Ensure metadata is an object
+                    if (!tx.metadata || typeof tx.metadata !== 'object') {
+                        tx.metadata = {};
+                    }
+                    
                     // Create the post with is_vote=true
                     const votePost = await this.post_client.create_or_update_post({
                         ...tx,
@@ -82,6 +105,12 @@ export class DbClient {
                             is_vote: true,
                             post_txid: tx.tx_id // Use the transaction ID as the post ID
                         }
+                    });
+                    
+                    logger.info('Created vote post', { 
+                        tx_id: tx.tx_id, 
+                        post_id: votePost?.id,
+                        success: votePost !== null
                     });
                     
                     // Create vote options
@@ -102,9 +131,42 @@ export class DbClient {
                     // Handle lock-related transactions
                     await this.lock_client.process_lock_action(tx);
                     break;
+                
+                case 'unknown':
+                    // Try to process unknown as a post if content exists
+                    if (tx.content) {
+                        logger.info('Processing unknown transaction as post', { tx_id: tx.tx_id });
+                        
+                        // Ensure metadata is an object and set post_txid
+                        if (!tx.metadata || typeof tx.metadata !== 'object') {
+                            tx.metadata = {};
+                        }
+                        
+                        if (!tx.metadata.post_txid) {
+                            tx.metadata.post_txid = tx.tx_id;
+                        }
+                        
+                        // Treat as post
+                        const unknownPost = await this.post_client.create_or_update_post({
+                            ...tx,
+                            type: 'post' // Override type to post
+                        });
+                        
+                        logger.info('Processed unknown as post', { 
+                            tx_id: tx.tx_id, 
+                            post_id: unknownPost?.id,
+                            success: unknownPost !== null
+                        });
+                    } else {
+                        logger.debug('Unknown transaction type without content, no processing', {
+                            tx_id: tx.tx_id,
+                            type: tx.type
+                        });
+                    }
+                    break;
                     
                 default:
-                    logger.debug('Unknown transaction type, no additional processing', {
+                    logger.debug('Unhandled transaction type, no additional processing', {
                         tx_id: tx.tx_id,
                         type: tx.type
                     });

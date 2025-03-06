@@ -18,6 +18,8 @@ export class Scanner {
     private txDataParser: TransactionDataParser;
     private prisma: PrismaClient;
     private isPolling = false;
+    // Store block heights for transactions to ensure they're properly saved
+    private txBlockHeights: Map<string, number> = new Map();
 
     constructor() {
         logger.info('🔧 Scanner initializing with new parser and db_client');
@@ -97,56 +99,160 @@ export class Scanner {
      */
     public async processTransaction(tx_id: string): Promise<void> {
         try {
-            logger.info('🔍 Processing transaction', { tx_id });
+            // Get the block height for this transaction if available
+            const block_height = this.txBlockHeights.get(tx_id) || 0;
+            logger.info('🔍 Processing transaction', { tx_id, block_height });
             
             // First, try to parse the transaction with the standard parser
-            const parsedTx = await parser.parse_transaction(tx_id);
-            
-            // If the transaction is successfully parsed, check if it's a vote transaction
-            if (parsedTx) {
-                // Check if this might be a vote transaction
-                const isVote = this.isVoteTransaction(parsedTx);
+            let parsedTx: any = null;
+            try {
+                parsedTx = await parser.parse_transaction(tx_id);
                 
-                if (isVote) {
-                    logger.info('🗳️ Detected vote transaction, processing with VoteTransactionService', { tx_id });
+                // Ensure block height is set from our stored value if available
+                if (block_height > 0 && parsedTx) {
+                    parsedTx.block_height = block_height;
+                }
+            } catch (parseError) {
+                logger.warn('⚠️ Error parsing transaction', { 
+                    tx_id, 
+                    error: parseError instanceof Error ? parseError.message : 'Unknown error' 
+                });
+            }
+            
+            // If we couldn't parse the transaction, try to get minimal data directly from TransactionDataParser
+            if (!parsedTx) {
+                try {
+                    // Try to fetch raw transaction data
+                    const rawTxData = await this.txDataParser.fetch_transaction(tx_id);
                     
-                    // Fetch the full transaction data if needed
-                    let fullTx = parsedTx;
-                    
-                    // If the transaction doesn't have a data array, try to fetch it
-                    if (!fullTx.data || !Array.isArray(fullTx.data) || fullTx.data.length === 0) {
-                        try {
-                            // Try to fetch the transaction data
-                            const txData = await this.txDataParser.fetch_transaction(tx_id);
-                            
-                            if (txData) {
-                                // Extract data from the transaction
-                                const data = this.txDataParser.extract_data_from_transaction(txData);
-                                
-                                if (data && data.length > 0) {
-                                    fullTx.data = data;
-                                }
-                            }
-                        } catch (fetchError) {
-                            logger.warn('⚠️ Error fetching additional transaction data', {
-                                tx_id,
-                                error: fetchError instanceof Error ? fetchError.message : 'Unknown error'
-                            });
-                        }
-                    }
-                    
-                    // Process the vote transaction
-                    const voteResult = await this.voteService.processVoteTransaction(fullTx);
-                    
-                    if (voteResult) {
-                        logger.info('✅ Vote transaction processed successfully', {
+                    if (rawTxData) {
+                        // Create a minimal transaction object with available data
+                        parsedTx = {
                             tx_id,
-                            post_id: voteResult.post.id,
-                            options_count: voteResult.voteOptions.length
-                        });
+                            content: '',
+                            content_type: 'text',
+                            block_height: this.txBlockHeights.get(tx_id) || 0,
+                            timestamp: new Date().toISOString(),
+                            type: 'post', // Default to post type to ensure post creation
+                            metadata: {},
+                            data: this.txDataParser.extract_data_from_transaction(rawTxData) || []
+                        };
+                        logger.info('🔧 Created minimal transaction object from raw data', { tx_id });
                     } else {
-                        logger.warn('⚠️ Vote transaction processing failed', { tx_id });
+                        // If we still have no data, create an empty placeholder
+                        parsedTx = {
+                            tx_id,
+                            content: '',
+                            content_type: 'text',
+                            block_height: this.txBlockHeights.get(tx_id) || 0,
+                            timestamp: new Date().toISOString(),
+                            type: 'post', // Default to post type to ensure post creation
+                            metadata: {},
+                            data: []
+                        };
+                        logger.info('🔧 Created empty placeholder transaction object', { tx_id });
                     }
+                } catch (fetchError) {
+                    logger.warn('⚠️ Unable to fetch raw transaction data', {
+                        tx_id,
+                        error: fetchError instanceof Error ? fetchError.message : 'Unknown error'
+                    });
+                    
+                    // Still create a minimal record
+                    parsedTx = {
+                        tx_id,
+                        content: '',
+                        content_type: 'text',
+                        block_height: this.txBlockHeights.get(tx_id) || 0,
+                        timestamp: new Date().toISOString(),
+                        type: 'post', // Default to post type to ensure post creation
+                        metadata: { error: 'Failed to parse transaction' },
+                        data: []
+                    };
+                }
+            }
+            
+            // Check if this might be a vote transaction
+            const isVote = this.isVoteTransaction(parsedTx);
+            
+            if (isVote) {
+                logger.info('🗳️ Detected vote transaction, processing with VoteTransactionService', { tx_id });
+                
+                // If the transaction doesn't have a data array, try to fetch it
+                if (!parsedTx.data || !Array.isArray(parsedTx.data) || parsedTx.data.length === 0) {
+                    try {
+                        // Try to fetch the transaction data
+                        const txData = await this.txDataParser.fetch_transaction(tx_id);
+                        
+                        if (txData) {
+                            // Extract data from the transaction
+                            const data = this.txDataParser.extract_data_from_transaction(txData);
+                            
+                            if (data && data.length > 0) {
+                                parsedTx.data = data;
+                            }
+                        }
+                    } catch (fetchError) {
+                        logger.warn('⚠️ Error fetching additional transaction data', {
+                            tx_id,
+                            error: fetchError instanceof Error ? fetchError.message : 'Unknown error'
+                        });
+                    }
+                }
+                
+                // Process the vote transaction
+                const voteResult = await this.voteService.processVoteTransaction(parsedTx);
+                
+                if (voteResult) {
+                    logger.info('✅ Vote transaction processed successfully', {
+                        tx_id,
+                        post_id: voteResult.post.id,
+                        options_count: voteResult.voteOptions.length
+                    });
+                } else {
+                    logger.warn('⚠️ Vote transaction processing failed', { tx_id });
+                    
+                    // Save the failed vote transaction as a post transaction
+                    try {
+                        await db_client.process_transaction({
+                            tx_id,
+                            content: parsedTx.content || "",
+                            content_type: parsedTx.content_type || "text",
+                            block_height: parsedTx.block_height || this.txBlockHeights.get(tx_id) || 0,
+                            timestamp: parsedTx.timestamp || new Date().toISOString(),
+                            type: 'post', // Mark as post type to create a post entry
+                            protocol: parsedTx.protocol || 'MAP',
+                            metadata: { ...parsedTx.metadata, is_vote_attempt: true }
+                        });
+                        logger.info('✅ Failed vote transaction saved as regular transaction', { tx_id });
+                    } catch (dbError) {
+                        logger.error('❌ Error saving failed vote transaction', {
+                            tx_id,
+                            error: dbError instanceof Error ? dbError.message : 'Unknown error'
+                        });
+                    }
+                }
+            } else {
+                // For non-vote transactions, explicitly save to the database
+                try {
+                    // Ensure the transaction is saved to the database using the correct method
+                    await db_client.process_transaction({
+                        tx_id,
+                        content: parsedTx.content || "",
+                        content_type: parsedTx.content_type || "text",
+                        block_height: parsedTx.block_height || this.txBlockHeights.get(tx_id) || 0,
+                        timestamp: parsedTx.timestamp || new Date().toISOString(),
+                        type: parsedTx.type || 'post', // Default to post type if not specified
+                        protocol: parsedTx.protocol || 'MAP',
+                        metadata: parsedTx.metadata || {}
+                    });
+                    
+                    logger.info('✅ Regular transaction saved to database', { tx_id });
+                } catch (dbError) {
+                    logger.error('❌ Error saving transaction to database', {
+                        tx_id,
+                        error: dbError instanceof Error ? dbError.message : 'Unknown error'
+                    });
                 }
             }
         } catch (error) {
@@ -205,12 +311,19 @@ export class Scanner {
             return;
         }
 
-        const block = tx?.block?.height || tx?.height || tx?.block_height;
+        // Extract block height from transaction
+        const block_height = tx?.block?.height || tx?.height || tx?.block_height;
 
-        // Clear transaction detection log
+        // Store transaction data including block height in a map
+        if (block_height) {
+            this.txBlockHeights.set(tx_id, block_height);
+            logger.debug('Stored block height for transaction', { tx_id, block_height });
+        }
+
+        // Log transaction detection
         logger.info('🔍 TRANSACTION DETECTED', {
             tx_id,
-            block,
+            block_height,
             type: 'incoming'
         });
 

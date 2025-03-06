@@ -9,15 +9,21 @@ export class TransactionClient extends BaseDbClient {
     /**
      * Save a transaction to the database
      * @param tx Transaction to save
+     * @param retryAttempt Current retry attempt (used internally for recursive retry)
      * @returns Saved transaction
      */
-    public async save_transaction(tx: ParsedTransaction): Promise<ProcessedTransaction> {
+    public async save_transaction(tx: ParsedTransaction, retryAttempt = 0): Promise<ProcessedTransaction> {
         if (!tx || !tx.tx_id) {
             throw new Error('Invalid transaction data');
         }
         
+        // Maximum number of retry attempts
+        const MAX_RETRIES = 3;
+        // Timeout for the operation in milliseconds
+        const OPERATION_TIMEOUT = 5000; // 5 seconds
+        
         try {
-            logger.debug('Saving transaction', { tx_id: tx.tx_id });
+            logger.debug('Saving transaction', { tx_id: tx.tx_id, retryAttempt });
             
             // Ensure block_height is a valid number
             const safe_block_height = typeof tx.block_height !== 'undefined' && tx.block_height !== null && !isNaN(Number(tx.block_height))
@@ -34,14 +40,24 @@ export class TransactionClient extends BaseDbClient {
                 protocol: tx.protocol || 'MAP'
             };
             
-            // Save the transaction
-            const saved_tx = await this.with_fresh_client(async (client) => {
+            // Create a promise with timeout
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error(`DB operation timed out after ${OPERATION_TIMEOUT}ms`));
+                }, OPERATION_TIMEOUT);
+            });
+            
+            // Save the transaction with timeout
+            const dbOperationPromise = this.with_fresh_client(async (client) => {
                 return await client.processed_transaction.upsert({
                     where: { tx_id: tx.tx_id },
                     update: tx_data,
                     create: tx_data
                 });
             });
+            
+            // Race between the DB operation and the timeout
+            const saved_tx = await Promise.race([dbOperationPromise, timeoutPromise]);
             
             logger.debug('Transaction saved successfully', { 
                 tx_id: saved_tx.tx_id,
@@ -50,8 +66,32 @@ export class TransactionClient extends BaseDbClient {
             
             return saved_tx;
         } catch (error) {
+            // Check if we can retry
+            if (retryAttempt < MAX_RETRIES) {
+                const isTimeout = error instanceof Error && 
+                                  (error.message.includes('timed out') || 
+                                   error.message.includes('timeout'));
+                                   
+                if (isTimeout) {
+                    logger.warn('DB operation timeout, retrying', {
+                        tx_id: tx.tx_id,
+                        attempt: retryAttempt + 1,
+                        max_retries: MAX_RETRIES
+                    });
+                    
+                    // Exponential backoff: wait longer before each retry
+                    const backoffMs = Math.pow(2, retryAttempt) * 1000;
+                    await new Promise(resolve => setTimeout(resolve, backoffMs));
+                    
+                    // Retry the operation
+                    return this.save_transaction(tx, retryAttempt + 1);
+                }
+            }
+            
+            // Log the error and rethrow if retries are exhausted or it's not a timeout
             logger.error('Error saving transaction', {
                 tx_id: tx.tx_id,
+                retryAttempt,
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
             throw error;
