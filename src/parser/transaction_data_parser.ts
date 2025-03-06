@@ -10,7 +10,7 @@ import { logger } from '../utils/logger.js';
 
 export class TransactionDataParser extends BaseParser {
     private jungleBus: JungleBusClient;
-    private transactionCache = new Map<string, boolean>();
+    // Use the transactionCache from BaseParser
 
     constructor() {
         super();
@@ -643,24 +643,13 @@ export class TransactionDataParser extends BaseParser {
     /**
      * Prune the transaction cache if it exceeds the maximum size
      */
+    /**
+     * Prune the transaction cache if it exceeds the maximum size
+     * @deprecated Use the common implementation from BaseParser
+     */
     private prune_cache(): void {
-        if (this.transactionCache.size > this.MAX_CACHE_SIZE) {
-            // Convert to array of keys
-            const keys = Array.from(this.transactionCache.keys());
-            
-            // Remove oldest entries (first 20% of the cache)
-            const pruneCount = Math.floor(this.MAX_CACHE_SIZE * 0.2);
-            const keysToRemove = keys.slice(0, pruneCount);
-            
-            for (const key of keysToRemove) {
-                this.transactionCache.delete(key);
-            }
-            
-            this.logInfo('Pruned transaction cache', {
-                pruned: pruneCount,
-                remaining: this.transactionCache.size
-            });
-        }
+        // Call the common implementation from BaseParser
+        super.prune_cache(this.transactionCache, this.MAX_CACHE_SIZE);
     }
 
     /**

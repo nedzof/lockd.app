@@ -19,8 +19,8 @@ export class MainParser extends BaseParser {
     private vote_parser: VoteParser;
     private vote_transaction_service: VoteTransactionService;
     private prisma: PrismaClient;
-    private transactionCache = new Map<string, boolean>();
-    private readonly MAX_CACHE_SIZE = 10000;
+    // Use the transactionCache from BaseParser
+    private readonly MAX_CACHE_SIZE = 10000; // Override the default MAX_CACHE_SIZE from BaseParser
 
     constructor() {
         super();
@@ -238,22 +238,10 @@ export class MainParser extends BaseParser {
     
     /**
      * Prune the transaction cache if it exceeds the maximum size
+     * @deprecated Use the common implementation from BaseParser
      */
     private prune_cache(): void {
-        if (this.transactionCache.size > this.MAX_CACHE_SIZE) {
-            // Convert to array of keys
-            const keys = Array.from(this.transactionCache.keys());
-            
-            // Remove oldest entries (first 20% of the cache)
-            const pruneCount = Math.floor(this.MAX_CACHE_SIZE * 0.2);
-            for (let i = 0; i < pruneCount; i++) {
-                this.transactionCache.delete(keys[i]);
-            }
-            
-            logger.debug('🧹 Pruned transaction cache', { 
-                pruned: pruneCount,
-                new_size: this.transactionCache.size
-            });
-        }
+        // Call the common implementation from BaseParser
+        super.prune_cache(this.transactionCache, this.MAX_CACHE_SIZE);
     }
 }

@@ -167,21 +167,15 @@ export class TransactionParser {
     public async parseTransaction(tx_id: string): Promise<void> {
         logger.warn('DEPRECATED: TransactionParser.parseTransaction is deprecated, use parser.parse_transaction instead');
         
-        // Check cache first
-        if (this.transactionCache.has(tx_id)) {
-            return;
+        // Delegate to the new parser module
+        try {
+            await parser.parse_transaction(tx_id);
+        } catch (error) {
+            logger.error('Error in parseTransaction', {
+                tx_id,
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
-        
-        // Add to cache
-        this.transactionCache.set(tx_id, true);
-        
-        // Prune cache if it gets too large
-        if (this.transactionCache.size > this.MAX_CACHE_SIZE) {
-            const oldestKey = this.transactionCache.keys().next().value;
-            this.transactionCache.delete(oldestKey);
-        }
-        
-        return await parser.parse_transaction(tx_id);
     }
 
     /**
@@ -191,20 +185,14 @@ export class TransactionParser {
     public async parseTransactions(tx_ids: string[]): Promise<void> {
         logger.warn('DEPRECATED: TransactionParser.parseTransactions is deprecated, use parser.parse_transactions instead');
         
-        // Filter out already processed transactions
-        const uniqueTxIds = tx_ids.filter(tx_id => !this.transactionCache.has(tx_id));
-        
-        // Add to cache
-        for (const tx_id of uniqueTxIds) {
-            this.transactionCache.set(tx_id, true);
-            
-            // Prune cache if it gets too large
-            if (this.transactionCache.size > this.MAX_CACHE_SIZE) {
-                const oldestKey = this.transactionCache.keys().next().value;
-                this.transactionCache.delete(oldestKey);
-            }
+        // Delegate to the new parser module
+        try {
+            await parser.parse_transactions(tx_ids);
+        } catch (error) {
+            logger.error('Error in parseTransactions', {
+                tx_ids_count: tx_ids.length,
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
-        
-        return await parser.parse_transactions(uniqueTxIds);
     }
 }

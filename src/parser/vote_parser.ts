@@ -25,6 +25,7 @@ export class VoteParser extends BaseParser {
             // Use the helper function to extract vote data
             const voteData = extract_vote_data(data);
             
+            // Add additional processing that's specific to VoteParser
             // If this is a vote, generate a hash for the options if needed
             if (voteData.is_vote && voteData.options && voteData.options.length > 0 && !voteData.options_hash) {
                 const optionsString = voteData.options.join('|');

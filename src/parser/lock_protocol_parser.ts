@@ -48,20 +48,9 @@ export class LockProtocolParser extends BaseParser {
             };
 
             // First, check if we have a data array in the transaction
-            let contentFromTxData = '';
-            if (tx.data && Array.isArray(tx.data)) {
-                // Look for content in the data array
-                for (const dataItem of tx.data) {
-                    if (typeof dataItem === 'string' && dataItem.toLowerCase().startsWith('content=')) {
-                        contentFromTxData = dataItem.substring(dataItem.indexOf('=') + 1);
-                        lockData.content = contentFromTxData;
-                        this.logDebug('Found content in tx.data array', { 
-                            content: contentFromTxData,
-                            tx_id: tx?.id || 'unknown'
-                        });
-                        break;
-                    }
-                }
+            let contentFromTxData = this.extract_content_from_tx_data(tx);
+            if (contentFromTxData) {
+                lockData.content = contentFromTxData;
             }
 
             // Parse the data array for lock protocol data
@@ -115,42 +104,10 @@ export class LockProtocolParser extends BaseParser {
                     this.logDebug('Found is_locked=true flag', { tx_id: tx?.id || 'unknown' });
                     continue;
                 }
-                
-                // Check for key-value pairs
-                if (item.includes('=')) {
-                    const parts = item.split('=');
-                    if (parts.length === 2) {
-                        const key = this.normalizeKey(parts[0]);
-                        const value = parts[1];
-                        this.process_key_value_pair(key, value, lockData, contentFromTxData !== '');
-                    }
-                }
             }
 
-            // Process key-value pairs from the data array
-            for (let i = 0; i < data.length; i++) {
-                const item = data[i];
-                
-                // Skip items that don't contain key-value pairs
-                if (!item.includes('=')) {
-                    continue;
-                }
-                
-                // Split the item into key and value
-                const parts = item.split('=');
-                if (parts.length < 2) {
-                    continue;
-                }
-                
-                const key = this.normalizeKey(parts[0]);
-                // Skip processing content key if we already have content from tx.data
-                if (key === 'content' && contentFromTxData) {
-                    continue;
-                }
-                
-                const value = parts.slice(1).join('='); // Rejoin in case value contains =
-                this.process_key_value_pair(key, value, lockData, contentFromTxData !== '');
-            }
+            // Process all key-value pairs from the data array
+            this.process_all_key_value_pairs(data, lockData, contentFromTxData !== '');
 
             // Extract tags
             const tags = extract_tags(data);
@@ -287,6 +244,60 @@ export class LockProtocolParser extends BaseParser {
                 tx_id: tx?.id || 'unknown'
             });
             return { question: '', options: [] };
+        }
+    }
+    
+    /**
+     * Extract content from transaction data array
+     * @param tx The transaction object
+     * @returns Content string or empty string if not found
+     */
+    private extract_content_from_tx_data(tx: any): string {
+        if (!tx || !tx.data || !Array.isArray(tx.data)) {
+            return '';
+        }
+        
+        for (const dataItem of tx.data) {
+            if (typeof dataItem === 'string' && dataItem.toLowerCase().startsWith('content=')) {
+                const content = dataItem.substring(dataItem.indexOf('=') + 1);
+                this.logDebug('Found content in tx.data array', { 
+                    content_preview: content.substring(0, 50) + (content.length > 50 ? '...' : ''),
+                    tx_id: tx?.id || 'unknown'
+                });
+                return content;
+            }
+        }
+        
+        return '';
+    }
+    
+    /**
+     * Process all key-value pairs from transaction data
+     * @param data Array of transaction data strings
+     * @param metadata The metadata object to update
+     * @param skipContentUpdate If true, don't update the content field
+     */
+    private process_all_key_value_pairs(data: string[], metadata: Record<string, any>, skipContentUpdate: boolean = false): void {
+        for (const item of data) {
+            // Skip items that don't contain key-value pairs
+            if (!item.includes('=')) {
+                continue;
+            }
+            
+            // Split the item into key and value
+            const parts = item.split('=');
+            if (parts.length < 2) {
+                continue;
+            }
+            
+            const key = this.normalizeKey(parts[0]);
+            // Skip processing content key if skipContentUpdate is true
+            if (key === 'content' && skipContentUpdate) {
+                continue;
+            }
+            
+            const value = parts.slice(1).join('='); // Rejoin in case value contains =
+            this.process_key_value_pair(key, value, metadata, skipContentUpdate);
         }
     }
 

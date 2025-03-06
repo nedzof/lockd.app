@@ -2,9 +2,11 @@
  * Base Parser class with common functionality for all parsers
  */
 import { logger } from '../utils/logger.js';
+import { decode_hex_string, sanitize_for_db } from './utils/helpers.js';
 
 export class BaseParser {
     protected readonly MAX_CACHE_SIZE = 1000;
+    protected transactionCache = new Map<string, boolean>();
     
     /**
      * Helper function to safely normalize keys with potential Unicode characters
@@ -91,43 +93,20 @@ export class BaseParser {
     
     /**
      * Helper function to safely decode hex strings using Node.js Buffer
+     * @deprecated Use decode_hex_string from helpers.ts instead
      */
     protected decodeHexString(hexString: string): string {
-        try {
-            // Check if it's a valid hex string
-            if (!/^[0-9a-fA-F]+$/.test(hexString)) {
-                return hexString;
-            }
-            
-            // Decode the hex string
-            return Buffer.from(hexString, 'hex').toString('utf8');
-        } catch (error) {
-            logger.warn('Error decoding hex string', {
-                error: error instanceof Error ? error.message : String(error),
-                hexString: hexString.substring(0, 20) + '...' // Only log a portion for privacy
-            });
-            return hexString;
-        }
+        logger.warn('DEPRECATED: BaseParser.decodeHexString is deprecated, use decode_hex_string from helpers.ts instead');
+        return decode_hex_string(hexString);
     }
     
     /**
      * Helper function to sanitize strings for database storage
+     * @deprecated Use sanitize_for_db from helpers.ts instead
      */
     protected sanitizeForDb(str: string): string {
-        if (!str) return '';
-        
-        try {
-            // Replace non-printable characters
-            return str
-                .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
-                .replace(/\\u0000/g, '') // Remove NULL characters
-                .trim();
-        } catch (error) {
-            logger.warn('Error sanitizing string for DB', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-            return str;
-        }
+        logger.warn('DEPRECATED: BaseParser.sanitizeForDb is deprecated, use sanitize_for_db from helpers.ts instead');
+        return sanitize_for_db(str);
     }
     
     /**
@@ -156,5 +135,30 @@ export class BaseParser {
      */
     protected logError(message: string, context: Record<string, any> = {}): void {
         logger.error(message, context);
+    }
+    
+    /**
+     * Prune the transaction cache if it exceeds the maximum size
+     * Common implementation to avoid duplication in derived classes
+     */
+    protected prune_cache(cacheMap: Map<string, any> = this.transactionCache, maxSize: number = this.MAX_CACHE_SIZE): void {
+        if (cacheMap.size > maxSize) {
+            // Convert to array of keys
+            const keys = Array.from(cacheMap.keys());
+            
+            // Remove oldest entries (first 20% of the cache)
+            const pruneCount = Math.floor(maxSize * 0.2);
+            const keysToRemove = keys.slice(0, pruneCount);
+            
+            for (const key of keysToRemove) {
+                cacheMap.delete(key);
+            }
+            
+            this.logInfo('Pruned cache', {
+                pruned: pruneCount,
+                remaining: cacheMap.size,
+                max_size: maxSize
+            });
+        }
     }
 }

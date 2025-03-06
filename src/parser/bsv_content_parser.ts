@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger.js';
+import { extract_vote_data } from './utils/helpers.js';
 
 /**
  * BSV Content Parser
@@ -31,51 +32,68 @@ export class BsvContentParser {
                 is_locked: false
             };
             
-            // First, find the vote question (content without a number prefix)
-            const questionItem = txData.find(item => 
-                item.startsWith('content=') && 
-                !item.match(/content=\d+\s/)
-            );
+            // First use the common helper to extract basic vote data
+            const voteData = extract_vote_data(txData);
             
-            if (questionItem) {
-                result.question = questionItem.replace('content=', '');
-                logger.info('Found vote question', { content: result.question });
+            // If we have valid vote data from the helper, use it
+            if (voteData.is_vote) {
+                if (voteData.question) {
+                    result.question = voteData.question;
+                }
+                
+                if (voteData.options && voteData.options.length > 0) {
+                    result.options = voteData.options;
+                    result.total_options = voteData.total_options || voteData.options.length;
+                }
             }
             
-            // Find all option contents (content with a number prefix)
-            const optionItems = txData.filter(item => 
-                item.startsWith('content=') && 
-                item.match(/content=\d+\s/)
-            );
-            
-            // Extract option indices
-            const optionIndices = txData
-                .filter(item => item.startsWith('optionindex='))
-                .map(item => {
-                    const index = parseInt(item.replace('optionindex=', ''), 10);
-                    return { index };
-                });
-            
-            // Match options with their indices
-            optionItems.forEach((item, i) => {
-                const content = item.replace('content=', '');
-                // Extract the number from the beginning of the content
-                const match = content.match(/^(\d+)\s/);
+            // If we didn't get a question from the helper, try the specialized approach
+            if (!result.question) {
+                // Find the vote question (content without a number prefix)
+                const questionItem = txData.find(item => 
+                    item.startsWith('content=') && 
+                    !item.match(/content=\d+\s/)
+                );
                 
-                if (match) {
-                    const optionNumber = parseInt(match[1], 10);
-                    // Adjust for 0-based index
-                    const index = optionNumber - 1;
-                    
-                    if (index >= 0) {
-                        result.options[index] = content;
-                        logger.debug('Found vote option', { 
-                            content,
-                            index
-                        });
-                    }
+                if (questionItem) {
+                    result.question = questionItem.replace('content=', '');
+                    logger.info('Found vote question using specialized method', { content: result.question });
                 }
-            });
+            }
+            
+            // If we didn't get options from the helper, try the specialized approach
+            if (result.options.length === 0) {
+                // Find all option contents (content with a number prefix)
+                const optionItems = txData.filter(item => 
+                    item.startsWith('content=') && 
+                    item.match(/content=\d+\s/)
+                );
+                
+                // Match options with their indices
+                optionItems.forEach((item) => {
+                    const content = item.replace('content=', '');
+                    // Extract the number from the beginning of the content
+                    const match = content.match(/^(\d+)\s/);
+                    
+                    if (match) {
+                        const optionNumber = parseInt(match[1], 10);
+                        // Adjust for 0-based index
+                        const index = optionNumber - 1;
+                        
+                        if (index >= 0) {
+                            result.options[index] = content;
+                            logger.debug('Found vote option using specialized method', { 
+                                content,
+                                index
+                            });
+                        }
+                    }
+                });
+                
+                // Filter out any empty options and ensure the array is dense
+                result.options = result.options.filter(option => option);
+                result.total_options = result.options.length;
+            }
             
             // Extract additional metadata
             txData.forEach(item => {
@@ -84,15 +102,10 @@ export class BsvContentParser {
                 } else if (item.startsWith('timestamp=') && !item.includes('.922Z')) {
                     // Only take the main timestamp, not the option timestamps
                     result.timestamp = item.replace('timestamp=', '');
-                } else if (item.startsWith('totaloptions=')) {
-                    result.total_options = parseInt(item.replace('totaloptions=', ''), 10);
                 } else if (item.startsWith('is_locked=')) {
                     result.is_locked = item.replace('is_locked=', '') === 'true';
                 }
             });
-            
-            // Filter out any empty options and ensure the array is dense
-            result.options = result.options.filter(option => option);
             
             return result;
         } catch (error) {
