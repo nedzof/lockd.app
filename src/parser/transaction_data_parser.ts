@@ -16,6 +16,7 @@ import bsv from 'bsv';
 import { JungleBusClient } from '@gorillapool/js-junglebus';
 import { JungleBusResponse } from '../shared/types.js';
 import { BaseParser } from './base_parser.js';
+import { MediaParser } from './media_parser.js';
 import { 
     sanitize_for_db, 
     decode_hex_string, 
@@ -28,6 +29,9 @@ import { logger } from '../utils/logger.js';
 import { VoteParser } from './vote_parser.js';
 
 export class TransactionDataParser extends BaseParser {
+    private mediaParser: MediaParser;
+    
+
     private jungleBus: JungleBusClient;
     private voteParser: VoteParser;
     // Use the transactionCache from BaseParser
@@ -44,6 +48,7 @@ export class TransactionDataParser extends BaseParser {
         });
         
         this.voteParser = new VoteParser();
+        this.mediaParser = new MediaParser();
     }
 
     /**
@@ -147,13 +152,105 @@ export class TransactionDataParser extends BaseParser {
                         
                         // Check if this is an OP_RETURN output
                         if (output.script && output.script.isDataOut()) {
+                            // First, check for the special cordQ+image/gif+PNG pattern directly in the script buffer
+                            if (output.script.toBuffer) {
+                                try {
+                                    const scriptBuf = output.script.toBuffer();
+                                    const scriptStr = scriptBuf.toString('utf8', 0, Math.min(scriptBuf.length, 200));
+                                    
+                                    // Check for cordQ + image/gif pattern
+                                    if (scriptStr.includes('cordQ') && scriptStr.includes('image/gif')) {
+                                        this.logInfo('Found cordQ + image/gif pattern in script buffer', {
+                                            tx_id: tx?.id || 'unknown'
+                                        });
+                                        
+                                        // Get the position of image/gif
+                                        const gifIndex = scriptStr.indexOf('image/gif');
+                                        if (gifIndex >= 0 && gifIndex + 9 < scriptBuf.length) {
+                                            // Extract the data after image/gif
+                                            const afterGifBuffer = scriptBuf.slice(gifIndex + 9);
+                                            
+                                            // Check if this data has a PNG signature
+                                            if (afterGifBuffer.length >= 8 && 
+                                                afterGifBuffer[0] === 0x89 && afterGifBuffer[1] === 0x50 && 
+                                                afterGifBuffer[2] === 0x4E && afterGifBuffer[3] === 0x47 && 
+                                                afterGifBuffer[4] === 0x0D && afterGifBuffer[5] === 0x0A && 
+                                                afterGifBuffer[6] === 0x1A && afterGifBuffer[7] === 0x0A) {
+                                                
+                                                this.logInfo('🖼️ Found PNG signature after image/gif in script buffer', {
+                                                    tx_id: tx?.id || 'unknown'
+                                                });
+                                                
+                                                // Add the correct content type
+                                                data.push('image/png');
+                                                data.push(`raw_image_data:${afterGifBuffer.toString('hex')}`);
+                                                return data; // Return early as we've found what we're looking for
+                                            }
+                                        }
+                                    }
+                                } catch (e) {
+                                    // Ignore errors in PNG detection
+                                }
+                            }
+                            
                             const chunks = output.script.chunks;
                             
                             // Skip OP_RETURN (first chunk)
                             for (let j = 1; j < chunks.length; j++) {
                                 const chunk = chunks[j];
                                 if (chunk.buf) {
-                                    // Process the buffer data
+                                    // Special handling for cordQ pattern with image/gif that we observed
+                                    try {
+                                        const chunkStr = chunk.buf.toString('utf8');
+                                        if (chunkStr.includes('cordQ') && chunkStr.includes('image/gif')) {
+                                            this.logInfo('🎬 Found cordQ + image/gif pattern in chunk', {
+                                                tx_id: tx?.id || 'unknown',
+                                                chunk_index: j
+                                            });
+                                            
+                                            // Add 'image/gif' as a separate item for better detection
+                                            data.push('image/gif');
+                                            
+                                            // Try to extract binary data that might follow image/gif
+                                            const gifIndex = chunkStr.indexOf('image/gif');
+                                            if (gifIndex >= 0 && gifIndex + 9 < chunkStr.length) {
+                                                // Extract the data after 'image/gif'
+                                                const rawData = chunkStr.substring(gifIndex + 9);
+                                                if (rawData.length > 0) {
+                                                    const binaryData = Buffer.from(rawData);
+                                                    this.logInfo('📷 Extracted raw image data after image/gif', {
+                                                        tx_id: tx?.id || 'unknown',
+                                                        data_length: binaryData.length
+                                                    });
+                                                    
+                                                    // Check if this data actually has a PNG signature despite being labeled as GIF
+                                                    if (binaryData.length >= 8 &&
+                                                        binaryData[0] === 0x89 && binaryData[1] === 0x50 && 
+                                                        binaryData[2] === 0x4E && binaryData[3] === 0x47 &&
+                                                        binaryData[4] === 0x0D && binaryData[5] === 0x0A && 
+                                                        binaryData[6] === 0x1A && binaryData[7] === 0x0A) {
+                                                        
+                                                        this.logInfo('🖼️ Detected PNG signature in data labeled as image/gif - correcting', {
+                                                            tx_id: tx?.id || 'unknown'
+                                                        });
+                                                        
+                                                        // Override the previously added 'image/gif' with 'image/png'
+                                                        data.pop(); // Remove the last added 'image/gif'
+                                                        data.push('image/png'); // Add correct content type
+                                                        data.push(`raw_image_data:${binaryData.toString('hex')}`);
+                                                        return; // Exit early as we've handled this chunk
+                                                    } else {
+                                                        // It's actually GIF data or some other format
+                                                        data.push(`raw_image_data:${binaryData.toString('hex')}`);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        // Ignore errors in special handling and continue with normal processing
+                                    }
+                                    
+                                    // Process the buffer data with the regular method
                                     this.processBufferData(chunk.buf, data, tx?.id || 'unknown');
                                 }
                             }
@@ -217,13 +314,17 @@ export class TransactionDataParser extends BaseParser {
                 }
             }
             
-            // If we still have no data, try to process the raw transaction
-            if (data.length === 0 && tx.transaction) {
+            // Always process the raw transaction for image data regardless of other results
+            if (tx.transaction) {
                 try {
+                    // Get the raw transaction buffer
                     const rawTx = Buffer.from(tx.transaction, 'base64');
-                    const rawTxHex = rawTx.toString('hex');
                     
-                    // Try to find OP_RETURN patterns in the raw transaction
+                    // Directly search for image signatures in the entire transaction
+                    this.extractImageSignatures(rawTx, data, tx?.id || 'unknown');
+                    
+                    // Also try to find OP_RETURN patterns in the raw transaction
+                    const rawTxHex = rawTx.toString('hex');
                     const opReturnPattern = /6a([0-9a-fA-F]{2,})/g;
                     let match;
                     
@@ -264,12 +365,160 @@ export class TransactionDataParser extends BaseParser {
     }
     
     /**
+     * Directly extract image signatures from a buffer and add them to the data array
+     * @param buf Buffer to process
+     * @param data Array to add processed data to
+     * @param txId Transaction ID for logging
+     */
+    private extractImageSignatures(buf: Buffer, data: string[], txId: string): void {
+        if (!buf || buf.length === 0) return;
+        
+        // Scan the entire buffer for PNG signatures
+        let pngIndex = -1;
+        for (let i = 0; i < buf.length - 8; i++) {
+            if (buf[i] === 0x89 && buf[i+1] === 0x50 && buf[i+2] === 0x4E && buf[i+3] === 0x47 &&
+                buf[i+4] === 0x0D && buf[i+5] === 0x0A && buf[i+6] === 0x1A && buf[i+7] === 0x0A) {
+                pngIndex = i;
+                this.logInfo(`🖼️ Found PNG signature at position ${pngIndex} in raw transaction`, { txId });
+                
+                // Extract the PNG data starting from the signature
+                const pngData = buf.slice(pngIndex);
+                data.push('image/png');
+                data.push(`raw_image_data:${pngData.toString('hex')}`);
+                return; // Found high-priority PNG signature
+            }
+        }
+        
+        // Scan for GIF signatures if no PNG was found
+        let gifIndex = -1;
+        for (let i = 0; i < buf.length - 6; i++) {
+            if (buf[i] === 0x47 && buf[i+1] === 0x49 && buf[i+2] === 0x46 && buf[i+3] === 0x38 &&
+                (buf[i+4] === 0x39 || buf[i+4] === 0x37) && buf[i+5] === 0x61) {
+                gifIndex = i;
+                this.logInfo(`🎬 Found GIF signature at position ${gifIndex} in raw transaction`, { txId });
+                
+                // Extract the GIF data starting from the signature
+                const gifData = buf.slice(gifIndex);
+                data.push('image/gif');
+                data.push(`raw_image_data:${gifData.toString('hex')}`);
+                return;
+            }
+        }
+    }
+    
+    /**
      * Process buffer data and add to data array
      * @param buf Buffer to process
      * @param data Array to add processed data to
      * @param txId Transaction ID for logging
      */
     private processBufferData(buf: Buffer, data: string[], txId: string): void {
+        // Skip empty buffers
+        if (!buf || buf.length === 0) {
+            return;
+        }
+
+        // Check for common image signatures directly in the buffer
+        // PNG signature check (89 50 4E 47 0D 0A 1A 0A) - most reliable
+        let pngIndex = -1;
+        for (let i = 0; i < buf.length - 8; i++) {
+            if (buf[i] === 0x89 && buf[i+1] === 0x50 && buf[i+2] === 0x4E && buf[i+3] === 0x47 &&
+                buf[i+4] === 0x0D && buf[i+5] === 0x0A && buf[i+6] === 0x1A && buf[i+7] === 0x0A) {
+                pngIndex = i;
+                break;
+            }
+        }
+
+        if (pngIndex >= 0) {
+            this.logInfo(`🖼️ Found PNG signature at position ${pngIndex} in buffer`, { txId });
+            
+            // Extract the PNG data starting from the signature
+            const pngData = buf.slice(pngIndex);
+            data.push('image/png');
+            data.push(`raw_image_data:${pngData.toString('hex')}`);
+            return;
+        }
+        
+        // GIF signature check (47 49 46 38)
+        let gifIndex = -1;
+        for (let i = 0; i < buf.length - 6; i++) {
+            if (buf[i] === 0x47 && buf[i+1] === 0x49 && buf[i+2] === 0x46 && buf[i+3] === 0x38 &&
+                (buf[i+4] === 0x39 || buf[i+4] === 0x37) && buf[i+5] === 0x61) {
+                gifIndex = i;
+                break;
+            }
+        }
+        
+        if (gifIndex >= 0) {
+            this.logInfo(`🎬 Found GIF signature at position ${gifIndex} in buffer`, { txId });
+            
+            // Extract the GIF data starting from the signature
+            const gifData = buf.slice(gifIndex);
+            data.push('image/gif');
+            data.push(`raw_image_data:${gifData.toString('hex')}`);
+            return;
+        }
+        
+        // If no file signature was found, check for content type identifiers
+        try {
+            const str = buf.toString('utf8');
+            
+            // Look for the cordQ pattern which often precedes content types
+            if (str.includes('cordQ')) {
+                this.logInfo('💼 Found cordQ marker, checking for content types', { txId });
+                
+                // Extract content type that follows cordQ
+                const cordQIndex = str.indexOf('cordQ');
+                if (cordQIndex >= 0 && cordQIndex + 5 < str.length) {
+                    // Extract the part after 'cordQ' which often contains the content type
+                    const afterCordQ = str.substring(cordQIndex + 5);
+                    
+                    // Check for image/gif content type specifically
+                    if (afterCordQ.includes('image/gif')) {
+                        this.logInfo('🎬 Found image/gif after cordQ marker', { txId });
+                        data.push('image/gif');
+                        
+                        // Also try to extract the raw image data that follows
+                        const gifIndex = afterCordQ.indexOf('image/gif');
+                        if (gifIndex >= 0 && gifIndex + 9 < afterCordQ.length) {
+                            const potentialImageData = afterCordQ.substring(gifIndex + 9);
+                            if (potentialImageData && potentialImageData.length > 0) {
+                                this.logInfo('📷 Found potential raw image data after image/gif', { txId });
+                                data.push(`raw_image_data:${Buffer.from(potentialImageData).toString('hex')}`);
+                            }
+                        }
+                    }
+                    // Check for other mime types
+                    else if (afterCordQ.includes('image/png')) {
+                        this.logInfo('📷 Found image/png after cordQ marker', { txId });
+                        data.push('image/png');
+                    }
+                    else if (afterCordQ.includes('image/jpeg')) {
+                        this.logInfo('📷 Found image/jpeg after cordQ marker', { txId });
+                        data.push('image/jpeg');
+                    }
+                }
+            }
+            
+            // Direct content type checks in the buffer
+            if (str === 'image/gif') {
+                this.logInfo('🎬 Found exact image/gif content type in buffer', { txId });
+                data.push('image/gif');
+            } else if (str.includes('image/gif') && !str.includes('cordQ')) {
+                // Only add if we didn't already add it from the cordQ check
+                this.logInfo('🎬 Found image/gif reference in buffer data', { txId });
+                data.push('image/gif');
+            }
+            
+            // Also check for mime type patterns like "content_type=image/gif"
+            if (str.includes('content_type=image/gif') || str.includes('Content-Type: image/gif')) {
+                this.logInfo('🎬 Found image/gif content type metadata', { txId });
+                data.push('image/gif');
+            }
+        } catch (error) {
+            // Non-text buffer, ignore this check
+        }
+        
         // Use the helper function to process buffer data
         const processedData = process_buffer_data(buf, txId);
         data.push(processedData);
@@ -332,6 +581,138 @@ export class TransactionDataParser extends BaseParser {
 
         // Track if content has been found in tx.data array
         let contentFromTxData = false;
+        
+        // First, scan for content types and raw image data in the data array
+        let gifContentTypeFound = false;
+        let rawImageDataItem: string | null = null;
+        
+        // Find GIF content type and raw image data
+        for (let i = 0; i < data.length; i++) {
+            const item = data[i];
+            if (!item || typeof item !== 'string') continue;
+            
+            // Check for GIF content type
+            if (item === 'image/gif') {
+                this.logInfo('🎬 Found image/gif content type in data array', { tx_id, index: i });
+                gifContentTypeFound = true;
+                result.media_type = 'gif';
+                result.content_type = 'image/gif';
+                result.is_binary = true;
+            }
+            
+            // Check for raw image data specially marked by our enhanced processBufferData method
+            if (item.startsWith('raw_image_data:')) {
+                this.logInfo('📷 Found raw image data item in data array', { tx_id, index: i });
+                rawImageDataItem = item;
+                result.has_raw_image_data = true;
+            }
+        }
+        
+        // Check for PNG content type
+        let pngContentTypeFound = false;
+        for (let i = 0; i < data.length; i++) {
+            const item = data[i];
+            if (!item || typeof item !== 'string') continue;
+            
+            if (item === 'image/png') {
+                this.logInfo('🖼️ Found image/png content type in data array', { tx_id, index: i });
+                pngContentTypeFound = true;
+                result.media_type = 'png';
+                result.content_type = 'image/png';
+                result.is_binary = true;
+            }
+        }
+        
+        // Process raw image data if content type was found (GIF or PNG)
+        if ((gifContentTypeFound || pngContentTypeFound) && rawImageDataItem) {
+            // Extract hex data from our marked raw_image_data item
+            const hexData = rawImageDataItem.substring('raw_image_data:'.length);
+            if (hexData && hexData.length > 0) {
+                result.raw_image_data = hexData;
+                
+                // Verify the actual data signature to ensure we have correct media_type
+                const dataBuffer = Buffer.from(hexData, 'hex');
+                
+                // Check buffer for PNG signature regardless of declared content type
+                if (dataBuffer.length >= 8 && 
+                    dataBuffer[0] === 0x89 && dataBuffer[1] === 0x50 && 
+                    dataBuffer[2] === 0x4E && dataBuffer[3] === 0x47 && 
+                    dataBuffer[4] === 0x0D && dataBuffer[5] === 0x0A && 
+                    dataBuffer[6] === 0x1A && dataBuffer[7] === 0x0A) {
+                    
+                    // It's actually a PNG even if labeled as GIF
+                    if (gifContentTypeFound && !pngContentTypeFound) {
+                        this.logInfo('🖼️ Correcting misidentified GIF to PNG based on signature', { tx_id });
+                    }
+                    
+                    result.media_type = 'png';
+                    result.content_type = 'image/png';
+                }
+                
+                // Check buffer for GIF signature as a fallback
+                else if (dataBuffer.length >= 6 && 
+                         dataBuffer[0] === 0x47 && dataBuffer[1] === 0x49 && 
+                         dataBuffer[2] === 0x46 && dataBuffer[3] === 0x38) {
+                    result.media_type = 'gif';
+                    result.content_type = 'image/gif';
+                }
+                // Update log message to reflect the actual content type detected
+                const detectedType = (result.content_type === 'image/png') ? 'PNG' : 'GIF';
+                this.logInfo(`💾 Successfully extracted raw image data for ${detectedType}`, { 
+                    tx_id, 
+                    data_size: hexData.length / 2, // Since each byte is 2 hex chars
+                    content_type: result.content_type
+                });
+                
+                // Add image metadata
+                result.image_metadata = { 
+                    format: 'gif', 
+                    size: hexData.length / 2 
+                };
+                
+                // Process with MediaParser to get additional metadata if possible
+                try {
+                    const mediaParser = new MediaParser();
+                    const metadata = mediaParser.process_image('image/gif', hexData);
+                    if (metadata) {
+                        result.image_metadata = metadata;
+                        this.logInfo('💼 Enhanced image metadata using MediaParser', { tx_id });
+                    }
+                } catch (error) {
+                    this.logWarn('Error processing GIF with MediaParser', {
+                        tx_id,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+            }
+        }
+        
+        // If we still don't have raw image data but we found GIF content type, look for it in adjacent items
+        if (gifContentTypeFound && !result.raw_image_data) {
+            const gifContentTypeIndex = data.findIndex(item => item === 'image/gif');
+            if (gifContentTypeIndex >= 0 && gifContentTypeIndex < data.length - 1) {
+                const potentialImageData = data[gifContentTypeIndex + 1];
+                if (potentialImageData && typeof potentialImageData === 'string') {
+                    // If it's already hex-encoded, use it directly
+                    if (potentialImageData.startsWith('hex:')) {
+                        result.raw_image_data = potentialImageData.substring(4);
+                        this.logInfo('💾 Found hex-encoded GIF data after content type', { tx_id });
+                    } else {
+                        // Try to treat it as binary data
+                        try {
+                            const buffer = Buffer.from(potentialImageData, 'utf8');
+                            result.raw_image_data = buffer.toString('hex');
+                            this.logInfo('💾 Converted potential GIF data to hex', { tx_id });
+                        } catch (error) {
+                            this.logWarn('Error processing potential GIF data', {
+                                tx_id,
+                                error: error instanceof Error ? error.message : String(error)
+                            });
+                        }
+                    }
+                }
+            }
+        }
         
         // Process each data item
         for (const item of data) {
@@ -446,7 +827,8 @@ export class TransactionDataParser extends BaseParser {
         }
         
         // Add binary detection flag if binary content is detected
-        if ((result.media_type && result.media_type.startsWith('image/')) || 
+        if (this.detectBinaryContent(result.content) || 
+            (result.media_type && result.media_type.startsWith('image/')) || 
             (result.content_type && result.content_type.startsWith('image/'))) {
             result.is_binary = true;
             
@@ -471,12 +853,61 @@ export class TransactionDataParser extends BaseParser {
                     };
                 }
                 
-                // Special handling for GIF images
+                // Special handling for GIF images using MediaParser
                 if (result.media_type === 'image/gif' || result.content_type === 'image/gif') {
-                    this.logInfo('🎬 Enhanced GIF image data processing', { tx_id });
-                    // Ensure GIF-specific metadata is properly set
-                    if (!result.image_metadata.format || result.image_metadata.format !== 'gif') {
-                        result.image_metadata.format = 'gif';
+                    this.logInfo('🎬 Delegating GIF processing to MediaParser', { tx_id });
+                    try {
+                        // Make sure raw_image_data exists before trying to process it
+                        if (!result.raw_image_data) {
+                            this.logWarn('No raw image data found for GIF processing', { tx_id });
+                            result.image_metadata = { format: 'gif', error: 'No raw image data available' };
+                        } else {
+                            // Ensure we have a proper Buffer for MediaParser
+                            let gifBuffer;
+                            if (typeof result.raw_image_data === 'string') {
+                                // Convert hex string to buffer
+                                gifBuffer = Buffer.from(result.raw_image_data, 'hex');
+                            } else if (Buffer.isBuffer(result.raw_image_data)) {
+                                gifBuffer = result.raw_image_data;
+                            } else {
+                                this.logWarn('Invalid raw_image_data format for GIF processing', { 
+                                    tx_id,
+                                    type: typeof result.raw_image_data
+                                });
+                                gifBuffer = null;
+                            }
+                            
+                            if (gifBuffer) {
+                                // Process GIF with the MediaParser
+                                const { metadata } = this.mediaParser.process_gif_image(gifBuffer, tx_id);
+                                
+                                // Update metadata with enhanced information
+                                result.image_metadata = {
+                                    ...result.image_metadata,
+                                    ...metadata
+                                };
+                                
+                                this.logInfo('✅ Successfully processed GIF with MediaParser', {
+                                    tx_id,
+                                    width: metadata.width,
+                                    height: metadata.height,
+                                    is_animated: metadata.is_animated
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        this.logWarn('Error in GIF processing, using basic metadata', {
+                            tx_id,
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                        // Ensure GIF-specific metadata is properly set at minimum
+                        if (!result.image_metadata || !result.image_metadata.format || result.image_metadata.format !== 'gif') {
+                            result.image_metadata = { 
+                                ...(result.image_metadata || {}),
+                                format: 'gif',
+                                error_message: error instanceof Error ? error.message : String(error)
+                            };
+                        }
                     }
                 }
             }
@@ -498,6 +929,18 @@ export class TransactionDataParser extends BaseParser {
                         if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
                             detectedType = 'image/gif';
                             this.logInfo('🎬 Detected GIF image from hex content', { tx_id });
+                            
+                            // Process with MediaParser for better GIF handling
+                            try {
+                                const fullBuffer = Buffer.from(hexPart, 'hex');
+                                const { metadata } = this.mediaParser.process_gif_image(fullBuffer, tx_id);
+                                result.image_metadata = metadata;
+                            } catch (error) {
+                                this.logWarn('Error in GIF processing from hex content, using basic detection', {
+                                    tx_id,
+                                    error: error instanceof Error ? error.message : String(error)
+                                });
+                            }
                         }
                         // PNG signature: 89 50 4E 47
                         else if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
@@ -848,11 +1291,32 @@ export class TransactionDataParser extends BaseParser {
                         result.content_type = contentType;
                         result.media_type = contentType;
                         result.raw_image_data = hexData;
-                        result.image_metadata = { format: 'gif', size: hexData.length / 2 };
+                        
+                        // Create buffer from hex data for MediaParser
+                        const gifBuffer = Buffer.from(hexData, 'hex');
+                        
+                        // Use MediaParser for enhanced GIF processing
+                        try {
+                            const { metadata } = this.mediaParser.process_gif_image(gifBuffer, txId);
+                            result.image_metadata = metadata;
+                            this.logInfo('🎬 Successfully processed GIF with MediaParser', {
+                                txId,
+                                width: metadata.width,
+                                height: metadata.height,
+                                is_animated: metadata.is_animated
+                            });
+                        } catch (error) {
+                            this.logWarn('Error in GIF processing from content-type metadata, using basic metadata', {
+                                txId,
+                                error: error instanceof Error ? error.message : String(error)
+                            });
+                            result.image_metadata = { format: 'gif', size: hexData.length / 2 };
+                        }
+                        
                         result.metadata = {
                             ...result.metadata,
                             raw_image_data: hexData,
-                            image_metadata: { format: 'gif', size: hexData.length / 2 },
+                            image_metadata: result.image_metadata,
                             binary_items_count: binaryItems.length,
                             media_type: contentType,
                             content_type: contentType
@@ -880,6 +1344,25 @@ export class TransactionDataParser extends BaseParser {
                             else if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
                                 contentType = 'image/gif';
                                 this.logInfo('🎬 Detected GIF image from file signature', { txId });
+                                
+                                // Try to process the full GIF with MediaParser right away
+                                try {
+                                    const fullBuffer = Buffer.from(hexData, 'hex');
+                                    const { metadata } = this.mediaParser.process_gif_image(fullBuffer, txId);
+                                    // Store the metadata for later use
+                                    result.image_metadata = metadata;
+                                    this.logInfo('🎬 Successfully processed GIF with MediaParser', {
+                                        txId,
+                                        width: metadata.width,
+                                        height: metadata.height,
+                                        is_animated: metadata.is_animated
+                                    });
+                                } catch (gifError) {
+                                    this.logWarn('Could not process GIF with MediaParser, will use basic detection', {
+                                        txId,
+                                        error: gifError instanceof Error ? gifError.message : String(gifError)
+                                    });
+                                }
                             }
                             // PDF signature: 25 50 44 46
                             else if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
@@ -901,15 +1384,35 @@ export class TransactionDataParser extends BaseParser {
                     result.content_type = contentType;
                     result.media_type = contentType;
                     result.raw_image_data = hexData;
-                    result.image_metadata = {
-                        format: contentType.split('/')[1],
-                        size: hexData.length / 2
-                    };
+                    
+                    // If it's a GIF and we haven't already processed it with MediaParser
+                    if (contentType === 'image/gif' && !result.image_metadata) {
+                        try {
+                            const fullGifBuffer = Buffer.from(hexData, 'hex');
+                            const { metadata } = this.mediaParser.process_gif_image(fullGifBuffer, txId);
+                            result.image_metadata = metadata;
+                            this.logInfo('🎬 Processed GIF with MediaParser', { txId, metadata });
+                        } catch (gifError) {
+                            this.logWarn('Error processing GIF with MediaParser, using basic metadata', {
+                                txId,
+                                error: gifError instanceof Error ? gifError.message : String(gifError)
+                            });
+                            // Fall back to basic metadata
+                            result.image_metadata = {
+                                format: 'gif',
+                                size: hexData.length / 2
+                            };
+                        }
+                    } else if (!result.image_metadata) {
+                        // Basic metadata for other image types
+                        result.image_metadata = {
+                            format: contentType.split('/')[1],
+                            size: hexData.length / 2
+                        };
+                    }
+                    
                     result.metadata.raw_image_data = hexData;
-                    result.metadata.image_metadata = {
-                        format: contentType.split('/')[1],
-                        size: hexData.length / 2
-                    };
+                    result.metadata.image_metadata = result.image_metadata;
                     result.metadata.media_type = contentType;
                     result.metadata.content_type = contentType;
                 } else {

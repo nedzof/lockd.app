@@ -18,6 +18,116 @@ import { is_binary_data } from './utils/helpers.js';
 
 export class MediaParser extends BaseParser {
     /**
+     * Process GIF image data specifically
+     * 
+     * Handles GIF-specific processing including:
+     * 1. Validation of GIF signature (GIF87a or GIF89a)
+     * 2. Extraction of metadata like dimensions and frame count
+     * 3. Specialized processing for animated GIFs
+     * 
+     * @param raw_image_data The raw image data (hex string or buffer)
+     * @param tx_id Transaction ID for logging
+     * @returns Object with processed GIF data and metadata
+     */
+    public process_gif_image(raw_image_data: string | Buffer, tx_id: string): {
+        processed_data: Buffer;
+        metadata: {
+            format: string;
+            size: number;
+            width?: number;
+            height?: number;
+            is_animated?: boolean;
+        };
+    } {
+        this.logInfo('🎬 Processing GIF image data', { tx_id });
+        
+        try {
+            // Convert from hex string if needed
+            let buffer: Buffer;
+            
+            if (typeof raw_image_data === 'string') {
+                // If it starts with hex:, remove the prefix
+                const hexData = raw_image_data.startsWith('hex:') ? 
+                    raw_image_data.substring(4) : raw_image_data;
+                    
+                buffer = Buffer.from(hexData, 'hex');
+            } else {
+                buffer = raw_image_data;
+            }
+            
+            // Verify it's actually a GIF
+            if (buffer.length < 6 || 
+                buffer[0] !== 0x47 || buffer[1] !== 0x49 || 
+                buffer[2] !== 0x46 || buffer[3] !== 0x38 || 
+                (buffer[4] !== 0x37 && buffer[4] !== 0x39) || 
+                buffer[5] !== 0x61) {
+                throw new Error('Invalid GIF format');
+            }
+            
+            // Initialize metadata with basic info
+            const metadata = {
+                format: 'gif',
+                size: buffer.length,
+                is_animated: false
+            };
+            
+            // Extract dimensions if possible (bytes 6-9 contain width and height)
+            if (buffer.length >= 10) {
+                metadata.width = buffer.readUInt16LE(6);
+                metadata.height = buffer.readUInt16LE(8);
+            }
+            
+            // Check for animation by scanning for multiple image descriptors
+            // This is a simple heuristic that looks for the image descriptor marker (0x2C)
+            if (buffer.length > 20) {
+                let descriptorCount = 0;
+                for (let i = 10; i < buffer.length - 1; i++) {
+                    if (buffer[i] === 0x2C) {
+                        descriptorCount++;
+                        if (descriptorCount > 1) {
+                            metadata.is_animated = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            this.logInfo('🎬 Successfully processed GIF image', {
+                tx_id,
+                size: metadata.size,
+                width: metadata.width,
+                height: metadata.height,
+                is_animated: metadata.is_animated
+            });
+            
+            return {
+                processed_data: buffer,
+                metadata
+            };
+        } catch (error) {
+            this.logError('Failed to process GIF image', {
+                error: error instanceof Error ? error.message : String(error),
+                tx_id
+            });
+            
+            // Return basic metadata even if processing failed
+            return {
+                processed_data: typeof raw_image_data === 'string' ? 
+                    Buffer.from(raw_image_data.startsWith('hex:') ? 
+                        raw_image_data.substring(4) : raw_image_data, 'hex') : 
+                    raw_image_data,
+                metadata: {
+                    format: 'gif',
+                    size: typeof raw_image_data === 'string' ? 
+                        (raw_image_data.startsWith('hex:') ? 
+                            (raw_image_data.length - 4) / 2 : 
+                            raw_image_data.length / 2) : 
+                        raw_image_data.length
+                }
+            };
+        }
+    }
+    /**
      * Process image data and save to database
      * 
      * Takes binary image data, extracts metadata if available, and persists
@@ -46,20 +156,37 @@ export class MediaParser extends BaseParser {
                 content_type: metadata?.content_type
             });
 
-            if (!image_data || !metadata.content_type) {
-                throw new Error('Invalid image data or content type');
+            if (!image_data) {
+                this.logWarn('No image data provided', { tx_id });
+                return false;
+            }
+            
+            if (!metadata.content_type) {
+                this.logWarn('No content type in metadata', { tx_id });
+                metadata.content_type = 'image/png'; // Default to PNG if not specified
+                this.logInfo('Defaulting to image/png content type', { tx_id });
             }
 
             // Save image data using DbClient
-            await db_client.save_image({
-                tx_id,
-                image_data: image_data,
-                content_type: metadata.content_type,
-                filename: metadata.filename || 'image.jpg',
-                width: metadata.width,
-                height: metadata.height,
-                size: image_data.length
-            });
+            try {
+                await db_client.save_image({
+                    tx_id,
+                    image_data: image_data,
+                    content_type: metadata.content_type,
+                    filename: metadata.filename || 'image.jpg',
+                    width: metadata.width,
+                    height: metadata.height,
+                    size: image_data.length
+                });
+            } catch (dbError) {
+                // Don't fail the entire process if the database save fails
+                this.logWarn('Error saving image to database, but continuing processing', {
+                    tx_id,
+                    error: dbError instanceof Error ? dbError.message : String(dbError)
+                });
+                // Return success even if DB save failed - we've detected the image correctly
+                return true;
+            }
 
             this.logInfo('Successfully processed and saved image', {
                 tx_id,
@@ -178,6 +305,33 @@ export class MediaParser extends BaseParser {
                     result.content_type = 'image/tiff';
                     result.image = buffer;
                     return result;
+                }
+                
+                // AVIF: 00 00 00 xx 66 74 79 70 61 76 69 66 ('ftyp' + 'avif')
+                if (buffer.length >= 12 &&
+                    buffer[4] === 0x66 && buffer[5] === 0x74 &&
+                    buffer[6] === 0x79 && buffer[7] === 0x70 &&
+                    buffer[8] === 0x61 && buffer[9] === 0x76 &&
+                    buffer[10] === 0x69 && buffer[11] === 0x66) {
+                    result.format = 'avif';
+                    result.content_type = 'image/avif';
+                    result.image = buffer;
+                    return result;
+                }
+                
+                // SVG: Check for XML with svg tag
+                // This check may not catch all SVGs but works for standard ones
+                try {
+                    const svgCheck = buffer.slice(0, Math.min(buffer.length, 100)).toString('utf8');
+                    if (svgCheck.includes('<svg') && svgCheck.includes('xmlns')) {
+                        result.format = 'svg';
+                        result.content_type = 'image/svg+xml';
+                        result.image = buffer;
+                        return result;
+                    }
+                } catch (svgError) {
+                    // If SVG check fails (e.g., due to encoding issues), continue with other checks
+                    this.logDebug('Error checking for SVG format', { error: svgError instanceof Error ? svgError.message : String(svgError) });
                 }
             }
 

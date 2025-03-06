@@ -259,6 +259,7 @@ export class Scanner {
                             });
                         }
                     }
+                }
                 
                 // Process the vote transaction
                 const voteResult = await this.voteService.processVoteTransaction(parsedTx);

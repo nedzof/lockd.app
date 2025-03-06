@@ -468,6 +468,279 @@ export class DbClient {
     }
     
     /**
+     * Save image data to the database and associate it with a transaction
+     * @param params Image data parameters
+     * @returns Promise<boolean> Success or failure
+     */
+    public async save_image(params: {
+        tx_id: string;
+        image_data: string | Buffer;
+        content_type: string;
+        filename?: string;
+        width?: number;
+        height?: number;
+        size?: number;
+    }): Promise<boolean> {
+        try {
+            if (!params.tx_id || !params.image_data) {
+                logger.warn('Missing required parameters for save_image', {
+                    tx_id: params.tx_id
+                });
+                return false;
+            }
+
+            // Convert Buffer to string if needed
+            let imageData = params.image_data;
+            let detectedFormat = null;
+            
+            if (Buffer.isBuffer(imageData)) {
+                // Check for image signatures to determine the correct content type
+                detectedFormat = this.detectImageFormat(imageData);
+                
+                if (detectedFormat) {
+                    // Override content type if a format signature is detected
+                    if (params.content_type !== detectedFormat.mimeType) {
+                        logger.info(`🖼️ Overriding content type to ${detectedFormat.mimeType} based on signature detection`, {
+                            tx_id: params.tx_id,
+                            original_content_type: params.content_type,
+                            detected_format: detectedFormat.format
+                        });
+                        params.content_type = detectedFormat.mimeType;
+                    }
+                } else {
+                    // Log if no format detected but we have image data
+                    logger.warn('⚠️ No image format signature detected in binary data', {
+                        tx_id: params.tx_id,
+                        content_type: params.content_type,
+                        data_length: imageData.length
+                    });
+                }
+                
+                // Encode buffer as hex string with prefix
+                imageData = 'hex:' + imageData.toString('hex');
+            } else if (typeof imageData === 'string' && !imageData.startsWith('hex:')) {
+                // Try to detect format in string data
+                try {
+                    const buffer = Buffer.from(imageData);
+                    detectedFormat = this.detectImageFormat(buffer);
+                    
+                    if (detectedFormat && params.content_type !== detectedFormat.mimeType) {
+                        logger.info(`🖼️ Overriding content type to ${detectedFormat.mimeType} based on signature detection`, {
+                            tx_id: params.tx_id,
+                            original_content_type: params.content_type,
+                            detected_format: detectedFormat.format
+                        });
+                        params.content_type = detectedFormat.mimeType;
+                    }
+                } catch (error) {
+                    logger.warn('Error detecting image format in string data', {
+                        tx_id: params.tx_id,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+                
+                // Encode as hex if it's not already
+                imageData = 'hex:' + Buffer.from(imageData).toString('hex');
+            }
+
+            // Get the related transaction
+            const transaction = await this.transaction_client.get_transaction(params.tx_id);
+            if (!transaction) {
+                logger.warn('Cannot save image: transaction not found', {
+                    tx_id: params.tx_id
+                });
+                return false;
+            }
+
+            // Determine media_type from content_type
+            const mediaType = this.getMediaTypeFromContentType(params.content_type);
+            
+            // Update the transaction with image data
+            await this.transaction_client.with_fresh_client(async (client) => {
+                return await client.transaction.update({
+                    where: { tx_id: params.tx_id },
+                    data: {
+                        media_type: mediaType,
+                        content_type: params.content_type,
+                        raw_image_data: imageData as string,
+                        metadata: {
+                            ...(transaction.metadata as object || {}),
+                            content_type: params.content_type,
+                            media_type: mediaType,
+                            image_metadata: {
+                                width: params.width,
+                                height: params.height,
+                                size: params.size,
+                                filename: params.filename
+                            }
+                        }
+                    }
+                });
+            });
+
+            // Also update any associated post
+            try {
+                await this.post_client.with_fresh_client(async (client) => {
+                    // Check if a post exists with this transaction ID
+                    const post = await client.post.findFirst({
+                        where: { tx_id: params.tx_id }
+                    });
+
+                    if (post) {
+                        return await client.post.update({
+                            where: { tx_id: params.tx_id },
+                            data: {
+                                media_type: mediaType,
+                                content_type: params.content_type,
+                                raw_image_data: imageData as string,
+                                metadata: {
+                                    ...(post.metadata as object || {}),
+                                    content_type: params.content_type,
+                                    media_type: mediaType,
+                                    image_metadata: {
+                                        width: params.width,
+                                        height: params.height,
+                                        size: params.size,
+                                        filename: params.filename
+                                    }
+                                }
+                            }
+                        });
+                    }
+                });
+            } catch (postError) {
+                // Log but don't fail the whole operation if post update fails
+                logger.warn('Failed to update post with image data, but transaction was updated', {
+                    tx_id: params.tx_id,
+                    error: postError instanceof Error ? postError.message : String(postError)
+                });
+            }
+
+            logger.info('Successfully saved image data', {
+                tx_id: params.tx_id,
+                content_type: params.content_type,
+                size: params.size || (typeof imageData === 'string' ? imageData.length : 'unknown')
+            });
+
+            return true;
+        } catch (error) {
+            logger.error('Error saving image data', {
+                tx_id: params.tx_id,
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            return false;
+        }
+    }
+
+    /**
+     * Converts content type to a standardized media type for storage
+     * @param contentType The MIME content type
+     * @returns Simplified media type string
+     */
+    private getMediaTypeFromContentType(contentType: string): string {
+        if (!contentType) {
+            return 'unknown';
+        }
+        
+        // Convert MIME types to our standard media types
+        switch (contentType.toLowerCase()) {
+            case 'image/png':
+                return 'png';
+            case 'image/gif':
+                return 'gif';
+            case 'image/jpeg':
+            case 'image/jpg':
+                return 'jpeg';
+            case 'image/webp':
+                return 'webp';
+            case 'image/bmp':
+                return 'bmp';
+            case 'image/svg+xml':
+                return 'svg';
+            case 'image/avif':
+                return 'avif';
+            case 'application/pdf':
+                return 'pdf';
+            default:
+                // Extract the subtype from content type if possible
+                if (contentType.includes('/')) {
+                    const subtype = contentType.split('/')[1];
+                    return subtype.split(';')[0].trim(); // Handle parameters and clean up
+                }
+                return contentType;
+        }
+    }
+    
+    /**
+     * Detects image format from a buffer based on file signatures
+     * @param buffer The buffer containing image data
+     * @returns Object with format and mimeType, or null if no format detected
+     */
+    private detectImageFormat(buffer: Buffer): { format: string, mimeType: string } | null {
+        if (!buffer || buffer.length < 4) {
+            return null;
+        }
+        
+        // PNG: 89 50 4E 47 0D 0A 1A 0A
+        if (buffer.length >= 8 &&
+            buffer[0] === 0x89 && buffer[1] === 0x50 &&
+            buffer[2] === 0x4E && buffer[3] === 0x47 &&
+            buffer[4] === 0x0D && buffer[5] === 0x0A &&
+            buffer[6] === 0x1A && buffer[7] === 0x0A) {
+            return { format: 'png', mimeType: 'image/png' };
+        }
+        
+        // GIF: 47 49 46 38 (37 or 39) 61
+        if (buffer.length >= 6 &&
+            buffer[0] === 0x47 && buffer[1] === 0x49 &&
+            buffer[2] === 0x46 && buffer[3] === 0x38 &&
+            (buffer[4] === 0x37 || buffer[4] === 0x39) && buffer[5] === 0x61) {
+            return { format: 'gif', mimeType: 'image/gif' };
+        }
+        
+        // JPEG: FF D8 FF
+        if (buffer.length >= 3 &&
+            buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+            return { format: 'jpeg', mimeType: 'image/jpeg' };
+        }
+        
+        // WebP: 52 49 46 46 XX XX XX XX 57 45 42 50
+        // RIFF....WEBP
+        if (buffer.length >= 12 &&
+            buffer[0] === 0x52 && buffer[1] === 0x49 &&
+            buffer[2] === 0x46 && buffer[3] === 0x46 &&
+            buffer[8] === 0x57 && buffer[9] === 0x45 &&
+            buffer[10] === 0x42 && buffer[11] === 0x50) {
+            return { format: 'webp', mimeType: 'image/webp' };
+        }
+        
+        // BMP: 42 4D (BM)
+        if (buffer.length >= 2 &&
+            buffer[0] === 0x42 && buffer[1] === 0x4D) {
+            return { format: 'bmp', mimeType: 'image/bmp' };
+        }
+        
+        // SVG: Check for XML with svg tag
+        // This is a simple check and may not catch all SVGs
+        const svgCheck = buffer.slice(0, Math.min(buffer.length, 100)).toString('utf8');
+        if (svgCheck.includes('<svg') && svgCheck.includes('xmlns')) {
+            return { format: 'svg', mimeType: 'image/svg+xml' };
+        }
+        
+        // AVIF: 00 00 00 xx 66 74 79 70 61 76 69 66 ('ftyp' + 'avif')
+        if (buffer.length >= 12 &&
+            buffer[4] === 0x66 && buffer[5] === 0x74 &&
+            buffer[6] === 0x79 && buffer[7] === 0x70 &&
+            buffer[8] === 0x61 && buffer[9] === 0x76 &&
+            buffer[10] === 0x69 && buffer[11] === 0x66) {
+            return { format: 'avif', mimeType: 'image/avif' };
+        }
+        
+        return null;
+    }
+    
+    /**
      * Detect if a transaction contains binary content
      * @param tx Transaction to check for binary content
      * @returns Boolean indicating if binary content was detected
