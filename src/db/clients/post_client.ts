@@ -1,314 +1,260 @@
-import { Post, VoteOption, PostMetadata, ParsedTransaction } from '../../shared/types.js';
-import { logger } from '../../utils/logger.js';
-import { BaseDbClient } from './base_client.js';
-
 /**
- * Client for interacting with post-related database operations
+ * Post Database Client
+ * 
+ * Handles database operations for posts and vote options.
+ * Follows KISS principles with minimal, focused responsibilities.
  */
+
+import BaseDbClient from './base_client.js';
+
+interface Post {
+  tx_id: string;
+  content: string;
+  author_address?: string;
+  created_at: Date;
+  is_vote?: boolean;
+  media_type?: string;
+  content_type?: string;
+  tags?: string[];
+  vote_options?: VoteOption[];
+}
+
+interface VoteOption {
+  tx_id: string;
+  post_id: string;
+  content: string;
+  option_index: number;
+  created_at: Date;
+  author_address?: string;
+  tags?: string[];
+}
+
 export class PostClient extends BaseDbClient {
-    /**
-     * Create a new post or update an existing one
-     * @param tx Transaction containing post data
-     * @returns Created or updated post
-     */
-    public async create_or_update_post(tx: ParsedTransaction): Promise<Post | null> {
-        if (!tx || !tx.tx_id) {
-            throw new Error('Invalid transaction data');
-        }
-        
-        try {
-            const metadata = tx.metadata as PostMetadata;
-            
-            if (!metadata || !metadata.post_txid) {
-                logger.warn('⚠️ Missing post_txid', { tx_id: tx.tx_id });
-                return null;
-            }
-            
-            logger.debug('📝 Creating/updating post', { 
-                tx_id: tx.tx_id, 
-                post_txid: metadata.post_txid
-            });
-            
-            // Prioritize transaction content over metadata content
-            const content = tx.content || metadata.content || '';
-            
-            // Log content details
-            logger.info('🔍 Post content check', { 
-                tx_id: tx.tx_id, 
-                content_exists: !!content,
-                content_length: content.length,
-                content_preview: content.substring(0, 50) + (content.length > 50 ? '...' : ''),
-                from_tx: !!tx.content,
-                from_metadata: !!metadata.content
-            });
-            
-            // Check for binary content and media types
-            const has_binary_content = (
-                (tx.content_type && tx.content_type.startsWith('image/')) ||
-                (tx.media_type && tx.media_type.startsWith('image/')) ||
-                (metadata.content_type && metadata.content_type.startsWith('image/'))
-            );
-            
-            // Handle GIF and other binary image types
-            if (has_binary_content) {
-                logger.info('🖼️ Detected binary image content in post', { 
-                    tx_id: tx.tx_id,
-                    post_txid: metadata.post_txid,
-                    content_type: tx.content_type || metadata.content_type || 'unknown',
-                    media_type: tx.media_type || metadata.media_type || 'unknown'
-                });
-            }
-            
-            // Prepare post data
-            const post_data = {
-                tx_id: metadata.post_txid,
-                content: content, // Use the prioritized content from above
-                block_height: typeof tx.block_height !== 'undefined' && tx.block_height !== null && !isNaN(Number(tx.block_height))
-                    ? Number(tx.block_height)
-                    : null,
-                author_address: metadata.author_address || tx.author_address || null,
-                is_vote: metadata.is_vote === true,
-                is_locked: metadata.is_locked === true,
-                // Set media_type if present in transaction or metadata
-                media_type: tx.media_type || metadata.media_type || null,
-                // Store content_type from transaction or metadata
-                content_type: tx.content_type || metadata.content_type || null,
-                // Store raw image data if present
-                raw_image_data: tx.raw_image_data || metadata.raw_image_data || null,
-                metadata: {
-                    ...metadata,
-                    content: content, // Also store content in metadata for consistency
-                    block_time: this.create_block_time_bigint(tx.block_time),
-                    is_deleted: metadata.is_deleted === true,
-                    parent_post_txid: metadata.parent_post_txid || null,
-                    orig_post_txid: metadata.orig_post_txid || null,
-                    // Include image metadata if available
-                    image_metadata: tx.image_metadata || metadata.image_metadata || null,
-                    // Include additional fields for binary content
-                    media_type: tx.media_type || metadata.media_type || null,
-                    content_type: tx.content_type || metadata.content_type || null
-                }
+  constructor() {
+    super();
+  }
+  
+  /**
+   * Create a new post
+   * @param post The post to create
+   * @returns The created post
+   */
+  async create_post(post: Post): Promise<any> {
+    try {
+      // Create the base post data object with only the fields that are definitely in the schema
+      const postData: any = {
+        tx_id: post.tx_id,
+        content: post.content,
+        created_at: post.created_at,
+        is_vote: post.is_vote || false,
+        tags: post.tags || []
+      };
+      
+      // Add optional fields only if they are provided
+      if (post.author_address) postData.author_address = post.author_address;
+      if (post.media_type) postData.media_type = post.media_type;
+      if (post.content_type) postData.content_type = post.content_type;
+      
+      // Add vote options if provided
+      if (post.vote_options && post.vote_options.length > 0) {
+        postData.vote_options = {
+          create: post.vote_options.map((option, index) => {
+            const voteOptionData: any = {
+              tx_id: option.tx_id,
+              content: option.content,
+              option_index: option.option_index || index,
+              created_at: option.created_at,
+              tags: option.tags || []
             };
             
-            // Create or update the post
-            const post = await this.with_fresh_client(async (client) => {
-                return await client.post.upsert({
-                    where: { tx_id: metadata.post_txid },
-                    update: post_data,
-                    create: post_data
-                });
-            });
+            if (option.author_address) voteOptionData.author_address = option.author_address;
             
-            logger.debug('✅ Post saved', { 
-                tx_id: post.tx_id,
-                author: post.author_address
-            });
-            
-            return post;
-        } catch (error) {
-            logger.error('❌ Error saving post', {
-                tx_id: tx.tx_id,
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            throw error;
-        }
+            return voteOptionData;
+          })
+        };
+      }
+      
+      return await this.with_retry(() => 
+        this.prisma.post.create({
+          data: postData,
+          include: {
+            vote_options: true
+          }
+        })
+      );
+    } catch (error) {
+      this.log_error('Error creating post', error as Error, {
+        tx_id: post.tx_id
+      });
+      throw error;
     }
-
-    /**
-     * Create vote options for a post
-     * @param tx Transaction containing vote option data
-     * @param post_txid Post transaction ID that these vote options belong to
-     * @returns Array of created vote options
-     */
-    public async create_vote_options(
-        tx: ParsedTransaction,
-        post_txid: string
-    ): Promise<VoteOption[]> {
-        if (!tx || !tx.tx_id || !post_txid) {
-            throw new Error('Invalid transaction or post data');
-        }
+  }
+  
+  /**
+   * Get a post by transaction ID
+   * @param transactionId The transaction ID of the post
+   * @returns The post or null if not found
+   */
+  async get_post_by_transaction_id(transactionId: string): Promise<any | null> {
+    try {
+      return await this.with_retry(() => 
+        this.prisma.post.findUnique({
+          where: {
+            tx_id: transactionId
+          },
+          include: {
+            vote_options: true
+          }
+        })
+      );
+    } catch (error) {
+      this.log_error('Error getting post by transaction ID', error as Error, {
+        tx_id: transactionId
+      });
+      return null;
+    }
+  }
+  
+  /**
+   * Update an existing post
+   * @param transactionId The transaction ID of the post to update
+   * @param updates The updates to apply
+   * @returns The updated post
+   */
+  async update_post(transactionId: string, updates: Partial<Post>): Promise<any> {
+    try {
+      const updateData: any = {};
+      
+      if (updates.content) updateData.content = updates.content;
+      if (updates.author_address) updateData.author_address = updates.author_address;
+      if (updates.media_type) updateData.media_type = updates.media_type;
+      if (updates.content_type) updateData.content_type = updates.content_type;
+      if (updates.tags) updateData.tags = updates.tags;
+      if (updates.is_vote !== undefined) updateData.is_vote = updates.is_vote;
+      
+      return await this.with_retry(() => 
+        this.prisma.post.update({
+          where: {
+            tx_id: transactionId
+          },
+          data: updateData,
+          include: {
+            vote_options: true
+          }
+        })
+      );
+    } catch (error) {
+      this.log_error('Error updating post', error as Error, {
+        tx_id: transactionId
+      });
+      throw error;
+    }
+  }
+  
+  /**
+   * Add vote options to a post
+   * @param postId The ID of the post
+   * @param voteOptions The vote options to add
+   * @returns The created vote options
+   */
+  async add_vote_options(postId: string, voteOptions: VoteOption[]): Promise<any[]> {
+    try {
+      const createdOptions = [];
+      
+      for (const option of voteOptions) {
+        const createdOption = await this.with_retry(() => 
+          this.prisma.vote_option.create({
+            data: {
+              tx_id: option.tx_id,
+              post_id: postId,
+              content: option.content,
+              option_index: option.option_index,
+              created_at: option.created_at,
+              author_address: option.author_address,
+              tags: option.tags || []
+            }
+          })
+        );
         
-        try {
-            const metadata = tx.metadata as PostMetadata;
-            
-            if (!metadata || !metadata.vote_options || !Array.isArray(metadata.vote_options)) {
-                logger.debug('👀 No vote options to create', { tx_id: tx.tx_id });
-                return [];
-            }
-            
-            // First, get the post to get its ID
-            const post = await this.get_post(post_txid);
-            
-            if (!post || !post.id) {
-                logger.error('🚨 Post not found for vote options', { post_txid });
-                
-                // Try to create the post if it doesn't exist (recovery mechanism)
-                logger.info('🔄 Attempting to create missing post for vote options', { post_txid });
-                
-                const recoveryPost = await this.create_or_update_post({
-                    ...tx,
-                    metadata: {
-                        ...tx.metadata as any,
-                        post_txid: post_txid,
-                        is_vote: true
-                    }
-                });
-                
-                if (!recoveryPost) {
-                    throw new Error('Failed to create missing post for vote options');
-                }
-                
-                logger.info('✅ Created missing post for vote options', { post_id: recoveryPost.id });
-                return await this.create_vote_options(tx, post_txid); // Retry with the new post
-            }
-            
-            logger.debug('📝 Creating vote options', { 
-                tx_id: tx.tx_id,
-                post_txid,
-                count: metadata.vote_options.length
-            });
-            
-            // Log vote options before creating
-            logger.info('📊 Vote options data', {
-                tx_id: tx.tx_id,
-                post_id: post.id,
-                options: metadata.vote_options
-            });
-            
-            // Prepare vote option data
-            const vote_option_data = metadata.vote_options.map((option, index) => {
-                // Handle both string options and object options with text property
-                const optionContent = typeof option === 'string' 
-                    ? option 
-                    : (option?.text || option?.content || `Option ${index + 1}`);
-                
-                return {
-                    tx_id: `${tx.tx_id}_option_${index}`,
-                    post_id: post.id,
-                    content: optionContent,
-                    option_index: index
-                };
-            });
-            
-            // Create vote options
-            const vote_options = await this.with_fresh_client(async (client) => {
-                // First, delete any existing vote options for this post
-                await client.vote_option.deleteMany({
-                    where: { post_id: post.id }
-                });
-                
-                // Then create the new vote options
-                const options: VoteOption[] = [];
-                
-                for (const option of vote_option_data) {
-                    const created_option = await client.vote_option.create({
-                        data: option
-                    });
-                    options.push(created_option);
-                }
-                
-                return options;
-            });
-            
-            logger.debug('✅ Vote options created', { 
-                post_txid,
-                count: vote_options.length
-            });
-            
-            return vote_options;
-        } catch (error) {
-            logger.error('❌ Error creating vote options', {
-                tx_id: tx.tx_id,
-                post_txid,
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            throw error;
-        }
+        createdOptions.push(createdOption);
+      }
+      
+      return createdOptions;
+    } catch (error) {
+      this.log_error('Error adding vote options', error as Error, {
+        post_id: postId
+      });
+      throw error;
     }
-
-    /**
-     * Get a post from the database
-     * @param post_txid Post transaction ID
-     * @param include_vote_options Whether to include vote options
-     * @returns Post or null if not found
-     */
-    public async get_post(
-        post_txid: string,
-        include_vote_options = false
-    ): Promise<Post | null> {
-        if (!post_txid) {
-            throw new Error('Invalid post transaction ID');
-        }
-        
-        try {
-            logger.debug('🔍 Getting post', { post_txid });
-            
-            // Get the post
-            const post = await this.with_fresh_client(async (client) => {
-                return await client.post.findUnique({
-                    where: { tx_id: post_txid },
-                    include: {
-                        vote_options: include_vote_options
-                    }
-                });
-            });
-            
-            if (!post) {
-                logger.debug('👀 Post not found', { post_txid });
-                return null;
-            }
-            
-            logger.debug('📝 Post found', { post_txid });
-            
-            return post;
-        } catch (error) {
-            logger.error('❌ Error getting post', {
-                post_txid,
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            throw error;
-        }
+  }
+  
+  /**
+   * Get vote options for a post
+   * @param postId The ID of the post
+   * @returns The vote options for the post
+   */
+  async get_vote_options(postId: string): Promise<any[]> {
+    try {
+      return await this.with_retry(() => 
+        this.prisma.vote_option.findMany({
+          where: {
+            post_id: postId
+          }
+        })
+      );
+    } catch (error) {
+      this.log_error('Error getting vote options', error as Error, {
+        post_id: postId
+      });
+      return [];
     }
-    
-    /**
-     * Clean up all vote options from the database
-     * @returns Promise<void>
-     */
-    public async cleanup_vote_options(): Promise<void> {
-        try {
-            logger.info('🧹 Cleaning up all vote options');
-            
-            const deleted = await this.with_fresh_client(async (client) => {
-                return await client.vote_option.deleteMany({});
-            });
-            
-            logger.info(`✅ Successfully deleted ${deleted.count} vote options`);
-        } catch (error) {
-            logger.error('❌ Error cleaning up vote options', {
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            throw error;
-        }
+  }
+  
+  /**
+   * Delete all posts
+   * @returns The number of deleted posts
+   */
+  async delete_all_posts(): Promise<number> {
+    try {
+      const result = await this.with_retry(() => 
+        this.prisma.post.deleteMany({})  
+      );
+      
+      this.log_info('Deleted all posts', {
+        count: result.count
+      });
+      
+      return result.count;
+    } catch (error) {
+      this.log_error('Error deleting all posts', error as Error);
+      throw error;
     }
-    
-    /**
-     * Clean up all posts from the database
-     * @returns Promise<void>
-     */
-    public async cleanup_posts(): Promise<void> {
-        try {
-            logger.info('🧹 Cleaning up all posts');
-            
-            const deleted = await this.with_fresh_client(async (client) => {
-                return await client.post.deleteMany({});
-            });
-            
-            logger.info(`✅ Successfully deleted ${deleted.count} posts`);
-        } catch (error) {
-            logger.error('❌ Error cleaning up posts', {
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            throw error;
-        }
+  }
+  
+  /**
+   * Delete all vote options
+   * @returns The number of deleted vote options
+   */
+  async delete_all_vote_options(): Promise<number> {
+    try {
+      const result = await this.with_retry(() => 
+        this.prisma.vote_option.deleteMany({})  
+      );
+      
+      this.log_info('Deleted all vote options', {
+        count: result.count
+      });
+      
+      return result.count;
+    } catch (error) {
+      this.log_error('Error deleting all vote options', error as Error);
+      throw error;
     }
+  }
 }
+
+// Export singleton instance
+export const post_client = new PostClient();
+
+// Export default for direct instantiation
+export default PostClient;

@@ -1,199 +1,280 @@
-import { ProcessedTransaction, ParsedTransaction } from '../../shared/types.js';
-import { logger } from '../../utils/logger.js';
-import { BaseDbClient } from './base_client.js';
-
 /**
- * Client for interacting with transaction-related database operations
+ * Transaction Database Client
+ * 
+ * Handles database operations for processed transactions.
+ * Follows KISS principles with minimal, focused responsibilities.
  */
-export class TransactionClient extends BaseDbClient {
-    /**
-     * Save a transaction to the database
-     * @param tx Transaction to save
-     * @param retryAttempt Current retry attempt (used internally for recursive retry)
-     * @returns Saved transaction
-     */
-    public async save_transaction(tx: ParsedTransaction, retryAttempt = 0): Promise<ProcessedTransaction> {
-        if (!tx || !tx.tx_id) {
-            throw new Error('Invalid transaction data');
-        }
-        
-        // Maximum number of retry attempts
-        const MAX_RETRIES = 3;
-        // Timeout for the operation in milliseconds
-        const OPERATION_TIMEOUT = 5000; // 5 seconds
-        
-        try {
-            logger.debug('Saving transaction', { tx_id: tx.tx_id, retryAttempt });
-            
-            // Ensure block_height is a valid number
-            const safe_block_height = typeof tx.block_height !== 'undefined' && tx.block_height !== null && !isNaN(Number(tx.block_height))
-                ? Number(tx.block_height)
-                : 0;
-            
-            // Create transaction data object with proper BigInt conversion for block_time
-            const tx_data = {
-                tx_id: tx.tx_id,
-                type: tx.type || 'unknown',
-                block_height: safe_block_height,
-                block_time: this.create_block_time_bigint(tx.block_time),
-                metadata: tx.metadata || {},
-                protocol: tx.protocol || 'MAP'
-            };
-            
-            // Create a promise with timeout
-            const timeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => {
-                    reject(new Error(`DB operation timed out after ${OPERATION_TIMEOUT}ms`));
-                }, OPERATION_TIMEOUT);
-            });
-            
-            // Save the transaction with timeout
-            const dbOperationPromise = this.with_fresh_client(async (client) => {
-                return await client.processed_transaction.upsert({
-                    where: { tx_id: tx.tx_id },
-                    update: tx_data,
-                    create: tx_data
-                });
-            });
-            
-            // Race between the DB operation and the timeout
-            const saved_tx = await Promise.race([dbOperationPromise, timeoutPromise]);
-            
-            logger.debug('Transaction saved successfully', { 
-                tx_id: saved_tx.tx_id,
-                type: saved_tx.type
-            });
-            
-            return saved_tx;
-        } catch (error) {
-            // Check if we can retry
-            if (retryAttempt < MAX_RETRIES) {
-                const isTimeout = error instanceof Error && 
-                                  (error.message.includes('timed out') || 
-                                   error.message.includes('timeout'));
-                                   
-                if (isTimeout) {
-                    logger.warn('DB operation timeout, retrying', {
-                        tx_id: tx.tx_id,
-                        attempt: retryAttempt + 1,
-                        max_retries: MAX_RETRIES
-                    });
-                    
-                    // Exponential backoff: wait longer before each retry
-                    const backoffMs = Math.pow(2, retryAttempt) * 1000;
-                    await new Promise(resolve => setTimeout(resolve, backoffMs));
-                    
-                    // Retry the operation
-                    return this.save_transaction(tx, retryAttempt + 1);
-                }
-            }
-            
-            // Log the error and rethrow if retries are exhausted or it's not a timeout
-            logger.error('Error saving transaction', {
-                tx_id: tx.tx_id,
-                retryAttempt,
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            throw error;
-        }
-    }
 
-    /**
-     * Get a transaction from the database
-     * @param tx_id Transaction ID
-     * @returns Transaction or null if not found
-     */
-    public async get_transaction(tx_id: string): Promise<ProcessedTransaction | null> {
-        if (!tx_id) {
-            throw new Error('Invalid transaction ID');
-        }
-        
-        try {
-            logger.debug('Getting transaction', { tx_id });
-            
-            // Get the transaction
-            const tx = await this.with_fresh_client(async (client) => {
-                return await client.processed_transaction.findUnique({
-                    where: { tx_id }
-                });
-            });
+import BaseDbClient from './base_client.js';
 
-            if (!tx) {
-                logger.debug('Transaction not found', { tx_id });
-                return null;
-            }
-            
-            logger.debug('Transaction found', { 
-                tx_id: tx.tx_id,
-                type: tx.type
-            });
-            
-            return tx;
-        } catch (error) {
-            logger.error('Error getting transaction', {
-                tx_id,
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            throw error;
-        }
-    }
-
-    /**
-     * Get the current blockchain height from the database
-     * @returns The current block height or null if not available
-     */
-    public async get_current_block_height(): Promise<number | null> {
-        try {
-            logger.debug('Getting current block height');
-            
-            // Try to get the latest block height from processed transactions
-            const latest_tx = await this.with_fresh_client(async (client) => {
-                return await client.processed_transaction.findFirst({
-                    orderBy: {
-                        block_height: 'desc'
-                    },
-                    where: {
-                        block_height: {
-                            gt: 0
-                        }
-                    }
-                });
-            });
-            
-            if (latest_tx?.block_height) {
-                logger.debug(`Using latest transaction block height: ${latest_tx.block_height}`);
-                return latest_tx.block_height;
-            }
-            
-            // If we still don't have a height, return null
-            logger.warn('Could not determine current block height');
-            return null;
-        } catch (error) {
-            logger.error('Error getting current block height', {
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            return null;
-        }
-    }
-    
-    /**
-     * Clean up all processed transactions from the database
-     * @returns Promise<void>
-     */
-    public async cleanup(): Promise<void> {
-        try {
-            logger.info('Cleaning up all processed transactions');
-            
-            const deleted = await this.with_fresh_client(async (client) => {
-                return await client.processed_transaction.deleteMany({});
-            });
-            
-            logger.info(`Successfully deleted ${deleted.count} processed transactions`);
-        } catch (error) {
-            logger.error('Error cleaning up processed transactions', {
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            throw error;
-        }
-    }
+interface ProcessedTransaction {
+  tx_id: string;
+  block_height: number;
+  block_time: number;
+  type?: string;
+  protocol?: string;
+  metadata: any;
+  created_at?: Date;
+  updated_at?: Date;
 }
+
+export class TransactionClient extends BaseDbClient {
+  constructor() {
+    super();
+  }
+  
+  /**
+   * Check if a transaction has been processed
+   * @param transactionId The transaction ID to check
+   * @returns True if the transaction exists in the database
+   */
+  async is_transaction_processed(transactionId: string): Promise<boolean> {
+    try {
+      const count = await this.with_retry(() => 
+        this.prisma.processed_transaction.count({
+          where: {
+            tx_id: transactionId
+          }
+        })
+      );
+      
+      return count > 0;
+    } catch (error) {
+      this.log_error('Error checking if transaction is processed', error as Error, {
+        tx_id: transactionId
+      });
+      return false;
+    }
+  }
+  
+  /**
+   * Get a processed transaction from the database
+   * @param transactionId The transaction ID to retrieve
+   * @returns The processed transaction or null if not found
+   */
+  async get_processed_transaction(transactionId: string): Promise<ProcessedTransaction | null> {
+    try {
+      const transaction = await this.with_retry(() => 
+        this.prisma.processed_transaction.findUnique({
+          where: {
+            tx_id: transactionId
+          }
+        })
+      );
+      
+      if (!transaction) {
+        return null;
+      }
+      
+      // Log what we're retrieving for debugging
+      this.log_info('Retrieved processed transaction', {
+        tx_id: transactionId,
+        type: transaction.type,
+        metadata_keys: transaction.metadata ? Object.keys(transaction.metadata) : []
+      });
+      
+      // Convert the transaction to the correct format
+      const processedTransaction: ProcessedTransaction = {
+        tx_id: transaction.tx_id,
+        block_height: transaction.block_height,
+        block_time: Number(transaction.block_time), // Convert BigInt to number
+        type: transaction.type,
+        protocol: transaction.protocol,
+        metadata: transaction.metadata
+      };
+      
+      return processedTransaction;
+    } catch (error) {
+      this.log_error('Error retrieving processed transaction', error as Error, {
+        tx_id: transactionId
+      });
+      return null;
+    }
+  }
+  
+  /**
+   * Save a processed transaction to the database
+   * @param transaction The transaction to save
+   * @returns The saved transaction
+   */
+  async save_processed_transaction(transaction: ProcessedTransaction): Promise<any> {
+    try {
+      const now = new Date();
+      
+      // Ensure block_height is a valid number and not zero if possible
+      const block_height = transaction.block_height > 0 ? 
+        transaction.block_height : 
+        await this.get_latest_block_height_for_transaction(transaction.tx_id);
+      
+      // Ensure we have a valid type (never default to 'unknown')
+      const type = transaction.type && transaction.type !== 'unknown' ? 
+        transaction.type : 'post';
+      
+      // Ensure we have a valid protocol
+      const protocol = transaction.protocol || 'lock';
+      
+      // Ensure metadata is an object and not null
+      const baseMetadata = transaction.metadata || {};
+      
+      // Create a clean metadata structure following KISS principles
+      // Only include essential fields and preserve the original structure where possible
+      // Rather than adding success/error fields unless explicitly provided
+      const enhancedMetadata = {
+        // Preserve original transaction data (most important part)
+        original_transaction: baseMetadata.original_transaction || null,
+        
+        // Use the new translated_data field name instead of parsed_data for consistency
+        translated_data: baseMetadata.translated_data || baseMetadata.parsed_data || null,
+        
+        // Preserve any existing fields from the base metadata, except error/success unless explicitly provided
+        ...Object.entries(baseMetadata)
+          .filter(([key]) => key !== 'original_transaction' && key !== 'parsed_data' && key !== 'translated_data')
+          .reduce((obj, [key, value]) => {
+            // Only include error/success if explicitly provided
+            if ((key === 'error' || key === 'success') && value === undefined) {
+              return obj;
+            }
+            obj[key] = value;
+            return obj;
+          }, {} as Record<string, any>)
+      };
+      
+      // Log what we're saving for debugging
+      this.log_info('Saving processed transaction', {
+        tx_id: transaction.tx_id,
+        type,
+        protocol,
+        metadata_keys: Object.keys(enhancedMetadata)
+      });
+      
+      // Log the full metadata for detailed debugging
+      this.log_info('Full transaction metadata', {
+        tx_id: transaction.tx_id,
+        metadata: enhancedMetadata
+      });
+      
+      return await this.with_retry(() => 
+        this.prisma.processed_transaction.upsert({
+          where: {
+            tx_id: transaction.tx_id
+          },
+          update: {
+            block_height: block_height,
+            block_time: BigInt(transaction.block_time),
+            type,
+            protocol,
+            metadata: enhancedMetadata,
+            updated_at: now
+          },
+          create: {
+            tx_id: transaction.tx_id,
+            block_height: block_height,
+            block_time: BigInt(transaction.block_time),
+            type,
+            protocol,
+            metadata: enhancedMetadata,
+            created_at: transaction.created_at || now,
+            updated_at: transaction.updated_at || now
+          }
+        })
+      );
+    } catch (error) {
+      this.log_error('Error saving processed transaction', error as Error, {
+        tx_id: transaction.tx_id
+      });
+      throw error;
+    }
+  }
+  
+  /**
+   * Get the latest block height for a transaction from related tables
+   * @param transactionId The transaction ID to check
+   * @returns The block height if found, otherwise 0
+   */
+  private async get_latest_block_height_for_transaction(transactionId: string): Promise<number> {
+    try {
+      // Check if this transaction is associated with a post
+      const post = await this.with_retry(() =>
+        this.prisma.post.findFirst({
+          where: {
+            tx_id: transactionId
+          }
+        })
+      );
+      
+      if (post?.block_height) {
+        return post.block_height;
+      }
+      
+      // Check if this transaction is associated with a lock_like
+      const lockLike = await this.with_retry(() =>
+        this.prisma.lock_like.findFirst({
+          where: {
+            tx_id: transactionId
+          }
+        })
+      );
+      
+      if (lockLike?.unlock_height) {
+        return lockLike.unlock_height;
+      }
+      
+      return 0;
+    } catch (error) {
+      this.log_error('Error getting block height for transaction', error as Error, {
+        tx_id: transactionId
+      });
+      return 0;
+    }
+  }
+  
+  // The get_processed_transaction function has been moved to line ~55
+  
+  /**
+   * Get the latest processed block height
+   * @returns The latest block height or 0 if no transactions have been processed
+   */
+  async get_latest_block_height(): Promise<number> {
+    try {
+      const latestTransaction = await this.with_retry(() => 
+        this.prisma.processed_transaction.findFirst({
+          orderBy: {
+            block_height: 'desc'
+          }
+        })
+      );
+      
+      return latestTransaction?.block_height || 0;
+    } catch (error) {
+      this.log_error('Error getting latest block height', error as Error);
+      return 0;
+    }
+  }
+  
+  /**
+   * Delete all processed transactions
+   * @returns The number of deleted transactions
+   */
+  async delete_all_processed_transactions(): Promise<number> {
+    try {
+      const result = await this.with_retry(() => 
+        this.prisma.processed_transaction.deleteMany({})
+      );
+      
+      this.log_info('Deleted all processed transactions', {
+        count: result.count
+      });
+      
+      return result.count;
+    } catch (error) {
+      this.log_error('Error deleting all processed transactions', error as Error);
+      throw error;
+    }
+  }
+}
+
+// Export singleton instance
+export const transaction_client = new TransactionClient();
+
+// Export default for direct instantiation
+export default TransactionClient;

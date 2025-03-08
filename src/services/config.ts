@@ -1,8 +1,10 @@
 // src/config.ts
 // Default configuration
 export const CONFIG = {
-    // Jungle Bus subscription ID
+    // Jungle Bus configuration
     JB_SUBSCRIPTION_ID: process.env.JB_SUBSCRIPTION_ID || 'lockd-app',
+    JUNGLEBUS_API_KEY: process.env.JUNGLEBUS_API_KEY || '',
+    JUNGLEBUS_URL: process.env.JUNGLEBUS_URL || 'https://junglebus.gorillapool.io',
     
     // Default start block if none is specified
     DEFAULT_START_BLOCK: 885872,
@@ -29,5 +31,10 @@ export const CONFIG = {
     NODE_ENV: process.env.NODE_ENV || 'development',
     
     // Debug mode
-    DEBUG: process.env.DEBUG === 'true'
+    DEBUG: process.env.DEBUG === 'true',
+    
+    // Retry configuration for JungleBus
+    JB_MAX_RETRIES: 5,
+    JB_RETRY_DELAY_MS: 1000, // 1 second initial delay
+    JB_MAX_RETRY_DELAY_MS: 30000, // 30 seconds maximum delay
 };
