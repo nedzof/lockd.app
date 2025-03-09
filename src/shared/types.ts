@@ -35,7 +35,7 @@ export interface VoteQuestion {
 export interface Vote {
   options_hash: string;
   total_options: number;
-  options: vote_option[];
+  options: VoteOption[];
 }
 
 export interface LockLike {
@@ -72,7 +72,7 @@ export interface Post {
     image_metadata?: Record<string, any> | null;
 }
 
-export interface PostWithVoteOptions extends Post {
+export interface PostWithVoteOptions extends Omit<Post, 'lock_likes' | 'vote_options'> {
     vote_question: {
         id: string;
         post_id: string;
