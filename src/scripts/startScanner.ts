@@ -1,104 +1,95 @@
-import { Scanner } from '../services/scanner';
-import { logger } from '../utils/logger';
-import { CONFIG } from '../services/config';
-import { junglebus_service } from '../services/junglebus_service';
+/**
+ * Start Scanner Script
+ * 
+ * Entry point for the scanner application
+ * Handles starting the Lockd.app blockchain transaction scanner
+ */
 
+import { scanner } from '../services/scanner.js';
+import logger from '../services/logger.js';
+import { CONFIG } from '../services/config.js';
+
+// Check if we're in cleanup mode
+const CLEANUP_MODE = process.env.CLEANUP_DB === 'true';
+
+// Get start block from environment or use default from config
+const START_BLOCK = process.env.START_BLOCK 
+  ? parseInt(process.env.START_BLOCK, 10)
+  : undefined; // undefined will make the scanner use the default from config
+
+/**
+ * Main function to start the scanner
+ */
 async function main() {
-    try {
-        // Parse command line arguments
-        const args = process.argv.slice(2);
-        const startBlock = args.length > 0 ? parseInt(args[0], 10) : CONFIG.DEFAULT_START_BLOCK;
-        const shouldCleanup = process.env.CLEANUP_DB === 'true';
-        
-        logger.info('Starting scanner with configuration', {
-            start_block: startBlock,
-            cleanup_db: shouldCleanup,
-            subscription_id: CONFIG.JB_SUBSCRIPTION_ID
-        });
-        
-        // Fetch subscription details to verify it exists
-        try {
-            const subscriptionDetails = await junglebus_service.fetchSubscriptionDetails();
-            if (subscriptionDetails) {
-                logger.info('Found JungleBus subscription', {
-                    subscription_id: CONFIG.JB_SUBSCRIPTION_ID,
-                    details: subscriptionDetails
-                });
-            } else {
-                logger.warn('Could not verify JungleBus subscription, but will continue anyway', {
-                    subscription_id: CONFIG.JB_SUBSCRIPTION_ID
-                });
-            }
-        } catch (error) {
-            logger.warn('Error fetching subscription details, but will continue anyway', {
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-        }
-        
-        // Create scanner with specified configuration
-        const scanner = new Scanner({
-            startBlock: startBlock,
-            logLevel: process.env.LOG_LEVEL || 'info'
-        });
-        
-        // Clean up the database if requested
-        if (shouldCleanup) {
-            logger.info('Cleaning up database before starting scanner...');
-            try {
-                const result = await scanner.cleanup_database();
-                logger.info('Database cleanup completed successfully', {
-                    deleted_lock_likes: result.lock_likes,
-                    deleted_vote_options: result.vote_options,
-                    deleted_posts: result.posts,
-                    deleted_transactions: result.transactions,
-                    total_deleted_records: result.lock_likes + result.vote_options + result.posts + result.transactions
-                });
-            } catch (error) {
-                logger.error('Failed to clean up database', {
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    stack: error instanceof Error ? error.stack : undefined
-                });
-                process.exit(1);
-            }
-        }
-        
-        // Set up signal handlers for graceful shutdown
-        process.on('SIGINT', async () => {
-            logger.info('Received SIGINT. Shutting down...');
-            await scanner.stop();
-            process.exit(0);
-        });
+  try {
+    // Log startup information
+    logger.info('Starting Lockd App Transaction Scanner', { 
+      cleanup_mode: CLEANUP_MODE,
+      start_block: START_BLOCK || CONFIG.DEFAULT_START_BLOCK,
+      subscription_id: CONFIG.JB_SUBSCRIPTION_ID,
+      environment: CONFIG.NODE_ENV
+    });
 
-        process.on('SIGTERM', async () => {
-            logger.info('Received SIGTERM. Shutting down...');
-            await scanner.stop();
-            process.exit(0);
-        });
+    // Setup cleanup handlers for graceful shutdown
+    setupShutdownHandlers();
 
-        // Start the scanner
-        await scanner.start();
-        logger.info('Scanner started successfully and is now running');
-        
-        // Log status periodically
-        setInterval(() => {
-            const status = scanner.get_status();
-            logger.info('Scanner status', status);
-        }, 60000); // Every minute
-        
-    } catch (error) {
-        logger.error('Failed to start scanner', { 
-            error: error instanceof Error ? error.message : 'Unknown error',
-            stack: error instanceof Error ? error.stack : undefined
-        });
-        process.exit(1);
-    }
+    // Start the scanner with the configured start block
+    await scanner.start(START_BLOCK);
+    logger.info('Scanner is running. Press Ctrl+C to stop.');
+  } catch (error) {
+    logger.error(`Scanner startup error: ${(error as Error).message}`);
+    await cleanup();
+    process.exit(1);
+  }
+}
+
+/**
+ * Setup handlers for graceful shutdown
+ */
+function setupShutdownHandlers() {
+  // Handle Ctrl+C
+  process.on('SIGINT', async () => {
+    logger.info('Received SIGINT signal. Shutting down...');
+    await cleanup();
+    process.exit(0);
+  });
+
+  // Handle kill command
+  process.on('SIGTERM', async () => {
+    logger.info('Received SIGTERM signal. Shutting down...');
+    await cleanup();
+    process.exit(0);
+  });
+
+  // Handle uncaught exceptions
+  process.on('uncaughtException', async (error) => {
+    logger.error(`Uncaught exception: ${error.message}`, { stack: error.stack });
+    await cleanup();
+    process.exit(1);
+  });
+
+  // Handle unhandled promise rejections
+  process.on('unhandledRejection', async (reason) => {
+    logger.error(`Unhandled promise rejection: ${reason}`);
+    await cleanup();
+    process.exit(1);
+  });
+}
+
+/**
+ * Perform cleanup operations before shutdown
+ */
+async function cleanup() {
+  try {
+    await scanner.stop();
+    logger.info('Cleanup completed successfully');
+  } catch (error) {
+    logger.error(`Cleanup error: ${(error as Error).message}`);
+  }
 }
 
 // Run the main function
 main().catch(error => {
-    logger.error('Unhandled error in main function', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined
-    });
-    process.exit(1);
+  logger.error(`Unhandled error in main: ${error.message}`, { stack: error.stack });
+  process.exit(1);
 });
