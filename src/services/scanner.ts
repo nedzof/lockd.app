@@ -10,6 +10,7 @@ import { junglebus_service } from './junglebus_service.js';
 
 export class Scanner {
   private isRunning: boolean = false;
+  private isWaiting: boolean = false;
   
   constructor() {
     logger.info('Scanner initialized');
@@ -35,18 +36,38 @@ export class Scanner {
       // Subscribe to junglebus using the configured subscription ID
       await junglebus_service.subscribe(
         startBlock,
-        // Process transactions - just log the transaction IDs
+        // Process transactions - Only log valid transaction IDs
         async (tx: any) => {
+          // Extract transaction ID using the common patterns
           const txId = tx?.tx?.h || tx?.hash || tx?.id || tx?.tx_id;
-          logger.info(`Found transaction: ${txId}`, { tx_id: txId });
+          
+          // Basic validation to make sure we have a transaction with some inputs and outputs
+          const hasInputs = tx?.tx?.in && tx.tx.in.length > 0;
+          const hasOutputs = tx?.tx?.out && tx.tx.out.length > 0;
+          
+          // Only log transactions that pass basic validation
+          if (txId && hasInputs && hasOutputs) {
+            logger.info(`Valid transaction: ${txId}`, { tx_id: txId });
+          }
         },
         // Process status updates
         async (status: any) => {
-          // Only log important status updates to avoid cluttering the logs
-          if (status.statusCode === 200) { // Block done status
+          // Only log blocks with transactions or important status updates
+          if (status.statusCode === 200 && status.transactions > 0) { // Block done with transactions
             logger.info(`Block ${status.block} processed with ${status.transactions} transactions`);
           } else if (status.statusCode === 300) { // Reorg status
             logger.warn(`Blockchain reorg detected at block ${status.block}`);
+          } else if (status.statusCode === 400) { // Error status
+            logger.error(`Error processing block ${status.block}: ${status.error || 'Unknown error'}`);
+          } else if (status.statusCode === 100 && status.status === 'waiting') {
+            // Only log once when first transitioning to the waiting state
+            if (!this.isWaiting) {
+              logger.info('Scanner caught up with blockchain, waiting for new blocks');
+              this.isWaiting = true;
+            }
+          } else if (status.statusCode === 200) {
+            // Reset the waiting state when we process any block (with or without transactions)
+            this.isWaiting = false;
           }
         },
         // Handle errors

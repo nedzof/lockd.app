@@ -106,8 +106,8 @@ export class JungleBusService {
         fromBlock,
         async (tx: any) => {
           try {
-            const txId = tx?.tx?.h || tx?.hash || tx?.id || tx?.tx_id;
-            this.logger.info(`Found transaction: ${txId}`, { tx_id: txId, tx: tx });
+            // Don't log transaction IDs here - let the onTransaction handler decide if this is a transaction worth logging
+            // This way we only log transactions that are actually valid and processed
             await onTransaction(tx);
           } catch (error) {
             const txId = tx?.tx?.h || tx?.hash || tx?.id || tx?.tx_id;
@@ -120,7 +120,12 @@ export class JungleBusService {
         },
         async (status: any) => {
           try {
-            this.logger.info('Status update received', status);
+            // Only log status updates if they're important or contain transactions
+            if ((status.statusCode === 200 && status.transactions > 0) || // Block done with transactions 
+                status.statusCode === 300 || // Reorg
+                status.statusCode === 400) { // Error
+              this.logger.info('Status update received', status);
+            }
             await onStatus(status);
           } catch (error) {
             this.logger.error('Failed to process status update', {
