@@ -22,6 +22,9 @@ export interface ExtendedMetadata extends Partial<LockProtocolData> {
   total_options?: number;
   lock_amount?: number;
   lock_duration?: number;
+  raw_image_data?: Buffer | null;
+  content_type?: string;
+  media_type?: string;
   [key: string]: any; // Allow any other properties
 }
 
@@ -162,7 +165,8 @@ export class TxParser {
     '616374696f6e': 'action',
     '636f6e74656e745f74797065': 'content_type',
     '6d656469615f74797065': 'media_type',
-    '617574686f725f61646472657373': 'author_address'
+    '617574686f725f61646472657373': 'author_address',
+    '696d6167655f64617461': 'raw_image_data'
   };
 
   /**
@@ -211,6 +215,40 @@ export class TxParser {
       
       // Extract and decode the value
       const valueHex = lowerHex.substring(valueStartPos, nextKeyPos);
+      
+      // Special handling for image data
+      if (key === 'raw_image_data') {
+        try {
+          // First try to decode as base64
+          let buffer: Buffer | null = null;
+          
+          // Check if the value is base64 encoded
+          const isBase64 = /^[A-Za-z0-9+/=]+$/.test(valueHex);
+          
+          if (isBase64) {
+            // If it's base64, decode directly
+            buffer = Buffer.from(valueHex, 'base64');
+          } else {
+            // If not base64, try hex decoding as fallback
+            buffer = Buffer.from(valueHex, 'hex');
+          }
+          
+          if (buffer.length > 0) {
+            metadata.raw_image_data = buffer;
+            logger.info('Found raw_image_data in transaction', {
+              data_length: buffer.length,
+              encoding: isBase64 ? 'base64' : 'hex'
+            });
+          }
+        } catch (error) {
+          logger.error('Error processing raw_image_data:', {
+            error: error instanceof Error ? error.message : String(error),
+            valueHex: valueHex.substring(0, 100) + '...' // Log first 100 chars
+          });
+        }
+        continue;
+      }
+      
       const value = this.decode_hex_to_utf8(valueHex);
       
       // Clean up the value
@@ -222,6 +260,109 @@ export class TxParser {
     
     // Process direct text patterns for special cases
     this.processDirectTextPatterns(decodedString, metadata);
+    
+    // Look for image data in the hex string if not already found
+    if (!metadata.raw_image_data) {
+      // First check if we have content type in metadata
+      const contentType = metadata.content_type?.toLowerCase();
+      const mediaType = metadata.media_type?.toLowerCase();
+      
+      if ((contentType?.startsWith('image/') || mediaType?.startsWith('image/')) && metadata.content) {
+        try {
+          // Try to decode the content as base64 first
+          const isBase64 = /^[A-Za-z0-9+/=]+$/.test(metadata.content);
+          let buffer: Buffer | null = null;
+          
+          if (isBase64) {
+            buffer = Buffer.from(metadata.content, 'base64');
+          } else {
+            // Try hex as fallback
+            buffer = Buffer.from(metadata.content, 'hex');
+          }
+          
+          if (buffer.length > 0) {
+            metadata.raw_image_data = buffer;
+            metadata.content_type = contentType || mediaType;
+            metadata.media_type = mediaType || contentType;
+            
+            logger.info('Found image data from content with type', {
+              content_type: metadata.content_type,
+              media_type: metadata.media_type,
+              data_length: buffer.length,
+              encoding: isBase64 ? 'base64' : 'hex'
+            });
+          }
+        } catch (error) {
+          logger.error('Error processing image data from content:', {
+            error: error instanceof Error ? error.message : String(error),
+            content_type: contentType,
+            media_type: mediaType
+          });
+        }
+      } else {
+        // Fallback: Try to find image data after content type markers
+        const imageMarkers = [
+          { type: 'image/jpeg', hex: '696d6167652f6a706567' },
+          { type: 'image/png', hex: '696d6167652f706e67' },
+          { type: 'image/gif', hex: '696d6167652f676966' },
+          { type: 'image/webp', hex: '696d6167652f77656270' }
+        ];
+        
+        for (const marker of imageMarkers) {
+          const markerPos = lowerHex.indexOf(marker.hex);
+          if (markerPos >= 0) {
+            try {
+              // Found an image marker, look for the actual image data
+              const dataStartPos = markerPos + marker.hex.length;
+              
+              // Try to find the end of the image data
+              // First look for the next key position
+              let dataEndPos = lowerHex.length;
+              for (const {pos} of keyPositions) {
+                if (pos > dataStartPos) {
+                  dataEndPos = pos;
+                  break;
+                }
+              }
+              
+              // Extract the image data
+              const imageDataHex = lowerHex.substring(dataStartPos, dataEndPos);
+              
+              // Try base64 first, then hex as fallback
+              const isBase64 = /^[A-Za-z0-9+/=]+$/.test(imageDataHex);
+              let buffer: Buffer | null = null;
+              
+              if (isBase64) {
+                buffer = Buffer.from(imageDataHex, 'base64');
+              } else {
+                buffer = Buffer.from(imageDataHex, 'hex');
+              }
+              
+              // Only store if we got actual data
+              if (buffer.length > 0) {
+                metadata.raw_image_data = buffer;
+                metadata.content_type = marker.type;
+                metadata.media_type = marker.type;
+                
+                logger.info('Found image data after content type marker', {
+                  content_type: marker.type,
+                  media_type: marker.type,
+                  data_length: buffer.length,
+                  encoding: isBase64 ? 'base64' : 'hex'
+                });
+              }
+            } catch (error) {
+              logger.error('Error processing image data after content type marker:', {
+                error: error instanceof Error ? error.message : String(error),
+                markerType: marker.type,
+                markerPos
+              });
+            }
+            break;
+          }
+        }
+      }
+    }
     
     return metadata;
   }
@@ -248,151 +389,52 @@ export class TxParser {
     // Numeric fields
     if (key === 'option_index' || key === 'sequence' || key === 'parent_sequence' || 
         key === 'total_options' || key === 'lock_amount' || key === 'lock_duration') {
-      const numberMatch = value.match(/^(\d+)/);
-      if (numberMatch) {
-        metadata[key] = parseInt(numberMatch[1], 10);
+      const numValue = parseInt(value, 10);
+      if (!isNaN(numValue)) {
+        metadata[key] = numValue;
       }
       return;
     }
     
-    // Array fields
-    if (key === 'tags') {
-      if (value.startsWith('[') && value.endsWith(']')) {
-        try {
-          metadata[key] = JSON.parse(value);
-        } catch {
-          metadata[key] = []; // Empty array on parse failure
-        }
-      } else {
-        metadata[key] = []; // Default empty array
-      }
+    // Content type fields
+    if (key === 'content_type' || key === 'media_type') {
+      metadata[key] = value.toLowerCase();
       return;
     }
     
-    // Timestamp fields - ensure they're complete
-    if (key === 'timestamp') {
-      metadata[key] = this.formatTimestamp(value);
-      return;
-    }
-    
-    // options_hash - clean up @ and remove unwanted prefix
-    if (key === 'options_hash') {
-      let cleanValue = value;
-      
-      // Remove @ prefix
-      if (cleanValue.startsWith('@')) {
-        cleanValue = cleanValue.substring(1);
-      }
-      
-      // Take only the hex portion
-      const hashMatch = cleanValue.match(/^([a-f0-9]+)/i);
-      if (hashMatch) {
-        metadata[key] = hashMatch[1];
-      } else {
-        metadata[key] = cleanValue;
-      }
-      return;
-    }
-    
-    // post_id - extract just the ID pattern
-    if (key === 'post_id') {
-      const postIdMatch = value.match(/^([a-z0-9]{6,8}-[a-z0-9]{6,10})/i);
-      if (postIdMatch) {
-        metadata[key] = postIdMatch[1];
-      } else {
-        metadata[key] = value;
-      }
-      return;
-    }
-    
-    // String fields (default)
-    if (value && value.length > 0) {
-      metadata[key] = value;
-    }
+    // Default string fields
+    metadata[key] = value;
   }
   
   /**
-   * Format a timestamp string into a consistent ISO format
+   * Format timestamp value
    */
   private formatTimestamp(value: string): string {
-    // If it's a short number like "20", assume it's incomplete and return a default
-    if (value.match(/^[0-9]{1,2}$/)) {
-      return '2025-01-01T00:00:00Z';
-    }
-    
-    // If it's a year, use the first day of the year
-    if (value.match(/^20\d{2}$/)) {
-      return `${value}-01-01T00:00:00Z`;
-    }
-    
-    // If it's a year-month, use the first day of the month
-    if (value.match(/^20\d{2}-\d{2}$/)) {
-      return `${value}-01T00:00:00Z`;
-    }
-    
-    // Check if value looks like a date with a T separator
-    if (value.match(/^20\d{2}-\d{2}-\d{2}T/)) {
-      const [datePart, timePart] = value.split('T');
-      
-      // Handle malformed time parts - like runs of digits with no separators
-      if (timePart) {
-        // Check for digit-only time part with no separators
-        if (timePart.match(/^\d+/)) {
-          // First, clean any Z or other trailing characters
-          const cleanTime = timePart.replace(/[^0-9]/g, '');
-          
-          // Ensure we have at least 6 digits (HHMMSS)
-          const paddedTime = cleanTime.padEnd(6, '0');
-          
-          // Format the time with separators
-          const hours = paddedTime.substring(0, 2);
-          const minutes = paddedTime.substring(2, 4);
-          const seconds = paddedTime.substring(4, 6);
-          
-          return `${datePart}T${hours}:${minutes}:${seconds}Z`;
-        }
-        
-        // If it has some separators but might be incomplete
-        if (timePart.match(/^\d{1,2}:\d{1,2}(:\d{1,2})?/)) {
-          const parts = timePart.split(':');
-          const hours = parts[0].padStart(2, '0');
-          const minutes = parts.length > 1 ? parts[1].padStart(2, '0') : '00';
-          const seconds = parts.length > 2 ? parts[2].replace('Z', '').padStart(2, '0') : '00';
-          
-          return `${datePart}T${hours}:${minutes}:${seconds}Z`;
-        }
-        
-        // It has a Z but might be missing colons
-        if (timePart.includes('Z')) {
-          // Keep the Z but make sure time format is correct
-          const timeParts = timePart.replace('Z', '').split(':');
-          const hours = timeParts.length > 0 ? timeParts[0].padStart(2, '0') : '00';
-          const minutes = timeParts.length > 1 ? timeParts[1].padStart(2, '0') : '00';
-          const seconds = timeParts.length > 2 ? timeParts[2].padStart(2, '0') : '00';
-          
-          return `${datePart}T${hours}:${minutes}:${seconds}Z`;
-        }
-        
-        // Return with Z suffix if not already present
-        return timePart.endsWith('Z') ? `${datePart}T${timePart}` : `${datePart}T${timePart}Z`;
+    // Try parsing as Unix timestamp first
+    const unixTimestamp = parseInt(value, 10);
+    if (!isNaN(unixTimestamp)) {
+      const date = new Date(unixTimestamp * 1000);
+      if (date.getTime() > 0) {
+        return date.toISOString();
       }
-      
-      // Only date part is present
-      return `${datePart}T00:00:00Z`;
     }
     
-    // If it's a full date without T, add the T and time
-    if (value.match(/^20\d{2}-\d{2}-\d{2}$/)) {
-      return `${value}T00:00:00Z`;
+    // Try parsing as ISO string
+    try {
+      const date = new Date(value);
+      if (date.getTime() > 0) {
+        return date.toISOString();
+      }
+    } catch (e) {
+      // Ignore parsing errors
     }
     
-    // If we can't determine the format, return as is
+    // Return original value if parsing fails
     return value;
   }
   
   /**
-   * Process direct text patterns from the decoded string
-   * Some patterns appear in the text but not as clear key-value pairs in the hex
+   * Process direct text patterns in decoded string
    */
   private processDirectTextPatterns(decodedString: string, metadata: ExtendedMetadata): void {
     // Extract option index if not already set
@@ -479,6 +521,25 @@ export class TxParser {
       let formattedText = '';
       if (metadata.content) {
         formattedText = metadata.content;
+      }
+      
+      // If we have image data, convert it to a Buffer
+      if (metadata.raw_image_data) {
+        try {
+          // Store the raw hex data in metadata
+          metadata.raw_image_data = metadata.raw_image_data;
+          
+          // Log image data found
+          logger.info('Found image data in transaction', {
+            content_type: metadata.content_type,
+            media_type: metadata.media_type,
+            data_length: metadata.raw_image_data.length
+          });
+        } catch (error) {
+          logger.error('Error processing image data', {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
       
       return {

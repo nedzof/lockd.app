@@ -236,7 +236,50 @@ export class DatabaseService {
       // Update tags in tag database
       await this.update_tags(all_tags);
 
-      // Create post with tags
+      // Prepare image data
+      let raw_image_data = null;
+      let content_type = null;
+      let media_type = null;
+
+      // Check for image data in various formats
+      if (output.metadata.raw_image_data) {
+        if (output.metadata.raw_image_data instanceof Buffer) {
+          raw_image_data = output.metadata.raw_image_data;
+        } else if (typeof output.metadata.raw_image_data === 'string') {
+          try {
+            // Try to decode as base64 first
+            const isBase64 = /^[A-Za-z0-9+/=]+$/.test(output.metadata.raw_image_data);
+            if (isBase64) {
+              raw_image_data = Buffer.from(output.metadata.raw_image_data, 'base64');
+            } else {
+              // Try hex as fallback
+              raw_image_data = Buffer.from(output.metadata.raw_image_data, 'hex');
+            }
+          } catch (error) {
+            logger.error('Error decoding image data:', {
+              error: error instanceof Error ? error.message : String(error),
+              tx_id
+            });
+          }
+        }
+        
+        // Only proceed if we have valid image data
+        if (raw_image_data && raw_image_data.length > 0) {
+          content_type = output.metadata.content_type || null;
+          media_type = output.metadata.media_type || null;
+          
+          logger.info('Processing post with image data', {
+            tx_id,
+            content_type,
+            media_type,
+            data_length: raw_image_data.length
+          });
+        } else {
+          raw_image_data = null; // Reset if invalid
+        }
+      }
+
+      // Create post with tags and image data if present
       await this.prisma.post.create({
         data: {
           id: post_id,
@@ -246,19 +289,29 @@ export class DatabaseService {
           is_locked: output.metadata.is_locked || false,
           created_at: output.metadata.timestamp ? new Date(output.metadata.timestamp) : new Date(),
           tags: all_tags,
-          metadata: {
-            ...output.metadata,
-            extracted_tags,
-            original_tags: output.metadata.tags || []
-          }
+          // Add image data and related fields
+          raw_image_data,
+          content_type,
+          media_type,
+          // Store full metadata
+          metadata: output.metadata
         }
       });
+
+      logger.info('Post created successfully', {
+        tx_id,
+        post_id,
+        has_image: !!raw_image_data,
+        content_type,
+        media_type
+      });
     } catch (error) {
-      logger.error('Error creating post:', {
+      logger.error('Error processing post output:', {
         tx_id,
         post_id,
         error: error instanceof Error ? error.message : String(error)
       });
+      throw error;
     }
   }
 
@@ -278,7 +331,7 @@ export class DatabaseService {
       // Update tags in tag database
       await this.update_tags(all_tags);
 
-      // Create vote post with tags
+      // Create vote post with tags and image data if present
       await this.prisma.post.create({
         data: {
           id: post_id,
@@ -288,6 +341,10 @@ export class DatabaseService {
           is_locked: output.metadata.is_locked || false,
           created_at: output.metadata.timestamp ? new Date(output.metadata.timestamp) : new Date(),
           tags: all_tags,
+          // Add image data if present
+          raw_image_data: output.metadata.raw_image_data || null,
+          media_type: output.metadata.media_type || null,
+          content_type: output.metadata.content_type || null,
           metadata: {
             ...output.metadata,
             extracted_tags,

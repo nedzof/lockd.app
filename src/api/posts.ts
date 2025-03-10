@@ -97,16 +97,56 @@ interface vote_optionResponse {
 
 const listPosts: PostListHandler = async (req, res, next) => {
   try {
-    const { cursor, limit = '10', tags = [], excludeVotes = 'false' } = req.query;
+    logger.debug('Received request for posts', {
+      query: req.query,
+      headers: req.headers
+    });
+
+    const { cursor, limit = '10', tags, selected_tags, excludeVotes = 'false' } = req.query;
     const parsedLimit = Math.min(parseInt(limit as string, 10), 50);
     const parsedExcludeVotes = excludeVotes === 'true';
     
-    logger.debug('Fetching posts with params', {
+    // Parse tags from either format
+    let parsedTags: string[] = [];
+    if (selected_tags) {
+      try {
+        parsedTags = JSON.parse(selected_tags as string);
+        logger.debug('Parsed selected_tags:', { selected_tags, parsedTags });
+      } catch (e) {
+        logger.error('Failed to parse selected_tags:', {
+          error: e instanceof Error ? e.message : 'Unknown error',
+          selected_tags
+        });
+      }
+    } else if (tags) {
+      parsedTags = Array.isArray(tags) ? tags : [tags as string];
+      logger.debug('Using tags parameter:', { tags, parsedTags });
+    }
+    
+    logger.debug('Building query with params', {
       cursor,
       limit: parsedLimit,
-      tags,
+      tags: parsedTags,
       excludeVotes: parsedExcludeVotes
     });
+    
+    // First try to get total count
+    const totalCount = await prisma.post.count({
+      where: {
+        AND: [
+          ...(parsedTags.length > 0 ? [{
+            tags: {
+              hasEvery: parsedTags
+            }
+          }] : []),
+          ...(parsedExcludeVotes ? [{
+            is_vote: false
+          }] : [])
+        ]
+      }
+    });
+
+    logger.debug('Total matching posts:', totalCount);
     
     const queryParams = {
       take: parsedLimit + 1,
@@ -118,13 +158,13 @@ const listPosts: PostListHandler = async (req, res, next) => {
       } : {}),
       where: {
         AND: [
-          ...(tags.length > 0 ? [{
+          ...(parsedTags.length > 0 ? [{
             tags: {
-              hasEvery: Array.isArray(tags) ? tags : [tags]
+              hasEvery: parsedTags
             }
           }] : []),
           ...(parsedExcludeVotes ? [{
-            is_vote: false // Fixed field name to match schema
+            is_vote: false
           }] : [])
         ]
       },
@@ -142,8 +182,15 @@ const listPosts: PostListHandler = async (req, res, next) => {
       }
     };
 
+    logger.debug('Executing query with params:', queryParams);
+
     // First fetch one more item than requested to determine if there are more items
     const posts = await prisma.post.findMany(queryParams);
+
+    logger.debug('Found posts:', {
+      count: posts.length,
+      hasMore: posts.length > parsedLimit
+    });
 
     // Check if there are more items
     const hasMore = posts.length > parsedLimit;
@@ -156,7 +203,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
       try {
         const processedPost = {
           ...post,
-          isVote: post.is_vote, // Add isVote field for frontend compatibility
+          isVote: post.is_vote,
           raw_image_data: post.raw_image_data 
             ? Buffer.from(post.raw_image_data).toString('base64')
             : null,
@@ -178,17 +225,30 @@ const listPosts: PostListHandler = async (req, res, next) => {
         });
         return null;
       }
-    }).filter(Boolean); // Remove any null posts from processing errors
+    }).filter(Boolean);
+
+    logger.debug('Processed posts:', {
+      originalCount: postsToReturn.length,
+      processedCount: processedPosts.length
+    });
 
     const lastPost = postsToReturn[postsToReturn.length - 1];
     const nextCursor = hasMore ? lastPost?.id : null;
 
-    return res.status(200).json({
+    const response = {
       posts: processedPosts,
       nextCursor,
       hasMore,
-      total: posts.length
+      total: totalCount
+    };
+
+    logger.debug('Sending response:', {
+      postCount: processedPosts.length,
+      hasMore,
+      nextCursor: nextCursor || 'none'
     });
+
+    return res.status(200).json(response);
   } catch (error: any) {
     logger.error('Error fetching posts:', {
       error: error instanceof Error ? error.stack : error,

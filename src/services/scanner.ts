@@ -10,7 +10,6 @@ import { junglebus_service } from './junglebus_service.js';
 import { tx_parser } from './tx_parser.js';
 import { database_service } from './database_service.js';
 import type { TransactionOutput } from './tx_parser.js';
-import chalk from 'chalk';
 
 export class Scanner {
   private isRunning: boolean = false;
@@ -26,7 +25,7 @@ export class Scanner {
       return; // Skip invalid outputs entirely
     }
     
-    console.log(chalk.cyan(`------- OUTPUT ${index + 1} -------`));
+    logger.info(`------- OUTPUT ${index + 1} -------`);
     
     // Check for vote-related content
     const isVoteQuestion = output.metadata?.is_vote === true && !output.metadata?.option_index;
@@ -38,24 +37,19 @@ export class Scanner {
     // Display content based on its type
     if (contentToDisplay) {
       if (isVoteQuestion) {
-        console.log(chalk.magenta('📊 VOTE QUESTION: ') + chalk.white(contentToDisplay));
+        logger.info(`📊 VOTE QUESTION: ${contentToDisplay}`);
       } 
       else if (isVoteOption) {
-        console.log(chalk.magenta(`⚪ OPTION ${output.metadata?.option_index}: `) + chalk.white(contentToDisplay));
+        logger.info(`⚪ OPTION ${output.metadata?.option_index}: ${contentToDisplay}`);
       }
       else {
-        console.log(chalk.green('📝 CONTENT: ') + chalk.white(contentToDisplay));
+        logger.info(`📝 CONTENT: ${contentToDisplay}`);
       }
     }
     
     // Display metadata excluding content fields that were already shown
     if (output.metadata && Object.keys(output.metadata).length > 0) {
-      console.log(chalk.yellow('Metadata:'));
-      Object.entries(output.metadata).forEach(([key, value]) => {
-        if (key !== 'content' && key !== 'content_type' && key !== '__proto__') {
-          console.log(chalk.yellow(`  ${key}: `) + chalk.white(String(value)));
-        }
-      });
+      logger.info('Metadata:', output.metadata);
     }
   }
   
@@ -164,19 +158,19 @@ export class Scanner {
       }
       
       // Display transaction information
-      console.log(`\n${chalk.green('='.repeat(50))}`);
-      console.log(chalk.green(`📄 TRANSACTION: ${txId}`));
-      console.log(chalk.green(`📅 TIMESTAMP: ${blockTime.toISOString()}`));
-      console.log(chalk.green(`🧱 BLOCK: ${blockHeight}`));
-      console.log(chalk.green(`⭐ Contains ${lockdOutputs.length} Lockd.app outputs`));
-      console.log(chalk.green('='.repeat(50)));
+      logger.info('='.repeat(50));
+      logger.info(`📄 TRANSACTION: ${txId}`);
+      logger.info(`📅 TIMESTAMP: ${blockTime.toISOString()}`);
+      logger.info(`🧱 BLOCK: ${blockHeight}`);
+      logger.info(`⭐ Contains ${lockdOutputs.length} Lockd.app outputs`);
+      logger.info('='.repeat(50));
       
       // Display each lockd output
       lockdOutputs.forEach((output, index) => {
         this.display_formatted_output(output, index);
       });
       
-      console.log(chalk.green('='.repeat(50)) + '\n');
+      logger.info('='.repeat(50));
 
       // Insert into database
       await database_service.insert_transaction(txId, blockHeight, blockTime, lockdOutputs);
