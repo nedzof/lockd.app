@@ -94,7 +94,7 @@ const PostGrid: React.FC<PostGridProps> = ({
     );
   }, [currentFilters]);
 
-  const fetchPosts = useCallback(async (reset = true) => {
+  const fetchPosts = useCallback(async (reset = true, retryCount = 0) => {
     if (!isMounted.current) return;
 
     if (reset) {
@@ -124,7 +124,18 @@ const PostGrid: React.FC<PostGridProps> = ({
       const response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`);
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        
+        // Handle specific error cases
+        if (response.status === 503) {
+          // Server temporarily unavailable, retry after delay
+          if (retryCount < 3) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+            return fetchPosts(reset, retryCount + 1);
+          }
+        }
+        
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
       
       const data = await response.json();
@@ -151,6 +162,21 @@ const PostGrid: React.FC<PostGridProps> = ({
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch posts';
       setError(errorMessage);
+      
+      // Log error for debugging
+      console.error('Error fetching posts:', {
+        error: err,
+        params: {
+          time_filter,
+          ranking_filter,
+          personal_filter,
+          block_filter,
+          selected_tags,
+          user_id,
+          nextCursor,
+          reset
+        }
+      });
     } finally {
       setLoading(false);
       setIsFetchingMore(false);

@@ -3,7 +3,6 @@ import { useState, useMemo, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { FiTrendingUp, FiClock, FiHeart, FiStar } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
-import TestApiComponent from '../components/TestApiComponent';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
 import TagFilter from '../components/TagFilter';
@@ -224,8 +223,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
             />
           </div>
         )}
-        
-        <TestApiComponent />
       </div>
     );
   };

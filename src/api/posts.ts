@@ -19,6 +19,10 @@ interface PostQueryParams {
   block_filter?: string;
   selected_tags?: string;
   user_id?: string;
+  cursor?: string;
+  limit?: string;
+  excludeVotes?: string;
+  tags?: string | string[];
 }
 
 // Define request body type for post creation
@@ -104,14 +108,13 @@ const listPosts: PostListHandler = async (req, res, next) => {
       excludeVotes: parsedExcludeVotes
     });
     
-    // VALIDATION: Log the exact query we're about to execute
     const queryParams = {
       take: parsedLimit + 1,
       ...(cursor ? { 
         cursor: { 
           id: cursor as string 
         },
-        skip: 1 // Skip the cursor item
+        skip: 1
       } : {}),
       where: {
         AND: [
@@ -121,37 +124,26 @@ const listPosts: PostListHandler = async (req, res, next) => {
             }
           }] : []),
           ...(parsedExcludeVotes ? [{
-            isVote: false
+            is_vote: false // Fixed field name to match schema
           }] : [])
         ]
       },
       orderBy: [
-        { created_at: 'desc' },
-        { id: 'desc' }
-      ]
-    };
-    
-    logger.debug('Executing Prisma query with params', {
-      queryParams: JSON.stringify(queryParams, null, 2)
-    });
-    
-    // First fetch one more item than requested to determine if there are more items
-    const posts = await prisma.post.findMany({
-      ...queryParams,
+        { created_at: 'desc' as const },
+        { id: 'desc' as const }
+      ],
       include: {
-        vote_options: true,
-        lockLikes: {
-          orderBy: { created_at: 'desc' }
+        vote_options: {
+          orderBy: { created_at: 'desc' as const }
+        },
+        lock_likes: {
+          orderBy: { created_at: 'desc' as const }
         }
       }
-    });
+    };
 
-    // VALIDATION: Log the IDs of posts we found to check for duplicates
-    logger.debug('Found posts', {
-      count: posts.length,
-      requestedLimit: parsedLimit,
-      post_ids: posts.map(post => post.id)
-    });
+    // First fetch one more item than requested to determine if there are more items
+    const posts = await prisma.post.findMany(queryParams);
 
     // Check if there are more items
     const hasMore = posts.length > parsedLimit;
@@ -159,63 +151,73 @@ const listPosts: PostListHandler = async (req, res, next) => {
     // Remove the extra item if we fetched more than requested
     const postsToReturn = hasMore ? posts.slice(0, parsedLimit) : posts;
 
-    // VALIDATION: Log the IDs of posts we're returning
-    logger.debug('Posts to return', {
-      count: postsToReturn.length,
-      post_ids: postsToReturn.map(post => post.id)
-    });
-
-    // Process posts to handle raw_image_data
+    // Process posts to handle raw_image_data and ensure consistent field names
     const processedPosts = postsToReturn.map(post => {
-      // Process raw_image_data to ensure it's in the correct format for the frontend
-      if (post.raw_image_data) {
-        try {
-          // Convert Bytes to base64 string for frontend use
-          post.raw_image_data = Buffer.from(post.raw_image_data).toString('base64');
-          logger.debug('Converted raw_image_data from Bytes to base64 string', {
-            post_id: post.id,
-            dataLength: post.raw_image_data.length
-          });
-        } catch (e) {
-          logger.error('Error processing raw_image_data', {
-            error: e instanceof Error ? e.message : 'Unknown error',
-            post_id: post.id
-          });
-        }
+      try {
+        const processedPost = {
+          ...post,
+          isVote: post.is_vote, // Add isVote field for frontend compatibility
+          raw_image_data: post.raw_image_data 
+            ? Buffer.from(post.raw_image_data).toString('base64')
+            : null,
+          vote_options: post.vote_options?.map((option: any) => ({
+            ...option,
+            created_at: option.created_at.toISOString()
+          })),
+          created_at: post.created_at.toISOString(),
+          lock_likes: post.lock_likes?.map((like: any) => ({
+            ...like,
+            created_at: like.created_at.toISOString()
+          }))
+        };
+        return processedPost;
+      } catch (e) {
+        logger.error('Error processing post:', {
+          post_id: post.id,
+          error: e instanceof Error ? e.message : 'Unknown error'
+        });
+        return null;
       }
-      return post;
-    });
+    }).filter(Boolean); // Remove any null posts from processing errors
 
     const lastPost = postsToReturn[postsToReturn.length - 1];
     const nextCursor = hasMore ? lastPost?.id : null;
 
-    logger.debug('Returning posts with pagination info', {
-      postsCount: processedPosts.length,
-      nextCursor,
-      hasMore
-    });
-
     return res.status(200).json({
       posts: processedPosts,
       nextCursor,
-      hasMore
+      hasMore,
+      total: posts.length
     });
   } catch (error: any) {
-    logger.error('Error fetching posts', {
-      error: error.message,
-      code: error.code
+    logger.error('Error fetching posts:', {
+      error: error instanceof Error ? error.stack : error,
+      query: req.query
     });
 
-    // Return appropriate error response
-    if (error.code === 'P2010' || error.message.includes('prepared statement')) {
-      return res.status(503).json({ 
-        error: 'Database connection error, please try again',
-        retryAfter: 1
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2010') {
+        return res.status(503).json({
+          error: 'Database connection error, please try again',
+          retryAfter: 1
+        });
+      }
+      return res.status(400).json({
+        error: 'Invalid query parameters',
+        details: error.message
       });
     }
 
-    return res.status(500).json({ 
-      error: 'Internal server error'
+    if (error instanceof Prisma.PrismaClientValidationError) {
+      return res.status(400).json({
+        error: 'Invalid query format',
+        details: error.message
+      });
+    }
+
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
@@ -238,11 +240,14 @@ const getPost: PostDetailHandler = async (req, res, next) => {
     if (post.raw_image_data) {
       try {
         // Convert Bytes to base64 string for frontend use
-        post.raw_image_data = Buffer.from(post.raw_image_data).toString('base64');
-        logger.debug('Converted raw_image_data from Bytes to base64 string', {
-          post_id: post.id,
-          dataLength: post.raw_image_data.length
-        });
+        const imageData = post.raw_image_data;
+        if (imageData) {
+          post.raw_image_data = Buffer.from(imageData).toString('base64');
+          logger.debug('Converted raw_image_data from Bytes to base64 string', {
+            post_id: post.id,
+            dataLength: imageData.length
+          });
+        }
       } catch (e) {
         logger.error('Error processing raw_image_data', {
           error: e instanceof Error ? e.message : 'Unknown error',
@@ -265,7 +270,7 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
       select: {
         media_type: true,
         raw_image_data: true,
-        imageFormat: true
+        image_metadata: true
       }
     });
 
@@ -289,9 +294,10 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     // Determine content type
     let content_type = post.media_type;
     
-    // If we have an imageFormat but no media_type, try to determine from format
-    if (!content_type && post.imageFormat && content_typeMap[post.imageFormat.toLowerCase()]) {
-      content_type = content_typeMap[post.imageFormat.toLowerCase()];
+    // If we have image metadata with format info, try to determine from that
+    const imageMetadata = post.image_metadata as { format?: string } | null;
+    if (!content_type && imageMetadata?.format && content_typeMap[imageMetadata.format.toLowerCase()]) {
+      content_type = content_typeMap[imageMetadata.format.toLowerCase()];
     }
     
     // Default to octet-stream if we can't determine the type
@@ -408,7 +414,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
           content: content,
           author_address: author_address,
           tags: tags || [],
-          isVote: isVote || false,
+          is_vote: isVote || false,
           metadata: clientProvidedpost_id ? { post_id: clientProvidedpost_id } : undefined
         }
       });
@@ -443,7 +449,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
               content: option.text,
               post_id: post.id,
               author_address: author_address,
-              optionIndex: index
+              option_index: index
             }
           });
         });
@@ -455,7 +461,10 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       res.status(201).json(post);
     } catch (error) {
       console.error('Error creating post:', error);
-      res.status(500).json({ error: 'Internal server error', message: error.message });
+      res.status(500).json({ 
+        error: 'Internal server error', 
+        message: error instanceof Error ? error.message : 'Unknown error' 
+      });
     }
   } catch (error) {
     console.error('Error creating post:', error);
@@ -548,7 +557,6 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
     
     // Prepare metadata for scanner processing
     const metadata = {
-      predictionMarketData,
       app: 'lockd',
       version: '1.0.0',
       lock: {
