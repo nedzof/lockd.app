@@ -8,7 +8,8 @@ import { CONFIG } from './config.js';
 import logger from './logger.js';
 import { junglebus_service } from './junglebus_service.js';
 import { tx_parser } from './tx_parser.js';
-import type { TransactionOutput, ExtendedMetadata } from './tx_parser.js';
+import { database_service } from './database_service.js';
+import type { TransactionOutput } from './tx_parser.js';
 import chalk from 'chalk';
 
 export class Scanner {
@@ -49,54 +50,12 @@ export class Scanner {
     
     // Display metadata excluding content fields that were already shown
     if (output.metadata && Object.keys(output.metadata).length > 0) {
-      // Order metadata for better readability
-      const metadataOrder = [
-        'app', 'operation', 'is_vote', 'is_locked', 'type', 
-        'option_index', 'options_hash', 'post_id', 'sequence', 
-        'parent_sequence', 'tags', 'timestamp'
-      ];
-      
-      // Gather all keys not in the order list
-      const remainingKeys = Object.keys(output.metadata).filter(key => 
-        !metadataOrder.includes(key) && 
-        key !== 'content' && 
-        key !== 'content_type' &&
-        key !== '__proto__'  // Skip special properties
-      );
-      
-      // Combine ordered keys + any remaining keys
-      const orderedKeys = [...metadataOrder, ...remainingKeys];
-      
-      // Filter to only keys that exist in the metadata
-      const keysToDisplay = orderedKeys.filter(key => 
-        output.metadata && 
-        output.metadata[key] !== undefined && 
-        output.metadata[key] !== null
-      );
-      
-      if (keysToDisplay.length > 0) {
-        console.log(chalk.yellow('Metadata:'));
-        
-        keysToDisplay.forEach(key => {
-          if (output.metadata) {
-            const value = output.metadata[key];
-            
-            // Format different value types
-            let displayValue = '';
-            if (typeof value === 'object' && value !== null) {
-              displayValue = JSON.stringify(value);
-            } else if (typeof value === 'boolean') {
-              displayValue = value ? 'true' : 'false';
-            } else if (value === null) {
-              displayValue = 'null';
-            } else {
-              displayValue = String(value);
-            }
-            
-            console.log(chalk.yellow(`  ${key}: `) + chalk.white(displayValue));
-          }
-        });
-      }
+      console.log(chalk.yellow('Metadata:'));
+      Object.entries(output.metadata).forEach(([key, value]) => {
+        if (key !== 'content' && key !== 'content_type' && key !== '__proto__') {
+          console.log(chalk.yellow(`  ${key}: `) + chalk.white(String(value)));
+        }
+      });
     }
   }
   
@@ -134,7 +93,7 @@ export class Scanner {
               return;
             }
             
-            await this.process_transaction(txId);
+            await this.process_transaction(txId, tx.block_height, new Date(tx.block_time));
           } catch (error: any) {
             logger.error(`Error processing transaction: ${error.message}`);
           }
@@ -181,14 +140,16 @@ export class Scanner {
   /**
    * Process a single transaction by ID
    * @param txId Transaction ID to process
+   * @param blockHeight Block height of the transaction
+   * @param blockTime Block timestamp
    */
-  async process_transaction(txId: string): Promise<void> {
+  async process_transaction(txId: string, blockHeight: number, blockTime: Date): Promise<void> {
     try {
       // Fetch and parse the transaction
       const parsedTx = await tx_parser.parse_transaction(txId);
       
       if (!parsedTx || !parsedTx.outputs || parsedTx.outputs.length === 0) {
-        return; // Skip logging for invalid transactions
+        return; // Skip invalid transactions
       }
       
       // Get valid outputs that contain lockd.app data
@@ -197,7 +158,7 @@ export class Scanner {
         output.metadata && output.metadata.app === 'lockd.app'
       );
 
-      // Only display if there are lockd.app related outputs
+      // Only process if there are lockd.app related outputs
       if (lockdOutputs.length === 0) {
         return;
       }
@@ -205,15 +166,8 @@ export class Scanner {
       // Display transaction information
       console.log(`\n${chalk.green('='.repeat(50))}`);
       console.log(chalk.green(`📄 TRANSACTION: ${txId}`));
-      
-      if (parsedTx.timestamp) {
-        console.log(chalk.green(`📅 TIMESTAMP: ${parsedTx.timestamp}`));
-      }
-      
-      if (parsedTx.blockHeight) {
-        console.log(chalk.green(`🧱 BLOCK: ${parsedTx.blockHeight}`));
-      }
-      
+      console.log(chalk.green(`📅 TIMESTAMP: ${blockTime.toISOString()}`));
+      console.log(chalk.green(`🧱 BLOCK: ${blockHeight}`));
       console.log(chalk.green(`⭐ Contains ${lockdOutputs.length} Lockd.app outputs`));
       console.log(chalk.green('='.repeat(50)));
       
@@ -223,6 +177,10 @@ export class Scanner {
       });
       
       console.log(chalk.green('='.repeat(50)) + '\n');
+
+      // Insert into database
+      await database_service.insert_transaction(txId, blockHeight, blockTime, lockdOutputs);
+      
     } catch (error) {
       logger.error(`Error processing transaction ${txId}: ${(error as Error).message}`);
     }
@@ -239,6 +197,7 @@ export class Scanner {
     
     try {
       await junglebus_service.unsubscribe();
+      await database_service.disconnect();
       this.isRunning = false;
       logger.info('Scanner stopped');
     } catch (error) {
