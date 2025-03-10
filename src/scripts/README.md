@@ -1,96 +1,132 @@
-# Vote Transaction Processing Scripts
+# Scripts Directory
 
-This directory contains scripts for processing BSV vote transactions and integrating them with the Lockd.app database.
+This directory contains core scripts for managing and interacting with the Lockd.app application. The scripts have been consolidated into focused, maintainable modules.
 
-## Scripts Overview
+## Directory Structure
 
-### 1. `insert-vote-transaction.ts`
-
-This script demonstrates how to insert a BSV vote transaction into the database. It creates:
-- A post record with `is_vote` set to true
-- Vote option records for each option in the vote
-- A processed_transaction record
-
-Usage:
-```bash
-npx tsx src/scripts/insert-vote-transaction.ts
+```
+scripts/
+├── transactions/    # Transaction processing module
+│   └── transaction-processor.ts  # Consolidated transaction processing
+├── scanner/         # Blockchain scanner module
+│   └── scanner.ts               # Consolidated scanner functionality
+├── tags/           # Tag management module
+│   └── tag-manager.ts          # Consolidated tag management
+└── README.md       # This file
 ```
 
-### 2. `query-vote-data.ts`
+## Core Modules
 
-This script queries and displays vote data from the database, including:
-- Vote posts with their options
-- Vote counts for each option
-- Vote percentages
+### Transaction Processor
+The `TransactionProcessor` class in `transaction-processor.ts` handles all transaction-related operations:
+- Processing individual and bulk transactions
+- Vote transaction handling
+- Transaction verification and reprocessing
+- Content source updates
 
-Usage:
+### Scanner
+The `Scanner` class in `scanner.ts` provides blockchain scanning functionality:
+- Blockchain scanning with JungleBus integration
+- Transaction monitoring and processing
+- Database synchronization
+- Cleanup and maintenance
+
+### Tag Manager
+The `TagManager` class in `tag-manager.ts` manages all tag-related operations:
+- Automatic tag generation
+- Tag system verification
+- Tag cleanup and maintenance
+- Usage statistics
+
+## Core Services
+
+The application relies on these essential services:
+- `junglebus_service.ts`: Core blockchain interaction
+- `tx_parser.ts`: Transaction parsing
+- `vote-transaction-service.ts`: Vote handling
+- `config.ts`: Configuration
+- `logger.ts`: Logging
+
+## Usage
+
+Run the scripts using npm commands:
+
 ```bash
-npx tsx src/scripts/query-vote-data.ts
+# Start the blockchain scanner
+npm run scanner
+
+# Process transactions
+npm run process-transactions
+
+# Manage tags
+npm run generate-tags
 ```
 
-### 3. `fix-vote-data.ts`
+## Development
 
-This script fixes existing vote data in the database by:
-- Updating posts to set `is_vote` to true
-- Creating missing vote options
-- Updating processed_transaction records
+When adding new functionality:
+1. Add it to the appropriate module class
+2. Keep the code organized and focused
+3. Follow the established patterns
+4. Update tests as needed
+5. Document new features
 
-Usage:
-```bash
-npx tsx src/scripts/fix-vote-data.ts
-```
+## Module Details
 
-## Vote Transaction Service
-
-The `vote-transaction-service.ts` file provides a reusable service for processing vote transactions. It includes methods for:
-
-- Processing individual vote transactions
-- Processing bulk vote transactions
-- Retrieving vote details
-
-Example usage:
-
+### Transaction Processor
 ```typescript
-import { PrismaClient } from '@prisma/client';
-import { VoteTransactionService } from './src/services/vote-transaction-service.js';
+import { TransactionProcessor } from './transactions/transaction-processor';
 
-const prisma = new PrismaClient();
-const voteService = new VoteTransactionService(prisma);
+const processor = new TransactionProcessor();
 
-// Process a single transaction
-const result = await voteService.processVoteTransaction(transaction);
+// Process transactions
+await processor.processTransactions(txIds, {
+  reprocess: false,
+  updateContent: true,
+  skipExisting: true
+});
 
-// Process multiple transactions
-const bulkResults = await voteService.processBulkVoteTransactions(transactions);
-
-// Get vote details
-const voteDetails = await voteService.getVoteDetails(postId);
+// Get statistics
+const stats = await processor.getStats();
 ```
 
-## Database Schema
+### Scanner
+```typescript
+import { Scanner } from './scanner/scanner';
 
-Vote transactions are stored in the following tables:
+const scanner = new Scanner({
+  environment: 'production',
+  startBlock: 885872
+});
 
-1. `post` - Stores the vote question
-   - `is_vote` is set to true for vote posts
-   - `content` contains the vote question
-   - `metadata` contains additional vote metadata like `options_hash` and `total_options`
+// Start scanning
+await scanner.start({
+  cleanupDb: false
+});
 
-2. `vote_option` - Stores the vote options
-   - Each option is linked to the post via `post_id`
-   - `option_index` indicates the order of the options
-   - `content` contains the option text
+// Stop scanning
+await scanner.stop();
+```
 
-3. `processed_transaction` - Tracks processed transactions
-   - `type` is set to 'vote' for vote transactions
-   - `metadata` contains vote-specific data
+### Tag Manager
+```typescript
+import { TagManager } from './tags/tag-manager';
 
-## Lock Protocol Parser
+const tagManager = new TagManager();
 
-The scripts use the `LockProtocolParser` to extract vote data from BSV transactions. The parser identifies:
+// Generate tags
+await tagManager.generateTags({
+  batchSize: 100,
+  updateExisting: true
+});
 
-- Vote questions
-- Vote options
-- Vote metadata (options hash, total options, etc.)
+// Verify tag system
+const verification = await tagManager.verifyTagSystem();
 
-For more details on the parser, see the `lock_protocol_parser.js` file.
+// Clean up tags
+await tagManager.cleanupTags();
+```
+
+## Vote Transaction Processing
+
+For detailed information about vote transaction processing, see the vote-transaction-service.ts file in the services directory.

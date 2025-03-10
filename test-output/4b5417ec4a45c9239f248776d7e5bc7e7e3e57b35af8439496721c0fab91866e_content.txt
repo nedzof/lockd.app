@@ -1,7 +1,0 @@
-Transaction ID: 4b5417ec4a45c9239f248776d7e5bc7e7e3e57b35af8439496721c0fab91866e
-Block Height: 123456
-Block Time: 1613456789
-Data Length: 5
-
-Content:
-j LM Lock  Hello world

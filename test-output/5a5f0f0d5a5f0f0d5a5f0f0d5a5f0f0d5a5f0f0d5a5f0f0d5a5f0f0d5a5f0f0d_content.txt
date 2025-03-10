@@ -1,7 +1,0 @@
-Transaction ID: 5a5f0f0d5a5f0f0d5a5f0f0d5a5f0f0d5a5f0f0d5a5f0f0d5a5f0f0d5a5f0f0d
-Block Height: 123456
-Block Time: 1613456789
-Data Length: 5
-
-Content:
-j LM Vote  What is yes vote option?
