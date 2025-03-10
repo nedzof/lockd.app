@@ -9,11 +9,11 @@ import statsRouter from './api/stats';
 import votesRouter from './api/votes';
 import vote_optionsRouter from './api/vote-options';
 import bsvPriceRouter from './api/bsv-price';
-import tagGenerationRouter from './routes/tagGenerationRoutes';
-import postTaggingRouter from './routes/postTaggingRoutes';
+// import tagGenerationRouter from './routes/tagGenerationRoutes';
+// import postTaggingRouter from './routes/postTaggingRoutes';
 import { logger } from './utils/logger';
-import { initializeTagGenerationJob } from './jobs/tagGenerationJob';
-import { initializeStatsUpdateJob } from './jobs/statsUpdateJob';
+// import { initializeTagGenerationJob } from './jobs/tagGenerationJob';
+// import { initializeStatsUpdateJob } from './jobs/statsUpdateJob';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -69,8 +69,8 @@ app.use('/api/stats', statsRouter);
 app.use('/api/votes', votesRouter);
 app.use('/api/vote-options', vote_optionsRouter);
 app.use('/api/bsv-price', bsvPriceRouter);
-app.use('/api', tagGenerationRouter);
-app.use('/api', postTaggingRouter);
+// app.use('/api', tagGenerationRouter);
+// app.use('/api', postTaggingRouter);
 
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -97,12 +97,12 @@ app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
   
   // Initialize the tag generation job
-  initializeTagGenerationJob();
-  logger.info('Tag generation job initialized');
+  // initializeTagGenerationJob();
+  // logger.info('Tag generation job initialized');
   
   // Initialize the stats update job
-  initializeStatsUpdateJob();
-  logger.info('Stats update job initialized');
+  // initializeStatsUpdateJob();
+  // logger.info('Stats update job initialized');
 });
 
 // Handle graceful shutdown

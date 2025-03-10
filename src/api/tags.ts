@@ -2,7 +2,6 @@ import express from 'express';
 import prisma from '../db/prisma';
 import { logger } from '../utils/logger';
 import { 
-  generateTags, 
   getCurrentEventTags, 
   getAllTags,
   updateTag,
@@ -34,7 +33,7 @@ router.get('/', async (req, res) => {
         type: 'current_event'
       },
       orderBy: {
-        usageCount: 'desc'
+        usage_count: 'desc'
       },
       take: 20,
       select: {
@@ -82,9 +81,6 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-// Generate new tags from current events
-router.post('/generate', generateTags);
 
 // Get current event tags
 router.get('/current-events', getCurrentEventTags);

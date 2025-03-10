@@ -71,7 +71,7 @@
     "@types/cron": "^2.0.1",
     "@types/jest": "^29.5.12",
     "@types/natural": "^5.1.5",
-    "@types/node": "^20.11.17",
+    "@types/node": "^20.17.24",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.20",
     "concurrently": "^8.2.2",
@@ -84,7 +84,7 @@
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "tsx": "^4.7.1",
-    "typescript": "^5.3.3",
+    "typescript": "^5.8.2",
     "vite": "^5.1.0"
   }
 }

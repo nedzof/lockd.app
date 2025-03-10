@@ -9,6 +9,8 @@ const prisma = new PrismaClient();
  * Job to update statistics periodically
  */
 export const initializeStatsUpdateJob = () => {
+  console.log('Initializing stats update job...');
+  
   // Run every hour at minute 0
   const job = new CronJob('0 * * * *', async () => {
     try {
@@ -41,7 +43,7 @@ export const initializeStatsUpdateJob = () => {
         }),
         
         // Total lock likes
-        prisma.lockLike.count(),
+        prisma.lock_like.count(),
         
         // Total unique users
         prisma.post.findMany({
@@ -57,23 +59,23 @@ export const initializeStatsUpdateJob = () => {
         }).then(users => users.length),
         
         // Total BSV locked
-        prisma.lockLike.aggregate({
+        prisma.lock_like.aggregate({
           _sum: {
             amount: true
           }
         }),
         
         // Average lock duration
-        prisma.lockLike.aggregate({
+        prisma.lock_like.aggregate({
           _avg: {
-            lock_duration: true
+            unlock_height: true
           }
         }),
         
         // Most used tag
         prisma.tag.findMany({
           orderBy: {
-            usageCount: 'desc'
+            usage_count: 'desc'
           },
           take: 1
         }),
@@ -108,7 +110,7 @@ export const initializeStatsUpdateJob = () => {
         total_lock_likes: total_lock_likes,
         total_users: total_users,
         total_bsv_locked: total_bsv_lockedResult._sum.amount || 0,
-        avg_lock_duration: avg_lock_durationResult._avg.lock_duration || 0,
+        avg_lock_duration: avg_lock_durationResult._avg.unlock_height || 0,
         most_used_tag: most_used_tag.length > 0 ? most_used_tag[0].name : null,
         most_active_user: mostActiveUser.length > 0 ? mostActiveUser[0].author_address : null,
         last_updated: new Date()
@@ -126,15 +128,26 @@ export const initializeStatsUpdateJob = () => {
       });
       
       logger.info('Stats update job completed successfully');
+      console.log('Stats update completed with data:', statsData);
     } catch (error) {
       logger.error('Error in stats update job', { error });
+      console.error('Error in stats update job:', error);
     }
   });
   
   // Start the job
   job.start();
+  console.log('Stats update job started and running...');
   
   logger.info('Stats update job scheduled');
   
   return job;
 };
+
+// Execute the job immediately when the file is run directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  console.log('Running stats update job immediately...');
+  const job = initializeStatsUpdateJob();
+  // Force immediate execution
+  job.fireOnTick();
+}

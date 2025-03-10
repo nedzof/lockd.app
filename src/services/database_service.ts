@@ -117,6 +117,16 @@ export class DatabaseService {
     outputs: TransactionOutput[]
   ): Promise<void> {
     try {
+      // Check if transaction already exists
+      const existing_tx = await this.prisma.processed_transaction.findUnique({
+        where: { tx_id }
+      });
+
+      if (existing_tx) {
+        logger.info('Transaction already processed, skipping:', { tx_id });
+        return;
+      }
+
       // First, insert the transaction
       await this.prisma.processed_transaction.create({
         data: {
@@ -149,6 +159,16 @@ export class DatabaseService {
 
       // Process each group of outputs
       for (const [post_id, groupedOutputs] of outputsByPostId) {
+        // Check if post already exists
+        const existing_post = await this.prisma.post.findUnique({
+          where: { tx_id }
+        });
+
+        if (existing_post) {
+          logger.info('Post already exists, skipping:', { tx_id, post_id });
+          continue;
+        }
+
         const mainOutput = groupedOutputs.find(o => 
           o.metadata?.is_vote && o.metadata?.option_index === undefined
         );
@@ -162,21 +182,42 @@ export class DatabaseService {
           
           // Create vote options
           for (const optionOutput of optionOutputs) {
-            await this.process_vote_option(tx_id, optionOutput, post_id);
+            try {
+              await this.process_vote_option(tx_id, optionOutput, post_id);
+            } catch (error) {
+              if (error instanceof Error && error.message.includes('Unique constraint')) {
+                logger.info('Vote option already exists, skipping:', { tx_id, post_id });
+                continue;
+              }
+              throw error;
+            }
           }
         } else {
           // Process as regular post
           const output = groupedOutputs[0];
           if (output) {
-            await this.process_post_output(tx_id, output, post_id);
+            try {
+              await this.process_post_output(tx_id, output, post_id);
+            } catch (error) {
+              if (error instanceof Error && error.message.includes('Unique constraint')) {
+                logger.info('Post already exists, skipping:', { tx_id, post_id });
+                continue;
+              }
+              throw error;
+            }
           }
         }
       }
     } catch (error) {
+      if (error instanceof Error && error.message.includes('Unique constraint')) {
+        logger.info('Transaction already exists, skipping:', { tx_id });
+        return;
+      }
       logger.error('Error inserting transaction:', {
         tx_id,
         error: error instanceof Error ? error.message : String(error)
       });
+      throw error; // Re-throw other errors
     }
   }
 

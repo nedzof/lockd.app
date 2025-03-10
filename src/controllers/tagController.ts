@@ -1,25 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../db/prisma';
 import { logger } from '../utils/logger';
-import { DynamicTagGenerator } from '../services/dynamicTagGenerator.js';
-import { runTagGenerationJob } from '../jobs/tagGenerationJob.js';
-
-// Create an instance of the tag generator
-const tagGenerator = new DynamicTagGenerator();
-
-/**
- * Generate tags from current events
- */
-export const generateTags = async (req: Request, res: Response) => {
-  try {
-    logger.info('Manual tag generation triggered via API');
-    const tags = await runTagGenerationJob();
-    res.json({ success: true, tags });
-  } catch (error: any) {
-    logger.error('Error in tag generation endpoint:', error);
-    res.status(500).json({ success: false, error: 'Failed to generate tags' });
-  }
-};
 
 /**
  * Get current event tags
@@ -31,7 +12,7 @@ export const getCurrentEventTags = async (req: Request, res: Response) => {
         type: 'current_event'
       },
       orderBy: {
-        usageCount: 'desc'
+        usage_count: 'desc'
       },
       take: 50
     });
@@ -52,7 +33,7 @@ export const getAllTags = async (req: Request, res: Response) => {
     const tags = await prisma.tag.findMany({
       orderBy: [
         { type: 'asc' },
-        { usageCount: 'desc' }
+        { usage_count: 'desc' }
       ],
       take: 100
     });
@@ -127,7 +108,7 @@ export const incrementTagUsage = async (req: Request, res: Response) => {
       await prisma.tag.update({
         where: { id: tag.id },
         data: { 
-          usageCount: { increment: 1 },
+          usage_count: { increment: 1 },
           updated_at: new Date()
         }
       });
@@ -140,7 +121,7 @@ export const incrementTagUsage = async (req: Request, res: Response) => {
         data: {
           name,
           type: 'user_created',
-          usageCount: 1
+          usage_count: 1
         }
       });
       
