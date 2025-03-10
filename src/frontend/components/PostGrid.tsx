@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { FiLoader, FiPlus } from 'react-icons/fi';
+import { FiLoader, FiPlus, FiExternalLink, FiLock, FiClock } from 'react-icons/fi';
 import type { ExtendedPost, PostStats } from '../types/post';
 
 const API_URL = process.env.VITE_API_URL || 'http://localhost:3003';
@@ -30,6 +30,7 @@ const PostGrid: React.FC<PostGridProps> = ({
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const isMounted = useRef<boolean>(false);
+  const isInitialMount = useRef<boolean>(true);
   const imageUrlMap = useRef<Map<string, string>>(new Map());
   const seenpost_ids = useRef<Set<string>>(new Set());
   const prevFilters = useRef({
@@ -84,7 +85,7 @@ const PostGrid: React.FC<PostGridProps> = ({
   // Function to check if filters have changed
   const haveFiltersChanged = useCallback(() => {
     const prev = prevFilters.current;
-    return (
+    const hasChanged = (
       prev.time_filter !== currentFilters.time_filter ||
       prev.ranking_filter !== currentFilters.ranking_filter ||
       prev.personal_filter !== currentFilters.personal_filter ||
@@ -92,12 +93,22 @@ const PostGrid: React.FC<PostGridProps> = ({
       prev.user_id !== currentFilters.user_id ||
       JSON.stringify(prev.selected_tags) !== JSON.stringify(currentFilters.selected_tags)
     );
+    
+    if (hasChanged) {
+      console.log('Filters changed from:', prev, 'to:', currentFilters);
+    }
+    
+    return hasChanged;
   }, [currentFilters]);
 
   const fetchPosts = useCallback(async (reset = true, retryCount = 0) => {
-    if (!isMounted.current) return;
+    if (!isMounted.current) {
+      console.log('Component not mounted, skipping fetch');
+      return;
+    }
 
     if (reset) {
+      console.log('Resetting posts state');
       setLoading(true);
       setError(null);
       setNextCursor(null);
@@ -112,27 +123,28 @@ const PostGrid: React.FC<PostGridProps> = ({
       if (nextCursor && !reset) queryParams.append('cursor', nextCursor);
       queryParams.append('limit', '10');
       
+      // Always send tags parameter, even if empty
+      queryParams.append('selected_tags', JSON.stringify(selected_tags || []));
+      
       if (time_filter) queryParams.append('time_filter', time_filter);
       if (ranking_filter) queryParams.append('ranking_filter', ranking_filter);
       if (personal_filter) queryParams.append('personal_filter', personal_filter);
       if (block_filter) queryParams.append('block_filter', block_filter);
-      if (selected_tags.length > 0) {
-        selected_tags.forEach(tag => queryParams.append('tags', tag));
-      }
       if (user_id) queryParams.append('user_id', user_id);
       
-      const response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`);
+      const url = `${API_URL}/api/posts?${queryParams.toString()}`;
+      console.log('Fetching posts from:', url);
+      
+      const response = await fetch(url);
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Error response:', errorData);
         
-        // Handle specific error cases
-        if (response.status === 503) {
-          // Server temporarily unavailable, retry after delay
-          if (retryCount < 3) {
-            await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-            return fetchPosts(reset, retryCount + 1);
-          }
+        if (response.status === 503 && retryCount < 3) {
+          console.log(`Retrying fetch (attempt ${retryCount + 1})`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+          return fetchPosts(reset, retryCount + 1);
         }
         
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
@@ -152,47 +164,55 @@ const PostGrid: React.FC<PostGridProps> = ({
           return createImageUrl(post);
         });
 
-      setSubmissions(prev => reset ? newPosts : [...prev, ...newPosts]);
-      setHasMore(data.hasMore);
-      setNextCursor(data.nextCursor);
-      
-      if (onStatsUpdate && data.stats) {
-        onStatsUpdate(data.stats);
+      if (isMounted.current) {
+        setSubmissions(prev => {
+          const updated = reset ? newPosts : [...prev, ...newPosts];
+          return updated;
+        });
+        setHasMore(data.hasMore);
+        setNextCursor(data.nextCursor);
+        
+        if (onStatsUpdate && data.stats) {
+          onStatsUpdate(data.stats);
+        }
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch posts';
-      setError(errorMessage);
-      
-      // Log error for debugging
-      console.error('Error fetching posts:', {
-        error: err,
-        params: {
-          time_filter,
-          ranking_filter,
-          personal_filter,
-          block_filter,
-          selected_tags,
-          user_id,
-          nextCursor,
-          reset
-        }
-      });
+      if (isMounted.current) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch posts';
+        console.error('Fetch error:', err);
+        setError(errorMessage);
+      }
     } finally {
-      setLoading(false);
-      setIsFetchingMore(false);
-      prevFilters.current = { ...currentFilters };
+      if (isMounted.current) {
+        setLoading(false);
+        setIsFetchingMore(false);
+        prevFilters.current = { ...currentFilters };
+      }
     }
-  }, [currentFilters, nextCursor, onStatsUpdate, createImageUrl, cleanupImageUrls]);
+  }, [currentFilters, nextCursor, onStatsUpdate, createImageUrl, cleanupImageUrls, selected_tags, time_filter, ranking_filter, personal_filter, block_filter, user_id]);
 
   // Effect to handle initial mount and filter changes
   useEffect(() => {
-    isMounted.current = true;
-    
+    if (!isMounted.current) {
+      console.log('Initial mount');
+      isMounted.current = true;
+      fetchPosts(true);
+      return;
+    }
+
+    if (isInitialMount.current) {
+      console.log('Skipping first filter update');
+      isInitialMount.current = false;
+      return;
+    }
+
     if (haveFiltersChanged()) {
+      console.log('Filters changed, fetching new posts');
       fetchPosts(true);
     }
-    
+
     return () => {
+      console.log('Component unmounting');
       isMounted.current = false;
       cleanupImageUrls();
     };
@@ -235,20 +255,49 @@ const PostGrid: React.FC<PostGridProps> = ({
         <div className="grid grid-cols-1 gap-6">
           {submissions.map((post) => (
             <div key={post.id} className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-xl border border-gray-800/10 shadow-lg hover:shadow-[#00ffa3]/5 transition-all duration-300">
-              <div className="flex items-center p-4 border-b border-gray-800/10">
-                <div className="w-10 h-10 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-full flex items-center justify-center text-gray-900 font-bold">
-                  {post.author_address ? post.author_address.substring(0, 2).toUpperCase() : "?"}
+              {/* Header with metadata */}
+              <div className="flex items-center justify-between p-4 border-b border-gray-800/10">
+                <div className="flex flex-col">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-gray-200 font-medium">
+                      {post.author_address ? 
+                        `${post.author_address.substring(0, 3)}...${post.author_address.substring(post.author_address.length - 3)}` : 
+                        "Anonymous"}
+                    </span>
+                    <a 
+                      href={`https://whatsonchain.com/address/${post.author_address}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[#00ffa3] hover:text-[#00ff9d] transition-colors"
+                    >
+                      <FiExternalLink size={14} />
+                    </a>
+                  </div>
+                  <div className="flex items-center text-gray-400 text-xs mt-1">
+                    <FiClock className="mr-1" size={12} />
+                    {new Date(post.created_at).toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </div>
                 </div>
-                <div className="ml-3">
-                  <p className="text-gray-200 font-medium">
-                    {post.author_address ? 
-                      `${post.author_address.substring(0, 6)}...${post.author_address.substring(post.author_address.length - 4)}` : 
-                      "Anonymous"}
-                  </p>
-                  <p className="text-gray-400 text-xs">
-                    {new Date(post.created_at).toLocaleString()}
-                  </p>
-                </div>
+                {/* Lock amount if present */}
+                {post.metadata && 'lock' in post.metadata && 
+                 typeof post.metadata.lock === 'object' && 
+                 post.metadata.lock !== null &&
+                 'amount' in post.metadata.lock &&
+                 typeof post.metadata.lock.amount === 'number' &&
+                 post.metadata.lock.amount > 0 && (
+                  <div className="flex items-center bg-[#00ffa3]/10 px-3 py-1.5 rounded-full">
+                    <FiLock className="text-[#00ffa3] mr-1.5" size={14} />
+                    <span className="text-[#00ffa3] font-medium text-sm">
+                      {post.metadata.lock.amount.toLocaleString()} sats
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="p-4">
@@ -278,9 +327,12 @@ const PostGrid: React.FC<PostGridProps> = ({
                 
                 {/* Tags */}
                 {post.tags && post.tags.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-4 flex flex-wrap gap-2">
                     {post.tags.map(tag => (
-                      <span key={tag} className="bg-white/5 text-gray-300 text-xs px-2.5 py-1 rounded-md">
+                      <span 
+                        key={tag} 
+                        className="bg-[#00ffa3]/5 text-[#00ffa3] text-xs px-2.5 py-1 rounded-full border border-[#00ffa3]/10 hover:bg-[#00ffa3]/10 transition-colors"
+                      >
                         #{tag}
                       </span>
                     ))}
