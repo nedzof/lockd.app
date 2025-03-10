@@ -432,4 +432,83 @@ export class VoteTransactionService {
       return [];
     }
   }
+
+  /**
+   * Query vote data for a specific post
+   */
+  async queryVoteData(postId: string) {
+    try {
+      const post = await this.prisma.post.findUnique({
+        where: { id: postId },
+        include: {
+          vote_options: {
+            include: {
+              votes: true
+            }
+          }
+        }
+      });
+
+      if (!post) {
+        logger.warn(`Post not found: ${postId}`);
+        return null;
+      }
+
+      const voteStats = post.vote_options.map(option => ({
+        option_text: option.option_text,
+        vote_count: option.votes.length,
+        percentage: post.vote_options.reduce((sum, opt) => sum + opt.votes.length, 0) > 0
+          ? (option.votes.length / post.vote_options.reduce((sum, opt) => sum + opt.votes.length, 0)) * 100
+          : 0
+      }));
+
+      return {
+        post_id: post.id,
+        total_votes: post.vote_options.reduce((sum, option) => sum + option.votes.length, 0),
+        options: voteStats
+      };
+    } catch (error) {
+      logger.error('Error querying vote data', {
+        post_id: postId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Query vote options for multiple posts
+   */
+  async queryVoteOptions(postIds: string[]) {
+    try {
+      const posts = await this.prisma.post.findMany({
+        where: {
+          id: { in: postIds },
+          is_vote: true
+        },
+        include: {
+          vote_options: {
+            include: {
+              votes: true
+            }
+          }
+        }
+      });
+
+      return posts.map(post => ({
+        post_id: post.id,
+        options: post.vote_options.map(option => ({
+          id: option.id,
+          text: option.option_text,
+          votes: option.votes.length
+        }))
+      }));
+    } catch (error) {
+      logger.error('Error querying vote options', {
+        post_ids: postIds,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  }
 }
