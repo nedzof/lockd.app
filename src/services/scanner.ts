@@ -8,7 +8,8 @@ import { CONFIG } from './config.js';
 import logger from './logger.js';
 import { junglebus_service } from './junglebus_service.js';
 import { tx_parser } from './tx_parser.js';
-import type { TransactionOutput, ExtendedMetadata } from './tx_parser.js';
+import type { TransactionOutput } from './tx_parser.js';
+import type { LockProtocolData } from '../shared/types.js';
 import chalk from 'chalk';
 
 export class Scanner {
@@ -28,11 +29,11 @@ export class Scanner {
     console.log(chalk.cyan(`------- OUTPUT ${index + 1} -------`));
     
     // Check for vote-related content
-    const isVoteQuestion = output.metadata?.is_vote === true && !output.metadata?.option_index;
-    const isVoteOption = output.metadata?.is_vote === true && output.metadata?.option_index !== undefined;
+    const isVoteQuestion = output.metadata?.is_vote === true;
+    const isVoteOption = output.metadata?.is_vote === true;
     
     // Extract content to display
-    const contentToDisplay = output.metadata?.content || '';
+    const contentToDisplay = output.content || '';
     
     // Display content based on its type
     if (contentToDisplay) {
@@ -40,7 +41,7 @@ export class Scanner {
         console.log(chalk.magenta('📊 VOTE QUESTION: ') + chalk.white(contentToDisplay));
       } 
       else if (isVoteOption) {
-        console.log(chalk.magenta(`⚪ OPTION ${output.metadata?.option_index}: `) + chalk.white(contentToDisplay));
+        console.log(chalk.magenta(`⚪ OPTION: `) + chalk.white(contentToDisplay));
       }
       else {
         console.log(chalk.green('📝 CONTENT: ') + chalk.white(contentToDisplay));
@@ -49,26 +50,15 @@ export class Scanner {
     
     // Display metadata excluding content fields that were already shown
     if (output.metadata && Object.keys(output.metadata).length > 0) {
-      // Order metadata for better readability
-      const metadataOrder = [
-        'app', 'operation', 'is_vote', 'is_locked', 'type', 
-        'option_index', 'options_hash', 'post_id', 'sequence', 
-        'parent_sequence', 'tags', 'timestamp'
+      // Only show specific properties from metadata that we care about
+      const propertiesToShow: (keyof LockProtocolData)[] = [
+        'is_vote', 'is_locked', 'post_id', 'options_hash', 
+        'total_options', 'lock_amount', 'lock_duration',
+        'content_type', 'media_type', 'tags'
       ];
       
-      // Gather all keys not in the order list
-      const remainingKeys = Object.keys(output.metadata).filter(key => 
-        !metadataOrder.includes(key) && 
-        key !== 'content' && 
-        key !== 'content_type' &&
-        key !== '__proto__'  // Skip special properties
-      );
-      
-      // Combine ordered keys + any remaining keys
-      const orderedKeys = [...metadataOrder, ...remainingKeys];
-      
       // Filter to only keys that exist in the metadata
-      const keysToDisplay = orderedKeys.filter(key => 
+      const keysToDisplay = propertiesToShow.filter(key => 
         output.metadata && 
         output.metadata[key] !== undefined && 
         output.metadata[key] !== null
@@ -93,7 +83,7 @@ export class Scanner {
               displayValue = String(value);
             }
             
-            console.log(chalk.yellow(`  ${key}: `) + chalk.white(displayValue));
+            console.log(chalk.yellow(`  ${String(key)}: `) + chalk.white(displayValue));
           }
         });
       }
@@ -194,7 +184,7 @@ export class Scanner {
       // Get valid outputs that contain lockd.app data
       const validOutputs = parsedTx.outputs.filter(output => output.isValid);
       const lockdOutputs = validOutputs.filter(output => 
-        output.metadata && output.metadata.app === 'lockd.app'
+        output.type === 'lockd'
       );
 
       // Only display if there are lockd.app related outputs
