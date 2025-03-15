@@ -31,7 +31,8 @@ export function extract_key_value_pairs(hexString: string): Record<string, strin
     'options_hash': '6f7074696f6e735f68617368',  // 'options_hash' in hex
     'lock_amount': '6c6f636b5f616d6f756e74',  // 'lock_amount' in hex
     'lock_duration': '6c6f636b5f6475726174696f6e',  // 'lock_duration' in hex
-    'option_index': '6f7074696f6e496e646578',  // 'optionIndex' in hex
+    'option_index': '6f7074696f6e5f696e646578',  // 'option_index' in hex
+    'optionIndex': '6f7074696f6e496e646578',  // 'optionIndex' in hex (camelCase variant)
     'content_type': '636f6e74656e745f74797065',  // 'content_type' in hex
     'media_type': '6d656469615f74797065',  // 'media_type' in hex
     'version': '76657273696f6e',  // 'version' in hex
@@ -73,15 +74,6 @@ export function build_metadata(keyValuePairs: Record<string, string>, content: s
     metadata.post_id = postIdMatch ? postIdMatch[1] : keyValuePairs.post_id.substring(0, 16); // Take just first part if no match
   }
   
-  // Boolean fields
-  if (keyValuePairs.is_vote !== undefined) {
-    metadata.is_vote = keyValuePairs.is_vote.toLowerCase() === 'true';
-  }
-  
-  if (keyValuePairs.is_locked !== undefined) {
-    metadata.is_locked = keyValuePairs.is_locked.toLowerCase() === 'true';
-  }
-  
   // Numeric fields
   if (keyValuePairs.lock_amount) {
     const numMatch = keyValuePairs.lock_amount.match(/^(\d+)/);
@@ -104,6 +96,15 @@ export function build_metadata(keyValuePairs: Record<string, string>, content: s
     }
   }
   
+  // Handle both camelCase and snake_case variants
+  if (keyValuePairs.option_index || keyValuePairs.optionIndex) {
+    const optionIndexValue = keyValuePairs.option_index || keyValuePairs.optionIndex;
+    const numMatch = optionIndexValue.match(/^(\d+)/);
+    if (numMatch) {
+      metadata.option_index = parseInt(numMatch[1], 10);
+    }
+  }
+  
   // Array fields
   if (keyValuePairs.tags) {
     try {
@@ -111,6 +112,18 @@ export function build_metadata(keyValuePairs: Record<string, string>, content: s
     } catch {
       metadata.tags = [];
     }
+  }
+  
+  // Boolean fields - ensure proper string to boolean conversion
+  if (keyValuePairs.is_vote !== undefined) {
+    // Convert various truthy strings to boolean
+    const value = keyValuePairs.is_vote.toLowerCase().trim();
+    metadata.is_vote = value === 'true' || value === '1' || value === 'yes';
+  }
+  
+  if (keyValuePairs.is_locked !== undefined) {
+    const value = keyValuePairs.is_locked.toLowerCase().trim();
+    metadata.is_locked = value === 'true' || value === '1' || value === 'yes';
   }
   
   // Other fields

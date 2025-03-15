@@ -242,6 +242,7 @@ export interface LockProtocolData {
     options_hash?: string;
     tags?: string[];
     total_options?: number;
+    option_index?: number;
     raw_image_data?: Buffer | null;
     media_type?: string | null;
     created_at?: Date | null;

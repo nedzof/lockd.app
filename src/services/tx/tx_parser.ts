@@ -115,6 +115,180 @@ export class TxParser {
   }
   
   /**
+   * Detects if the transaction is a vote with multiple outputs
+   * where one is the question and others are vote options
+   */
+  detect_vote_transaction(outputs: TransactionOutput[]): void {
+    // Only process if we have multiple valid outputs
+    if (outputs.length <= 1) return;
+    
+    try {
+      // Check if any outputs already have is_vote = true
+      const explicitVoteOutputs = outputs.filter(o => o.isValid && o.metadata?.is_vote === true);
+      
+      // If at least one output is explicitly marked as a vote, check if it's a multi-part vote
+      if (explicitVoteOutputs.length > 0) {
+        logger.debug(`Found ${explicitVoteOutputs.length} outputs explicitly marked as votes`);
+        
+        // Find the question output (might have total_options set or be the first output)
+        const questionOutput = explicitVoteOutputs.find(o => o.metadata?.total_options) || explicitVoteOutputs[0];
+        
+        // Ensure all outputs in this transaction are marked as votes
+        for (const output of outputs.filter(o => o.isValid)) {
+          output.metadata.is_vote = true;
+        }
+        
+        // Propagate post_id from question to all options if they don't have it
+        if (questionOutput.metadata?.post_id) {
+          const postId = questionOutput.metadata.post_id;
+          for (const output of outputs.filter(o => o.isValid && !o.metadata.post_id)) {
+            output.metadata.post_id = postId;
+          }
+        }
+        
+        // Propagate options_hash if present
+        const optionsHash = questionOutput.metadata?.options_hash;
+        if (optionsHash) {
+          for (const output of outputs.filter(o => o.isValid)) {
+            output.metadata.options_hash = optionsHash;
+          }
+        }
+        
+        // Find all option outputs
+        const optionOutputs = outputs.filter(o => 
+          o.isValid && 
+          o !== questionOutput && 
+          (o.metadata?.option_index !== undefined || o.metadata?.is_vote === true)
+        );
+        
+        // Assign option indices if not already set
+        optionOutputs.forEach((output, index) => {
+          if (output.metadata.option_index === undefined) {
+            output.metadata.option_index = index + 1;
+          }
+        });
+        
+        // Set total_options on question output if not already set
+        if (!questionOutput.metadata.total_options && optionOutputs.length > 0) {
+          questionOutput.metadata.total_options = optionOutputs.length;
+        }
+        
+        logger.debug(`Vote transaction with ${optionOutputs.length} options processed`);
+        return;
+      }
+      
+      // Check for outputs with consistent post_id - this is our traditional approach
+      // Get all unique post_ids
+      const postIdsMap = new Map<string, number>();
+      
+      // Count occurrences of each post_id
+      for (const output of outputs.filter(o => o.isValid && o.metadata?.post_id)) {
+        const postId = output.metadata.post_id;
+        postIdsMap.set(postId, (postIdsMap.get(postId) || 0) + 1);
+      }
+      
+      // If any post_id appears multiple times, it might be a vote
+      for (const [postId, count] of postIdsMap.entries()) {
+        if (count > 1 || outputs.length >= 3) { // Multi-part vote with shared post_id or many outputs
+          const relatedOutputs = outputs.filter(
+            o => o.isValid && (!o.metadata.post_id || o.metadata.post_id === postId)
+          );
+          
+          if (relatedOutputs.length >= 2) { // Enough to be a vote
+            // Mark all related outputs as part of a vote
+            for (const output of relatedOutputs) {
+              output.metadata.is_vote = true;
+              
+              // Set post_id for outputs that don't have it
+              if (!output.metadata.post_id) {
+                output.metadata.post_id = postId;
+              }
+            }
+            
+            // Assume first output is the question
+            const questionOutput = relatedOutputs[0];
+            const optionOutputs = relatedOutputs.slice(1);
+            
+            // Set option indices if not already set
+            optionOutputs.forEach((output, index) => {
+              if (output.metadata.option_index === undefined) {
+                output.metadata.option_index = index + 1;
+              }
+            });
+            
+            // Set total_options on question
+            if (!questionOutput.metadata.total_options) {
+              questionOutput.metadata.total_options = optionOutputs.length;
+            }
+            
+            // Find an options hash to propagate
+            const optionsHash = relatedOutputs.find(o => o.metadata?.options_hash)?.metadata?.options_hash;
+            if (optionsHash) {
+              for (const output of relatedOutputs) {
+                output.metadata.options_hash = optionsHash;
+              }
+            }
+            
+            logger.debug(`Vote transaction detected with ${optionOutputs.length} options for post_id ${postId}`);
+            break;
+          }
+        }
+      }
+      
+      // If no vote was detected with post_id, check if multiple outputs might be a vote
+      // by looking at their structure (one question followed by multiple options)
+      if (!outputs.some(o => o.isValid && o.metadata?.is_vote === true) && outputs.length >= 3) {
+        const validOutputs = outputs.filter(o => o.isValid);
+        if (validOutputs.length >= 3) { // Enough outputs to likely be a vote
+          // Mark all valid outputs as vote
+          for (const output of validOutputs) {
+            output.metadata.is_vote = true;
+          }
+          
+          // Assume first output is the question
+          const questionOutput = validOutputs[0];
+          const optionOutputs = validOutputs.slice(1);
+          
+          // Set option indices
+          optionOutputs.forEach((output, index) => {
+            if (output.metadata.option_index === undefined) {
+              output.metadata.option_index = index + 1;
+            }
+          });
+          
+          // Set total_options on question
+          if (!questionOutput.metadata.total_options) {
+            questionOutput.metadata.total_options = optionOutputs.length;
+          }
+          
+          // Find an options hash to propagate
+          const optionsHash = validOutputs.find(o => o.metadata?.options_hash)?.metadata?.options_hash;
+          if (optionsHash) {
+            for (const output of validOutputs) {
+              output.metadata.options_hash = optionsHash;
+            }
+          }
+          
+          // If a post_id exists anywhere, propagate it
+          const postId = validOutputs.find(o => o.metadata?.post_id)?.metadata?.post_id;
+          if (postId) {
+            for (const output of validOutputs) {
+              if (!output.metadata.post_id) {
+                output.metadata.post_id = postId;
+              }
+            }
+          }
+          
+          logger.debug(`Vote transaction detected with ${optionOutputs.length} options based on output structure`);
+        }
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Error detecting vote transaction: ${errorMessage}`);
+    }
+  }
+  
+  /**
    * Parse transaction data
    */
   async parse_transaction_data(txData: any): Promise<ParsedTransaction> {
@@ -164,6 +338,9 @@ export class TxParser {
           });
         }
       }
+      
+      // Check if this is a multi-part vote transaction
+      this.detect_vote_transaction(outputs);
       
       return {
         txId,
