@@ -8,6 +8,7 @@ import { CONFIG } from './config.js';
 import logger from './logger.js';
 import { junglebus_service } from './junglebus_service.js';
 import { tx_parser } from './tx_parser.js';
+import { tx_repository } from './db/tx_repository.js';
 import type { TransactionOutput } from './tx_parser.js';
 import type { LockProtocolData } from '../shared/types.js';
 import chalk from 'chalk';
@@ -29,8 +30,11 @@ export class Scanner {
     console.log(chalk.cyan(`------- OUTPUT ${index + 1} -------`));
     
     // Check for vote-related content
-    const isVoteQuestion = output.metadata?.is_vote === true;
-    const isVoteOption = output.metadata?.is_vote === true;
+    const isVoteQuestion = output.metadata?.is_vote === true && 
+                          (output.metadata?.total_options || index === 0);
+    const isVoteOption = output.metadata?.is_vote === true && 
+                         output.metadata?.option_index !== undefined && 
+                         !isVoteQuestion;
     
     // Extract content to display
     const contentToDisplay = output.content || '';
@@ -41,7 +45,8 @@ export class Scanner {
         console.log(chalk.magenta('📊 VOTE QUESTION: ') + chalk.white(contentToDisplay));
       } 
       else if (isVoteOption) {
-        console.log(chalk.magenta(`⚪ OPTION: `) + chalk.white(contentToDisplay));
+        const optionIndex = output.metadata?.option_index || '?';
+        console.log(chalk.magenta(`⚪ OPTION ${optionIndex}: `) + chalk.white(contentToDisplay));
       }
       else {
         console.log(chalk.green('📝 CONTENT: ') + chalk.white(contentToDisplay));
@@ -54,7 +59,7 @@ export class Scanner {
       const propertiesToShow: (keyof LockProtocolData)[] = [
         'is_vote', 'is_locked', 'post_id', 'options_hash', 
         'total_options', 'lock_amount', 'lock_duration',
-        'content_type', 'media_type', 'tags'
+        'content_type', 'media_type', 'tags', 'option_index'
       ];
       
       // Filter to only keys that exist in the metadata
@@ -174,6 +179,13 @@ export class Scanner {
    */
   async process_transaction(txId: string): Promise<void> {
     try {
+      // Check if the transaction is already saved
+      const isAlreadySaved = await tx_repository.isTransactionSaved(txId);
+      if (isAlreadySaved) {
+        logger.debug(`Transaction ${txId} already saved, skipping`);
+        return;
+      }
+      
       // Fetch and parse the transaction
       const parsedTx = await tx_parser.parse_transaction(txId);
       
@@ -187,10 +199,13 @@ export class Scanner {
         output.type === 'lockd'
       );
 
-      // Only display if there are lockd.app related outputs
+      // Only process if there are lockd.app related outputs
       if (lockdOutputs.length === 0) {
         return;
       }
+      
+      // Save the transaction to the database
+      await tx_repository.saveProcessedTransaction(parsedTx);
       
       // Display transaction information
       console.log(`\n${chalk.green('='.repeat(50))}`);
@@ -204,7 +219,14 @@ export class Scanner {
         console.log(chalk.green(`🧱 BLOCK: ${parsedTx.blockHeight}`));
       }
       
-      console.log(chalk.green(`⭐ Contains ${lockdOutputs.length} Lockd.app outputs`));
+      // Determine if this is a vote transaction
+      const isVote = lockdOutputs.some(output => output.metadata?.is_vote === true);
+      if (isVote) {
+        console.log(chalk.green(`📊 VOTE TRANSACTION with ${lockdOutputs.length} outputs`));
+      } else {
+        console.log(chalk.green(`⭐ Contains ${lockdOutputs.length} Lockd.app outputs`));
+      }
+      
       console.log(chalk.green('='.repeat(50)));
       
       // Display each lockd output
