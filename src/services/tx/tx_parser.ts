@@ -29,6 +29,7 @@ export interface ParsedTransaction {
   timestamp?: string;
   blockHeight?: number;
   rawTx?: string; // Raw transaction data in base64 format
+  authorAddress?: string; // Author address from transaction data
 }
 
 /**
@@ -300,6 +301,9 @@ export class TxParser {
         throw new Error('Transaction ID not found in transaction data');
       }
       
+      // Extract author address
+      const authorAddress = this.extract_author_address(txData);
+      
       // Extract outputs from transaction data
       const txOutputs = tx_fetcher.extract_outputs_from_tx_data(txData);
       const outputs: TransactionOutput[] = [];
@@ -314,6 +318,12 @@ export class TxParser {
           try {
             // Parse output with our extraction methods
             const parsed = await this.parse_output(output);
+            
+            // Add author address to metadata if available
+            if (authorAddress && parsed.metadata) {
+              parsed.metadata.author_address = authorAddress;
+            }
+            
             outputs.push({
               hex: output,
               content: parsed.content,
@@ -348,7 +358,8 @@ export class TxParser {
         outputs,
         blockHeight: txData.block_height || txData.height,
         timestamp: extract_timestamp(txData),
-        rawTx: txData.transaction || undefined
+        rawTx: txData.transaction || undefined,
+        authorAddress
       };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -409,6 +420,61 @@ export class TxParser {
       }
     }
     return results;
+  }
+  
+  /**
+   * Extracts author address from transaction data
+   */
+  extract_author_address(txData: any): string | undefined {
+    try {
+      // First, check for addresses array
+      if (txData.addresses && Array.isArray(txData.addresses) && txData.addresses.length > 0) {
+        return txData.addresses[0];
+      }
+      
+      // Try to get from inputs if available
+      if (txData.inputs && Array.isArray(txData.inputs) && txData.inputs.length > 0) {
+        const input = txData.inputs[0];
+        if (input && typeof input === 'object') {
+          // Check different possible formats for input addresses
+          if (input.address) return input.address;
+          if (input.addresses && Array.isArray(input.addresses) && input.addresses.length > 0) {
+            return input.addresses[0];
+          }
+        }
+      }
+      
+      // Try to extract from BMAP parser if available
+      if (txData.transaction) {
+        try {
+          // Use appropriate BMAP methods based on transaction format
+          // We'll skip this for now since method naming may vary
+          // This is a fallback approach only
+          logger.debug('Using raw transaction analysis for address extraction');
+          
+          // Direct parsing of P2PKH output scripts for addresses
+          if (txData.outputs && Array.isArray(txData.outputs)) {
+            for (const output of txData.outputs) {
+              // Look for a P2PKH pattern with OP_DUP OP_HASH160 <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
+              // In hex, this looks like: 76a914<pubKeyHash>88ac
+              if (typeof output === 'string' && output.startsWith('76a914') && output.endsWith('88ac')) {
+                const pubKeyHash = output.substring(6, output.length - 4);
+                logger.debug(`Found potential P2PKH output with pubKeyHash: ${pubKeyHash}`);
+                // We'd need a proper address encoder here, but we'll leave this as a placeholder
+                // since the addresses array should already provide this info
+              }
+            }
+          }
+        } catch (error) {
+          logger.debug(`Failed to extract address from transaction: ${error}`);
+        }
+      }
+      
+      return undefined;
+    } catch (error) {
+      logger.debug(`Error extracting author address: ${error}`);
+      return undefined;
+    }
   }
 }
 
