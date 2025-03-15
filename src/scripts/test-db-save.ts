@@ -12,7 +12,7 @@ import prisma from '../db.js';
 // Example transaction IDs to test with
 const TEST_TRANSACTION_IDS = [
   'c8ebe9050fdb87a546c0477b024d70727e07c9088ad11065fac5fb227b5a72f8', // Vote transaction
-  'a7cc804be0a15810e2fa0f97d7c15305b1facb7af1a876549b41af1f116fe053', // Transaction with invalid date
+  'a7cc804be0a15810e2fa0f97d7c15305b1facb7af1a876549b41af1f116fe053', // Transaction with an image and invalid date
 ];
 
 /**

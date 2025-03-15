@@ -7,6 +7,7 @@
 import prisma from '../../db.js';
 import logger from '../logger.js';
 import type { ParsedTransaction } from '../tx/tx_parser.js';
+import { extractImageFromOutputs, extractImageFromOutput, extractImageFromRawTx } from '../utils/image_extractor.js';
 
 /**
  * Transaction Repository class
@@ -122,7 +123,7 @@ export class TxRepository {
   async saveProcessedTransaction(parsedTx: ParsedTransaction): Promise<void> {
     try {
       // Extract relevant data from parsed transaction
-      const { txId, outputs, blockHeight, timestamp } = parsedTx;
+      const { txId, outputs, blockHeight, timestamp, rawTx } = parsedTx;
       
       // Skip if no valid transaction ID
       if (!txId) {
@@ -188,6 +189,93 @@ export class TxRepository {
           
           return newAcc;
         }, {} as Record<string, any>);
+      }
+      
+      // Try to extract image data from the outputs
+      try {
+        // Get all output scripts as hex strings
+        const outputHexes = outputs.map(output => output.hex).filter(Boolean);
+        
+        if (outputHexes.length > 0) {
+          logger.debug(`Checking ${outputHexes.length} outputs for image data`);
+          
+          // Try extracting from each output individually
+          let imageFound = false;
+          
+          for (let i = 0; i < outputHexes.length; i++) {
+            const image = extractImageFromOutput(outputHexes[i]);
+            if (image) {
+              logger.info(`Found ${image.format} image in output #${i}, size: ${image.size} bytes`);
+              
+              // Add image metadata to combined metadata
+              combinedMetadata.image_metadata = {
+                format: image.format,
+                mime_type: image.mime_type,
+                size: image.size,
+                position: image.position,
+                output_index: i
+              };
+              
+              // Add data URL for direct usage
+              combinedMetadata.image_data_url = image.data_url;
+              
+              // Store the raw image data as base64
+              combinedMetadata.raw_image_data = image.data.toString('base64');
+              
+              imageFound = true;
+              break;
+            }
+          }
+          
+          if (!imageFound) {
+            // If no image was found in individual outputs, try extracting from 
+            // all outputs combined (for cases where image spans multiple outputs)
+            const image = extractImageFromOutputs(outputHexes);
+            
+            if (image) {
+              logger.info(`Found ${image.format} image across multiple outputs, size: ${image.size} bytes`);
+              
+              // Add image metadata to combined metadata
+              combinedMetadata.image_metadata = {
+                format: image.format,
+                mime_type: image.mime_type,
+                size: image.size,
+                position: image.position
+              };
+              
+              // Add data URL for direct usage
+              combinedMetadata.image_data_url = image.data_url;
+              
+              // Store the raw image data as base64
+              combinedMetadata.raw_image_data = image.data.toString('base64');
+            } else if (rawTx) {
+              // If no image found in outputs, try the raw transaction data
+              logger.debug('Checking raw transaction data for images');
+              const image = extractImageFromRawTx(rawTx);
+              
+              if (image) {
+                logger.info(`Found ${image.format} image in raw transaction data, size: ${image.size} bytes`);
+                
+                // Add image metadata to combined metadata
+                combinedMetadata.image_metadata = {
+                  format: image.format,
+                  mime_type: image.mime_type,
+                  size: image.size,
+                  position: image.position,
+                  source: 'raw_tx'
+                };
+                
+                // Add data URL for direct usage
+                combinedMetadata.image_data_url = image.data_url;
+                
+                // Store the raw image data as base64
+                combinedMetadata.raw_image_data = image.data.toString('base64');
+              }
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn(`Error extracting image data from transaction ${txId}: ${error}`);
       }
       
       // Sanitize metadata to prevent database errors

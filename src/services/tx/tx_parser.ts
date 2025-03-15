@@ -28,6 +28,7 @@ export interface ParsedTransaction {
   outputs: TransactionOutput[];
   timestamp?: string;
   blockHeight?: number;
+  rawTx?: string; // Raw transaction data in base64 format
 }
 
 /**
@@ -346,7 +347,8 @@ export class TxParser {
         txId,
         outputs,
         blockHeight: txData.block_height || txData.height,
-        timestamp: extract_timestamp(txData)
+        timestamp: extract_timestamp(txData),
+        rawTx: txData.transaction || undefined
       };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
