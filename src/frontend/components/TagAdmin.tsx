@@ -1,4 +1,4 @@
-import { API_URL } from "../../config";
+import { API_URL } from "../config";
 import React, { useState, useEffect } from 'react';
 import { useTags, Tag } from '../hooks/useTags';
 import { FiRefreshCw, FiTrash2, FiEdit, FiSave, FiX } from 'react-icons/fi';

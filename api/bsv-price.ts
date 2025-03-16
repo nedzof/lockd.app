@@ -1,0 +1,1 @@
+import { VercelRequest, VercelResponse } from "@vercel/node"; export default function handler(req: VercelRequest, res: VercelResponse) { res.status(200).json({ price: 42.50, currency: "USD", timestamp: new Date().toISOString() }); }

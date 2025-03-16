@@ -1,4 +1,4 @@
-import { API_URL } from "../../config";
+import { API_URL } from "../config";
 import React, { useState, useEffect } from 'react';
 import { FiBarChart2, FiLock } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';

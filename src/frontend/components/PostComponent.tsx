@@ -1,4 +1,4 @@
-import { API_URL } from "../../config";
+import { API_URL } from "../config";
 import * as React from 'react';
 import { AiOutlineBlock } from 'react-icons/ai';
 import { HODLTransaction } from '../types';

@@ -1,4 +1,4 @@
-import { API_URL } from "../../config";
+import { API_URL } from "../config";
 import React, { useState, useEffect, useCallback } from 'react';
 import { HODLTransaction, vote_option } from '../types';
 import { useWallet } from '../providers/WalletProvider';

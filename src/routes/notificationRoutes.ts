@@ -1,18 +1,31 @@
 import express from 'express';
-import { getVapidPublicKey, subscribe, unsubscribe, updateThreshold } from '../controllers/notificationController';
+import {
+  getNotifications,
+  markNotificationAsRead,
+  subscribeToPushNotifications,
+  unsubscribeFromPushNotifications,
+  getSubscriptionStatus,
+  sendTestNotification
+} from '../controllers/notificationController';
 
 const router = express.Router();
 
-// Get VAPID public key
-router.get('/vapid-public-key', getVapidPublicKey);
+// Get subscription status for a user
+router.get('/status/:user_id', getSubscriptionStatus);
+
+// Get notifications for a user
+router.get('/:user_id', getNotifications);
+
+// Mark a notification as read
+router.put('/:notification_id/read', markNotificationAsRead);
 
 // Subscribe to push notifications
-router.post('/subscribe', subscribe);
+router.post('/subscribe', subscribeToPushNotifications);
 
 // Unsubscribe from push notifications
-router.post('/unsubscribe', unsubscribe);
+router.post('/unsubscribe', unsubscribeFromPushNotifications);
 
-// Update notification threshold
-router.post('/update-threshold', updateThreshold);
+// Send a test notification
+router.post('/test', sendTestNotification);
 
 export default router; 

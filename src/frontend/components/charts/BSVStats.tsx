@@ -1,4 +1,4 @@
-import { API_URL } from "../../../config";
+import { API_URL } from "../../config";
 import React, { useEffect, useState } from 'react';
 import {
   Chart as ChartJS,

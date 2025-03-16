@@ -226,7 +226,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                   <div className="h-4 w-px bg-gray-800/30 mx-4" />
                   
                   {/* Threshold Settings */}
-                  <ThresholdSettings connected={connected} />
+                  <ThresholdSettings connected={connected} walletAddress={bsvAddress || undefined} />
                 </>
               )}
             </div>

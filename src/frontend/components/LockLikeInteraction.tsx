@@ -1,4 +1,4 @@
-import { API_URL } from "../../config";
+import { API_URL } from "../config";
 import * as React from 'react';
 import { SiBitcoinsv } from 'react-icons/si';
 import { FiX } from 'react-icons/fi';

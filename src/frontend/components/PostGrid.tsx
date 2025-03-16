@@ -7,7 +7,7 @@ import type { Post } from '../types';
 import { toast } from 'react-hot-toast';
 import VoteOptionLockInteraction from './VoteOptionLockInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
-import { API_URL } from '../../config';
+import { API_URL } from '../config';
 
 interface vote_option {
   id: string;

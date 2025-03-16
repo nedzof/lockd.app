@@ -1,7 +1,7 @@
 import { CronJob } from 'cron';
 import prisma from '../db';
 import { logger } from '../utils/logger';
-import { sendNotification } from '../controllers/notificationController';
+import { sendNotification, getPushSubscriptions } from '../controllers/notificationController';
 
 /**
  * Check for posts that have reached user-defined thresholds and send notifications
@@ -10,24 +10,29 @@ async function checkThresholds() {
   try {
     logger.info('Running threshold notification check');
     
-    // Get all active push subscriptions using Prisma
-    const subscriptions = await prisma.push_subscription.findMany({
-      distinct: ['user_id'],
-      select: {
-        user_id: true,
-        threshold_value: true
-      }
-    });
+    // Get all active push subscriptions from the in-memory storage
+    const subscriptions = getPushSubscriptions();
     
     if (!subscriptions || subscriptions.length === 0) {
       logger.info('No push subscriptions found');
       return;
     }
     
-    logger.info(`Found ${subscriptions.length} users with push subscriptions`);
+    // Get unique user subscriptions with their threshold values
+    const uniqueUserSubscriptions = subscriptions.reduce((acc: Array<{ user_id: string; threshold_value: number }>, sub: { user_id: string; threshold_value: number }) => {
+      if (!acc.some((item: { user_id: string }) => item.user_id === sub.user_id)) {
+        acc.push({
+          user_id: sub.user_id,
+          threshold_value: sub.threshold_value
+        });
+      }
+      return acc;
+    }, [] as Array<{ user_id: string; threshold_value: number }>);
+    
+    logger.info(`Found ${uniqueUserSubscriptions.length} users with push subscriptions`);
     
     // For each user with a subscription
-    for (const subscription of subscriptions) {
+    for (const subscription of uniqueUserSubscriptions) {
       const { user_id, threshold_value } = subscription;
       
       // Find posts that have reached the threshold since the last check
@@ -91,7 +96,7 @@ async function checkThresholds() {
     
     logger.info('Threshold notification check completed');
   } catch (error) {
-    logger.error('Error in threshold notification job:', error);
+    logger.error('Error in threshold notification job:', error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -112,7 +117,7 @@ export function initializeThresholdNotificationJob() {
     
     return job;
   } catch (error) {
-    logger.error('Error initializing threshold notification job:', error);
+    logger.error('Error initializing threshold notification job:', error instanceof Error ? error.message : String(error));
     return null;
   }
 } 

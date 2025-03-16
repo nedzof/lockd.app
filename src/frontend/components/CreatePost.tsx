@@ -1,4 +1,4 @@
-import { API_URL } from "../../config";
+import { API_URL } from "../config";
 import * as React from 'react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
