@@ -603,25 +603,95 @@ const PostGrid: React.FC<PostGridProps> = ({
                       const totalLocked = post.vote_options.reduce((sum, option) => sum + option.lock_amount, 0);
                       
                       return (
-                        <div className="space-y-2">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           {post.vote_options.map((option: vote_option) => {
                             const percentage = calculatePercentage(option.lock_amount, totalLocked);
+                            // Determine color based on percentage
+                            const getStatusColor = (pct: number) => {
+                              if (pct >= 60) return "from-emerald-500 to-emerald-400";
+                              if (pct >= 30) return "from-blue-500 to-cyan-400";
+                              return "from-gray-500 to-gray-400";
+                            };
+                            
+                            // Calculate days remaining for lock
+                            const daysRemaining = option.unlock_height 
+                              ? Math.max(0, Math.floor((option.unlock_height - (post.block_height || 0)) / 144)) 
+                              : Math.floor(option.lock_duration / 144);
+                            
+                            // Determine lock status
+                            const getLockStatus = () => {
+                              if (!option.unlock_height) return "active";
+                              if (daysRemaining <= 1) return "near-expiry";
+                              if (daysRemaining <= 0) return "completed";
+                              return "active";
+                            };
+                            
+                            const lockStatus = getLockStatus();
                             
                             return (
-                              <div key={option.id} className="bg-white/5 p-2 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
-                                <div className="grid grid-cols-12 gap-2 items-center">
-                                  {/* Option content - left side */}
-                                  <div className="col-span-7 md:col-span-8">
+                              <div key={option.id} className="bg-white/5 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-300 overflow-hidden">
+                                <div className="p-3 flex items-center space-x-3">
+                                  {/* Circular progress indicator */}
+                                  <div className="relative h-14 w-14 flex-shrink-0">
+                                    <svg className="w-full h-full" viewBox="0 0 36 36">
+                                      {/* Background circle */}
+                                      <circle 
+                                        cx="18" 
+                                        cy="18" 
+                                        r="16" 
+                                        fill="none" 
+                                        className="stroke-gray-700/30" 
+                                        strokeWidth="2"
+                                      />
+                                      {/* Progress circle */}
+                                      <circle 
+                                        cx="18" 
+                                        cy="18" 
+                                        r="16" 
+                                        fill="none" 
+                                        className={`stroke-current text-[#00ffa3]`}
+                                        strokeWidth="3"
+                                        strokeDasharray={`${percentage}, 100`}
+                                        strokeLinecap="round"
+                                        transform="rotate(-90 18 18)"
+                                      />
+                                      {/* Percentage text */}
+                                      <text 
+                                        x="18" 
+                                        y="18" 
+                                        dominantBaseline="middle" 
+                                        textAnchor="middle" 
+                                        className="fill-white font-bold text-xs"
+                                      >
+                                        {percentage}%
+                                      </text>
+                                    </svg>
+                                  </div>
+                                  
+                                  {/* Content area */}
+                                  <div className="flex-1 min-w-0">
                                     <p className="text-base font-semibold text-white truncate">{option.content}</p>
+                                    <div className="flex items-center text-xs text-gray-400 mt-1 space-x-2">
+                                      <span className="flex items-center">
+                                        <FiLock className="mr-1" size={12} />
+                                        {formatBSV(option.lock_amount)} BSV
+                                      </span>
+                                      <span className="flex items-center">
+                                        <FiClock className="mr-1" size={12} />
+                                        {daysRemaining} days
+                                      </span>
+                                      {/* Status indicator */}
+                                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] uppercase font-medium
+                                        ${lockStatus === 'active' ? 'bg-green-900/20 text-green-400' : 
+                                          lockStatus === 'near-expiry' ? 'bg-yellow-900/20 text-yellow-400' : 
+                                          'bg-gray-900/20 text-gray-400'}`}>
+                                        {lockStatus}
+                                      </span>
+                                    </div>
                                   </div>
                                   
-                                  {/* Percentage - middle */}
-                                  <div className="col-span-2 md:col-span-1 text-center">
-                                    <span className="text-sm font-bold text-[#00ffa3]">{percentage}%</span>
-                                  </div>
-                                  
-                                  {/* Lock button - right side */}
-                                  <div className="col-span-3">
+                                  {/* Lock button */}
+                                  <div className="flex-shrink-0">
                                     <VoteOptionLockInteraction 
                                       optionId={option.id} 
                                       onLock={handlevote_optionLock}
