@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import prisma from '../db/prisma';
+import prisma from '../db';
 
 const router = Router();
 
@@ -57,13 +57,12 @@ const handleLockLike = async (
     }
 
     // Create the lock like record using the post's id
-    const lockLike = await prisma.lockLike.create({
+    const lockLike = await prisma.lock_like.create({
       data: {
         tx_id: `${post.id}_${Date.now()}`, // Temporary tx_id until we get the real one
         post_id: post.id,
         author_address,
         amount,
-        lock_duration,
         created_at: new Date()
       }
     });
@@ -114,27 +113,14 @@ const handlevote_optionLock = async (
     }
 
     // Create the lock like record for the vote option
-    const lockLike = await prisma.lockLike.create({
+    const lockLike = await prisma.lock_like.create({
       data: {
         tx_id: `${vote_option.id}_${Date.now()}`, // Temporary tx_id until we get the real one
         post_id: vote_option.post.id, // Link to the parent post
         vote_option_id: vote_option.id, // Link to the specific vote option
         author_address,
         amount,
-        lock_duration,
         created_at: new Date()
-      }
-    });
-
-    // Update the vote option's total locked amount
-    await prisma.vote_option.update({
-      where: {
-        id: vote_option_id
-      },
-      data: {
-        lock_amount: {
-          increment: amount
-        }
       }
     });
 

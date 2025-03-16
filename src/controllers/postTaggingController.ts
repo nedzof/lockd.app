@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import prisma from '../db/prisma';
+import prisma from '../db';
 import { logger } from '../utils/logger';
 import { TagDatabaseService } from '../services/tagDatabaseService';
 

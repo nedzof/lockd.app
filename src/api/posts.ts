@@ -1,5 +1,5 @@
 import express, { Router, RequestHandler } from 'express';
-import prisma from '../db/prisma';
+import prisma from '../db';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { validateQueryParams } from '../utils/validation';
 import type { DirectPostBody } from '../types';
@@ -140,7 +140,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
       ...queryParams,
       include: {
         vote_options: true,
-        lockLikes: {
+        lock_likes: {
           orderBy: { created_at: 'desc' }
         }
       }

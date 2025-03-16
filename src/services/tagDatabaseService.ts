@@ -1,4 +1,4 @@
-import prisma from '../db/prisma';
+import prisma from '../db';
 import { logger } from '../utils/logger';
 import { LocalDeepseekService } from './localDeepseekService';
 
