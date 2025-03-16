@@ -40,6 +40,7 @@ interface ExtendedPost {
   imageUrl?: string;
   totalLocked?: number;
   media_url?: string;
+  base64Image?: string;
 }
 
 interface PostGridProps {
@@ -54,6 +55,17 @@ interface PostGridProps {
 
 // Use environment variable for API URL or default to localhost:3003
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
+
+// Add debounce utility
+function debounce(func: Function, wait: number) {
+  let timeout: NodeJS.Timeout | null = null;
+  return function(...args: any[]) {
+    if (timeout) clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      func(...args);
+    }, wait);
+  };
+}
 
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
@@ -81,6 +93,8 @@ const PostGrid: React.FC<PostGridProps> = ({
   const initialFetchMade = useRef<boolean>(false);
   // Add a ref to track if component is mounted
   const isMounted = useRef<boolean>(false);
+  // Add a ref to track if a fetch is in progress
+  const isFetchInProgress = useRef<boolean>(false);
   // Add a ref to store previous filter values for comparison
   const prevFilters = useRef({
     time_filter: '',
@@ -91,7 +105,7 @@ const PostGrid: React.FC<PostGridProps> = ({
     user_id: ''
   });
 
-  // Memoize the filter values for comparison
+  // Memoize current filters to avoid unnecessary re-renders
   const currentFilters = useMemo(() => ({
     time_filter,
     ranking_filter,
@@ -103,28 +117,50 @@ const PostGrid: React.FC<PostGridProps> = ({
 
   // Function to check if filters have changed
   const haveFiltersChanged = useCallback(() => {
-    const prev = prevFilters.current;
+    // Deep comparison for arrays
+    const areTagsEqual = () => {
+      if (prevFilters.current.selected_tags.length !== selected_tags.length) {
+        return false;
+      }
+      
+      const prevTagsSet = new Set(prevFilters.current.selected_tags);
+      return selected_tags.every(tag => prevTagsSet.has(tag));
+    };
+    
+    // Compare each filter value
     return (
-      prev.time_filter !== currentFilters.time_filter ||
-      prev.ranking_filter !== currentFilters.ranking_filter ||
-      prev.personal_filter !== currentFilters.personal_filter ||
-      prev.block_filter !== currentFilters.block_filter ||
-      prev.user_id !== currentFilters.user_id ||
-      JSON.stringify(prev.selected_tags) !== JSON.stringify(currentFilters.selected_tags)
+      prevFilters.current.time_filter !== time_filter ||
+      prevFilters.current.ranking_filter !== ranking_filter ||
+      prevFilters.current.personal_filter !== personal_filter ||
+      prevFilters.current.block_filter !== block_filter ||
+      prevFilters.current.user_id !== user_id ||
+      !areTagsEqual()
     );
-  }, [currentFilters]);
+  }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
 
   const fetchPosts = useCallback(async (reset = true) => {
     if (!isMounted.current) {
       return;
     }
 
-    if (reset) {
+    // Prevent concurrent fetches
+    if (isFetchInProgress.current) {
+      console.log('Fetch already in progress, skipping this request');
+      return;
+    }
+
+    isFetchInProgress.current = true;
+
+    // Don't set loading state immediately to prevent UI flicker
+    // Only set loading state if we don't have any posts yet
+    if (reset && submissions.length === 0) {
       setLoading(true);
-      setError(null);
+    }
+    
+    // Don't clear error state immediately
+    if (reset) {
       setNextCursor(null); // Reset cursor when fetching from the beginning
-      // Clear the set of seen post IDs when resetting
-      seenpost_ids.current = new Set();
+      // We'll clear the seen post IDs only after successful fetch
     } else {
       setIsFetchingMore(true);
     }
@@ -158,6 +194,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         queryParams.append('user_id', user_id);
       }
       
+      console.log(`Fetching posts with params: ${queryParams.toString()}`);
       const response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`);
       
       if (!response.ok) {
@@ -166,8 +203,9 @@ const PostGrid: React.FC<PostGridProps> = ({
       
       const data = await response.json();
       
-      if (!data.posts || !Array.isArray(data.posts)) {
-        throw new Error('Invalid API response format - posts array missing');
+      if (!data || !data.posts || !Array.isArray(data.posts)) {
+        console.error('Invalid API response format:', data);
+        throw new Error('Invalid API response format - posts array missing or malformed');
       }
       
       // Process posts to add image URLs and other derived data
@@ -175,13 +213,43 @@ const PostGrid: React.FC<PostGridProps> = ({
         // Process image data if available
         if (post.raw_image_data) {
           try {
-            // Create a blob URL for the image data
-            const blob = new Blob([Buffer.from(post.raw_image_data, 'base64')], { type: post.media_type || 'image/jpeg' });
-            post.imageUrl = URL.createObjectURL(blob);
+            // Check if we already have a blob URL for this image
+            if (imageUrlMap.current.has(post.id)) {
+              post.imageUrl = imageUrlMap.current.get(post.id);
+              console.log(`Using cached blob URL for post ${post.id}`);
+            } else {
+              // Create a direct data URL from the base64 string
+              console.log(`Processing image for post ${post.id} with media type ${post.media_type || 'image/jpeg'}`);
+              
+              if (typeof post.raw_image_data === 'string') {
+                // Create a data URL directly from the base64 string
+                post.imageUrl = `data:${post.media_type || 'image/jpeg'};base64,${post.raw_image_data}`;
+                console.log(`Created data URL for post ${post.id}`);
+                
+                // Store the URL in our map for future reference
+                imageUrlMap.current.set(post.id, post.imageUrl);
+              } else {
+                console.warn(`Unexpected raw_image_data type for post ${post.id}:`, typeof post.raw_image_data);
+                // Try to convert to string if it's not already a string
+                try {
+                  const base64String = typeof post.raw_image_data.toString === 'function' 
+                    ? post.raw_image_data.toString('base64')
+                    : String(post.raw_image_data);
+                  post.imageUrl = `data:${post.media_type || 'image/jpeg'};base64,${base64String}`;
+                  imageUrlMap.current.set(post.id, post.imageUrl);
+                } catch (error) {
+                  console.error(`Error creating data URL for post ${post.id}:`, error);
+                }
+              }
+            }
           } catch (error) {
+            console.error(`Error processing image for post ${post.id}:`, error);
           }
         } else if (post.media_url) {
           post.imageUrl = post.media_url;
+          console.log(`Using media_url for post ${post.id}: ${post.media_url}`);
+          // Store the URL in our map for future reference
+          imageUrlMap.current.set(post.id, post.media_url);
         }
         
         // For vote posts, fetch vote options if they're not already included
@@ -192,6 +260,12 @@ const PostGrid: React.FC<PostGridProps> = ({
         return post;
       });
       
+      // Now that we have successfully fetched new posts, we can clear the seen post IDs if resetting
+      if (reset) {
+        seenpost_ids.current = new Set();
+        setError(null); // Only clear error state after successful fetch
+      }
+      
       // Filter out duplicates using the seen post IDs
       const uniqueNewPosts = processedPosts.filter((post: any) => {
         if (seenpost_ids.current.has(post.id)) {
@@ -201,11 +275,18 @@ const PostGrid: React.FC<PostGridProps> = ({
         return true;
       });
       
-      // Update submissions state
-      if (reset) {
-        setSubmissions([...uniqueNewPosts]); // Create a new array to ensure state update
-      } else {
-        setSubmissions(prevSubmissions => [...prevSubmissions, ...uniqueNewPosts]);
+      console.log(`Received ${uniqueNewPosts.length} unique posts`);
+      
+      // Only update state if we have posts to show
+      if (uniqueNewPosts.length > 0 || reset) {
+        // Update submissions state
+        if (reset) {
+          // Clean up old blob URLs before replacing posts
+          cleanupBlobUrls(submissions);
+          setSubmissions([...uniqueNewPosts]); // Create a new array to ensure state update
+        } else {
+          setSubmissions(prevSubmissions => [...prevSubmissions, ...uniqueNewPosts]);
+        }
       }
       
       // Update pagination state
@@ -219,6 +300,7 @@ const PostGrid: React.FC<PostGridProps> = ({
     } catch (err) {
       // Add more detailed error logging
       if (err instanceof Error) {
+        console.error('Error fetching posts:', err.message);
       }
       
       // Check for network errors
@@ -227,6 +309,9 @@ const PostGrid: React.FC<PostGridProps> = ({
       } else {
         setError('Failed to fetch posts. Please try again later.');
       }
+
+      // Don't clear existing posts on error
+      // This ensures posts don't disappear when there's an error
     } finally {
       if (reset) {
         setLoading(false);
@@ -236,8 +321,17 @@ const PostGrid: React.FC<PostGridProps> = ({
       
       // Update previous filters after fetch completes
       prevFilters.current = { ...currentFilters };
+      
+      // Reset the fetch in progress flag
+      isFetchInProgress.current = false;
     }
-  }, [currentFilters, nextCursor, onStatsUpdate]);
+  }, [currentFilters, nextCursor, onStatsUpdate, submissions]);
+
+  // Create a debounced version of fetchPosts
+  const debouncedFetchPosts = useMemo(() => 
+    debounce((reset: boolean) => fetchPosts(reset), 300), 
+    [fetchPosts]
+  );
 
   const fetchvote_optionsForPost = useCallback(async (post: any) => {
     try {
@@ -260,13 +354,25 @@ const PostGrid: React.FC<PostGridProps> = ({
   }, []);
 
   const handleLoadMore = useCallback(() => {
-    if (!hasMore || isFetchingMore) {
+    if (!hasMore || isFetchingMore || isFetchInProgress.current) {
       return;
     }
     
     // Important: We're setting reset=false here to append to existing posts
     fetchPosts(false);
-  }, [hasMore, isFetchingMore, nextCursor, fetchPosts]);
+  }, [hasMore, isFetchingMore, fetchPosts]);
+
+  // Cleanup function for blob URLs
+  const cleanupBlobUrls = useCallback((posts: ExtendedPost[]) => {
+    posts.forEach(post => {
+      if (post.imageUrl?.startsWith('blob:')) {
+        console.log(`Revoking blob URL for post ${post.id}`);
+        URL.revokeObjectURL(post.imageUrl);
+        // Also remove from our map
+        imageUrlMap.current.delete(post.id);
+      }
+    });
+  }, []);
 
   // Effect to handle initial mount and filter changes
   useEffect(() => {
@@ -277,37 +383,34 @@ const PostGrid: React.FC<PostGridProps> = ({
     const isFirstMount = !initialFetchMade.current;
     const filtersChanged = haveFiltersChanged();
     
-    // Only fetch if it's the first mount or filters have changed
+    // Only fetch if it's the first mount or if filters have changed
     if (isFirstMount || filtersChanged) {
       initialFetchMade.current = true;
-      fetchPosts(true);
+      console.log('Filters changed, triggering debounced fetch');
+      console.log('Previous filters:', prevFilters.current);
+      console.log('Current filters:', currentFilters);
+      debouncedFetchPosts(true);
+    } else {
+      console.log('Filters did not change, skipping fetch');
     }
     
     // Cleanup function
     return () => {
       isMounted.current = false;
     };
-  }, [fetchPosts, haveFiltersChanged, currentFilters, fetchvote_optionsForPost]);
+  }, [debouncedFetchPosts, haveFiltersChanged, currentFilters]);
 
-  // Add a separate effect to force an initial fetch when the component mounts
-  useEffect(() => {
-    fetchPosts(true);
-    // This effect should only run once
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-  }, [nextCursor, hasMore, submissions.length, isFetchingMore]);
-
+  // Cleanup blob URLs when component unmounts
   useEffect(() => {
     return () => {
-      submissions.forEach(post => {
-        if (post.imageUrl?.startsWith('blob:')) {
-          URL.revokeObjectURL(post.imageUrl);
-        }
-      });
+      console.log('Component unmounting, cleaning up blob URLs');
+      cleanupBlobUrls(submissions);
     };
-  }, [submissions]);
+  }, [submissions, cleanupBlobUrls]);
+
+  // Empty effect to monitor state changes
+  useEffect(() => {
+  }, [nextCursor, hasMore, submissions.length, isFetchingMore]);
 
   const handlevote_optionLock = async (optionId: string, amount: number, duration: number) => {
     // Check if wallet is connected
@@ -410,11 +513,34 @@ const PostGrid: React.FC<PostGridProps> = ({
                       <div className="relative rounded-lg overflow-hidden bg-gray-900/30">
                         <img 
                           src={post.imageUrl} 
-                          alt="Post image" 
+                          alt={`Image for post ${post.id}`}
                           className="w-full h-auto object-contain max-h-[500px]"
                           onError={(e) => {
-                            e.currentTarget.style.display = 'none';
+                            console.error(`Error loading image for post ${post.id}`);
+                            // Try to reload the image once
+                            const currentSrc = e.currentTarget.src;
+                            if (!e.currentTarget.dataset.retried) {
+                              console.log(`Retrying image load for post ${post.id}`);
+                              e.currentTarget.dataset.retried = 'true';
+                              // Add a cache-busting parameter
+                              e.currentTarget.src = `${currentSrc}${currentSrc.includes('?') ? '&' : '?'}retry=${Date.now()}`;
+                            } else {
+                              console.log(`Failed to load image for post ${post.id} after retry`);
+                              e.currentTarget.style.display = 'none';
+                              
+                              // Show a fallback message
+                              const fallbackEl = document.createElement('div');
+                              fallbackEl.className = 'p-4 text-center text-gray-400';
+                              fallbackEl.textContent = 'Image could not be loaded';
+                              e.currentTarget.parentNode?.appendChild(fallbackEl);
+                            }
                           }}
+                          ref={(el) => {
+                            if (el) {
+                              imageRefs.current[post.id] = el;
+                            }
+                          }}
+                          loading="lazy"
                         />
                       </div>
                     </div>
