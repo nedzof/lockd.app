@@ -130,13 +130,15 @@ const listPosts: PostListHandler = async (req, res, next) => {
           hasSome: parsedTags
         }
       });
+      logger.debug('Added tag filter', { tags: parsedTags });
     }
     
     // Add exclude votes filter
     if (parsedExcludeVotes) {
       whereConditions.push({
-        isVote: false
+        is_vote: false
       });
+      logger.debug('Added exclude votes filter');
     }
     
     // Apply time filter
@@ -158,7 +160,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
         whereConditions.push({
           created_at: { gte: startDate }
         });
-        logger.debug(`Filtering posts created after ${startDate.toISOString()}`);
+        logger.debug(`Added time filter for posts created after ${startDate.toISOString()}`);
       }
     }
     
@@ -178,16 +180,52 @@ const listPosts: PostListHandler = async (req, res, next) => {
       }
       
       if (blockCount > 0) {
-        // For now, we'll use a simple approach since we don't have block height data
-        // In a real implementation, you would query the current block height and filter accordingly
-        const now = new Date();
-        const approximateBlockTime = 10 * 60 * 1000; // 10 minutes per block in milliseconds
-        const startDate = new Date(now.getTime() - blockCount * approximateBlockTime);
-        
-        whereConditions.push({
-          created_at: { gte: startDate }
-        });
-        logger.debug(`Filtering posts created after ${startDate.toISOString()} (approx. ${blockCount} blocks)`);
+        // Get the latest block height from the processed_transaction table
+        try {
+          const latestTransaction = await prisma.processed_transaction.findFirst({
+            orderBy: {
+              block_height: 'desc'
+            }
+          });
+          
+          if (latestTransaction && latestTransaction.block_height > 0) {
+            const minBlockHeight = latestTransaction.block_height - blockCount;
+            
+            whereConditions.push({
+              block_height: {
+                gte: minBlockHeight
+              }
+            });
+            
+            logger.debug(`Added block filter for posts with block_height >= ${minBlockHeight} (current: ${latestTransaction.block_height})`);
+          } else {
+            logger.warn('No transactions found with block_height, using time-based approximation');
+            
+            // Fallback to time-based approximation
+            const now = new Date();
+            const approximateBlockTime = 10 * 60 * 1000; // 10 minutes per block in milliseconds
+            const startDate = new Date(now.getTime() - blockCount * approximateBlockTime);
+            
+            whereConditions.push({
+              created_at: { gte: startDate }
+            });
+            
+            logger.debug(`Fallback: Added time-based filter for posts created after ${startDate.toISOString()} (approx. ${blockCount} blocks)`);
+          }
+        } catch (error) {
+          logger.error('Error getting latest block height', { error });
+          
+          // Fallback to time-based approximation
+          const now = new Date();
+          const approximateBlockTime = 10 * 60 * 1000; // 10 minutes per block in milliseconds
+          const startDate = new Date(now.getTime() - blockCount * approximateBlockTime);
+          
+          whereConditions.push({
+            created_at: { gte: startDate }
+          });
+          
+          logger.debug(`Error fallback: Added time-based filter for posts created after ${startDate.toISOString()} (approx. ${blockCount} blocks)`);
+        }
       }
     }
     
@@ -200,7 +238,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
         whereConditions.push({
           author_address: user_id as string
         });
-        logger.debug(`Filtering posts by author: ${user_id}`);
+        logger.debug(`Added author filter for user: ${user_id}`);
       } else if (personal_filter === 'locked') {
         // Show only posts that have lock_likes
         whereConditions.push({
@@ -208,7 +246,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
             some: {} // At least one lock_like
           }
         });
-        logger.debug('Filtering posts with lock_likes');
+        logger.debug('Added filter for posts with lock_likes');
       }
     } else if (user_id && user_id !== 'anon') {
       // If no personal filter but user_id is provided and not 'anon', filter by that user
@@ -228,13 +266,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
       logger.debug('Applying ranking filter', { ranking_filter });
       
       if (ranking_filter === 'top-1' || ranking_filter === 'top-3' || ranking_filter === 'top-10') {
-        // For top posts, order by lock_amount (total locked BSV) and then by created_at
-        let limit = 1;
-        if (ranking_filter === 'top-3') limit = 3;
-        if (ranking_filter === 'top-10') limit = 10;
-        
-        // We'll use a different approach for ranking
-        // First, we'll add a special orderBy clause
+        // For top posts, order by the number of lock_likes and then by created_at
         orderBy = [
           {
             lock_likes: {
@@ -245,7 +277,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
           { id: 'desc' }
         ];
         
-        logger.debug(`Ordering by popularity metrics with limit: ${limit}`);
+        logger.debug(`Set ordering by lock_likes count for ${ranking_filter}`);
       }
     }
     

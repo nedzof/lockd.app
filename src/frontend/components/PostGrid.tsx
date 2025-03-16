@@ -430,7 +430,14 @@ const PostGrid: React.FC<PostGridProps> = ({
       initialFetchMade.current = true;
       console.log('Filters changed, triggering debounced fetch');
       console.log('Previous filters:', prevFilters.current);
-      console.log('Current filters:', currentFilters);
+      console.log('Current filters:', {
+        time_filter,
+        ranking_filter,
+        personal_filter,
+        block_filter,
+        selected_tags,
+        user_id
+      });
       debouncedFetchPosts(true);
     } else {
       console.log('Filters did not change, skipping fetch');
@@ -440,7 +447,19 @@ const PostGrid: React.FC<PostGridProps> = ({
     return () => {
       isMounted.current = false;
     };
-  }, [debouncedFetchPosts, haveFiltersChanged, currentFilters]);
+  }, [debouncedFetchPosts, haveFiltersChanged, time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
+
+  // Add a debug effect to log when props change
+  useEffect(() => {
+    console.log('PostGrid props changed:', {
+      time_filter,
+      ranking_filter,
+      personal_filter,
+      block_filter,
+      selected_tags: selected_tags.length > 0 ? selected_tags : 'none',
+      user_id
+    });
+  }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
 
   // Cleanup blob URLs when component unmounts
   useEffect(() => {

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { FiTrendingUp, FiClock, FiHeart, FiStar } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
@@ -74,14 +74,32 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   }, []);
 
   const handleRefreshPosts = useCallback(() => {
-    // Implement post refresh logic here
-    console.log('Refreshing posts...');
+    // Reset all filters
+    settime_filter('');
+    setblock_filter('');
+    setranking_filter('top-1');
+    setpersonal_filter('');
+    setselected_tags([]);
+    
+    console.log('Refreshing posts with reset filters...');
   }, []);
 
   // Memoize the user_id to prevent unnecessary re-renders
   const memoizeduser_id = useMemo(() => {
     return connected && bsvAddress ? bsvAddress : 'anon';
   }, [connected, bsvAddress]);
+
+  // Debug current filter state
+  useEffect(() => {
+    console.log('Current filter state:', {
+      time_filter,
+      block_filter,
+      ranking_filter,
+      personal_filter,
+      selected_tags,
+      user_id: memoizeduser_id
+    });
+  }, [time_filter, block_filter, ranking_filter, personal_filter, selected_tags, memoizeduser_id]);
 
   const renderContent = () => {
     if (isStats) {
