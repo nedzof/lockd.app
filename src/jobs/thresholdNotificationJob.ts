@@ -1,7 +1,27 @@
 import { CronJob } from 'cron';
 import prisma from '../db';
 import { logger } from '../utils/logger';
-import { sendNotification, getPushSubscriptions } from '../controllers/notificationController';
+import { sendNotification } from '../controllers/notificationController';
+import { notificationSubscriptionService } from '../services/notificationSubscriptionService';
+import { PrismaClient } from '@prisma/client';
+
+// Define interface for notification subscription
+interface NotificationSubscription {
+  id: string;
+  wallet_address: string;
+  session_id?: string | null;
+  threshold_value: number;
+  notifications_enabled: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// Add type definitions for prisma client
+const prismaWithTypes = prisma as PrismaClient & {
+  notification_subscription: {
+    findMany: (args: any) => Promise<NotificationSubscription[]>;
+  }
+};
 
 /**
  * Check for posts that have reached user-defined thresholds and send notifications
@@ -10,85 +30,41 @@ async function checkThresholds() {
   try {
     logger.info('Running threshold notification check');
     
-    // Get all active push subscriptions from the in-memory storage
-    const subscriptions = getPushSubscriptions();
+    // Find all active subscriptions with their threshold values
+    const thresholds = await findUniqueThresholds();
     
-    if (!subscriptions || subscriptions.length === 0) {
-      logger.info('No push subscriptions found');
+    if (thresholds.length === 0) {
+      logger.info('No active notification subscriptions found');
       return;
     }
     
-    // Get unique user subscriptions with their threshold values
-    const uniqueUserSubscriptions = subscriptions.reduce((acc: Array<{ user_id: string; threshold_value: number }>, sub: { user_id: string; threshold_value: number }) => {
-      if (!acc.some((item: { user_id: string }) => item.user_id === sub.user_id)) {
-        acc.push({
-          user_id: sub.user_id,
-          threshold_value: sub.threshold_value
-        });
+    logger.info(`Found ${thresholds.length} unique threshold values to check`);
+    
+    // For each threshold value, find posts that have reached it
+    for (const threshold of thresholds) {
+      const subscriptions = await notificationSubscriptionService.findSubscriptionsByThreshold(threshold);
+      
+      if (subscriptions.length === 0) {
+        continue;
       }
-      return acc;
-    }, [] as Array<{ user_id: string; threshold_value: number }>);
-    
-    logger.info(`Found ${uniqueUserSubscriptions.length} users with push subscriptions`);
-    
-    // For each user with a subscription
-    for (const subscription of uniqueUserSubscriptions) {
-      const { user_id, threshold_value } = subscription;
+      
+      logger.info(`Checking posts that reached ${threshold} BSV threshold (${subscriptions.length} subscriptions)`);
       
       // Find posts that have reached the threshold since the last check
-      // Using Prisma's groupBy feature
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const recentPosts = await findPostsAboveThreshold(threshold);
       
-      // First get post IDs with lock amounts that meet the threshold
-      const postAggregations = await prisma.lock_like.groupBy({
-        by: ['post_id'],
-        where: {
-          created_at: {
-            gte: oneHourAgo
-          }
-        },
-        having: {
-          amount: {
-            _sum: {
-              gte: threshold_value
-            }
-          }
-        },
-        _sum: {
-          amount: true
-        }
-      });
-      
-      // Then get the actual post details for those IDs
-      if (postAggregations.length > 0) {
-        const postIds = postAggregations.map(agg => agg.post_id);
+      if (recentPosts.length > 0) {
+        logger.info(`Found ${recentPosts.length} posts that reached threshold ${threshold}`);
         
-        const recentPosts = await prisma.post.findMany({
-          where: {
-            id: {
-              in: postIds
-            }
-          },
-          select: {
-            id: true,
-            content: true
-          }
-        });
-        
-        if (recentPosts.length > 0) {
-          logger.info(`Found ${recentPosts.length} posts that reached threshold ${threshold_value} for user ${user_id}`);
+        // For each post, notify all subscribers for this threshold
+        for (const post of recentPosts) {
+          const title = 'Threshold Alert';
+          const body = `A post has reached ${post.total_locked} BSV: "${post.content.substring(0, 50)}${post.content.length > 50 ? '...' : ''}"`;
+          const url = `/posts/${post.id}`;
           
-          // Send notification for each post
-          for (const post of recentPosts) {
-            // Find the corresponding aggregation to get the total locked amount
-            const postAgg = postAggregations.find(agg => agg.post_id === post.id);
-            const totalLocked = postAgg?._sum.amount || 0;
-            
-            const title = 'Threshold Alert';
-            const body = `A post has reached ${totalLocked} BSV: "${post.content.substring(0, 50)}${post.content.length > 50 ? '...' : ''}"`;
-            const url = `/posts/${post.id}`;
-            
-            await sendNotification(user_id, title, body, url);
+          // Notify each subscriber for this threshold
+          for (const subscription of subscriptions) {
+            await sendNotification(subscription.wallet_address, title, body, url);
           }
         }
       }
@@ -98,6 +74,87 @@ async function checkThresholds() {
   } catch (error) {
     logger.error('Error in threshold notification job:', error instanceof Error ? error.message : String(error));
   }
+}
+
+/**
+ * Find unique threshold values from all active subscriptions
+ */
+async function findUniqueThresholds(): Promise<number[]> {
+  try {
+    // Get all active subscriptions
+    const allActiveSubscriptions = await prismaWithTypes.notification_subscription.findMany({
+      where: {
+        notifications_enabled: true
+      },
+      select: {
+        threshold_value: true
+      },
+      distinct: ['threshold_value']
+    });
+    
+    // Extract and return unique threshold values
+    return allActiveSubscriptions.map((sub: { threshold_value: number }) => sub.threshold_value);
+  } catch (error) {
+    logger.error('Error finding unique thresholds:', error);
+    return [];
+  }
+}
+
+/**
+ * Find posts that have reached a specific threshold in the last hour
+ */
+async function findPostsAboveThreshold(threshold: number) {
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  
+  // First get post IDs with lock amounts that meet the threshold
+  const postAggregations = await prisma.lock_like.groupBy({
+    by: ['post_id'],
+    where: {
+      created_at: {
+        gte: oneHourAgo
+      }
+    },
+    having: {
+      amount: {
+        _sum: {
+          gte: threshold
+        }
+      }
+    },
+    _sum: {
+      amount: true
+    }
+  });
+  
+  if (postAggregations.length === 0) {
+    return [];
+  }
+  
+  const postIds = postAggregations.map(agg => agg.post_id);
+  
+  // Then get the actual post details for those IDs
+  const posts = await prisma.post.findMany({
+    where: {
+      id: {
+        in: postIds
+      }
+    },
+    select: {
+      id: true,
+      content: true
+    }
+  });
+  
+  // Combine post data with lock amounts
+  return posts.map(post => {
+    const postAgg = postAggregations.find(agg => agg.post_id === post.id);
+    const total_locked = postAgg?._sum.amount || 0;
+    
+    return {
+      ...post,
+      total_locked
+    };
+  });
 }
 
 /**
