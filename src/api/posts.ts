@@ -93,16 +93,142 @@ interface vote_optionResponse {
 
 const listPosts: PostListHandler = async (req, res, next) => {
   try {
-    const { cursor, limit = '10', tags = [], excludeVotes = 'false' } = req.query;
+    const { 
+      cursor, 
+      limit = '10', 
+      tags = [], 
+      excludeVotes = 'false',
+      time_filter,
+      block_filter,
+      ranking_filter,
+      personal_filter,
+      user_id
+    } = req.query;
+    
     const parsedLimit = Math.min(parseInt(limit as string, 10), 50);
     const parsedExcludeVotes = excludeVotes === 'true';
+    const parsedTags = Array.isArray(tags) ? tags : tags ? [tags] : [];
     
     logger.debug('Fetching posts with params', {
-      cursor,
+      excludeVotes: parsedExcludeVotes,
       limit: parsedLimit,
-      tags,
-      excludeVotes: parsedExcludeVotes
+      tags: parsedTags,
+      time_filter,
+      block_filter,
+      ranking_filter,
+      personal_filter,
+      user_id
     });
+    
+    // Build the where clause for the query
+    const whereConditions: any[] = [];
+    
+    // Add tag filtering
+    if (parsedTags.length > 0) {
+      whereConditions.push({
+        tags: {
+          hasSome: parsedTags
+        }
+      });
+    }
+    
+    // Add exclude votes filter
+    if (parsedExcludeVotes) {
+      whereConditions.push({
+        isVote: false
+      });
+    }
+    
+    // Apply time filter
+    if (time_filter) {
+      logger.debug('Applying time filter', { time_filter });
+      const now = new Date();
+      let days = 0;
+      
+      if (time_filter === '1d') {
+        days = 1;
+      } else if (time_filter === '7d') {
+        days = 7;
+      } else if (time_filter === '30d') {
+        days = 30;
+      }
+      
+      if (days > 0) {
+        const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+        whereConditions.push({
+          created_at: { gte: startDate }
+        });
+      }
+    }
+    
+    // Apply block filter
+    if (block_filter) {
+      logger.debug('Applying block filter', { block_filter });
+      
+      // Determine the number of blocks to look back
+      let blockCount = 0;
+      
+      if (block_filter === 'last-block') {
+        blockCount = 1;
+      } else if (block_filter === 'last-5-blocks') {
+        blockCount = 5;
+      } else if (block_filter === 'last-10-blocks') {
+        blockCount = 10;
+      }
+      
+      if (blockCount > 0) {
+        // For now, we'll use a simple approach since we don't have block height data
+        // In a real implementation, you would query the current block height and filter accordingly
+        const now = new Date();
+        const approximateBlockTime = 10 * 60 * 1000; // 10 minutes per block in milliseconds
+        const startDate = new Date(now.getTime() - blockCount * approximateBlockTime);
+        
+        whereConditions.push({
+          created_at: { gte: startDate }
+        });
+      }
+    }
+    
+    // Apply personal filter
+    if (personal_filter && user_id) {
+      logger.debug('Applying personal filter', { personal_filter, user_id });
+      
+      if (personal_filter === 'mylocks') {
+        // Show only posts created by the current user
+        whereConditions.push({
+          author_address: user_id as string
+        });
+      } else if (personal_filter === 'locked') {
+        // Show only posts that have lock_likes
+        whereConditions.push({
+          lock_likes: {
+            some: {} // At least one lock_like
+          }
+        });
+      }
+    } else if (user_id) {
+      // If no personal filter but user_id is provided, we might want to filter by that user
+      // This depends on your application logic
+    }
+    
+    // Determine the order by clause based on ranking filter
+    let orderBy: any[] = [
+      { created_at: 'desc' },
+      { id: 'desc' }
+    ];
+    
+    if (ranking_filter) {
+      logger.debug('Applying ranking filter', { ranking_filter });
+      
+      if (ranking_filter === 'top-1' || ranking_filter === 'top-3' || ranking_filter === 'top-10') {
+        // For top posts, we might want to order by some popularity metric
+        // For now, we'll just use created_at as a placeholder
+        orderBy = [
+          { created_at: 'desc' },
+          { id: 'desc' }
+        ];
+      }
+    }
     
     // VALIDATION: Log the exact query we're about to execute
     const queryParams = {
@@ -114,21 +240,9 @@ const listPosts: PostListHandler = async (req, res, next) => {
         skip: 1 // Skip the cursor item
       } : {}),
       where: {
-        AND: [
-          ...(tags.length > 0 ? [{
-            tags: {
-              hasEvery: Array.isArray(tags) ? tags : [tags]
-            }
-          }] : []),
-          ...(parsedExcludeVotes ? [{
-            isVote: false
-          }] : [])
-        ]
+        AND: whereConditions
       },
-      orderBy: [
-        { created_at: 'desc' },
-        { id: 'desc' }
-      ]
+      orderBy
     };
     
     logger.debug('Executing Prisma query with params', {
