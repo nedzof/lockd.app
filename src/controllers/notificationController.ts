@@ -1,6 +1,29 @@
 import { Request, Response } from 'express';
 import { logger } from '../utils/logger';
 import webpush from 'web-push';
+import { notificationSubscriptionService } from '../services/notificationSubscriptionService';
+import { PrismaClient } from '@prisma/client';
+
+// Define interfaces for our notification models
+interface NotificationSubscription {
+  id: string;
+  wallet_address: string;
+  session_id?: string | null;
+  threshold_value: number;
+  notifications_enabled: boolean;
+  subscription_data: any;
+  endpoint?: string | null;
+  created_at: Date;
+  updated_at: Date;
+  last_notified_at?: Date | null;
+}
+
+// Initialize Prisma client with types
+const prisma = new PrismaClient() as PrismaClient & {
+  notification_subscription: {
+    findMany: (args: any) => Promise<NotificationSubscription[]>;
+  }
+};
 
 // Configure web-push with VAPID keys
 const vapidPublicKey = process.env.VITE_PUBLIC_VAPID_KEY || '';
@@ -18,7 +41,7 @@ if (vapidPublicKey && vapidPrivateKey && vapidSubject) {
   logger.warn('Web Push VAPID keys not configured. Push notifications will not work.');
 }
 
-// In-memory storage for notifications and subscriptions since they're not in the Prisma schema
+// In-memory storage for notifications since they're not in the Prisma schema yet
 interface Notification {
   id: string;
   user_id: string;
@@ -29,31 +52,13 @@ interface Notification {
   created_at: Date;
 }
 
-interface PushSubscription {
-  id: string;
-  user_id: string;
-  endpoint: string;
-  p256dh: string;
-  auth: string;
-  threshold_value: number;
-}
-
 // In-memory storage
 const notifications: Notification[] = [];
-const pushSubscriptions: PushSubscription[] = [];
 
 // Generate a simple UUID
 function generateId(): string {
   return Math.random().toString(36).substring(2, 15) + 
          Math.random().toString(36).substring(2, 15);
-}
-
-/**
- * Get all push subscriptions
- * @returns Array of push subscriptions
- */
-export function getPushSubscriptions(): PushSubscription[] {
-  return pushSubscriptions;
 }
 
 /**
@@ -72,14 +77,15 @@ export const getSubscriptionStatus = async (req: Request, res: Response) => {
       });
     }
     
-    // Check if user has any active subscriptions
-    const userSubscriptions = pushSubscriptions.filter(sub => sub.user_id === user_id);
+    // Get subscription status from database
+    const status = await notificationSubscriptionService.getSubscriptionStatus(user_id);
     
     return res.status(200).json({
       success: true,
-      subscribed: userSubscriptions.length > 0,
-      count: userSubscriptions.length,
-      threshold: userSubscriptions.length > 0 ? userSubscriptions[0].threshold_value : null
+      subscribed: status.isSubscribed,
+      count: status.subscriptionCount,
+      activeCount: status.activeSubscriptions,
+      threshold: status.threshold
     });
   } catch (error) {
     logger.error('Error getting subscription status:', error instanceof Error ? error.message : String(error));
@@ -148,15 +154,7 @@ export async function sendNotification(
       url
     });
     
-    // Get the user's push subscriptions
-    const subscriptions = pushSubscriptions.filter(sub => sub.user_id === user_id);
-    
-    if (!subscriptions || subscriptions.length === 0) {
-      logger.info(`No push subscriptions found for user ${user_id}`);
-      return false;
-    }
-    
-    // Store the notification in memory
+    // Store notification in memory
     const notification: Notification = {
       id: generateId(),
       user_id,
@@ -169,84 +167,77 @@ export async function sendNotification(
     
     notifications.push(notification);
     
-    logger.info(`Notification created with ID ${notification.id}`);
+    // Get active subscriptions for this user from database
+    const userStatus = await notificationSubscriptionService.getSubscriptionStatus(user_id);
     
-    // Send push notification to each subscription
-    if (vapidPublicKey && vapidPrivateKey && vapidSubject) {
-      const notificationsSent = [];
-      
-      for (const subscription of subscriptions) {
-        try {
-          const pushSubscription = {
-            endpoint: subscription.endpoint,
-            keys: {
-              p256dh: subscription.p256dh,
-              auth: subscription.auth
-            }
-          };
-          
-          const payload = JSON.stringify({
-            title,
-            body,
-            url
-          });
-          
-          // Set options for the notification
-          const options = {
-            TTL: 60 * 60, // 1 hour in seconds
-            vapidDetails: {
-              subject: vapidSubject,
-              publicKey: vapidPublicKey,
-              privateKey: vapidPrivateKey
-            },
-            headers: {}
-          };
-          
-          const result = await webpush.sendNotification(
-            pushSubscription, 
-            payload, 
-            options
-          );
-          
-          notificationsSent.push({
-            subscriptionId: subscription.id,
-            success: true,
-            statusCode: result.statusCode
-          });
-          
-          logger.info(`Push notification sent to subscription ${subscription.id}`, {
-            statusCode: result.statusCode
-          });
-        } catch (error) {
-          logger.error(`Failed to send push notification to subscription ${subscription.id}:`, 
-            error instanceof Error ? error.message : String(error));
-          
-          notificationsSent.push({
-            subscriptionId: subscription.id,
-            success: false,
-            error: error instanceof Error ? error.message : String(error)
-          });
-          
-          // If the subscription is no longer valid, remove it
-          if (error instanceof Error && 
-              (error.message.includes('410') || error.message.includes('404'))) {
-            const index = pushSubscriptions.findIndex(sub => sub.id === subscription.id);
-            if (index !== -1) {
-              pushSubscriptions.splice(index, 1);
-              logger.info(`Removed invalid subscription ${subscription.id}`);
-            }
-          }
-        }
-      }
-      
-      // Log summary
-      const successCount = notificationsSent.filter(n => n.success).length;
-      logger.info(`Push notification summary: ${successCount}/${notificationsSent.length} sent successfully`);
-      
-      return successCount > 0;
+    if (!userStatus.isSubscribed) {
+      logger.info(`User ${user_id} has no active subscriptions`);
+      return false;
     }
     
-    return false;
+    // Get all subscriptions for this user
+    const subscriptions = await prisma.notification_subscription.findMany({
+      where: {
+        wallet_address: user_id,
+        notifications_enabled: true
+      }
+    });
+    
+    if (subscriptions.length === 0) {
+      logger.info(`No active subscriptions found for user ${user_id}`);
+      return false;
+    }
+    
+    // Send notification to all active subscriptions
+    let sentCount = 0;
+    
+    for (const subscription of subscriptions) {
+      try {
+        // The subscription data stored in the database
+        const pushSubscription = subscription.subscription_data;
+        
+        if (!pushSubscription) {
+          logger.warn(`Invalid subscription data for user ${user_id}, subscription ${subscription.id}`);
+          continue;
+        }
+        
+        // Payload
+        const payload = JSON.stringify({
+          title,
+          body,
+          url,
+          timestamp: new Date().getTime(),
+          icon: '/favicon.ico'
+        });
+        
+        // Send push notification
+        await webpush.sendNotification(pushSubscription, payload);
+        
+        // Update last notified timestamp
+        await notificationSubscriptionService.updateLastNotified(subscription.id);
+        
+        sentCount++;
+      } catch (subscriptionError) {
+        logger.error(`Failed to send notification to specific subscription:`, {
+          user_id,
+          subscription_id: subscription.id,
+          error: subscriptionError instanceof Error ? subscriptionError.message : String(subscriptionError)
+        });
+        
+        // Check if the subscription is invalid (expired, unsubscribed, etc.)
+        if (
+          subscriptionError instanceof Error && 
+          (subscriptionError.message.includes('410') || subscriptionError.message.includes('404'))
+        ) {
+          // Subscription is expired or invalid, disable it
+          await notificationSubscriptionService.unsubscribe(user_id, subscription.endpoint);
+          logger.info(`Disabled invalid subscription for user ${user_id}`);
+        }
+      }
+    }
+    
+    logger.info(`Sent notification to ${sentCount}/${subscriptions.length} subscriptions for user ${user_id}`);
+    return sentCount > 0;
   } catch (error) {
     logger.error('Error sending notification:', error instanceof Error ? error.message : String(error));
     return false;
@@ -269,10 +260,10 @@ export const getNotifications = async (req: Request, res: Response) => {
       });
     }
     
-    // Get notifications for the user from memory
-    const userNotifications = notifications
-      .filter(notification => notification.user_id === user_id)
-      .sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
+    // Get notifications from in-memory storage
+    const userNotifications = notifications.filter(
+      notification => notification.user_id === user_id
+    ).sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
     
     return res.status(200).json({
       success: true,
@@ -304,8 +295,10 @@ export const markNotificationAsRead = async (req: Request, res: Response) => {
       });
     }
     
-    // Find the notification in memory
-    const notificationIndex = notifications.findIndex(n => n.id === notification_id);
+    // Find notification in in-memory storage
+    const notificationIndex = notifications.findIndex(
+      notification => notification.id === notification_id
+    );
     
     if (notificationIndex === -1) {
       return res.status(404).json({
@@ -314,7 +307,7 @@ export const markNotificationAsRead = async (req: Request, res: Response) => {
       });
     }
     
-    // Mark as read
+    // Mark notification as read
     notifications[notificationIndex].read = true;
     
     return res.status(200).json({
@@ -338,7 +331,7 @@ export const markNotificationAsRead = async (req: Request, res: Response) => {
  */
 export const subscribeToPushNotifications = async (req: Request, res: Response) => {
   try {
-    const { user_id, subscription, threshold_value } = req.body;
+    const { user_id, subscription, threshold_value, session_id } = req.body;
     
     if (!user_id || !subscription) {
       return res.status(400).json({
@@ -347,35 +340,21 @@ export const subscribeToPushNotifications = async (req: Request, res: Response) 
       });
     }
     
-    // Remove any existing subscriptions with the same endpoint
-    const existingIndex = pushSubscriptions.findIndex(
-      sub => sub.endpoint === subscription.endpoint
+    // Store subscription in the database
+    const result = await notificationSubscriptionService.subscribe(
+      user_id,
+      subscription,
+      threshold_value || 1.0,
+      session_id
     );
     
-    if (existingIndex !== -1) {
-      pushSubscriptions.splice(existingIndex, 1);
-      logger.info(`Removed existing subscription for endpoint ${subscription.endpoint}`);
-    }
-    
-    // Store the subscription in memory
-    const pushSubscription: PushSubscription = {
-      id: generateId(),
-      user_id,
-      endpoint: subscription.endpoint,
-      p256dh: subscription.keys.p256dh,
-      auth: subscription.keys.auth,
-      threshold_value: threshold_value || 1
-    };
-    
-    pushSubscriptions.push(pushSubscription);
-    
-    logger.info(`Subscription created with ID ${pushSubscription.id} for user ${user_id}`);
+    logger.info(`Subscription created for user ${user_id}`);
     
     return res.status(200).json({
       success: true,
       data: {
-        id: pushSubscription.id,
-        threshold: pushSubscription.threshold_value
+        id: result.id,
+        threshold: result.threshold_value
       }
     });
   } catch (error) {
@@ -404,36 +383,14 @@ export const unsubscribeFromPushNotifications = async (req: Request, res: Respon
       });
     }
     
-    // Remove the subscription from memory
-    const initialLength = pushSubscriptions.length;
+    // Unsubscribe in the database
+    await notificationSubscriptionService.unsubscribe(user_id, endpoint);
     
-    // If endpoint is provided, remove specific subscription
-    if (endpoint) {
-      const filteredSubscriptions = pushSubscriptions.filter(
-        sub => !(sub.user_id === user_id && sub.endpoint === endpoint)
-      );
-      
-      // Update the array
-      pushSubscriptions.length = 0;
-      pushSubscriptions.push(...filteredSubscriptions);
-    } 
-    // Otherwise remove all subscriptions for this user
-    else {
-      const filteredSubscriptions = pushSubscriptions.filter(
-        sub => sub.user_id !== user_id
-      );
-      
-      // Update the array
-      pushSubscriptions.length = 0;
-      pushSubscriptions.push(...filteredSubscriptions);
-    }
-    
-    const removed = initialLength - pushSubscriptions.length;
-    logger.info(`Removed ${removed} subscription(s) for user ${user_id}`);
+    logger.info(`Unsubscribed user ${user_id} from push notifications`);
     
     return res.status(200).json({
       success: true,
-      removed
+      message: 'Successfully unsubscribed from push notifications'
     });
   } catch (error) {
     logger.error('Error unsubscribing from push notifications:', error instanceof Error ? error.message : String(error));
