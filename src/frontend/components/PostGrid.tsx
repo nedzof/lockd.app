@@ -1,12 +1,13 @@
 import * as React from 'react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2, FiExternalLink } from 'react-icons/fi';
+import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2, FiExternalLink, FiClock } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
 import type { Post } from '../types';
 import { toast } from 'react-hot-toast';
-import vote_optionLockInteraction from './vote_optionLockInteraction';
+import VoteOptionLockInteraction from './VoteOptionLockInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
+import { API_URL } from '../config';
 
 interface vote_option {
   id: string;
@@ -40,6 +41,7 @@ interface ExtendedPost {
   imageUrl?: string;
   totalLocked?: number;
   media_url?: string;
+  base64Image?: string;
 }
 
 interface PostGridProps {
@@ -52,9 +54,41 @@ interface PostGridProps {
   user_id: string;
 }
 
-// Use environment variable for API URL or default to localhost:3003
-const API_URL = 'http://localhost:3003';
-console.log('VALIDATION: Using API URL:', API_URL);
+// Add debounce utility
+function debounce(func: Function, wait: number) {
+  let timeout: NodeJS.Timeout | null = null;
+  return function(...args: any[]) {
+    if (timeout) clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      func(...args);
+    }, wait);
+  };
+}
+
+// Helper function to format date in a simplified way
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+  
+  if (diffInSeconds < 60) {
+    return `${diffInSeconds}s`;
+  } else if (diffInSeconds < 3600) {
+    return `${Math.floor(diffInSeconds / 60)}m`;
+  } else if (diffInSeconds < 86400) {
+    return `${Math.floor(diffInSeconds / 3600)}h`;
+  } else if (diffInSeconds < 604800) {
+    return `${Math.floor(diffInSeconds / 86400)}d`;
+  } else {
+    return `${date.toLocaleDateString()}`;
+  }
+}
+
+// Helper function to calculate percentage of locked amount
+function calculatePercentage(amount: number, total: number): number {
+  if (!total) return 0;
+  return Math.round((amount / total) * 100);
+}
 
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
@@ -82,6 +116,8 @@ const PostGrid: React.FC<PostGridProps> = ({
   const initialFetchMade = useRef<boolean>(false);
   // Add a ref to track if component is mounted
   const isMounted = useRef<boolean>(false);
+  // Add a ref to track if a fetch is in progress
+  const isFetchInProgress = useRef<boolean>(false);
   // Add a ref to store previous filter values for comparison
   const prevFilters = useRef({
     time_filter: '',
@@ -92,7 +128,7 @@ const PostGrid: React.FC<PostGridProps> = ({
     user_id: ''
   });
 
-  // Memoize the filter values for comparison
+  // Memoize current filters to avoid unnecessary re-renders
   const currentFilters = useMemo(() => ({
     time_filter,
     ranking_filter,
@@ -104,33 +140,52 @@ const PostGrid: React.FC<PostGridProps> = ({
 
   // Function to check if filters have changed
   const haveFiltersChanged = useCallback(() => {
-    const prev = prevFilters.current;
+    // Deep comparison for arrays
+    const areTagsEqual = () => {
+      if (prevFilters.current.selected_tags.length !== selected_tags.length) {
+        return false;
+      }
+      
+      const prevTagsSet = new Set(prevFilters.current.selected_tags);
+      return selected_tags.every(tag => prevTagsSet.has(tag));
+    };
+    
+    // Compare each filter value
     return (
-      prev.time_filter !== currentFilters.time_filter ||
-      prev.ranking_filter !== currentFilters.ranking_filter ||
-      prev.personal_filter !== currentFilters.personal_filter ||
-      prev.block_filter !== currentFilters.block_filter ||
-      prev.user_id !== currentFilters.user_id ||
-      JSON.stringify(prev.selected_tags) !== JSON.stringify(currentFilters.selected_tags)
+      prevFilters.current.time_filter !== time_filter ||
+      prevFilters.current.ranking_filter !== ranking_filter ||
+      prevFilters.current.personal_filter !== personal_filter ||
+      prevFilters.current.block_filter !== block_filter ||
+      prevFilters.current.user_id !== user_id ||
+      !areTagsEqual()
     );
-  }, [currentFilters]);
+  }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
 
   const fetchPosts = useCallback(async (reset = true) => {
     if (!isMounted.current) {
-      console.log('VALIDATION: Component not mounted, skipping fetch');
       return;
     }
 
-    if (reset) {
+    // Prevent concurrent fetches
+    if (isFetchInProgress.current) {
+      console.log('Fetch already in progress, skipping this request');
+      return;
+    }
+
+    isFetchInProgress.current = true;
+
+    // Don't set loading state immediately to prevent UI flicker
+    // Only set loading state if we don't have any posts yet
+    if (reset && submissions.length === 0) {
       setLoading(true);
-      setError(null);
+    }
+    
+    // Don't clear error state immediately
+    if (reset) {
       setNextCursor(null); // Reset cursor when fetching from the beginning
-      // Clear the set of seen post IDs when resetting
-      seenpost_ids.current = new Set();
-      console.log('VALIDATION: Resetting cursor and fetching initial posts');
+      // We'll clear the seen post IDs only after successful fetch
     } else {
       setIsFetchingMore(true);
-      console.log('VALIDATION: Fetching more posts with cursor:', nextCursor);
     }
     
     try {
@@ -144,137 +199,214 @@ const PostGrid: React.FC<PostGridProps> = ({
       // Add limit
       queryParams.append('limit', '10');
       
-      // Add filters
-      if (time_filter) queryParams.append('time_filter', time_filter);
-      if (ranking_filter) queryParams.append('ranking_filter', ranking_filter);
-      if (personal_filter) queryParams.append('personal_filter', personal_filter);
-      if (block_filter) queryParams.append('block_filter', block_filter);
+      // Add filters - log each filter as it's added
+      if (time_filter) {
+        queryParams.append('time_filter', time_filter);
+        console.log(`Adding time_filter: ${time_filter}`);
+      }
+      
+      if (ranking_filter) {
+        queryParams.append('ranking_filter', ranking_filter);
+        console.log(`Adding ranking_filter: ${ranking_filter}`);
+      }
+      
+      if (personal_filter) {
+        queryParams.append('personal_filter', personal_filter);
+        console.log(`Adding personal_filter: ${personal_filter}`);
+      }
+      
+      if (block_filter) {
+        queryParams.append('block_filter', block_filter);
+        console.log(`Adding block_filter: ${block_filter}`);
+      }
       
       // Add tags if selected
       if (selected_tags.length > 0) {
         selected_tags.forEach(tag => {
           queryParams.append('tags', tag);
         });
+        console.log(`Adding tags: ${selected_tags.join(', ')}`);
       }
       
       // Add user_id if available
       if (user_id) {
         queryParams.append('user_id', user_id);
+        console.log(`Adding user_id: ${user_id}`);
       }
       
-      console.log('VALIDATION: Query parameters:', queryParams.toString());
+      console.log(`Fetching posts with params: ${queryParams.toString()}`);
       
-      const response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`);
-      console.log('VALIDATION: Response status:', response.status);
+      // Add timeout and retry logic for fetch
+      let retryCount = 0;
+      const maxRetries = 2;
+      let response;
       
-      if (!response.ok) {
-        console.error('VALIDATION: API Error:', response.status, response.statusText);
-        throw new Error(`HTTP error! status: ${response.status}`);
+      while (retryCount <= maxRetries) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+          
+          response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`, {
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            break; // Success, exit the retry loop
+          } else {
+            console.warn(`Attempt ${retryCount + 1}/${maxRetries + 1} failed with status: ${response.status}`);
+            retryCount++;
+            
+            if (retryCount <= maxRetries) {
+              // Wait before retrying (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount - 1)));
+            }
+          }
+        } catch (fetchError) {
+          console.error(`Fetch attempt ${retryCount + 1}/${maxRetries + 1} failed:`, fetchError);
+          retryCount++;
+          
+          if (retryCount <= maxRetries) {
+            // Wait before retrying (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount - 1)));
+          } else {
+            // All retries failed
+            setError('Failed to connect to the server. Please check your connection and try again.');
+            setLoading(false);
+            setIsFetchingMore(false);
+            isFetchInProgress.current = false;
+            throw fetchError;
+          }
+        }
       }
       
-      const data = await response.json();
-      console.log('VALIDATION: Raw API response:', JSON.stringify(data).substring(0, 200) + '...');
-      console.log('VALIDATION: Posts array type:', Array.isArray(data.posts) ? 'Array' : typeof data.posts);
-      console.log('VALIDATION: Posts array length:', data.posts ? data.posts.length : 'undefined');
-      
-      if (!data.posts || !Array.isArray(data.posts)) {
-        console.error('VALIDATION: Invalid posts data structure:', data);
-        throw new Error('Invalid API response format - posts array missing');
+      if (!response || !response.ok) {
+        const errorMessage = response ? `HTTP error! status: ${response.status}` : 'Failed to connect to the server';
+        setError(errorMessage);
+        setLoading(false);
+        setIsFetchingMore(false);
+        isFetchInProgress.current = false;
+        throw new Error(errorMessage);
       }
       
-      console.log('VALIDATION: API response full data:', data);
+      let data;
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        console.error('Error parsing response:', parseError);
+        setError('Invalid response from server');
+        setLoading(false);
+        setIsFetchingMore(false);
+        isFetchInProgress.current = false;
+        throw parseError;
+      }
       
-      console.log('VALIDATION: API response:', {
-        postsCount: data.posts.length,
-        nextCursor: data.nextCursor,
-        hasMore: data.hasMore,
-        post_ids: data.posts.map((post: any) => post.id)
-      });
-      
-      // Log the content of the first post for debugging
-      if (data.posts.length > 0) {
-        console.log('VALIDATION: First post content:', {
-          id: data.posts[0].id,
-          content: data.posts[0].content,
-          contentLength: data.posts[0].content ? data.posts[0].content.length : 0,
-          isVote: data.posts[0].is_vote,
-          hasvote_options: data.posts[0].vote_options && data.posts[0].vote_options.length > 0
-        });
+      if (!data || !data.posts || !Array.isArray(data.posts)) {
+        console.error('Invalid API response format:', data);
+        setError('Invalid response format from server');
+        setLoading(false);
+        setIsFetchingMore(false);
+        isFetchInProgress.current = false;
+        throw new Error('Invalid API response format - posts array missing or malformed');
       }
       
       // Process posts to add image URLs and other derived data
       const processedPosts = data.posts.map((post: any) => {
-        console.log('VALIDATION: Processing post:', post.id);
-        
         // Process image data if available
         if (post.raw_image_data) {
           try {
-            // Create a blob URL for the image data
-            const blob = new Blob([Buffer.from(post.raw_image_data, 'base64')], { type: post.media_type || 'image/jpeg' });
-            post.imageUrl = URL.createObjectURL(blob);
-            console.log('VALIDATION: Created image URL for post:', post.id);
+            // Check if we already have a blob URL for this image
+            if (imageUrlMap.current.has(post.id)) {
+              post.imageUrl = imageUrlMap.current.get(post.id);
+              console.log(`Using cached blob URL for post ${post.id}`);
+            } else {
+              // Create a direct data URL from the base64 string
+              console.log(`Processing image for post ${post.id} with media type ${post.media_type || 'image/jpeg'}`);
+              
+              if (typeof post.raw_image_data === 'string') {
+                // Create a data URL directly from the base64 string
+                post.imageUrl = `data:${post.media_type || 'image/jpeg'};base64,${post.raw_image_data}`;
+                console.log(`Created data URL for post ${post.id}`);
+                
+                // Store the URL in our map for future reference
+                imageUrlMap.current.set(post.id, post.imageUrl);
+              } else {
+                console.warn(`Unexpected raw_image_data type for post ${post.id}:`, typeof post.raw_image_data);
+                // Try to convert to string if it's not already a string
+                try {
+                  const base64String = typeof post.raw_image_data.toString === 'function' 
+                    ? post.raw_image_data.toString('base64')
+                    : String(post.raw_image_data);
+                  post.imageUrl = `data:${post.media_type || 'image/jpeg'};base64,${base64String}`;
+                  imageUrlMap.current.set(post.id, post.imageUrl);
+                } catch (error) {
+                  console.error(`Error creating data URL for post ${post.id}:`, error);
+                }
+              }
+            }
           } catch (error) {
-            console.error('VALIDATION: Error creating image URL for post:', post.id, error);
+            console.error(`Error processing image for post ${post.id}:`, error);
           }
         } else if (post.media_url) {
           post.imageUrl = post.media_url;
-          console.log('VALIDATION: Using media_url for post:', post.id);
+          console.log(`Using media_url for post ${post.id}: ${post.media_url}`);
+          // Store the URL in our map for future reference
+          imageUrlMap.current.set(post.id, post.media_url);
         }
+        
+        // Calculate total locked amount for the post
+        let totalLocked = 0;
+        
+        // Sum up lock_likes amounts if available
+        if (post.lock_likes && Array.isArray(post.lock_likes)) {
+          totalLocked += post.lock_likes.reduce((sum: number, lock: any) => sum + (lock.amount || 0), 0);
+        }
+        
+        // For vote posts, also include the lock amounts from vote options
+        if (post.is_vote && post.vote_options && Array.isArray(post.vote_options)) {
+          totalLocked += post.vote_options.reduce((sum: number, option: any) => sum + (option.lock_amount || 0), 0);
+        }
+        
+        // Assign the calculated total locked amount
+        post.totalLocked = totalLocked;
         
         // For vote posts, fetch vote options if they're not already included
         if (post.is_vote && (!post.vote_options || post.vote_options.length === 0)) {
-          console.log('VALIDATION: Post is a vote, fetching vote options:', post.id);
-          // We'll fetch vote options after setting state
           setTimeout(() => fetchvote_optionsForPost(post), 0);
         }
         
         return post;
       });
       
-      console.log('VALIDATION: Processed posts:', processedPosts.length);
-      if (processedPosts.length > 0) {
-        console.log('VALIDATION: First processed post:', {
-          id: processedPosts[0].id,
-          has_imageUrl: !!processedPosts[0].imageUrl,
-          content: processedPosts[0].content?.substring(0, 30)
-        });
+      // Now that we have successfully fetched new posts, we can clear the seen post IDs if resetting
+      if (reset) {
+        seenpost_ids.current = new Set();
+        setError(null); // Only clear error state after successful fetch
       }
       
       // Filter out duplicates using the seen post IDs
       const uniqueNewPosts = processedPosts.filter((post: any) => {
         if (seenpost_ids.current.has(post.id)) {
-          console.log('VALIDATION: Filtering out duplicate post:', post.id);
           return false;
         }
         seenpost_ids.current.add(post.id);
         return true;
       });
       
-      // Update submissions state
-      console.log('VALIDATION: Current submissions before update:', {
-        count: submissions.length,
-        ids: submissions.map(post => post.id)
-      });
+      console.log(`Received ${uniqueNewPosts.length} unique posts`);
       
-      if (reset) {
-        console.log('VALIDATION: Reset submissions with new posts - count:', uniqueNewPosts.length);
-        if (uniqueNewPosts.length > 0) {
-          console.log('VALIDATION: First post ID:', uniqueNewPosts[0].id);
-          console.log('VALIDATION: First post content:', uniqueNewPosts[0].content?.substring(0, 30));
+      // Only update state if we have posts to show
+      if (uniqueNewPosts.length > 0 || reset) {
+        // Update submissions state
+        if (reset) {
+          // Clean up old blob URLs before replacing posts
+          cleanupBlobUrls(submissions);
+          setSubmissions([...uniqueNewPosts]); // Create a new array to ensure state update
+        } else {
+          setSubmissions(prevSubmissions => [...prevSubmissions, ...uniqueNewPosts]);
         }
-        setSubmissions([...uniqueNewPosts]); // Create a new array to ensure state update
-      } else {
-        console.log('VALIDATION: Added new unique posts to submissions');
-        setSubmissions(prevSubmissions => [...prevSubmissions, ...uniqueNewPosts]);
       }
-      
-      // Debug check to ensure submissions state is updated correctly
-      setTimeout(() => {
-        console.log('VALIDATION: Submissions state after update:', {
-          count: submissions.length,
-          ids: submissions.map(post => post.id)
-        });
-      }, 100);
       
       // Update pagination state
       setHasMore(data.hasMore);
@@ -284,22 +416,10 @@ const PostGrid: React.FC<PostGridProps> = ({
       if (onStatsUpdate && data.stats) {
         onStatsUpdate(data.stats);
       }
-      
-      console.log('Updated submissions:', {
-        count: uniqueNewPosts.length,
-        hasMore: data.hasMore,
-        nextCursor: data.nextCursor
-      });
     } catch (err) {
-      console.error('Error fetching posts:', err);
-      
       // Add more detailed error logging
       if (err instanceof Error) {
-        console.error('Error details:', {
-          message: err.message,
-          name: err.name,
-          stack: err.stack
-        });
+        console.error('Error fetching posts:', err.message);
       }
       
       // Check for network errors
@@ -308,6 +428,9 @@ const PostGrid: React.FC<PostGridProps> = ({
       } else {
         setError('Failed to fetch posts. Please try again later.');
       }
+
+      // Don't clear existing posts on error
+      // This ensures posts don't disappear when there's an error
     } finally {
       if (reset) {
         setLoading(false);
@@ -317,12 +440,20 @@ const PostGrid: React.FC<PostGridProps> = ({
       
       // Update previous filters after fetch completes
       prevFilters.current = { ...currentFilters };
+      
+      // Reset the fetch in progress flag
+      isFetchInProgress.current = false;
     }
-  }, [currentFilters, nextCursor, onStatsUpdate]);
+  }, [currentFilters, nextCursor, onStatsUpdate, submissions]);
+
+  // Create a debounced version of fetchPosts
+  const debouncedFetchPosts = useMemo(() => 
+    debounce((reset: boolean) => fetchPosts(reset), 300), 
+    [fetchPosts]
+  );
 
   const fetchvote_optionsForPost = useCallback(async (post: any) => {
     try {
-      console.log(`Fetching vote options for post ${post.id} with tx_id ${post.tx_id}`);
       const response = await fetch(`${API_URL}/api/vote-options/${post.tx_id}`);
       
       if (!response.ok) {
@@ -330,7 +461,6 @@ const PostGrid: React.FC<PostGridProps> = ({
       }
       
       const vote_options = await response.json();
-      console.log(`Retrieved ${vote_options.length} vote options for post ${post.id}`, vote_options);
       
       // Update the post with the vote options
       setSubmissions(prevSubmissions => 
@@ -339,28 +469,29 @@ const PostGrid: React.FC<PostGridProps> = ({
         )
       );
     } catch (error) {
-      console.error(`Error fetching vote options for post ${post.id}:`, error);
     }
   }, []);
 
   const handleLoadMore = useCallback(() => {
-    console.log('Load more button clicked');
-    console.log('Current pagination state:', {
-      nextCursor,
-      hasMore,
-      isFetchingMore,
-      currentPostCount: submissions.length,
-      seenpost_ids: seenpost_ids.current.size
-    });
-    
-    if (!hasMore || isFetchingMore) {
-      console.log('Cannot load more: hasMore =', hasMore, 'isFetchingMore =', isFetchingMore);
+    if (!hasMore || isFetchingMore || isFetchInProgress.current) {
       return;
     }
     
     // Important: We're setting reset=false here to append to existing posts
     fetchPosts(false);
-  }, [hasMore, isFetchingMore, nextCursor, fetchPosts]);
+  }, [hasMore, isFetchingMore, fetchPosts]);
+
+  // Cleanup function for blob URLs
+  const cleanupBlobUrls = useCallback((posts: ExtendedPost[]) => {
+    posts.forEach(post => {
+      if (post.imageUrl?.startsWith('blob:')) {
+        console.log(`Revoking blob URL for post ${post.id}`);
+        URL.revokeObjectURL(post.imageUrl);
+        // Also remove from our map
+        imageUrlMap.current.delete(post.id);
+      }
+    });
+  }, []);
 
   // Effect to handle initial mount and filter changes
   useEffect(() => {
@@ -371,67 +502,65 @@ const PostGrid: React.FC<PostGridProps> = ({
     const isFirstMount = !initialFetchMade.current;
     const filtersChanged = haveFiltersChanged();
     
-    console.log('PostGrid effect triggered:', { 
-      isFirstMount, 
-      filtersChanged,
-      currentFilters
-    });
-    
-    // Only fetch if it's the first mount or filters have changed
+    // Only fetch if it's the first mount or if filters have changed
     if (isFirstMount || filtersChanged) {
-      console.log('Fetching posts due to mount or filter change');
       initialFetchMade.current = true;
-      fetchPosts(true);
+      console.log('Filters changed, triggering debounced fetch');
+      console.log('Previous filters:', prevFilters.current);
+      console.log('Current filters:', {
+        time_filter,
+        ranking_filter,
+        personal_filter,
+        block_filter,
+        selected_tags,
+        user_id
+      });
+      debouncedFetchPosts(true);
     } else {
-      console.log('Skipping fetch - no filter changes detected');
+      console.log('Filters did not change, skipping fetch');
     }
     
     // Cleanup function
     return () => {
-      console.log('PostGrid component unmounting');
       isMounted.current = false;
     };
-  }, [fetchPosts, haveFiltersChanged, currentFilters, fetchvote_optionsForPost]);
+  }, [debouncedFetchPosts, haveFiltersChanged, time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
 
-  // Add a separate effect to force an initial fetch when the component mounts
+  // Add a debug effect to log when props change
   useEffect(() => {
-    console.log('VALIDATION: Initial mount effect - forcing fetch');
-    fetchPosts(true);
-    // This effect should only run once
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    console.log('Pagination state updated:', {
-      nextCursor,
-      hasMore,
-      submissionsCount: submissions.length,
-      isFetchingMore
+    console.log('PostGrid props changed:', {
+      time_filter,
+      ranking_filter,
+      personal_filter,
+      block_filter,
+      selected_tags: selected_tags.length > 0 ? selected_tags : 'none',
+      user_id
     });
-  }, [nextCursor, hasMore, submissions.length, isFetchingMore]);
+  }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
 
+  // Cleanup blob URLs when component unmounts
   useEffect(() => {
     return () => {
-      submissions.forEach(post => {
-        if (post.imageUrl?.startsWith('blob:')) {
-          URL.revokeObjectURL(post.imageUrl);
-        }
-      });
+      console.log('Component unmounting, cleaning up blob URLs');
+      cleanupBlobUrls(submissions);
     };
-  }, [submissions]);
+  }, [submissions, cleanupBlobUrls]);
+
+  // Empty effect to monitor state changes
+  useEffect(() => {
+  }, [nextCursor, hasMore, submissions.length, isFetchingMore]);
 
   const handlevote_optionLock = async (optionId: string, amount: number, duration: number) => {
-    if (!wallet.connected) {
+    // Check if wallet is connected
+    if (!wallet) {
       toast.error('Please connect your wallet first');
       return;
     }
 
-    if (wallet.balance < amount) {
-      toast.error('Insufficient balance');
-      return;
-    }
-
     try {
+      // Check balance - simplified approach
+      toast.loading('Checking wallet balance...');
+      
       setIsLocking(true);
       const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
         method: 'POST',
@@ -442,7 +571,7 @@ const PostGrid: React.FC<PostGridProps> = ({
           vote_option_id: optionId,
           amount,
           lock_duration: duration,
-          author_address: wallet.address,
+          author_address: user_id, // Use the user_id from props which should be the wallet address
         }),
       });
 
@@ -453,7 +582,6 @@ const PostGrid: React.FC<PostGridProps> = ({
       toast.success('Successfully locked BSV on vote option');
       fetchPosts(); // Refresh posts to show updated lock amounts
     } catch (error) {
-      console.error('Error locking BSV on vote option:', error);
       toast.error('Failed to lock BSV on vote option');
     } finally {
       setIsLocking(false);
@@ -463,29 +591,6 @@ const PostGrid: React.FC<PostGridProps> = ({
   // Render the component
   return (
     <div className="w-full">
-      {/* Debug info */}
-      <div className="bg-gray-800 p-4 mb-4 rounded-lg text-sm">
-        <h3 className="font-bold">Debug info:</h3>
-        <p>Posts Count: {submissions.length}</p>
-        <p>Loading: {loading.toString()}</p>
-        <p>Error: {error || 'none'}</p>
-        <p>Has More: {hasMore.toString()}</p>
-        <p>Next Cursor: {nextCursor || 'none'}</p>
-        <p>Filters: {JSON.stringify(currentFilters)}</p>
-        <p>Selected Tags: {selected_tags.length > 0 ? selected_tags.join(', ') : 'none'}</p>
-        <p>First Post ID: {submissions.length > 0 ? submissions[0].id : 'none'}</p>
-        
-        {/* Post details */}
-        {submissions.length > 0 && (
-          <div className="mt-2 border-t border-gray-700 pt-2">
-            <p className="font-bold">First Post Details:</p>
-            <pre className="bg-gray-900 p-2 rounded mt-1 overflow-auto text-xs" style={{ maxHeight: '200px' }}>
-              {JSON.stringify(submissions[0], null, 2)}
-            </pre>
-          </div>
-        )}
-      </div>
-
       {/* Main post grid */}
       <div className="w-full">
         {/* Loading state */}
@@ -497,9 +602,26 @@ const PostGrid: React.FC<PostGridProps> = ({
 
         {/* Error state */}
         {error && (
-          <div className="bg-red-500 text-white p-4 rounded-lg mb-4">
-            <p className="font-bold">Error loading posts:</p>
-            <p>{error}</p>
+          <div className="bg-red-500/10 border border-red-500/30 text-white p-6 rounded-lg mb-4 flex flex-col items-center">
+            <div className="flex items-center mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <p className="font-bold text-lg">Connection Error</p>
+            </div>
+            <p className="text-center mb-4">{error}</p>
+            <button 
+              onClick={() => {
+                setError(null);
+                fetchPosts(true);
+              }}
+              className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-white rounded-lg transition-colors duration-200 flex items-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Retry
+            </button>
           </div>
         )}
 
@@ -513,93 +635,224 @@ const PostGrid: React.FC<PostGridProps> = ({
 
         {/* Posts grid */}
         {submissions.length > 0 && (
-          <div className="grid grid-cols-1 gap-6">
+          <div className="grid grid-cols-1 gap-4">
             {submissions.map((post) => (
               <div key={post.id} className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-xl border border-gray-800/10 shadow-lg hover:shadow-[#00ffa3]/5 transition-all duration-300">
-                <div className="flex items-center p-4 border-b border-gray-800/10">
-                  <div className="w-10 h-10 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-full flex items-center justify-center text-gray-900 font-bold">
-                    {post.author_address ? post.author_address.substring(0, 2).toUpperCase() : "?"}
+                {/* Post header */}
+                <div className="flex items-center justify-between p-3 border-b border-gray-800/10 bg-gradient-to-r from-gray-800/20 to-transparent">
+                  <div className="flex items-center">
+                    <div className="flex flex-col">
+                      <p className="text-gray-200 font-medium flex items-center">
+                        {post.author_address ? 
+                          <>
+                            <span className="bg-[#00ffa3]/10 text-[#00ffa3] px-2 py-0.5 rounded text-xs mr-1.5">
+                              {post.author_address.substring(0, 6)}...{post.author_address.substring(post.author_address.length - 4)}
+                            </span>
+                          </> : 
+                          <span className="text-gray-400">Anonymous</span>
+                        }
+                        <span className="flex items-center text-gray-400 text-xs ml-2">
+                          <FiClock className="mr-1" size={12} />
+                          {formatDate(post.created_at)}
+                        </span>
+                      </p>
+                    </div>
                   </div>
-                  <div className="ml-3">
-                    <p className="text-gray-200 font-medium">
-                      {post.author_address ? 
-                        `${post.author_address.substring(0, 6)}...${post.author_address.substring(post.author_address.length - 4)}` : 
-                        "Anonymous"}
-                    </p>
-                    <p className="text-gray-400 text-xs">
-                      {new Date(post.created_at).toLocaleString()}
-                    </p>
-                  </div>
+                  
+                  {/* WhatsonChain link */}
+                  <a 
+                    href={`https://whatsonchain.com/tx/${post.tx_id}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-gray-400 hover:text-[#00ffa3] transition-colors flex items-center text-xs"
+                    title="View on WhatsonChain"
+                  >
+                    <span className="mr-1 hidden sm:inline">Transaction</span>
+                    <FiExternalLink size={14} />
+                  </a>
                 </div>
 
                 <div className="p-4">
-                  {/* Post content */}
+                  {/* Post content - Moved before image for better visual hierarchy */}
                   {post.content && (
                     <div className="mb-4 whitespace-pre-wrap text-gray-100 leading-relaxed">
-                      {post.content}
+                      <p className="text-xl font-semibold mb-2 text-white">{post.content.split('\n')[0]}</p>
+                      {post.content.split('\n').slice(1).join('\n') && (
+                        <p className="text-gray-200">{post.content.split('\n').slice(1).join('\n')}</p>
+                      )}
                     </div>
                   )}
                   
-                  {/* Post image */}
+                  {/* Post image - Full width to align with right edge */}
                   {post.imageUrl && (
-                    <div className="mb-4">
-                      <div className="relative rounded-lg overflow-hidden bg-gray-900/30">
+                    <div className="mb-4 w-full">
+                      <div className="relative rounded-lg overflow-hidden bg-gradient-to-b from-gray-800/50 to-gray-900/70 p-1 shadow-inner">
                         <img 
                           src={post.imageUrl} 
-                          alt="Post image" 
-                          className="w-full h-auto object-contain max-h-[500px]"
+                          alt={`Image for post ${post.id}`}
+                          className="w-full h-auto object-contain max-h-[400px] rounded"
                           onError={(e) => {
-                            console.error('Image failed to load:', post.imageUrl);
-                            e.currentTarget.style.display = 'none';
+                            console.error(`Error loading image for post ${post.id}`);
+                            // Try to reload the image once
+                            const currentSrc = e.currentTarget.src;
+                            if (!e.currentTarget.dataset.retried) {
+                              console.log(`Retrying image load for post ${post.id}`);
+                              e.currentTarget.dataset.retried = 'true';
+                              // Add a cache-busting parameter
+                              e.currentTarget.src = `${currentSrc}${currentSrc.includes('?') ? '&' : '?'}retry=${Date.now()}`;
+                            } else {
+                              console.log(`Failed to load image for post ${post.id} after retry`);
+                              e.currentTarget.style.display = 'none';
+                              
+                              // Show a fallback message
+                              const fallbackEl = document.createElement('div');
+                              fallbackEl.className = 'p-4 text-center text-gray-400';
+                              fallbackEl.textContent = 'Image could not be loaded';
+                              e.currentTarget.parentNode?.appendChild(fallbackEl);
+                            }
                           }}
+                          ref={(el) => {
+                            if (el) {
+                              imageRefs.current[post.id] = el;
+                            }
+                          }}
+                          loading="lazy"
                         />
                       </div>
                     </div>
                   )}
-                  
-                  {/* Tags Section */}
-                  {post.tags && post.tags.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {post.tags.map(tag => (
-                        <span key={tag} className="bg-white/5 text-gray-300 text-xs px-2.5 py-1 rounded-md">
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 
-                {/* Vote Options Section */}
+                {/* Vote Options Section - Full width to align with right edge */}
                 {post.is_vote && post.vote_options && post.vote_options.length > 0 && (
-                  <div className="mt-2 p-4 pt-0">
-                    <h3 className="font-bold text-lg mb-3 text-gray-200 flex items-center">
-                      <FiBarChart2 className="mr-2" /> Vote Options
-                    </h3>
-                    <div className="space-y-3">
-                      {post.vote_options.map((option: vote_option) => (
-                        <div key={option.id} className="bg-white/5 p-4 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
-                          <p className="font-medium text-white">{option.content}</p>
-                          <div className="mt-2 flex items-center justify-between text-sm text-gray-400">
-                            <span className="flex items-center">
-                              <FiLock className="mr-1" /> {formatBSV(option.lock_amount)} BSV
-                            </span>
-                            <span className="flex items-center">
-                              <FiZap className="mr-1" /> {option.lock_duration} days
-                            </span>
-                          </div>
-                          <div className="mt-3">
-                            <vote_optionLockInteraction 
-                              optionId={option.id} 
-                              onLock={handlevote_optionLock}
-                              isLocking={isLocking}
-                              connected={wallet.connected}
-                            />
-                          </div>
+                  <div className="mt-2 p-4 pt-0 w-full">
+                    {/* Calculate total locked amount for percentages */}
+                    {(() => {
+                      const totalLocked = post.vote_options.reduce((sum, option) => sum + option.lock_amount, 0);
+                      
+                      return (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
+                          {post.vote_options.map((option: vote_option) => {
+                            const percentage = calculatePercentage(option.lock_amount, totalLocked);
+                            // Determine color based on percentage
+                            const getStatusColor = (pct: number) => {
+                              if (pct >= 60) return "from-emerald-500 to-emerald-400";
+                              if (pct >= 30) return "from-blue-500 to-cyan-400";
+                              return "from-gray-500 to-gray-400";
+                            };
+                            
+                            // Calculate days remaining for lock
+                            const daysRemaining = option.unlock_height 
+                              ? Math.max(0, Math.floor((option.unlock_height - (post.block_height || 0)) / 144)) 
+                              : Math.floor(option.lock_duration / 144);
+                            
+                            // Determine lock status
+                            const getLockStatus = () => {
+                              if (!option.unlock_height) return "active";
+                              if (daysRemaining <= 1) return "near-expiry";
+                              if (daysRemaining <= 0) return "completed";
+                              return "active";
+                            };
+                            
+                            const lockStatus = getLockStatus();
+                            
+                            return (
+                              <div key={option.id} className="bg-white/5 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-300 overflow-hidden shadow-lg">
+                                <div className="p-3">
+                                  {/* Simplified layout with only essential elements */}
+                                  <div className="flex items-center gap-3">
+                                    {/* Circular progress indicator */}
+                                    <div className="relative h-12 w-12 flex-shrink-0">
+                                      <svg className="w-full h-full" viewBox="0 0 36 36">
+                                        {/* Background circle */}
+                                        <circle 
+                                          cx="18" 
+                                          cy="18" 
+                                          r="16" 
+                                          fill="none" 
+                                          className="stroke-gray-700/30" 
+                                          strokeWidth="2"
+                                        />
+                                        {/* Progress circle */}
+                                        <circle 
+                                          cx="18" 
+                                          cy="18" 
+                                          r="16" 
+                                          fill="none" 
+                                          className={`stroke-current text-[#00ffa3]`}
+                                          strokeWidth="3"
+                                          strokeDasharray={`${percentage}, 100`}
+                                          strokeLinecap="round"
+                                          transform="rotate(-90 18 18)"
+                                        />
+                                        {/* Percentage text */}
+                                        <text 
+                                          x="18" 
+                                          y="18" 
+                                          dominantBaseline="middle" 
+                                          textAnchor="middle" 
+                                          className="fill-white font-bold text-xs"
+                                        >
+                                          {percentage}%
+                                        </text>
+                                      </svg>
+                                    </div>
+                                    
+                                    {/* Content area */}
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-base font-semibold text-white line-clamp-2 hover:line-clamp-none transition-all duration-300" title={option.content}>
+                                        {option.content}
+                                      </p>
+                                    </div>
+                                    
+                                    {/* Lock button */}
+                                    <div className="flex-shrink-0">
+                                      <VoteOptionLockInteraction 
+                                        optionId={option.id} 
+                                        onLock={handlevote_optionLock}
+                                        isLocking={isLocking}
+                                        connected={!!wallet}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })()}
                   </div>
                 )}
+                
+                {/* Post footer with BSV locked amount */}
+                <div className="p-3 border-t border-gray-800/10 flex justify-between items-center bg-gradient-to-r from-transparent to-gray-800/20">
+                  <div className="flex items-center space-x-2">
+                    {post.is_vote && (
+                      <span className="bg-purple-900/20 text-purple-400 text-xs px-2 py-0.5 rounded-full">
+                        Vote
+                      </span>
+                    )}
+                    {post.tags && post.tags.length > 0 && (
+                      <div className="flex items-center space-x-1">
+                        {post.tags.slice(0, 2).map(tag => (
+                          <span key={tag} className="bg-white/5 text-gray-300 text-xs px-1.5 py-0.5 rounded-full">
+                            #{tag}
+                          </span>
+                        ))}
+                        {post.tags.length > 2 && (
+                          <span className="text-gray-400 text-xs">+{post.tags.length - 2}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Display locked BSV amount for all posts */}
+                  <div className="text-[#00ffa3] font-medium flex items-center text-sm">
+                    <FiLock className="mr-1" size={14} />
+                    {formatBSV(post.totalLocked || 0)} BSV
+                  </div>
+                </div>
               </div>
             ))}
           </div>

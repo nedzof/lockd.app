@@ -1,9 +1,8 @@
 import * as React from 'react';
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { FiTrendingUp, FiClock, FiHeart, FiStar } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
-import TestApiComponent from '../components/TestApiComponent';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
 import TagFilter from '../components/TagFilter';
@@ -33,6 +32,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       settime_filter(filter);
       setblock_filter(''); // Clear block filter when time filter is set
     }
+    console.log(`Set time filter to: ${filter || 'none'}`);
   };
 
   const handleblock_filter = (filter: string) => {
@@ -44,6 +44,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       setblock_filter(filter);
       settime_filter(''); // Clear time filter when block filter is set
     }
+    console.log(`Set block filter to: ${filter || 'none'}`);
   };
 
   const handleranking_filter = (filter: string) => {
@@ -54,6 +55,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       // Otherwise, set the new filter
       setranking_filter(filter);
     }
+    console.log(`Set ranking filter to: ${filter || 'none'}`);
   };
 
   const handlepersonal_filter = (filter: string) => {
@@ -64,6 +66,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       // Otherwise, set the new filter
       setpersonal_filter(filter);
     }
+    console.log(`Set personal filter to: ${filter || 'none'}`);
   };
 
   const handleStatsUpdate = useCallback((stats: { totalLocked: number; participantCount: number; roundNumber: number }) => {
@@ -71,14 +74,32 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   }, []);
 
   const handleRefreshPosts = useCallback(() => {
-    // Implement post refresh logic here
-    console.log('Refreshing posts...');
+    // Reset all filters
+    settime_filter('');
+    setblock_filter('');
+    setranking_filter('top-1');
+    setpersonal_filter('');
+    setselected_tags([]);
+    
+    console.log('Refreshing posts with reset filters...');
   }, []);
 
   // Memoize the user_id to prevent unnecessary re-renders
   const memoizeduser_id = useMemo(() => {
     return connected && bsvAddress ? bsvAddress : 'anon';
   }, [connected, bsvAddress]);
+
+  // Debug current filter state
+  useEffect(() => {
+    console.log('Current filter state:', {
+      time_filter,
+      block_filter,
+      ranking_filter,
+      personal_filter,
+      selected_tags,
+      user_id: memoizeduser_id
+    });
+  }, [time_filter, block_filter, ranking_filter, personal_filter, selected_tags, memoizeduser_id]);
 
   const renderContent = () => {
     if (isStats) {
@@ -87,7 +108,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
     // Memoize the entire PostGrid component to prevent unnecessary re-renders
     const memoizedPostGrid = useMemo(() => {
-      console.log('Creating memoized PostGrid instance');
       return (
         <PostGrid 
           onStatsUpdate={handleStatsUpdate}
@@ -118,6 +138,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
+                    title={`Show posts from the last ${filter === '1d' ? 'day' : filter === '7d' ? '7 days' : '30 days'}`}
                   >
                     {filter.toUpperCase()}
                   </button>
@@ -142,6 +163,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
+                    title={`Show posts from ${label.toLowerCase()}`}
                   >
                     {label}
                   </button>
@@ -166,41 +188,46 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
+                    title={`Show ${label.toLowerCase()} posts by popularity`}
                   >
                     {label}
                   </button>
                 ))}
               </div>
 
-              {/* Divider */}
-              <div className="h-4 w-px bg-gray-800/30 mx-4" />
-
-              {/* Personal Filters */}
-              <div className="flex items-center space-x-1">
-                {[
-                  { id: 'mylocks', label: 'My Posts' },
-                  { id: 'locked', label: 'Locked Posts' }
-                ].map(({ id, label }) => (
-                  <button
-                    key={id}
-                    onClick={() => handlepersonal_filter(id)}
-                    className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                      personal_filter === id
-                        ? 'bg-white/10 text-white'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              
-              {/* Divider */}
-              <div className="h-4 w-px bg-gray-800/30 mx-4" />
-              
-              {/* Threshold Settings */}
+              {/* Only show Personal Filters and Threshold Settings when connected */}
               {connected && (
-                <ThresholdSettings connected={connected} />
+                <>
+                  {/* Divider */}
+                  <div className="h-4 w-px bg-gray-800/30 mx-4" />
+                  
+                  {/* Personal Filters */}
+                  <div className="flex items-center space-x-1">
+                    {[
+                      { id: 'mylocks', label: 'My Posts' },
+                      { id: 'locked', label: 'Locked Posts' }
+                    ].map(({ id, label }) => (
+                      <button
+                        key={id}
+                        onClick={() => handlepersonal_filter(id)}
+                        className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
+                          personal_filter === id
+                            ? 'bg-white/10 text-white'
+                            : 'text-gray-400 hover:text-white hover:bg-white/5'
+                        }`}
+                        title={id === 'mylocks' ? 'Show only your posts' : 'Show only posts with locked BSV'}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  {/* Divider */}
+                  <div className="h-4 w-px bg-gray-800/30 mx-4" />
+                  
+                  {/* Threshold Settings */}
+                  <ThresholdSettings connected={connected} walletAddress={bsvAddress || undefined} />
+                </>
               )}
             </div>
           </div>
@@ -208,8 +235,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           {/* Tag Filter */}
           <TagFilter
             selected_tags={selected_tags}
-            onTagsChange={setselected_tags}
-            user_id={bsvAddress || undefined}
+            onTagSelect={setselected_tags}
           />
         </div>
 
@@ -224,8 +250,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
             />
           </div>
         )}
-        
-        <TestApiComponent />
       </div>
     );
   };

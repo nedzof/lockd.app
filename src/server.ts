@@ -11,9 +11,11 @@ import vote_optionsRouter from './api/vote-options';
 import bsvPriceRouter from './api/bsv-price';
 import tagGenerationRouter from './routes/tagGenerationRoutes';
 import postTaggingRouter from './routes/postTaggingRoutes';
+import notificationRouter from './routes/notificationRoutes';
 import { logger } from './utils/logger';
 import { initializeTagGenerationJob } from './jobs/tagGenerationJob';
 import { initializeStatsUpdateJob } from './jobs/statsUpdateJob';
+import { initializeThresholdNotificationJob } from './jobs/thresholdNotificationJob';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -23,7 +25,7 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3003;
 
 // Configure CORS
 const corsOptions = {
-  origin: ['http://localhost:5173', 'http://localhost:3000'], 
+  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://lockd-app.vercel.app'], 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
@@ -71,6 +73,7 @@ app.use('/api/vote-options', vote_optionsRouter);
 app.use('/api/bsv-price', bsvPriceRouter);
 app.use('/api', tagGenerationRouter);
 app.use('/api', postTaggingRouter);
+app.use('/api/notifications', notificationRouter);
 
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -92,26 +95,38 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Start server
-app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
-  
-  // Initialize the tag generation job
-  initializeTagGenerationJob();
-  logger.info('Tag generation job initialized');
-  
-  // Initialize the stats update job
-  initializeStatsUpdateJob();
-  logger.info('Stats update job initialized');
-});
+// Only start the server in development mode, not in Vercel's serverless environment
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    logger.info(`Server running on port ${PORT}`);
+    
+    // Initialize the tag generation job
+    initializeTagGenerationJob();
+    logger.info('Tag generation job initialized');
+    
+    // Initialize the stats update job
+    initializeStatsUpdateJob();
+    logger.info('Stats update job initialized');
+    
+    // Initialize the threshold notification job
+    initializeThresholdNotificationJob();
+  });
 
-// Handle graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
-  process.exit(0);
-});
+  // Handle graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received. Shutting down gracefully...');
+    process.exit(0);
+  });
 
-process.on('SIGINT', () => {
-  console.log('SIGINT received. Shutting down gracefully...');
-  process.exit(0);
-});
+  process.on('SIGINT', () => {
+    console.log('SIGINT received. Shutting down gracefully...');
+    process.exit(0);
+  });
+} else {
+  // In production (Vercel), initialize jobs if needed
+  // Note: Long-running jobs may not work well in serverless environments
+  logger.info('Running in production mode (serverless)');
+}
+
+// Export the Express app for Vercel
+export default app;

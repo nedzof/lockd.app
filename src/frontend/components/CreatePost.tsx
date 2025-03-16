@@ -1,3 +1,4 @@
+import { API_URL } from "../config";
 import * as React from 'react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
@@ -7,7 +8,6 @@ import { FiX, FiPlus, FiCheck, FiRefreshCw, FiImage, FiFile, FiPlusCircle, FiTra
 import { createPost } from '../services/post.service';
 import { isWalletConnected, ensureWalletConnection, getWalletStatus } from '../utils/walletConnectionHelpers';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 interface CreatePostProps {
   onPostCreated?: () => void;

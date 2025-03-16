@@ -1,3 +1,4 @@
+import { API_URL } from "../../config";
 import React, { useEffect, useState } from 'react';
 import {
   Chart as ChartJS,
@@ -29,7 +30,6 @@ ChartJS.register(
   BarElement
 );
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 interface StatsData {
   totalLocked: number;

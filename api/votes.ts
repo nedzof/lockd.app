@@ -1,0 +1,1 @@
+import { VercelRequest, VercelResponse } from "@vercel/node"; export default function handler(req: VercelRequest, res: VercelResponse) { res.status(200).json({ votes: [ { id: 1, post_id: "m7qe2xt3-d13553", option_id: 1, amount: 0.001 }, { id: 2, post_id: "bbad770a-68fc-4135-9a78-85611dce9413", option_id: 2, amount: 0.002 } ] }); }

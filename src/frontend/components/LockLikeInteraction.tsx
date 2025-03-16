@@ -1,3 +1,4 @@
+import { API_URL } from "../config";
 import * as React from 'react';
 import { SiBitcoinsv } from 'react-icons/si';
 import { FiX } from 'react-icons/fi';
@@ -8,7 +9,6 @@ import { toast } from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
 import { createPortal } from 'react-dom';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 interface LockLikeInteractionProps {
   posttx_id?: string;

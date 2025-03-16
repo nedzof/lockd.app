@@ -1,0 +1,1 @@
+import { VercelRequest, VercelResponse } from "@vercel/node"; export default function handler(req: VercelRequest, res: VercelResponse) { res.status(200).json({ stats: { total_posts: 100, total_users: 50, total_locked: 1.234 } }); }

@@ -1,3 +1,4 @@
+import { API_URL } from "../config";
 import * as React from 'react';
 import { AiOutlineBlock } from 'react-icons/ai';
 import { HODLTransaction } from '../types';
@@ -9,7 +10,6 @@ interface PostProps {
   posttx_id?: string;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 const timeSincePost = (transaction: HODLTransaction) => {
   const now = new Date();

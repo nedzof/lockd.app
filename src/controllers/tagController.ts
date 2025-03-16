@@ -52,7 +52,7 @@ export const getAllTags = async (req: Request, res: Response) => {
     const tags = await prisma.tag.findMany({
       orderBy: [
         { type: 'asc' },
-        { usageCount: 'desc' }
+        { usage_count: 'desc' }
       ],
       take: 100
     });
@@ -127,7 +127,7 @@ export const incrementTagUsage = async (req: Request, res: Response) => {
       await prisma.tag.update({
         where: { id: tag.id },
         data: { 
-          usageCount: { increment: 1 },
+          usage_count: { increment: 1 },
           updated_at: new Date()
         }
       });
@@ -140,7 +140,7 @@ export const incrementTagUsage = async (req: Request, res: Response) => {
         data: {
           name,
           type: 'user_created',
-          usageCount: 1
+          usage_count: 1
         }
       });
       
