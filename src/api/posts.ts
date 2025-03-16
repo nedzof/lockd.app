@@ -158,6 +158,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
         whereConditions.push({
           created_at: { gte: startDate }
         });
+        logger.debug(`Filtering posts created after ${startDate.toISOString()}`);
       }
     }
     
@@ -186,6 +187,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
         whereConditions.push({
           created_at: { gte: startDate }
         });
+        logger.debug(`Filtering posts created after ${startDate.toISOString()} (approx. ${blockCount} blocks)`);
       }
     }
     
@@ -198,6 +200,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
         whereConditions.push({
           author_address: user_id as string
         });
+        logger.debug(`Filtering posts by author: ${user_id}`);
       } else if (personal_filter === 'locked') {
         // Show only posts that have lock_likes
         whereConditions.push({
@@ -205,10 +208,14 @@ const listPosts: PostListHandler = async (req, res, next) => {
             some: {} // At least one lock_like
           }
         });
+        logger.debug('Filtering posts with lock_likes');
       }
-    } else if (user_id) {
-      // If no personal filter but user_id is provided, we might want to filter by that user
-      // This depends on your application logic
+    } else if (user_id && user_id !== 'anon') {
+      // If no personal filter but user_id is provided and not 'anon', filter by that user
+      whereConditions.push({
+        author_address: user_id as string
+      });
+      logger.debug(`Filtering posts by author: ${user_id}`);
     }
     
     // Determine the order by clause based on ranking filter
@@ -221,12 +228,24 @@ const listPosts: PostListHandler = async (req, res, next) => {
       logger.debug('Applying ranking filter', { ranking_filter });
       
       if (ranking_filter === 'top-1' || ranking_filter === 'top-3' || ranking_filter === 'top-10') {
-        // For top posts, we might want to order by some popularity metric
-        // For now, we'll just use created_at as a placeholder
+        // For top posts, order by lock_amount (total locked BSV) and then by created_at
+        let limit = 1;
+        if (ranking_filter === 'top-3') limit = 3;
+        if (ranking_filter === 'top-10') limit = 10;
+        
+        // We'll use a different approach for ranking
+        // First, we'll add a special orderBy clause
         orderBy = [
+          {
+            lock_likes: {
+              _count: 'desc'
+            }
+          },
           { created_at: 'desc' },
           { id: 'desc' }
         ];
+        
+        logger.debug(`Ordering by popularity metrics with limit: ${limit}`);
       }
     }
     

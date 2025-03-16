@@ -201,22 +201,39 @@ const PostGrid: React.FC<PostGridProps> = ({
       // Add limit
       queryParams.append('limit', '10');
       
-      // Add filters
-      if (time_filter) queryParams.append('time_filter', time_filter);
-      if (ranking_filter) queryParams.append('ranking_filter', ranking_filter);
-      if (personal_filter) queryParams.append('personal_filter', personal_filter);
-      if (block_filter) queryParams.append('block_filter', block_filter);
+      // Add filters - log each filter as it's added
+      if (time_filter) {
+        queryParams.append('time_filter', time_filter);
+        console.log(`Adding time_filter: ${time_filter}`);
+      }
+      
+      if (ranking_filter) {
+        queryParams.append('ranking_filter', ranking_filter);
+        console.log(`Adding ranking_filter: ${ranking_filter}`);
+      }
+      
+      if (personal_filter) {
+        queryParams.append('personal_filter', personal_filter);
+        console.log(`Adding personal_filter: ${personal_filter}`);
+      }
+      
+      if (block_filter) {
+        queryParams.append('block_filter', block_filter);
+        console.log(`Adding block_filter: ${block_filter}`);
+      }
       
       // Add tags if selected
       if (selected_tags.length > 0) {
         selected_tags.forEach(tag => {
           queryParams.append('tags', tag);
         });
+        console.log(`Adding tags: ${selected_tags.join(', ')}`);
       }
       
       // Add user_id if available
       if (user_id) {
         queryParams.append('user_id', user_id);
+        console.log(`Adding user_id: ${user_id}`);
       }
       
       console.log(`Fetching posts with params: ${queryParams.toString()}`);

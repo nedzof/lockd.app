@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useMemo, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { FiTrendingUp, FiClock, FiHeart, FiStar, FiCalendar, FiBox } from 'react-icons/fi';
+import { FiTrendingUp, FiClock, FiHeart, FiStar } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
@@ -22,20 +22,17 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const [personal_filter, setpersonal_filter] = useState('');
   const [block_filter, setblock_filter] = useState('');
   const [selected_tags, setselected_tags] = useState<string[]>([]);
-  const [filter_mode, set_filter_mode] = useState<'days' | 'blocks'>('days');
 
   const handletime_filter = (filter: string) => {
     // If the same filter is clicked again, clear it
     if (time_filter === filter) {
       settime_filter('');
     } else {
-      // Set the new filter
+      // Otherwise, set the new filter and clear other filter types
       settime_filter(filter);
-      // Set filter mode to days
-      set_filter_mode('days');
-      // Clear block filter when time filter is set
-      setblock_filter('');
+      setblock_filter(''); // Clear block filter when time filter is set
     }
+    console.log(`Set time filter to: ${filter || 'none'}`);
   };
 
   const handleblock_filter = (filter: string) => {
@@ -43,13 +40,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     if (block_filter === filter) {
       setblock_filter('');
     } else {
-      // Set the new filter
+      // Otherwise, set the new filter and clear other filter types
       setblock_filter(filter);
-      // Set filter mode to blocks
-      set_filter_mode('blocks');
-      // Clear time filter when block filter is set
-      settime_filter('');
+      settime_filter(''); // Clear time filter when block filter is set
     }
+    console.log(`Set block filter to: ${filter || 'none'}`);
   };
 
   const handleranking_filter = (filter: string) => {
@@ -60,15 +55,18 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       // Otherwise, set the new filter
       setranking_filter(filter);
     }
+    console.log(`Set ranking filter to: ${filter || 'none'}`);
   };
 
   const handlepersonal_filter = (filter: string) => {
-    // Toggle the personal filter independently
+    // If the same filter is clicked again, clear it
     if (personal_filter === filter) {
       setpersonal_filter('');
     } else {
+      // Otherwise, set the new filter
       setpersonal_filter(filter);
     }
+    console.log(`Set personal filter to: ${filter || 'none'}`);
   };
 
   const handleStatsUpdate = useCallback((stats: { totalLocked: number; participantCount: number; roundNumber: number }) => {
@@ -111,76 +109,48 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
         <div className="mb-8 space-y-4">
           <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg">
             <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800/10">
-              {/* Filter Mode Toggle */}
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => set_filter_mode('days')}
-                  className={`flex items-center px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                    filter_mode === 'days'
-                      ? 'bg-[#00ffa3]/20 text-[#00ffa3]'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  <FiCalendar className="mr-1" />
-                  Days
-                </button>
-                <button
-                  onClick={() => set_filter_mode('blocks')}
-                  className={`flex items-center px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                    filter_mode === 'blocks'
-                      ? 'bg-[#00ffa3]/20 text-[#00ffa3]'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  <FiBox className="mr-1" />
-                  Blocks
-                </button>
+              {/* Time Filters */}
+              <div className="flex items-center space-x-1">
+                {['1d', '7d', '30d'].map((filter) => (
+                  <button
+                    key={filter}
+                    onClick={() => handletime_filter(filter)}
+                    className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
+                      time_filter === filter
+                        ? 'bg-white/10 text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    }`}
+                    title={`Show posts from the last ${filter === '1d' ? 'day' : filter === '7d' ? '7 days' : '30 days'}`}
+                  >
+                    {filter.toUpperCase()}
+                  </button>
+                ))}
               </div>
 
               {/* Divider */}
               <div className="h-4 w-px bg-gray-800/30 mx-4" />
 
-              {/* Time Filters - Show only when days mode is selected */}
-              {filter_mode === 'days' && (
-                <div className="flex items-center space-x-1">
-                  {['1d', '7d', '30d'].map((filter) => (
-                    <button
-                      key={filter}
-                      onClick={() => handletime_filter(filter)}
-                      className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                        time_filter === filter
-                          ? 'bg-white/10 text-white'
-                          : 'text-gray-400 hover:text-white hover:bg-white/5'
-                      }`}
-                    >
-                      {filter.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Block Filters - Show only when blocks mode is selected */}
-              {filter_mode === 'blocks' && (
-                <div className="flex items-center space-x-1">
-                  {[
-                    { id: 'last-block', label: 'Last Block' },
-                    { id: 'last-5-blocks', label: 'Last 5 Blocks' },
-                    { id: 'last-10-blocks', label: 'Last 10 Blocks' }
-                  ].map(({ id, label }) => (
-                    <button
-                      key={id}
-                      onClick={() => handleblock_filter(id)}
-                      className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                        block_filter === id
-                          ? 'bg-white/10 text-white'
-                          : 'text-gray-400 hover:text-white hover:bg-white/5'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {/* Block Filters */}
+              <div className="flex items-center space-x-1">
+                {[
+                  { id: 'last-block', label: 'Last Block' },
+                  { id: 'last-5-blocks', label: 'Last 5 Blocks' },
+                  { id: 'last-10-blocks', label: 'Last 10 Blocks' }
+                ].map(({ id, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => handleblock_filter(id)}
+                    className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
+                      block_filter === id
+                        ? 'bg-white/10 text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    }`}
+                    title={`Show posts from ${label.toLowerCase()}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
 
               {/* Divider */}
               <div className="h-4 w-px bg-gray-800/30 mx-4" />
@@ -200,6 +170,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
+                    title={`Show ${label.toLowerCase()} posts by popularity`}
                   >
                     {label}
                   </button>
@@ -226,6 +197,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                             ? 'bg-white/10 text-white'
                             : 'text-gray-400 hover:text-white hover:bg-white/5'
                         }`}
+                        title={id === 'mylocks' ? 'Show only your posts' : 'Show only posts with locked BSV'}
                       >
                         {label}
                       </button>
