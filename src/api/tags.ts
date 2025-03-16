@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
         type: 'current_event'
       },
       orderBy: {
-        usageCount: 'desc'
+        usage_count: 'desc'
       },
       take: 20,
       select: {

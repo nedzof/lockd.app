@@ -42,51 +42,39 @@ export class TagDatabaseService {
    */
   async storeTags(tags: string[], type: string = 'ai_generated'): Promise<void> {
     try {
-      // Get existing tags to avoid duplicates
-      const existingTags = await prisma.tag.findMany({
-        where: {
-          name: {
-            in: tags
-          }
-        },
-        select: {
-          name: true
-        }
-      });
+      // Filter out empty tags
+      const validTags = tags.filter(tag => tag && tag.trim().length > 0);
       
-      const existingTagNames = new Set(existingTags.map(tag => tag.name));
-      
-      // Filter out tags that already exist
-      const newTags = tags.filter(tag => !existingTagNames.has(tag));
-      
-      // Create new tags
-      if (newTags.length > 0) {
-        await prisma.tag.createMany({
-          data: newTags.map(name => ({
-            name,
-            type,
-            usageCount: 1
-          })),
-          skipDuplicates: true
-        });
-        
-        logger.info(`Created ${newTags.length} new tags of type '${type}'`);
+      if (validTags.length === 0) {
+        logger.info('No valid tags to store');
+        return;
       }
       
-      // Update usage count for all tags (both new and existing)
-      for (const tag of tags) {
-        await prisma.tag.updateMany({
-          where: { name: tag },
-          data: { 
-            usageCount: { increment: 1 },
+      // Create or update tags in the database
+      const operations = validTags.map(tag => {
+        const normalizedTag = tag.trim().toLowerCase();
+        
+        return prisma.tag.upsert({
+          where: { name: normalizedTag },
+          update: { 
+            type,
+            usage_count: { increment: 1 },
+            updated_at: new Date()
+          },
+          create: {
+            name: normalizedTag,
+            type,
+            usage_count: 1,
+            created_at: new Date(),
             updated_at: new Date()
           }
         });
-      }
+      });
       
-      logger.info(`Updated usage count for ${tags.length} tags`);
+      await Promise.all(operations);
+      logger.info(`Stored ${validTags.length} tags of type '${type}'`);
     } catch (error) {
-      logger.error('Error storing tags in database:', error);
+      logger.error('Error storing tags:', error);
     }
   }
   
@@ -129,7 +117,7 @@ export class TagDatabaseService {
     try {
       const tags = await prisma.tag.findMany({
         orderBy: {
-          usageCount: 'desc'
+          usage_count: 'desc'
         },
         take: limit
       });
@@ -155,7 +143,7 @@ export class TagDatabaseService {
           type
         },
         orderBy: {
-          usageCount: 'desc'
+          usage_count: 'desc'
         },
         take: limit
       });
@@ -173,27 +161,20 @@ export class TagDatabaseService {
    */
   async updateTagStatistics(): Promise<void> {
     try {
-      // Get the most used tag
-      const most_used_tag = await prisma.tag.findFirst({
+      // Get all tags
+      const tags = await prisma.tag.findMany({
         orderBy: {
-          usageCount: 'desc'
+          usage_count: 'desc'
         }
       });
       
-      if (!most_used_tag) {
-        logger.warn('No tags found for statistics update');
-        return;
+      // Log tag statistics
+      logger.info(`Total tags: ${tags.length}`);
+      
+      if (tags.length > 0) {
+        const topTags = tags.slice(0, 5);
+        logger.info(`Top 5 tags: ${topTags.map(tag => `${tag.name} (${tag.usage_count})`).join(', ')}`);
       }
-      
-      // Update the stats table
-      await prisma.stats.updateMany({
-        data: {
-          most_used_tag: most_used_tag.name,
-          last_updated: new Date()
-        }
-      });
-      
-      logger.info(`Updated tag statistics, most used tag: ${most_used_tag.name}`);
     } catch (error) {
       logger.error('Error updating tag statistics:', error);
     }

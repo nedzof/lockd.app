@@ -41,7 +41,7 @@ export const initializeStatsUpdateJob = () => {
         }),
         
         // Total lock likes
-        prisma.lockLike.count(),
+        prisma.lock_like.count(),
         
         // Total unique users
         prisma.post.findMany({
@@ -57,14 +57,14 @@ export const initializeStatsUpdateJob = () => {
         }).then(users => users.length),
         
         // Total BSV locked
-        prisma.lockLike.aggregate({
+        prisma.lock_like.aggregate({
           _sum: {
             amount: true
           }
         }),
         
         // Average lock duration
-        prisma.lockLike.aggregate({
+        prisma.lock_like.aggregate({
           _avg: {
             lock_duration: true
           }
@@ -73,7 +73,7 @@ export const initializeStatsUpdateJob = () => {
         // Most used tag
         prisma.tag.findMany({
           orderBy: {
-            usageCount: 'desc'
+            usage_count: 'desc'
           },
           take: 1
         }),

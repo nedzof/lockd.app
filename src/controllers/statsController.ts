@@ -51,7 +51,7 @@ export const getStats = async (req: Request, res: Response) => {
     // Get the latest stats record
     const stats = await prisma.stats.findFirst({
       orderBy: {
-        lastUpdated: 'desc'
+        last_updated: 'desc'
       }
     });
 
@@ -161,7 +161,7 @@ export const getStats = async (req: Request, res: Response) => {
       const postDistributionData = [
         {
           range: '0-10 BSV',
-          value: await prisma.lockLike.count({
+          value: await prisma.lock_like.count({
             where: {
               amount: {
                 lte: 10
@@ -174,7 +174,7 @@ export const getStats = async (req: Request, res: Response) => {
         },
         {
           range: '10-50 BSV',
-          value: await prisma.lockLike.count({
+          value: await prisma.lock_like.count({
             where: {
               amount: {
                 gt: 10,
@@ -188,7 +188,7 @@ export const getStats = async (req: Request, res: Response) => {
         },
         {
           range: '50-100 BSV',
-          value: await prisma.lockLike.count({
+          value: await prisma.lock_like.count({
             where: {
               amount: {
                 gt: 50,
@@ -202,7 +202,7 @@ export const getStats = async (req: Request, res: Response) => {
         },
         {
           range: '100+ BSV',
-          value: await prisma.lockLike.count({
+          value: await prisma.lock_like.count({
             where: {
               amount: {
                 gt: 100
@@ -219,15 +219,15 @@ export const getStats = async (req: Request, res: Response) => {
       const tagUsageData = await prisma.tag.findMany({
         select: {
           name: true,
-          usageCount: true
+          usage_count: true
         },
         orderBy: {
-          usageCount: 'desc'
+          usage_count: 'desc'
         },
         take: 5
       }).then(tags => tags.map(tag => ({
         name: tag.name,
-        count: tag.usageCount
+        count: tag.usage_count
       })));
       
       // Get user activity data
@@ -263,7 +263,7 @@ export const getStats = async (req: Request, res: Response) => {
         },
         {
           name: 'Lock Likes',
-          users: await prisma.lockLike.groupBy({
+          users: await prisma.lock_like.groupBy({
             by: ['author_address'],
             where: {
               author_address: {
@@ -273,7 +273,7 @@ export const getStats = async (req: Request, res: Response) => {
                 gte: startDate
               }
             }
-          }).then(result => result.length)
+          }).then((result: any[]) => result.length)
         }
       ];
       
@@ -320,21 +320,26 @@ export const getStats = async (req: Request, res: Response) => {
       const statsData = { ...stats };
       
       // If current_bsv_price doesn't exist in the stats object, add it with a default value
-      if (statsData.currentBsvPrice === undefined || statsData.currentBsvPrice === null) {
+      if (statsData.current_bsv_price === undefined || statsData.current_bsv_price === null) {
         // Try to fetch the current price
         try {
           const currentPrice = await fetchBsvPrice();
           if (currentPrice !== null) {
-            statsData.currentBsvPrice = currentPrice;
+            statsData.current_bsv_price = currentPrice;
           } else {
-            statsData.currentBsvPrice = priceData.length > 0 ? 
+            statsData.current_bsv_price = priceData.length > 0 ? 
               priceData[priceData.length - 1].price : 45.0;
           }
         } catch (error) {
           logger.error('Error fetching current BSV price', { error });
-          statsData.currentBsvPrice = priceData.length > 0 ? 
+          statsData.current_bsv_price = priceData.length > 0 ? 
             priceData[priceData.length - 1].price : 45.0;
         }
+      }
+      
+      // Include current BSV price if available
+      if (stats && stats.current_bsv_price) {
+        statsData.current_bsv_price = stats.current_bsv_price;
       }
       
       return res.json({
@@ -463,7 +468,7 @@ function generateSamplePriceData(stats: any) {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
   
   // Use the current_bsv_price if it exists, otherwise use a default value
-  const currentPrice = (stats as any)?.currentBsvPrice || 45.0;
+  const currentPrice = (stats as any)?.current_bsv_price || 45.0;
   
   return months.map((month, index) => {
     // Generate a price that fluctuates around the current price
