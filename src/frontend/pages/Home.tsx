@@ -170,35 +170,38 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 ))}
               </div>
 
-              {/* Divider */}
-              <div className="h-4 w-px bg-gray-800/30 mx-4" />
-
-              {/* Personal Filters */}
-              <div className="flex items-center space-x-1">
-                {[
-                  { id: 'mylocks', label: 'My Posts' },
-                  { id: 'locked', label: 'Locked Posts' }
-                ].map(({ id, label }) => (
-                  <button
-                    key={id}
-                    onClick={() => handlepersonal_filter(id)}
-                    className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                      personal_filter === id
-                        ? 'bg-white/10 text-white'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              
-              {/* Divider */}
-              <div className="h-4 w-px bg-gray-800/30 mx-4" />
-              
-              {/* Threshold Settings */}
+              {/* Only show Personal Filters and Threshold Settings when connected */}
               {connected && (
-                <ThresholdSettings connected={connected} />
+                <>
+                  {/* Divider */}
+                  <div className="h-4 w-px bg-gray-800/30 mx-4" />
+                  
+                  {/* Personal Filters */}
+                  <div className="flex items-center space-x-1">
+                    {[
+                      { id: 'mylocks', label: 'My Posts' },
+                      { id: 'locked', label: 'Locked Posts' }
+                    ].map(({ id, label }) => (
+                      <button
+                        key={id}
+                        onClick={() => handlepersonal_filter(id)}
+                        className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
+                          personal_filter === id
+                            ? 'bg-white/10 text-white'
+                            : 'text-gray-400 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  {/* Divider */}
+                  <div className="h-4 w-px bg-gray-800/30 mx-4" />
+                  
+                  {/* Threshold Settings */}
+                  <ThresholdSettings connected={connected} />
+                </>
               )}
             </div>
           </div>
