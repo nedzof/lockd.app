@@ -509,18 +509,23 @@ const PostGrid: React.FC<PostGridProps> = ({
             {submissions.map((post) => (
               <div key={post.id} className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-xl border border-gray-800/10 shadow-lg hover:shadow-[#00ffa3]/5 transition-all duration-300">
                 {/* Post header */}
-                <div className="flex items-center justify-between p-3 border-b border-gray-800/10">
+                <div className="flex items-center justify-between p-3 border-b border-gray-800/10 bg-gradient-to-r from-gray-800/20 to-transparent">
                   <div className="flex items-center">
-                    <div>
-                      <p className="text-gray-200 font-medium">
+                    <div className="flex flex-col">
+                      <p className="text-gray-200 font-medium flex items-center">
                         {post.author_address ? 
-                          `${post.author_address.substring(0, 6)}...${post.author_address.substring(post.author_address.length - 4)}` : 
-                          "Anonymous"}
+                          <>
+                            <span className="bg-[#00ffa3]/10 text-[#00ffa3] px-2 py-0.5 rounded text-xs mr-1.5">
+                              {post.author_address.substring(0, 6)}...{post.author_address.substring(post.author_address.length - 4)}
+                            </span>
+                          </> : 
+                          <span className="text-gray-400">Anonymous</span>
+                        }
+                        <span className="flex items-center text-gray-400 text-xs ml-2">
+                          <FiClock className="mr-1" size={12} />
+                          {formatDate(post.created_at)}
+                        </span>
                       </p>
-                      <div className="flex items-center text-gray-400 text-xs">
-                        <FiClock className="mr-1" />
-                        {formatDate(post.created_at)}
-                      </div>
                     </div>
                   </div>
                   
@@ -529,29 +534,33 @@ const PostGrid: React.FC<PostGridProps> = ({
                     href={`https://whatsonchain.com/tx/${post.tx_id}`} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="text-gray-400 hover:text-[#00ffa3] transition-colors"
+                    className="text-gray-400 hover:text-[#00ffa3] transition-colors flex items-center text-xs"
                     title="View on WhatsonChain"
                   >
-                    <FiExternalLink size={16} />
+                    <span className="mr-1 hidden sm:inline">Transaction</span>
+                    <FiExternalLink size={14} />
                   </a>
                 </div>
 
                 <div className="p-4">
-                  {/* Post content */}
+                  {/* Post content - Moved before image for better visual hierarchy */}
                   {post.content && (
                     <div className="mb-4 whitespace-pre-wrap text-gray-100 leading-relaxed">
-                      {post.content}
+                      <p className="text-xl font-semibold mb-2 text-white">{post.content.split('\n')[0]}</p>
+                      {post.content.split('\n').slice(1).join('\n') && (
+                        <p className="text-gray-200">{post.content.split('\n').slice(1).join('\n')}</p>
+                      )}
                     </div>
                   )}
                   
-                  {/* Post image */}
+                  {/* Post image - Reduced size and added gradient background */}
                   {post.imageUrl && (
-                    <div className="mb-4">
-                      <div className="relative rounded-lg overflow-hidden bg-gray-900/30">
+                    <div className="mb-4 max-w-2xl mx-auto">
+                      <div className="relative rounded-lg overflow-hidden bg-gradient-to-b from-gray-800/50 to-gray-900/70 p-1 shadow-inner">
                         <img 
                           src={post.imageUrl} 
                           alt={`Image for post ${post.id}`}
-                          className="w-full h-auto object-contain max-h-[500px]"
+                          className="w-full h-auto object-contain max-h-[400px] rounded"
                           onError={(e) => {
                             console.error(`Error loading image for post ${post.id}`);
                             // Try to reload the image once
@@ -582,17 +591,6 @@ const PostGrid: React.FC<PostGridProps> = ({
                       </div>
                     </div>
                   )}
-                  
-                  {/* Tags Section */}
-                  {post.tags && post.tags.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {post.tags.map(tag => (
-                        <span key={tag} className="bg-white/5 text-gray-300 text-xs px-2.5 py-1 rounded-md">
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 
                 {/* Vote Options Section */}
@@ -603,7 +601,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                       const totalLocked = post.vote_options.reduce((sum, option) => sum + option.lock_amount, 0);
                       
                       return (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto">
                           {post.vote_options.map((option: vote_option) => {
                             const percentage = calculatePercentage(option.lock_amount, totalLocked);
                             // Determine color based on percentage
@@ -629,7 +627,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                             const lockStatus = getLockStatus();
                             
                             return (
-                              <div key={option.id} className="bg-white/5 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-300 overflow-hidden">
+                              <div key={option.id} className="bg-white/5 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-300 overflow-hidden shadow-lg">
                                 <div className="p-3 flex items-center space-x-3">
                                   {/* Circular progress indicator */}
                                   <div className="relative h-14 w-14 flex-shrink-0">
@@ -710,10 +708,30 @@ const PostGrid: React.FC<PostGridProps> = ({
                 )}
                 
                 {/* Post footer with BSV locked amount */}
-                <div className="p-3 border-t border-gray-800/10 flex justify-end">
+                <div className="p-3 border-t border-gray-800/10 flex justify-between items-center bg-gradient-to-r from-transparent to-gray-800/20">
+                  <div className="flex items-center space-x-2">
+                    {post.is_vote && (
+                      <span className="bg-purple-900/20 text-purple-400 text-xs px-2 py-0.5 rounded-full">
+                        Vote
+                      </span>
+                    )}
+                    {post.tags && post.tags.length > 0 && (
+                      <div className="flex items-center space-x-1">
+                        {post.tags.slice(0, 2).map(tag => (
+                          <span key={tag} className="bg-white/5 text-gray-300 text-xs px-1.5 py-0.5 rounded-full">
+                            #{tag}
+                          </span>
+                        ))}
+                        {post.tags.length > 2 && (
+                          <span className="text-gray-400 text-xs">+{post.tags.length - 2}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  
                   {post.totalLocked && post.totalLocked > 0 && (
-                    <div className="text-[#00ffa3] font-medium flex items-center">
-                      <FiLock className="mr-1" />
+                    <div className="text-[#00ffa3] font-medium flex items-center text-sm">
+                      <FiLock className="mr-1" size={14} />
                       {formatBSV(post.totalLocked)} BSV locked
                     </div>
                   )}
