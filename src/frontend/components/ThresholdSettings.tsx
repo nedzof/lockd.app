@@ -14,75 +14,79 @@ interface ThresholdSettingsProps {
 }
 
 const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, walletAddress }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const [milestoneThreshold, setMilestoneThreshold] = useState(() => {
-    // Check if user has a preference stored in localStorage
-    const savedThreshold = localStorage.getItem('milestoneThreshold');
-    return savedThreshold ? Number(savedThreshold) : 1;
-  });
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [isSubscribing, setIsSubscribing] = useState(false);
-  const [apiAvailable, setApiAvailable] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [milestoneThreshold, setMilestoneThreshold] = useState<number>(0.1);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
+  const [isSubscribing, setIsSubscribing] = useState<boolean>(false);
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
   
-  // Get user identifier (user_id from localStorage or wallet address)
+  // Check if this browser supports notifications
+  const notificationsSupported = 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
+
+  // Get user identifier (wallet address or session ID)
   const getUserIdentifier = (): string | null => {
-    const userId = localStorage.getItem('user_id');
-    if (userId) return userId;
-    // Use the actual wallet address passed from props when connected
-    return connected && walletAddress ? walletAddress : null;
+    // Prefer authenticated wallet address
+    if (connected && walletAddress) {
+      return walletAddress;
+    }
+    
+    // Fallback to anonymous session
+    return null;
   };
   
-  // Check notification permission and subscription status on mount
+  // Check notification status when component mounts or wallet connection changes
   useEffect(() => {
     const checkNotificationStatus = async () => {
-      if (!connected) return;
-      
       try {
-        // Get user identifier
         const userId = getUserIdentifier();
-        if (!userId) return;
-        
-        // Reset API availability flag
-        setApiAvailable(true);
-        
-        // Check if the browser supports notifications
-        if (!('Notification' in window)) {
+        if (!userId) {
+          setNotificationsEnabled(false);
           return;
         }
         
-        // Check if permission is already granted
-        if (Notification.permission === 'granted') {
-          // Check if we have a service worker and subscription
-          if ('serviceWorker' in navigator && 'PushManager' in window) {
-            try {
-              const registration = await navigator.serviceWorker.ready;
-              const subscription = await registration.pushManager.getSubscription();
-              setNotificationsEnabled(!!subscription);
-            } catch (error) {
-              console.error('Error checking notification status:', error);
+        // Make API call to check subscription status
+        try {
+          const response = await axios.get(`${API_BASE_URL}/notifications/status/${userId}`);
+          if (response.data.success) {
+            setNotificationsEnabled(response.data.subscribed);
+            
+            // If there's a threshold set, use it
+            if (response.data.threshold) {
+              setMilestoneThreshold(response.data.threshold);
             }
           }
+        } catch (error) {
+          console.warn('Failed to check notification status:', error);
+          // Don't set an error message here to avoid showing errors on page load
+          setNotificationsEnabled(false);
         }
       } catch (error) {
         console.error('Error checking notification status:', error);
+        setNotificationsEnabled(false);
       }
     };
     
-    checkNotificationStatus();
+    if (connected && notificationsSupported) {
+      checkNotificationStatus();
+    }
   }, [connected]);
-
+  
+  // Handle threshold change
   const handleThresholdChange = (value: string) => {
-    const numValue = Number(value);
-    setMilestoneThreshold(numValue);
-    localStorage.setItem('milestoneThreshold', value);
+    // Convert to number and validate
+    const numValue = parseFloat(value);
     
-    // If notifications are enabled, update subscription with new threshold
-    if (notificationsEnabled && apiAvailable) {
-      updateNotificationSubscription(numValue);
+    if (!isNaN(numValue) && numValue > 0) {
+      setMilestoneThreshold(numValue);
+      
+      // If notifications are enabled, update the subscription
+      if (notificationsEnabled) {
+        updateNotificationSubscription(numValue);
+      }
     }
   };
-
+  
   // Helper function to convert the VAPID key from base64 to Uint8Array
   function urlBase64ToUint8Array(base64String: string): Uint8Array {
     try {
@@ -119,38 +123,35 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
       throw new Error('Failed to convert VAPID key: ' + (error instanceof Error ? error.message : String(error)));
     }
   }
-
+  
+  // Toggle notifications on/off
   const toggleNotifications = async () => {
-    if (!connected || isSubscribing) return;
+    setNotificationError(null);
+    
+    if (!notificationsSupported) {
+      setNotificationError('Your browser does not support notifications');
+      return;
+    }
     
     try {
       setIsSubscribing(true);
       
-      // Check API availability first
-      if (!apiAvailable) {
-        alert('Notification server is currently unavailable. Please try again later.');
-        setIsSubscribing(false);
-        return;
-      }
-      
       if (notificationsEnabled) {
-        // Unsubscribe from notifications
+        // Unsubscribe
         const success = await unsubscribeFromNotifications();
         if (success) {
           setNotificationsEnabled(false);
-          localStorage.setItem('notificationsEnabled', 'false');
         }
       } else {
-        // Subscribe to notifications
+        // Subscribe
         const success = await subscribeToNotifications();
         if (success) {
           setNotificationsEnabled(true);
-          localStorage.setItem('notificationsEnabled', 'true');
         }
       }
     } catch (error) {
       console.error('Error toggling notifications:', error);
-      alert('There was a problem with the notification service. Please try again later.');
+      setNotificationError(`There was a problem with the notification service: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSubscribing(false);
     }
@@ -160,14 +161,14 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
     try {
       // First check if the browser supports notifications
       if (!('Notification' in window)) {
-        alert('Your browser does not support notifications');
+        setNotificationError('Your browser does not support notifications');
         return false;
       }
       
       // Then check if we have a user ID
       const userId = getUserIdentifier();
       if (!userId) {
-        alert('Your wallet must be connected to receive notifications');
+        setNotificationError('Your wallet must be connected to receive notifications');
         return false;
       }
       
@@ -181,16 +182,18 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
       if (permission === 'granted') {
         // Check if we have a service worker
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-          alert('Your browser does not support push notifications');
+          setNotificationError('Your browser does not support push notifications');
           return false;
         }
         
         try {
           // Wait for service worker to be ready
           const registration = await navigator.serviceWorker.ready;
+          console.log('Service worker registration ready:', registration);
           
           // Get existing subscription or create a new one
           let subscription = await registration.pushManager.getSubscription();
+          console.log('Current subscription:', subscription);
           
           // If no subscription exists, create one
           if (!subscription) {
@@ -198,7 +201,7 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
               // Check if VAPID key is available
               if (!PUBLIC_VAPID_KEY) {
                 console.error('VAPID key is missing');
-                alert('Server configuration error: VAPID key is missing');
+                setNotificationError('Server configuration error: VAPID key is missing');
                 return false;
               }
               
@@ -210,249 +213,301 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
                 userVisibleOnly: true,
                 applicationServerKey: convertedVapidKey
               });
+              
+              console.log('New subscription created:', subscription);
             } catch (subscribeError) {
               console.error('Error subscribing to push service:', subscribeError);
-              alert(`Failed to subscribe to notifications: ${subscribeError instanceof Error ? subscribeError.message : 'Unknown error'}`);
+              setNotificationError(`Failed to subscribe to notifications: ${subscribeError instanceof Error ? subscribeError.message : 'Unknown error'}`);
               return false;
             }
           }
           
           // Send subscription to server
           try {
+            console.log('Sending subscription to server with data:', {
+              user_id: userId,
+              threshold_value: milestoneThreshold,
+              subscription_json: subscription.toJSON()
+            });
+            
             const response = await axios.post(`${API_BASE_URL}/notifications/subscribe`, {
               user_id: userId,
               subscription: subscription.toJSON(),
               threshold_value: milestoneThreshold
             }, {
-              timeout: 8000 // 8 second timeout
+              timeout: 10000 // 10 second timeout
             });
             
             if (response.data.success) {
-              console.log('Successfully subscribed to notifications');
+              console.log('Successfully subscribed to notifications:', response.data);
               
               // Make a visible notification to confirm subscription
-              new Notification('Notifications Enabled', {
-                body: `You will be notified when posts reach ${milestoneThreshold} BSV.`,
-                icon: '/favicon.ico'
-              });
+              try {
+                new Notification('Notifications Enabled', {
+                  body: `You will be notified when posts reach ${milestoneThreshold} BSV.`,
+                  icon: '/favicon.ico'
+                });
+              } catch (notifyError) {
+                console.warn('Could not display confirmation notification:', notifyError);
+                // This is non-critical, so we don't fail the overall subscription
+              }
               
               return true;
             } else {
               console.error('Server did not accept subscription', response.data);
+              setNotificationError(`Server error: ${response.data.message || 'Unknown error'}`);
               return false;
             }
           } catch (err) {
             console.error('Error creating push subscription:', err);
+            
             // Log more detailed error information
             if (err && typeof err === 'object' && 'response' in err) {
               const axiosError = err as { response?: { status?: number, data?: any } };
               console.error(`Status code: ${axiosError.response?.status}, Error details:`, axiosError.response?.data);
+              
+              // Provide more detailed error message
+              if (axiosError.response?.status === 500) {
+                setNotificationError('Server error: The notification service is currently unavailable. Please try again later.');
+              } else if (axiosError.response?.data?.message) {
+                setNotificationError(`Server error: ${axiosError.response.data.message}`);
+              } else {
+                setNotificationError('Failed to register for notifications. Please try again later.');
+              }
+            } else {
+              setNotificationError('Network error. Please check your connection and try again.');
             }
-            setApiAvailable(false);
+            
             return false;
           }
-        } catch (err) {
-          console.error('Error creating push subscription:', err);
-          setApiAvailable(false);
+        } catch (error) {
+          console.error('Service worker error:', error);
+          setNotificationError(`Service worker error: ${error instanceof Error ? error.message : 'Unknown error'}`);
           return false;
         }
+      } else if (permission === 'denied') {
+        setNotificationError('Notification permission denied. Please enable notifications in your browser settings.');
+        return false;
       } else {
-        alert('You must allow notifications to use this feature');
+        setNotificationError('Notification permission was not granted.');
         return false;
       }
     } catch (error) {
-      console.error('Error subscribing to notifications:', error);
+      console.error('Unexpected error in subscribeToNotifications:', error);
+      setNotificationError(`Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return false;
     }
   };
-
+  
   const unsubscribeFromNotifications = async (): Promise<boolean> => {
     try {
-      // Check if we have a user ID
       const userId = getUserIdentifier();
-      if (!userId) return false;
+      if (!userId) {
+        setNotificationError('Your wallet must be connected to manage notifications');
+        return false;
+      }
       
-      // First try to unsubscribe browser subscription
-      let browserUnsubscribed = false;
-      
+      // Get SW registration and unsubscribe from push
       if ('serviceWorker' in navigator) {
-        // Get service worker registration
         const registration = await navigator.serviceWorker.ready;
-        
-        // Get existing subscription
         const subscription = await registration.pushManager.getSubscription();
         
         if (subscription) {
-          // Unsubscribe from push service
-          browserUnsubscribed = await subscription.unsubscribe();
-          console.log('Unsubscribed from browser push notifications');
+          // Get the endpoint to unsubscribe from server
+          const endpoint = subscription.endpoint;
+          
+          try {
+            // First unsubscribe on server
+            await axios.post(`${API_BASE_URL}/notifications/unsubscribe`, {
+              user_id: userId,
+              endpoint
+            });
+            
+            // Then unsubscribe in browser
+            await subscription.unsubscribe();
+            
+            console.log('Successfully unsubscribed from notifications');
+            return true;
+          } catch (error) {
+            console.error('Error unsubscribing from notifications:', error);
+            
+            // Even if server unsubscribe fails, try to unsubscribe in browser
+            try {
+              await subscription.unsubscribe();
+            } catch (browserError) {
+              console.error('Error unsubscribing in browser:', browserError);
+            }
+            
+            setNotificationError('Error unsubscribing from notifications, but notifications have been disabled in this browser.');
+            return true; // Return true because we consider this "unsubscribed" from the user's perspective
+          }
         } else {
-          // No subscription to unsubscribe from
-          browserUnsubscribed = true;
+          // No subscription in browser, just notify the server
+          try {
+            await axios.post(`${API_BASE_URL}/notifications/unsubscribe`, {
+              user_id: userId
+            });
+            
+            console.log('Successfully unsubscribed from server notifications');
+            return true;
+          } catch (error) {
+            console.error('Error unsubscribing from server notifications:', error);
+            setNotificationError('Error unsubscribing from server. Please try again later.');
+            return false;
+          }
         }
-      } else {
-        // No service worker support
-        browserUnsubscribed = true;
       }
       
-      // Then remove subscription from server
-      try {
-        await axios.post(`${API_BASE_URL}/notifications/unsubscribe`, {
-          user_id: userId
-        }, {
-          timeout: 8000 // 8 second timeout
-        });
-        
-        console.log('Unsubscribed from server notifications');
-        return browserUnsubscribed;
-      } catch (err) {
-        console.error('Error unsubscribing from server:', err);
-        setApiAvailable(false);
-        return browserUnsubscribed;
-      }
+      return false;
     } catch (error) {
-      console.error('Error unsubscribing from push notifications:', error);
+      console.error('Error unsubscribing from notifications:', error);
+      setNotificationError(`Error unsubscribing: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return false;
     }
   };
-
+  
   const updateNotificationSubscription = async (threshold: number): Promise<void> => {
     try {
-      if (!notificationsEnabled) return;
-      
-      // Check if we have a user ID
       const userId = getUserIdentifier();
-      if (!userId) return;
-      
-      // Get the service worker registration
-      if ('serviceWorker' in navigator) {
-        const registration = await navigator.serviceWorker.ready;
-        
-        // Get the current subscription
-        const subscription = await registration.pushManager.getSubscription();
-        
-        if (subscription) {
-          // Update the subscription with the new threshold
-          await axios.post(`${API_BASE_URL}/notifications/subscribe`, {
-            user_id: userId,
-            subscription: subscription.toJSON(),
-            threshold_value: threshold
-          }, {
-            timeout: 5000 // 5 second timeout
-          });
-          
-          console.log(`Updated notification threshold to ${threshold} BSV`);
-        }
+      if (!userId || !notificationsEnabled) {
+        return;
       }
+      
+      // Update threshold on server
+      await axios.post(`${API_BASE_URL}/notifications/threshold`, {
+        user_id: userId,
+        threshold_value: threshold
+      });
+      
+      console.log(`Notification threshold updated to ${threshold}`);
     } catch (error) {
-      console.error('Failed to update notification subscription:', error);
-      setApiAvailable(false);
+      console.error('Error updating notification threshold:', error);
+      // We don't show an error to the user for threshold updates
     }
   };
-
+  
+  // Handle clicking outside modal to close it
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
+        setShowModal(false);
+      }
+    };
+    
+    if (showModal) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showModal]);
+  
+  // Open modal
+  const openModal = () => {
+    setShowModal(true);
+  };
+  
+  // Close modal
+  const closeModal = () => {
+    setShowModal(false);
+  };
+  
   return (
-    <div className="relative">
+    <>
       <button
-        ref={buttonRef}
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center space-x-1 text-xs text-gray-400 hover:text-white transition-colors"
+        onClick={openModal}
+        className="flex items-center justify-center space-x-2 py-1.5 px-3 bg-gray-800 text-white rounded hover:bg-gray-700 transition duration-200 text-sm"
       >
-        <FiLock className="w-3 h-3" />
-        <span>Threshold: {milestoneThreshold} BSV</span>
+        <FiLock className="w-4 h-4" />
+        <span>BSV Threshold</span>
       </button>
-
-      {isOpen && (
-        <>
-          {/* Backdrop - closes modal when clicked */}
-          <div 
-            className="fixed inset-0 bg-black bg-opacity-40 backdrop-blur-sm z-[999] transition-opacity duration-300" 
-            onClick={() => setIsOpen(false)}
-          ></div>
-          
-          {/* Modal content - positioned under the threshold button */}
-          <div
-            className="absolute top-6 right-0 w-80 bg-[#1A1B23] rounded-lg shadow-2xl border border-gray-800/40 z-[1000] backdrop-blur-xl overflow-hidden transition-all duration-300"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-sm font-medium text-white">BSV Threshold</h3>
-                <button 
-                  onClick={() => setIsOpen(false)}
-                  className="text-gray-400 hover:text-white transition-colors"
-                >
-                  &times;
-                </button>
-              </div>
+      
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black bg-opacity-50 pt-24">
+          <div ref={modalRef} className="bg-gray-900 border border-gray-800 rounded-md shadow-lg p-6 max-w-md w-full mx-4">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-white">BSV Threshold Settings</h2>
+              <button onClick={closeModal} className="text-gray-400 hover:text-white">
+                &times;
+              </button>
+            </div>
+            
+            <div className="mb-6">
+              <p className="text-gray-300 mb-4">Set the minimum BSV threshold for items you see. Content with less BSV value will be hidden.</p>
               
-              <div className="mb-5">
+              <div className="flex items-center mb-2">
+                <span className="text-gray-300 mr-3">Threshold:</span>
                 <input
-                  type="range"
-                  min="0.1"
-                  max="100"
-                  step="0.1"
+                  type="text"
                   value={milestoneThreshold}
                   onChange={(e) => handleThresholdChange(e.target.value)}
-                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-800"
-                  style={{
-                    background: `linear-gradient(to right, #00ffa3 ${milestoneThreshold}%, #1f2937 ${milestoneThreshold}%)`,
-                  }}
+                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white w-24"
                 />
-                <div className="flex justify-between text-xs text-gray-400 mt-2">
-                  <span>0.1 BSV</span>
-                  <span>{milestoneThreshold} BSV</span>
-                  <span>100 BSV</span>
-                </div>
+                <span className="text-gray-300 ml-3">BSV</span>
               </div>
               
-              <div className="flex items-start space-x-2 mb-4">
-                <FiInfo className="w-3 h-3 mt-0.5 flex-shrink-0 text-[#00ffa3]" />
-                <span className="text-xs text-gray-400">
-                  Set your BSV threshold for post visibility and notifications
-                </span>
+              <div className="text-gray-400 text-sm flex items-start">
+                <FiInfo className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" />
+                <span>Setting a higher threshold will show fewer items, but with higher value.</span>
               </div>
-              
-              {/* Notification toggle */}
-              <div className="flex items-center justify-between mb-1 p-2 rounded-lg bg-[#00ffa3]/5 border border-[#00ffa3]/20">
-                <div className="flex items-center space-x-2">
-                  <FiBell className={`w-4 h-4 ${notificationsEnabled ? 'text-[#00ffa3]' : 'text-gray-400'}`} />
-                  <span className="text-xs text-gray-300">Enable Notifications</span>
+            </div>
+            
+            {notificationsSupported && (
+              <div className="border-t border-gray-800 pt-4 mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center">
+                    <FiBell className="w-5 h-5 mr-2 text-cyan-400" />
+                    <span className="text-white font-medium">Notifications</span>
+                  </div>
+                  
+                  <button
+                    onClick={toggleNotifications}
+                    disabled={isSubscribing || !connected}
+                    className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ease-in-out duration-300 focus:outline-none ${
+                      notificationsEnabled ? 'bg-cyan-500' : 'bg-gray-700'
+                    } ${!connected ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <span
+                      className={`inline-block w-4 h-4 transform transition ease-in-out duration-300 bg-white rounded-full ${
+                        notificationsEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
                 </div>
                 
-                <div 
-                  onClick={toggleNotifications}
-                  className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors duration-300 ease-in-out focus:outline-none cursor-pointer ${notificationsEnabled ? 'bg-[#00ffa3]' : 'bg-gray-600'}`}
-                >
-                  <span
-                    className={`${
-                      notificationsEnabled ? 'translate-x-5' : 'translate-x-1'
-                    } inline-block h-3 w-3 transform rounded-full bg-white transition-transform duration-300 ease-in-out shadow-md`}
-                  />
-                </div>
+                <p className="text-gray-400 text-sm mb-3">
+                  {notificationsEnabled
+                    ? `You will be notified when posts reach ${milestoneThreshold} BSV.`
+                    : `Enable to receive notifications when posts reach ${milestoneThreshold} BSV.`}
+                </p>
+                
+                {notificationError && (
+                  <div className="bg-red-900/30 border border-red-800 text-red-200 px-3 py-2 rounded text-sm mt-2">
+                    {notificationError}
+                  </div>
+                )}
+                
+                {!connected && (
+                  <div className="bg-gray-800 border border-gray-700 text-gray-300 px-3 py-2 rounded text-sm mt-2">
+                    Connect your wallet to enable notifications.
+                  </div>
+                )}
               </div>
-              
-              {isSubscribing && (
-                <p className="text-xs text-gray-400 mt-2 animate-pulse">
-                  Processing...
-                </p>
-              )}
-              
-              {!apiAvailable && (
-                <p className="text-xs text-red-400 mt-2">
-                  Notification server is currently unavailable
-                </p>
-              )}
-              
-              {!connected && (
-                <p className="text-xs text-gray-500 mt-2 p-1.5 bg-white/5 rounded border border-gray-700/30">
-                  Connect wallet to enable notifications
-                </p>
-              )}
+            )}
+            
+            <div className="flex justify-end">
+              <button
+                onClick={closeModal}
+                className="px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 transition duration-200"
+              >
+                Close
+              </button>
             </div>
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </>
   );
 };
 
