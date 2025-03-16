@@ -5,7 +5,8 @@ import {
   subscribeToPushNotifications,
   unsubscribeFromPushNotifications,
   getSubscriptionStatus,
-  sendTestNotification
+  sendTestNotification,
+  updateNotificationThreshold
 } from '../controllers/notificationController';
 
 const router = express.Router();
@@ -24,6 +25,9 @@ router.post('/subscribe', subscribeToPushNotifications);
 
 // Unsubscribe from push notifications
 router.post('/unsubscribe', unsubscribeFromPushNotifications);
+
+// Update notification threshold
+router.post('/threshold', updateNotificationThreshold);
 
 // Send a test notification
 router.post('/test', sendTestNotification);

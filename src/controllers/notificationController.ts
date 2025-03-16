@@ -325,6 +325,54 @@ export const markNotificationAsRead = async (req: Request, res: Response) => {
 };
 
 /**
+ * Update notification threshold for a user
+ * @param req Express request object
+ * @param res Express response object
+ */
+export const updateNotificationThreshold = async (req: Request, res: Response) => {
+  try {
+    const { user_id, threshold_value } = req.body;
+    
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+    
+    if (threshold_value === undefined || isNaN(Number(threshold_value)) || Number(threshold_value) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid threshold value is required'
+      });
+    }
+    
+    // Update threshold in the database
+    const success = await notificationSubscriptionService.updateThreshold(
+      user_id,
+      Number(threshold_value)
+    );
+    
+    logger.info(`Threshold updated for user ${user_id} to ${threshold_value}`);
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Notification threshold updated successfully',
+      data: {
+        threshold: Number(threshold_value)
+      }
+    });
+  } catch (error) {
+    logger.error('Error updating notification threshold:', error instanceof Error ? error.message : String(error));
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update notification threshold',
+      error: process.env.NODE_ENV === 'development' ? error instanceof Error ? error.message : String(error) : undefined
+    });
+  }
+};
+
+/**
  * Subscribe to push notifications
  * @param req Express request object
  * @param res Express response object
