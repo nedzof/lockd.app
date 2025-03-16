@@ -546,17 +546,17 @@ const PostGrid: React.FC<PostGridProps> = ({
                   {/* Post content - Moved before image for better visual hierarchy */}
                   {post.content && (
                     <div className="mb-4 whitespace-pre-wrap text-gray-100 leading-relaxed">
-                      <p className="text-xl font-semibold mb-2 text-white">{post.content.split('\n')[0]}</p>
+                      <p className="text-xl font-semibold mb-2 text-white text-right">{post.content.split('\n')[0]}</p>
                       {post.content.split('\n').slice(1).join('\n') && (
-                        <p className="text-gray-200">{post.content.split('\n').slice(1).join('\n')}</p>
+                        <p className="text-gray-200 text-right">{post.content.split('\n').slice(1).join('\n')}</p>
                       )}
                     </div>
                   )}
                   
-                  {/* Post image - Reduced size and added gradient background */}
+                  {/* Post image - Adjusted for vertical alignment */}
                   {post.imageUrl && (
-                    <div className="mb-4 max-w-2xl mx-auto">
-                      <div className="relative rounded-lg overflow-hidden bg-gradient-to-b from-gray-800/50 to-gray-900/70 p-1 shadow-inner">
+                    <div className="mb-4 mx-auto flex justify-center">
+                      <div className="relative rounded-lg overflow-hidden bg-gradient-to-b from-gray-800/50 to-gray-900/70 p-1 shadow-inner max-w-md">
                         <img 
                           src={post.imageUrl} 
                           alt={`Image for post ${post.id}`}
@@ -601,7 +601,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                       const totalLocked = post.vote_options.reduce((sum, option) => sum + option.lock_amount, 0);
                       
                       return (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto">
+                        <div className="flex flex-col items-end">
                           {post.vote_options.map((option: vote_option) => {
                             const percentage = calculatePercentage(option.lock_amount, totalLocked);
                             // Determine color based on percentage
@@ -627,7 +627,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                             const lockStatus = getLockStatus();
                             
                             return (
-                              <div key={option.id} className="bg-white/5 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-300 overflow-hidden shadow-lg">
+                              <div key={option.id} className="bg-white/5 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-300 overflow-hidden shadow-lg mb-2 w-full max-w-xs">
                                 <div className="p-3">
                                   {/* Simplified layout with only essential elements */}
                                   <div className="flex items-center gap-3">
