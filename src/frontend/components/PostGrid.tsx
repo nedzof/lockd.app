@@ -5,7 +5,7 @@ import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
 import type { Post } from '../types';
 import { toast } from 'react-hot-toast';
-import vote_optionLockInteraction from './vote_optionLockInteraction';
+import VoteOptionLockInteraction from './VoteOptionLockInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
 
 interface vote_option {
@@ -53,8 +53,7 @@ interface PostGridProps {
 }
 
 // Use environment variable for API URL or default to localhost:3003
-const API_URL = 'http://localhost:3003';
-console.log('VALIDATION: Using API URL:', API_URL);
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
@@ -117,7 +116,6 @@ const PostGrid: React.FC<PostGridProps> = ({
 
   const fetchPosts = useCallback(async (reset = true) => {
     if (!isMounted.current) {
-      console.log('VALIDATION: Component not mounted, skipping fetch');
       return;
     }
 
@@ -127,10 +125,8 @@ const PostGrid: React.FC<PostGridProps> = ({
       setNextCursor(null); // Reset cursor when fetching from the beginning
       // Clear the set of seen post IDs when resetting
       seenpost_ids.current = new Set();
-      console.log('VALIDATION: Resetting cursor and fetching initial posts');
     } else {
       setIsFetchingMore(true);
-      console.log('VALIDATION: Fetching more posts with cursor:', nextCursor);
     }
     
     try {
@@ -162,88 +158,43 @@ const PostGrid: React.FC<PostGridProps> = ({
         queryParams.append('user_id', user_id);
       }
       
-      console.log('VALIDATION: Query parameters:', queryParams.toString());
-      
       const response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`);
-      console.log('VALIDATION: Response status:', response.status);
       
       if (!response.ok) {
-        console.error('VALIDATION: API Error:', response.status, response.statusText);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const data = await response.json();
-      console.log('VALIDATION: Raw API response:', JSON.stringify(data).substring(0, 200) + '...');
-      console.log('VALIDATION: Posts array type:', Array.isArray(data.posts) ? 'Array' : typeof data.posts);
-      console.log('VALIDATION: Posts array length:', data.posts ? data.posts.length : 'undefined');
       
       if (!data.posts || !Array.isArray(data.posts)) {
-        console.error('VALIDATION: Invalid posts data structure:', data);
         throw new Error('Invalid API response format - posts array missing');
-      }
-      
-      console.log('VALIDATION: API response full data:', data);
-      
-      console.log('VALIDATION: API response:', {
-        postsCount: data.posts.length,
-        nextCursor: data.nextCursor,
-        hasMore: data.hasMore,
-        post_ids: data.posts.map((post: any) => post.id)
-      });
-      
-      // Log the content of the first post for debugging
-      if (data.posts.length > 0) {
-        console.log('VALIDATION: First post content:', {
-          id: data.posts[0].id,
-          content: data.posts[0].content,
-          contentLength: data.posts[0].content ? data.posts[0].content.length : 0,
-          isVote: data.posts[0].is_vote,
-          hasvote_options: data.posts[0].vote_options && data.posts[0].vote_options.length > 0
-        });
       }
       
       // Process posts to add image URLs and other derived data
       const processedPosts = data.posts.map((post: any) => {
-        console.log('VALIDATION: Processing post:', post.id);
-        
         // Process image data if available
         if (post.raw_image_data) {
           try {
             // Create a blob URL for the image data
             const blob = new Blob([Buffer.from(post.raw_image_data, 'base64')], { type: post.media_type || 'image/jpeg' });
             post.imageUrl = URL.createObjectURL(blob);
-            console.log('VALIDATION: Created image URL for post:', post.id);
           } catch (error) {
-            console.error('VALIDATION: Error creating image URL for post:', post.id, error);
           }
         } else if (post.media_url) {
           post.imageUrl = post.media_url;
-          console.log('VALIDATION: Using media_url for post:', post.id);
         }
         
         // For vote posts, fetch vote options if they're not already included
         if (post.is_vote && (!post.vote_options || post.vote_options.length === 0)) {
-          console.log('VALIDATION: Post is a vote, fetching vote options:', post.id);
-          // We'll fetch vote options after setting state
           setTimeout(() => fetchvote_optionsForPost(post), 0);
         }
         
         return post;
       });
       
-      console.log('VALIDATION: Processed posts:', processedPosts.length);
-      if (processedPosts.length > 0) {
-        console.log('VALIDATION: First processed post:', {
-          id: processedPosts[0].id,
-          has_imageUrl: !!processedPosts[0].imageUrl,
-          content: processedPosts[0].content?.substring(0, 30)
-        });
-      }
-      
       // Filter out duplicates using the seen post IDs
       const uniqueNewPosts = processedPosts.filter((post: any) => {
         if (seenpost_ids.current.has(post.id)) {
-          console.log('VALIDATION: Filtering out duplicate post:', post.id);
           return false;
         }
         seenpost_ids.current.add(post.id);
@@ -251,30 +202,11 @@ const PostGrid: React.FC<PostGridProps> = ({
       });
       
       // Update submissions state
-      console.log('VALIDATION: Current submissions before update:', {
-        count: submissions.length,
-        ids: submissions.map(post => post.id)
-      });
-      
       if (reset) {
-        console.log('VALIDATION: Reset submissions with new posts - count:', uniqueNewPosts.length);
-        if (uniqueNewPosts.length > 0) {
-          console.log('VALIDATION: First post ID:', uniqueNewPosts[0].id);
-          console.log('VALIDATION: First post content:', uniqueNewPosts[0].content?.substring(0, 30));
-        }
         setSubmissions([...uniqueNewPosts]); // Create a new array to ensure state update
       } else {
-        console.log('VALIDATION: Added new unique posts to submissions');
         setSubmissions(prevSubmissions => [...prevSubmissions, ...uniqueNewPosts]);
       }
-      
-      // Debug check to ensure submissions state is updated correctly
-      setTimeout(() => {
-        console.log('VALIDATION: Submissions state after update:', {
-          count: submissions.length,
-          ids: submissions.map(post => post.id)
-        });
-      }, 100);
       
       // Update pagination state
       setHasMore(data.hasMore);
@@ -284,22 +216,9 @@ const PostGrid: React.FC<PostGridProps> = ({
       if (onStatsUpdate && data.stats) {
         onStatsUpdate(data.stats);
       }
-      
-      console.log('Updated submissions:', {
-        count: uniqueNewPosts.length,
-        hasMore: data.hasMore,
-        nextCursor: data.nextCursor
-      });
     } catch (err) {
-      console.error('Error fetching posts:', err);
-      
       // Add more detailed error logging
       if (err instanceof Error) {
-        console.error('Error details:', {
-          message: err.message,
-          name: err.name,
-          stack: err.stack
-        });
       }
       
       // Check for network errors
@@ -322,7 +241,6 @@ const PostGrid: React.FC<PostGridProps> = ({
 
   const fetchvote_optionsForPost = useCallback(async (post: any) => {
     try {
-      console.log(`Fetching vote options for post ${post.id} with tx_id ${post.tx_id}`);
       const response = await fetch(`${API_URL}/api/vote-options/${post.tx_id}`);
       
       if (!response.ok) {
@@ -330,7 +248,6 @@ const PostGrid: React.FC<PostGridProps> = ({
       }
       
       const vote_options = await response.json();
-      console.log(`Retrieved ${vote_options.length} vote options for post ${post.id}`, vote_options);
       
       // Update the post with the vote options
       setSubmissions(prevSubmissions => 
@@ -339,22 +256,11 @@ const PostGrid: React.FC<PostGridProps> = ({
         )
       );
     } catch (error) {
-      console.error(`Error fetching vote options for post ${post.id}:`, error);
     }
   }, []);
 
   const handleLoadMore = useCallback(() => {
-    console.log('Load more button clicked');
-    console.log('Current pagination state:', {
-      nextCursor,
-      hasMore,
-      isFetchingMore,
-      currentPostCount: submissions.length,
-      seenpost_ids: seenpost_ids.current.size
-    });
-    
     if (!hasMore || isFetchingMore) {
-      console.log('Cannot load more: hasMore =', hasMore, 'isFetchingMore =', isFetchingMore);
       return;
     }
     
@@ -371,43 +277,26 @@ const PostGrid: React.FC<PostGridProps> = ({
     const isFirstMount = !initialFetchMade.current;
     const filtersChanged = haveFiltersChanged();
     
-    console.log('PostGrid effect triggered:', { 
-      isFirstMount, 
-      filtersChanged,
-      currentFilters
-    });
-    
     // Only fetch if it's the first mount or filters have changed
     if (isFirstMount || filtersChanged) {
-      console.log('Fetching posts due to mount or filter change');
       initialFetchMade.current = true;
       fetchPosts(true);
-    } else {
-      console.log('Skipping fetch - no filter changes detected');
     }
     
     // Cleanup function
     return () => {
-      console.log('PostGrid component unmounting');
       isMounted.current = false;
     };
   }, [fetchPosts, haveFiltersChanged, currentFilters, fetchvote_optionsForPost]);
 
   // Add a separate effect to force an initial fetch when the component mounts
   useEffect(() => {
-    console.log('VALIDATION: Initial mount effect - forcing fetch');
     fetchPosts(true);
     // This effect should only run once
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    console.log('Pagination state updated:', {
-      nextCursor,
-      hasMore,
-      submissionsCount: submissions.length,
-      isFetchingMore
-    });
   }, [nextCursor, hasMore, submissions.length, isFetchingMore]);
 
   useEffect(() => {
@@ -421,17 +310,16 @@ const PostGrid: React.FC<PostGridProps> = ({
   }, [submissions]);
 
   const handlevote_optionLock = async (optionId: string, amount: number, duration: number) => {
-    if (!wallet.connected) {
+    // Check if wallet is connected
+    if (!wallet) {
       toast.error('Please connect your wallet first');
       return;
     }
 
-    if (wallet.balance < amount) {
-      toast.error('Insufficient balance');
-      return;
-    }
-
     try {
+      // Check balance - simplified approach
+      toast.loading('Checking wallet balance...');
+      
       setIsLocking(true);
       const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
         method: 'POST',
@@ -442,7 +330,7 @@ const PostGrid: React.FC<PostGridProps> = ({
           vote_option_id: optionId,
           amount,
           lock_duration: duration,
-          author_address: wallet.address,
+          author_address: user_id, // Use the user_id from props which should be the wallet address
         }),
       });
 
@@ -453,7 +341,6 @@ const PostGrid: React.FC<PostGridProps> = ({
       toast.success('Successfully locked BSV on vote option');
       fetchPosts(); // Refresh posts to show updated lock amounts
     } catch (error) {
-      console.error('Error locking BSV on vote option:', error);
       toast.error('Failed to lock BSV on vote option');
     } finally {
       setIsLocking(false);
@@ -463,29 +350,6 @@ const PostGrid: React.FC<PostGridProps> = ({
   // Render the component
   return (
     <div className="w-full">
-      {/* Debug info */}
-      <div className="bg-gray-800 p-4 mb-4 rounded-lg text-sm">
-        <h3 className="font-bold">Debug info:</h3>
-        <p>Posts Count: {submissions.length}</p>
-        <p>Loading: {loading.toString()}</p>
-        <p>Error: {error || 'none'}</p>
-        <p>Has More: {hasMore.toString()}</p>
-        <p>Next Cursor: {nextCursor || 'none'}</p>
-        <p>Filters: {JSON.stringify(currentFilters)}</p>
-        <p>Selected Tags: {selected_tags.length > 0 ? selected_tags.join(', ') : 'none'}</p>
-        <p>First Post ID: {submissions.length > 0 ? submissions[0].id : 'none'}</p>
-        
-        {/* Post details */}
-        {submissions.length > 0 && (
-          <div className="mt-2 border-t border-gray-700 pt-2">
-            <p className="font-bold">First Post Details:</p>
-            <pre className="bg-gray-900 p-2 rounded mt-1 overflow-auto text-xs" style={{ maxHeight: '200px' }}>
-              {JSON.stringify(submissions[0], null, 2)}
-            </pre>
-          </div>
-        )}
-      </div>
-
       {/* Main post grid */}
       <div className="w-full">
         {/* Loading state */}
@@ -549,7 +413,6 @@ const PostGrid: React.FC<PostGridProps> = ({
                           alt="Post image" 
                           className="w-full h-auto object-contain max-h-[500px]"
                           onError={(e) => {
-                            console.error('Image failed to load:', post.imageUrl);
                             e.currentTarget.style.display = 'none';
                           }}
                         />
@@ -588,11 +451,11 @@ const PostGrid: React.FC<PostGridProps> = ({
                             </span>
                           </div>
                           <div className="mt-3">
-                            <vote_optionLockInteraction 
+                            <VoteOptionLockInteraction 
                               optionId={option.id} 
                               onLock={handlevote_optionLock}
                               isLocking={isLocking}
-                              connected={wallet.connected}
+                              connected={!!wallet}
                             />
                           </div>
                         </div>

@@ -12,13 +12,14 @@ export interface ParsedContent {
   data: any;
 }
 
-export interface VoteOption {
-  id?: string;
-  post_txid: string;
-  option_text: string;
-  option_index: number;
-  created_at?: Date;
+export interface vote_option {
+  id: string;
+  post_id: string;
+  content: string;
+  index: number;
+  created_at: Date;
   updated_at?: Date;
+  question_id?: string;
 }
 
 export interface VoteQuestion {
@@ -35,44 +36,40 @@ export interface VoteQuestion {
 export interface Vote {
   options_hash: string;
   total_options: number;
-  options: VoteOption[];
+  options: vote_option[];
 }
 
 export interface LockLike {
   id?: string;
-  lock_txid: string;
-  target_txid: string;
-  lock_type: string;
-  action: LockAction;
-  block_height: number;
-  block_time: bigint;
+  tx_id?: string;
+  lock_amount: number;
+  lock_duration: number;
   created_at?: Date;
   updated_at?: Date;
+  post_id?: string;
 }
 
 export interface Post {
-    id?: string;
-    post_txid: string;
-    type?: string;
-    content: string;
-    block_time: bigint;
-    block_height?: number;
-    is_deleted?: boolean;
-    parent_post_txid?: string | null;
-    orig_post_txid?: string | null;
-    created_at?: Date;
-    updated_at?: Date;
-    protocol?: string;
+    id: string;
+    post_id: string;
+    type: string;
+    content: any;
+    block_time: Date;
+    sequence: number;
+    parent_sequence: number;
+    created_at: Date;
+    updated_at: Date;
+    protocol: string;
+    sender_address?: string | null;
+    block_height?: number | null;
+    tx_id?: string | null;
+    image?: Buffer | null;
     lock_likes?: LockLike[];
-    vote_options?: VoteOption[];
-    // Binary content fields
-    media_type?: string | null;
-    content_type?: string | null;
-    raw_image_data?: string | null;
-    image_metadata?: Record<string, any> | null;
+    vote_options?: vote_option[];
+    vote_question?: VoteQuestion | null;
 }
 
-export interface PostWithVoteOptions extends Omit<Post, 'lock_likes' | 'vote_options'> {
+export interface PostWithvote_options extends Post {
     vote_question: {
         id: string;
         post_id: string;
@@ -103,46 +100,16 @@ export interface PostWithVoteOptions extends Omit<Post, 'lock_likes' | 'vote_opt
     }[];
 }
 
-// New interfaces for the refactored DB clients
-
-export type LockAction = 'like' | 'unlike';
-
-export interface PostMetadata {
-    post_txid: string;
-    content: string;
-    is_deleted?: boolean;
-    parent_post_txid?: string;
-    orig_post_txid?: string;
-    vote_options?: string[];
-    // Binary content fields
-    content_type?: string;
-    media_type?: string;
-    raw_image_data?: string;
-    image_metadata?: Record<string, any>;
-    is_binary?: boolean;
-}
-
-export interface LockMetadata {
-    target_txid: string;
-    lock_type: string;
-    action?: string;
-}
-
 export interface ProcessedTransaction {
     id?: string;
     tx_id: string;  // Only required field
     block_height?: number;  // Maps to block_height in database
-    block_time?: bigint;    // Maps to block_time in database as BigInt
+    block_time?: number;    // Maps to block_time in database (BigInt in DB, Number in TS)
     type?: string;
     protocol?: string;
     metadata?: Record<string, any>;
     created_at?: Date;      // Maps to created_at in database
     updated_at?: Date;      // Maps to updated_at in database
-    // Binary content fields
-    content_type?: string;
-    media_type?: string;
-    raw_image_data?: string;
-    image_metadata?: Record<string, any>;
 }
 
 export interface JungleBusTransaction {
@@ -195,11 +162,6 @@ export interface ParsedTransaction {
     block_height?: number;
     block_time?: string;
     author_address?: string;
-    // Binary content fields
-    content_type?: string;
-    media_type?: string;
-    raw_image_data?: string;
-    image_metadata?: Record<string, any>;
 }
 
 export interface DecodedTransaction {
@@ -242,13 +204,6 @@ export interface LockProtocolData {
     options_hash?: string;
     tags?: string[];
     total_options?: number;
-    option_index?: number;
-    raw_image_data?: Buffer | null;
-    media_type?: string | null;
-    created_at?: Date | null;
-    is_locked?: boolean;
-    post_txid?: string;
-    author_address?: string;
 }
 
 export interface TransactionMetadata {

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import prisma from '../db';
+import prisma from '../db/prisma';
 import { logger } from '../utils/logger';
 import { DynamicTagGenerator } from '../services/dynamicTagGenerator.js';
 import { runTagGenerationJob } from '../jobs/tagGenerationJob.js';

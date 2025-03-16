@@ -1,264 +1,284 @@
-/**
- * Scanner Service
- * 
- * Handles scanning blockchain for transactions with the configured header
- */
-
-import { CONFIG } from './config.js';
-import logger from './logger.js';
-import { junglebus_service } from './junglebus_service.js';
-import { tx_parser } from './tx_parser.js';
-import { tx_repository } from './db/tx_repository.js';
-import type { TransactionOutput } from './tx_parser.js';
-import type { LockProtocolData } from '../shared/types.js';
-import chalk from 'chalk';
+import { JungleBusClient, ControlMessageStatusCode } from "@gorillapool/js-junglebus";
+import { TransactionParser } from "./parser";
+import { DbClient } from "./dbClient";
+import { CONFIG } from "./config";
+import { logger } from "../utils/logger";
 
 export class Scanner {
-  private isRunning: boolean = false;
-  private isWaiting: boolean = false;
-  
-  /**
-   * Displays formatted transaction output in a clean, readable way
-   * @param output Transaction output object
-   * @param index Output index
-   */
-  private display_formatted_output(output: TransactionOutput, index: number): void {
-    if (!output.isValid) {
-      return; // Skip invalid outputs entirely
-    }
-    
-    console.log(chalk.cyan(`------- OUTPUT ${index + 1} -------`));
-    
-    // Check for vote-related content
-    const isVoteQuestion = output.metadata?.is_vote === true && 
-                          (output.metadata?.total_options || index === 0);
-    const isVoteOption = output.metadata?.is_vote === true && 
-                         output.metadata?.option_index !== undefined && 
-                         !isVoteQuestion;
-    
-    // Extract content to display
-    const contentToDisplay = output.content || '';
-    
-    // Display content based on its type
-    if (contentToDisplay) {
-      if (isVoteQuestion) {
-        console.log(chalk.magenta('📊 VOTE QUESTION: ') + chalk.white(contentToDisplay));
-      } 
-      else if (isVoteOption) {
-        const optionIndex = output.metadata?.option_index || '?';
-        console.log(chalk.magenta(`⚪ OPTION ${optionIndex}: `) + chalk.white(contentToDisplay));
-      }
-      else {
-        console.log(chalk.green('📝 CONTENT: ') + chalk.white(contentToDisplay));
-      }
-    }
-    
-    // Display metadata excluding content fields that were already shown
-    if (output.metadata && Object.keys(output.metadata).length > 0) {
-      // Only show specific properties from metadata that we care about
-      const propertiesToShow: (keyof LockProtocolData)[] = [
-        'is_vote', 'is_locked', 'post_id', 'options_hash', 
-        'total_options', 'lock_amount', 'lock_duration',
-        'content_type', 'media_type', 'tags', 'option_index'
-      ];
-      
-      // Filter to only keys that exist in the metadata
-      const keysToDisplay = propertiesToShow.filter(key => 
-        output.metadata && 
-        output.metadata[key] !== undefined && 
-        output.metadata[key] !== null
-      );
-      
-      if (keysToDisplay.length > 0) {
-        console.log(chalk.yellow('Metadata:'));
-        
-        keysToDisplay.forEach(key => {
-          if (output.metadata) {
-            const value = output.metadata[key];
-            
-            // Format different value types
-            let displayValue = '';
-            if (typeof value === 'object' && value !== null) {
-              displayValue = JSON.stringify(value);
-            } else if (typeof value === 'boolean') {
-              displayValue = value ? 'true' : 'false';
-            } else if (value === null) {
-              displayValue = 'null';
-            } else {
-              displayValue = String(value);
-            }
-            
-            console.log(chalk.yellow(`  ${String(key)}: `) + chalk.white(displayValue));
-          }
-        });
-      }
-    }
-  }
-  
-  constructor() {
-    logger.info('Scanner initialized');
-  }
-  
-  /**
-   * Start the scanner from a specified block height
-   * Using the default start block from config if not specified
-   */
-  async start(fromBlock?: number): Promise<void> {
-    if (this.isRunning) {
-      logger.warn('Scanner is already running');
-      return;
-    }
-    
-    // Use provided block height or default from config
-    const startBlock = fromBlock ?? CONFIG.DEFAULT_START_BLOCK;
-    
-    this.isRunning = true;
-    logger.info(`Starting scanner from block ${startBlock}`);
-    
-    try {
-      // Subscribe to junglebus using the configured subscription ID
-      await junglebus_service.subscribe(
-        startBlock,
-        // Process transactions
-        async (tx: any) => {
-          try {
-            const txId = tx?.tx?.h || tx?.hash || tx?.id || tx?.tx_id;
-            
-            if (!txId) {
-              logger.warn(`Received transaction with no ID, skipping`);
-              return;
-            }
-            
-            await this.process_transaction(txId);
-          } catch (error: any) {
-            logger.error(`Error processing transaction: ${error.message}`);
-          }
-        },
-        // Process status updates
-        async (status: any) => {
-          // Skip verbose logging
-          if (status.statusCode === 200 && status.transactions === 0) return;
-          if (status.statusCode === 199) return;
-          
-          // Log important status updates
-          if (status.statusCode === 300) {
-            logger.warn(`Blockchain reorg detected at block ${status.block}`);
-          } else if (status.statusCode === 400) {
-            logger.error(`Error processing block ${status.block}: ${status.error || 'Unknown error'}`);
-          } else if (status.statusCode === 100 && status.status === 'waiting') {
-            if (!this.isWaiting) {
-              logger.info('Scanner caught up with blockchain, waiting for new blocks');
-              this.isWaiting = true;
-            }
-          } else if (status.statusCode === 200 && status.transactions > 0) {
-            logger.info(`Block ${status.block} processed with ${status.transactions} transactions`);
-            this.isWaiting = false;
-          }
-        },
-        // Handle errors
-        async (error: Error, txId?: string) => {
-          if (txId) {
-            logger.error(`Error processing transaction ${txId}: ${error.message}`);
-          } else {
-            logger.error(`Scanner error: ${error.message}`);
-          }
-        }
-      );
-      
-      logger.info('Scanner subscription established');
-    } catch (error) {
-      this.isRunning = false;
-      logger.error(`Failed to start scanner: ${(error as Error).message}`);
-      throw error;
-    }
-  }
-  
-  /**
-   * Process a single transaction by ID
-   * @param txId Transaction ID to process
-   */
-  async process_transaction(txId: string): Promise<void> {
-    try {
-      // Check if the transaction is already saved
-      const isAlreadySaved = await tx_repository.isTransactionSaved(txId);
-      if (isAlreadySaved) {
-        logger.debug(`Transaction ${txId} already saved, skipping`);
-        return;
-      }
-      
-      // Fetch and parse the transaction
-      const parsedTx = await tx_parser.parse_transaction(txId);
-      
-      if (!parsedTx || !parsedTx.outputs || parsedTx.outputs.length === 0) {
-        return; // Skip logging for invalid transactions
-      }
-      
-      // Get valid outputs that contain lockd.app data
-      const validOutputs = parsedTx.outputs.filter(output => output.isValid);
-      const lockdOutputs = validOutputs.filter(output => 
-        output.type === 'lockd'
-      );
+    private readonly start_block = 0;  // Start earlier to catch all target blocks
+    private readonly jungle_bus: JungleBusClient;
+    private readonly parser: TransactionParser;
+    private readonly dbClient: DbClient;
+    private pending_transactions: string[] = [];
+    private processing_batch = false;
+    private readonly batch_size = 5; // Process 5 transactions at a time
+    private readonly batch_interval = 5000; // 5 seconds between batches
 
-      // Only process if there are lockd.app related outputs
-      if (lockdOutputs.length === 0) {
-        return;
-      }
-      
-      // Save the transaction to the database
-      await tx_repository.saveProcessedTransaction(parsedTx);
-      
-      // Display transaction information
-      console.log(`\n${chalk.green('='.repeat(50))}`);
-      console.log(chalk.green(`📄 TRANSACTION: ${txId}`));
-      
-      if (parsedTx.timestamp) {
-        console.log(chalk.green(`📅 TIMESTAMP: ${parsedTx.timestamp}`));
-      }
-      
-      if (parsedTx.blockHeight) {
-        console.log(chalk.green(`🧱 BLOCK: ${parsedTx.blockHeight}`));
-      }
-      
-      // Determine if this is a vote transaction
-      const isVote = lockdOutputs.some(output => output.metadata?.is_vote === true);
-      if (isVote) {
-        console.log(chalk.green(`📊 VOTE TRANSACTION with ${lockdOutputs.length} outputs`));
-      } else {
-        console.log(chalk.green(`⭐ Contains ${lockdOutputs.length} Lockd.app outputs`));
-      }
-      
-      console.log(chalk.green('='.repeat(50)));
-      
-      // Display each lockd output
-      lockdOutputs.forEach((output, index) => {
-        this.display_formatted_output(output, index);
-      });
-      
-      console.log(chalk.green('='.repeat(50)) + '\n');
-    } catch (error) {
-      logger.error(`Error processing transaction ${txId}: ${(error as Error).message}`);
+    constructor(parser: TransactionParser, dbClient: DbClient) {
+        this.parser = parser;
+        this.dbClient = dbClient;
+        this.jungle_bus = new JungleBusClient("junglebus.gorillapool.io", {
+            useSSL: true,
+            onConnected: (ctx) => {
+                logger.info("🔌 JungleBus CONNECTED", ctx);
+            },
+            onConnecting: (ctx) => {
+                logger.info("🔄 JungleBus CONNECTING", ctx);
+            },
+            onDisconnected: (ctx) => {
+                logger.info("❌ JungleBus DISCONNECTED", ctx);
+            },
+            onError: (ctx) => {
+                logger.error("❌ JungleBus ERROR", ctx);
+            },
+        });
+
+        // Start the batch processing loop
+        this.processBatches();
     }
-  }
-  
-  /**
-   * Stop the scanner
-   */
-  async stop(): Promise<void> {
-    if (!this.isRunning) {
-      logger.warn('Scanner is not running');
-      return;
+
+    private async processBatches() {
+        while (true) {
+            try {
+                if (this.pending_transactions.length > 0 && !this.processing_batch) {
+                    this.processing_batch = true;
+                    
+                    // Take a batch of transactions
+                    const batch = this.pending_transactions.splice(0, this.batch_size);
+                    
+                    logger.info(`🔄 Processing batch of ${batch.length} transactions`, {
+                        batch_size: batch.length,
+                        remaining: this.pending_transactions.length
+                    });
+                    
+                    // Process each transaction in the batch
+                    const promises = batch.map(tx_id => {
+                        return this.parser.parseTransaction(tx_id).catch(error => {
+                            logger.error('❌ Error processing transaction in batch', {
+                                tx_id,
+                                error: error instanceof Error ? error.message : 'Unknown error'
+                            });
+                        });
+                    });
+                    
+                    // Wait for all transactions to be processed with a timeout
+                    const timeoutPromise = new Promise(resolve => setTimeout(resolve, 30000)); // 30 second timeout
+                    await Promise.race([Promise.all(promises), timeoutPromise]);
+                    
+                    this.processing_batch = false;
+                }
+            } catch (error) {
+                logger.error('❌ Error in batch processing loop', {
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+                this.processing_batch = false;
+            }
+            
+            // Wait before processing the next batch
+            await new Promise(resolve => setTimeout(resolve, this.batch_interval));
+        }
+    }
+
+    private async handleTransaction(tx: any): Promise<void> {
+        // Try different ways to get the tx_id
+        const tx_id = tx?.transaction?.hash || tx?.hash || tx?.id || tx?.tx_id;
+        if (!tx_id) {
+            return;
+        }
+
+        const block = tx?.block?.height || tx?.height || tx?.block_height;
+
+        // Clear transaction detection log
+        logger.info('🔍 TRANSACTION DETECTED', {
+            tx_id,
+            block,
+            type: 'incoming'
+        });
+
+        // Add transaction to the pending list
+        this.pending_transactions.push(tx_id);
+    }
+
+    private async handleStatus(status: any): Promise<void> {
+        // Only log block completion and waiting status
+        if (status.status_code === ControlMessageStatusCode.WAITING) {
+            logger.info("⏳ Waiting for new blocks", { current_block: status.block });
+        } else if (status.status_code === 199) {
+            logger.info("✓ Block scanned", { block: status.block });
+        }
+    }
+
+    private handleError(error: any): void {
+        logger.error("❌ SUBSCRIPTION ERROR", error);
+    }
+
+    private async fetchSubscriptionDetails() {
+        const subscription_id = process.env.JB_SUBSCRIPTION_ID || CONFIG.JB_SUBSCRIPTION_ID;
+        try {
+            const response = await fetch(`${this.jungle_bus.url}/v1/subscription/${subscription_id}`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            logger.info("📋 SUBSCRIPTION DETAILS", { data });
+            return data;
+        } catch (error) {
+            logger.warn("⚠️ Failed to fetch subscription details", {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                subscription_id
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Get the current block height from the database
+     * @returns The current block height or null if not available
+     */
+    public async getCurrentBlockHeight(): Promise<number | null> {
+        try {
+            // Try to get the block height from the database
+            const dbHeight = await this.dbClient.get_current_block_height();
+            if (dbHeight) {
+                return dbHeight;
+            }
+            
+            // If database call fails, use the default start block from config
+            logger.info(`Using default start block from config: ${CONFIG.DEFAULT_START_BLOCK}`);
+            return CONFIG.DEFAULT_START_BLOCK;
+        } catch (error) {
+            logger.error('Error getting current block height', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            
+            // Return the default start block as a fallback
+            logger.info(`Using default start block as fallback: ${CONFIG.DEFAULT_START_BLOCK}`);
+            return CONFIG.DEFAULT_START_BLOCK;
+        }
+    }
+
+    public async start(): Promise<void> {
+        try {
+            const subscription_id = process.env.JB_SUBSCRIPTION_ID || CONFIG.JB_SUBSCRIPTION_ID;
+            logger.info(`🚀 Starting scanner from block ${this.start_block} with subscription ID ${subscription_id}`);
+            
+            // If start_block is 0, try to get the latest block height from the database
+            let start_block = this.start_block;
+            if (start_block === 0) {
+                const latestBlockHeight = await this.getCurrentBlockHeight();
+                if (latestBlockHeight) {
+                    start_block = latestBlockHeight;
+                    logger.info(`Using latest block height from database: ${start_block}`);
+                } else {
+                    // Default to a reasonable starting point if we can't get the latest height
+                    start_block = CONFIG.DEFAULT_START_BLOCK;
+                    logger.info(`Using default start block: ${start_block}`);
+                }
+            }
+            
+            try {
+                // Define callback functions
+                const onPublish = (tx: any) => {
+                    this.handleTransaction(tx);
+                };
+                
+                const onStatus = (message: any) => {
+                    if (message.statusCode === ControlMessageStatusCode.BLOCK_DONE) {
+                        logger.info("✓ Block scanned", { block: message.block });
+                    } else if (message.statusCode === ControlMessageStatusCode.WAITING) {
+                        logger.info("⏳ Waiting for new blocks", { current_block: message.block });
+                    } else if (message.statusCode === ControlMessageStatusCode.REORG) {
+                        logger.info("🔄 REORG TRIGGERED", message);
+                    } else if (message.statusCode === ControlMessageStatusCode.ERROR) {
+                        logger.error("❌ JungleBus Status Error", message);
+                    }
+                };
+                
+                const onError = (err: any) => {
+                    logger.error("❌ JungleBus Error", err);
+                };
+                
+                const onMempool = (tx: any) => {
+                    this.handleTransaction(tx);
+                };
+                
+                // Subscribe to the JungleBus using the format from the example
+                await this.jungle_bus.Subscribe(
+                    subscription_id,
+                    start_block,
+                    onPublish,
+                    onStatus,
+                    onError,
+                    onMempool
+                );
+                
+                logger.info(`Scanner started successfully from block ${start_block}`);
+            } catch (jungleBusError) {
+                // Handle JungleBus connection errors gracefully
+                logger.error('JungleBus connection error', {
+                    error: jungleBusError instanceof Error ? jungleBusError.message : 'Unknown error',
+                    subscription_id
+                });
+                
+                logger.info('Scanner will continue to run without JungleBus connection');
+                
+                // Start a polling loop to check for new transactions periodically
+                this.startPollingLoop();
+            }
+        } catch (error) {
+            logger.error('Failed to start scanner', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            throw error;
+        }
     }
     
-    try {
-      await junglebus_service.unsubscribe();
-      this.isRunning = false;
-      logger.info('Scanner stopped');
-    } catch (error) {
-      logger.error(`Failed to stop scanner: ${(error as Error).message}`);
-      throw error;
+    /**
+     * Start a polling loop to check for new transactions periodically
+     * This is a fallback when JungleBus connection fails
+     */
+    private async startPollingLoop() {
+        logger.info('Starting polling loop for transactions');
+        
+        // Poll every 30 seconds
+        const POLL_INTERVAL = 30000;
+        
+        while (true) {
+            try {
+                logger.info('Polling for new transactions');
+                
+                // Wait for the next poll interval
+                await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+            } catch (error) {
+                logger.error('Error in polling loop', {
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+                
+                // Wait before trying again
+                await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+            }
+        }
     }
-  }
+
+    public async stop(): Promise<void> {
+        try {
+            logger.info(' STOPPING SCANNER');
+            await this.jungle_bus.Disconnect();
+            logger.info(' SCANNER STOPPED');
+        } catch (error) {
+            logger.error(' Failed to stop scanner', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            throw error;
+        }
+    }
 }
 
-// Export singleton instance
-export const scanner = new Scanner();
+// Check if this file is being run directly
+if (process.env.NODE_ENV !== 'test' && import.meta.url === new URL(import.meta.url).href) {
+    const parser = new TransactionParser(new DbClient());
+    const dbClient = new DbClient();
+    const scanner = new Scanner(parser, dbClient);
+    scanner.start().catch(console.error);
+}

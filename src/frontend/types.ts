@@ -32,7 +32,7 @@ export interface Post {
   threshold: number;
   isTop10Percent: boolean;
   isTop3: boolean;
-  lock_likes: LockLike[];
+  locklikes: LockLike[];
   content: string;
   unlock_height: number | null;
   block_height: number;

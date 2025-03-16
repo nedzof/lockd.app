@@ -3,7 +3,6 @@ import { useState, useMemo, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { FiTrendingUp, FiClock, FiHeart, FiStar } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
-import TestApiComponent from '../components/TestApiComponent';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
 import TagFilter from '../components/TagFilter';
@@ -87,7 +86,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
     // Memoize the entire PostGrid component to prevent unnecessary re-renders
     const memoizedPostGrid = useMemo(() => {
-      console.log('Creating memoized PostGrid instance');
       return (
         <PostGrid 
           onStatsUpdate={handleStatsUpdate}
@@ -208,8 +206,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           {/* Tag Filter */}
           <TagFilter
             selected_tags={selected_tags}
-            onTagsChange={setselected_tags}
-            user_id={bsvAddress || undefined}
+            onTagSelect={setselected_tags}
           />
         </div>
 
@@ -224,8 +221,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
             />
           </div>
         )}
-        
-        <TestApiComponent />
       </div>
     );
   };

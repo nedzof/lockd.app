@@ -26,7 +26,7 @@ export interface Post {
   creator: {
     handle: string;
   };
-  lock_likes: LockLike[];
+  locklikes: LockLike[];
 }
 
 export interface PostExtended {
@@ -50,7 +50,7 @@ export interface PostExtended {
   threshold: number;
   is_top_10_percent: boolean;
   is_top_3: boolean;
-  lock_likes: LockLike[];
+  locklikes: LockLike[];
   content: string;
   unlock_height?: number;
   block_height?: number;
@@ -82,7 +82,7 @@ export interface HODLTransaction {
   description?: string;
   amount: number;
   created_at: Date;
-  lock_likes: LockLike[];
+  locklikes: LockLike[];
   replies: HODLTransaction[];
   is_vote?: boolean;
   content_type?: string;

@@ -34,7 +34,7 @@ export default function LockLikeDrawer({ transaction }: LockLikeDrawerProps) {
         onClick={() => setIsOpen(!isOpen)}
         className="text-gray-600 dark:text-gray-400 hover:text-orange-500 dark:hover:text-orange-400 ml-2"
       >
-        {transaction.lock_likes.length}
+        {transaction.locklikes.length}
       </button>
 
       {isOpen && (
@@ -53,7 +53,7 @@ export default function LockLikeDrawer({ transaction }: LockLikeDrawerProps) {
             </div>
 
             <div className="max-h-96 overflow-y-auto">
-              {transaction.lock_likes
+              {transaction.locklikes
                 .slice()
                 .sort((a, b) => b.amount - a.amount)
                 .map((locklike) => (

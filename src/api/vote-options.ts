@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import prisma from '../db';
+import prisma from '../db/prisma';
 import { logger } from '../utils/logger';
 
 const router = express.Router();
@@ -53,8 +53,7 @@ router.get('/:tx_id', async (req: Request, res: Response) => {
         post_id: post.id
       },
       include: {
-        post: true,
-        lock_likes: true
+        lockLikes: true
       }
     });
 
@@ -79,8 +78,7 @@ router.get('/:tx_id', async (req: Request, res: Response) => {
             created_at: new Date()
           },
           include: {
-            post: true,
-            lock_likes: true
+            lockLikes: true
           }
         });
         createdOptions.push(newOption);
@@ -91,7 +89,7 @@ router.get('/:tx_id', async (req: Request, res: Response) => {
         return {
           ...option,
           totalLocked: 0,
-          lock_likes: undefined // Don't expose the individual lock likes
+          lockLikes: undefined // Don't expose the individual lock likes
         };
       });
       
@@ -115,11 +113,11 @@ router.get('/:tx_id', async (req: Request, res: Response) => {
 
     // Calculate total locked amount for each option
     const vote_optionsWithTotals = vote_options.map(option => {
-      const totalLocked = option.lock_likes.reduce((sum, lock) => sum + lock.amount, 0);
+      const totalLocked = option.lockLikes.reduce((sum, lock) => sum + lock.amount, 0);
       return {
         ...option,
         totalLocked: totalLocked,
-        lock_likes: undefined // Don't expose the individual lock likes
+        lockLikes: undefined // Don't expose the individual lock likes
       };
     });
 
