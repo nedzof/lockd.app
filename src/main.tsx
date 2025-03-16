@@ -5,7 +5,9 @@ import App from './frontend/pages/App';
 import { WalletProvider } from './frontend/providers/WalletProvider';
 import './index.css';
 
-// Register service worker for push notifications
+// Service worker registration is disabled for now
+// Uncomment this if you want to enable push notifications in the future
+/*
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js')
@@ -17,6 +19,7 @@ if ('serviceWorker' in navigator) {
       });
   });
 }
+*/
 
 // Create a root component to properly organize providers
 const Root = () => {
