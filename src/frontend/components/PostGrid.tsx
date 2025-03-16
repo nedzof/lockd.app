@@ -598,50 +598,26 @@ const PostGrid: React.FC<PostGridProps> = ({
                 {/* Vote Options Section */}
                 {post.is_vote && post.vote_options && post.vote_options.length > 0 && (
                   <div className="mt-2 p-4 pt-0">
-                    <h3 className="font-bold text-lg mb-3 text-gray-200 flex items-center">
-                      <FiBarChart2 className="mr-2" /> Vote Options
-                    </h3>
-                    
                     {/* Calculate total locked amount for percentages */}
                     {(() => {
                       const totalLocked = post.vote_options.reduce((sum, option) => sum + option.lock_amount, 0);
                       
                       return (
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                           {post.vote_options.map((option: vote_option) => {
                             const percentage = calculatePercentage(option.lock_amount, totalLocked);
                             
                             return (
-                              <div key={option.id} className="bg-white/5 p-3 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
+                              <div key={option.id} className="bg-white/5 p-2 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
                                 <div className="grid grid-cols-12 gap-2 items-center">
                                   {/* Option content - left side */}
-                                  <div className="col-span-4 md:col-span-3">
+                                  <div className="col-span-7 md:col-span-8">
                                     <p className="text-base font-semibold text-white truncate">{option.content}</p>
                                   </div>
                                   
-                                  {/* Progress bar - middle */}
-                                  <div className="col-span-5 md:col-span-6">
-                                    <div className="flex items-center w-full">
-                                      <div className="flex-grow">
-                                        <div className="w-full bg-gray-800/50 rounded-full h-3">
-                                          <div 
-                                            className="bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] h-3 rounded-full" 
-                                            style={{ width: `${percentage}%` }}
-                                          ></div>
-                                        </div>
-                                      </div>
-                                      <span className="ml-2 text-sm font-bold text-[#00ffa3] min-w-[40px] text-right">{percentage}%</span>
-                                    </div>
-                                    
-                                    {/* Lock info below progress bar */}
-                                    <div className="flex items-center justify-between text-xs text-gray-400 mt-1">
-                                      <span className="flex items-center">
-                                        <FiLock className="mr-1" /> {formatBSV(option.lock_amount)} BSV
-                                      </span>
-                                      <span className="flex items-center">
-                                        <FiZap className="mr-1" /> {option.lock_duration} days
-                                      </span>
-                                    </div>
+                                  {/* Percentage - middle */}
+                                  <div className="col-span-2 md:col-span-1 text-center">
+                                    <span className="text-sm font-bold text-[#00ffa3]">{percentage}%</span>
                                   </div>
                                   
                                   {/* Lock button - right side */}

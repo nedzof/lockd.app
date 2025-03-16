@@ -34,14 +34,11 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
           className="w-full inline-flex items-center justify-center px-2 py-1 text-xs font-medium rounded-md shadow-sm text-gray-200 bg-white/10 hover:bg-white/15 border border-gray-700/30 focus:outline-none focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isLocking ? (
-            <>
-              <FiLoader className="animate-spin mr-1" size={12} /> Locking...
-            </>
+            <FiLoader className="animate-spin" size={12} />
           ) : (
-            <>
-              <FiLock className="mr-1" size={12} /> Lock BSV
-            </>
+            <FiLock size={12} />
           )}
+          <span className="ml-1">Lock</span>
         </button>
       ) : (
         <>
