@@ -50,42 +50,31 @@ export const subscribe = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
 
-    // Create the push_subscription table if it doesn't exist
-    try {
-      await prisma.$executeRaw`
-        CREATE TABLE IF NOT EXISTS push_subscription (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id TEXT NOT NULL,
-          endpoint TEXT NOT NULL,
-          p256dh TEXT NOT NULL,
-          auth TEXT NOT NULL,
-          threshold_value FLOAT NOT NULL DEFAULT 1,
-          created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-          UNIQUE(user_id, endpoint)
-        );
-        CREATE INDEX IF NOT EXISTS push_subscription_user_id_idx ON push_subscription(user_id);
-      `;
-    } catch (dbError) {
-      logger.error('Error creating push_subscription table:', dbError);
-      // Continue even if there's an error, as the table might already exist
-    }
-
-    // Store subscription in database using raw SQL
-    const result = await prisma.$executeRaw`
-      INSERT INTO push_subscription (user_id, endpoint, p256dh, auth, threshold_value)
-      VALUES (${userId}, ${typedSubscription.endpoint}, ${typedSubscription.keys.p256dh}, ${typedSubscription.keys.auth}, ${thresholdValue || 1})
-      ON CONFLICT (user_id, endpoint) 
-      DO UPDATE SET 
-        p256dh = ${typedSubscription.keys.p256dh},
-        auth = ${typedSubscription.keys.auth},
-        threshold_value = ${thresholdValue || 1},
-        updated_at = NOW()
-      RETURNING *;
-    `;
+    // Store subscription in database using Prisma
+    const newSubscription = await prisma.push_subscription.upsert({
+      where: {
+        user_id_endpoint: {
+          user_id: userId,
+          endpoint: typedSubscription.endpoint
+        }
+      },
+      update: {
+        p256dh: typedSubscription.keys.p256dh,
+        auth: typedSubscription.keys.auth,
+        threshold_value: thresholdValue || 1,
+        updated_at: new Date()
+      },
+      create: {
+        user_id: userId,
+        endpoint: typedSubscription.endpoint,
+        p256dh: typedSubscription.keys.p256dh,
+        auth: typedSubscription.keys.auth,
+        threshold_value: thresholdValue || 1
+      }
+    });
 
     logger.info(`User ${userId} subscribed to push notifications with threshold ${thresholdValue}`);
-    return res.status(201).json({ success: true });
+    return res.status(201).json({ success: true, subscription: newSubscription });
   } catch (error) {
     logger.error('Error subscribing to push notifications:', error);
     return res.status(500).json({ error: 'Failed to subscribe to push notifications' });
@@ -103,11 +92,13 @@ export const unsubscribe = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
 
-    // Remove subscription from database using raw SQL
-    await prisma.$executeRaw`
-      DELETE FROM push_subscription
-      WHERE user_id = ${userId} AND endpoint = ${endpoint};
-    `;
+    // Remove subscription from database using Prisma
+    await prisma.push_subscription.deleteMany({
+      where: {
+        user_id: userId,
+        endpoint: endpoint
+      }
+    });
 
     logger.info(`User ${userId} unsubscribed from push notifications`);
     return res.status(200).json({ success: true });
@@ -128,12 +119,16 @@ export const updateThreshold = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
 
-    // Update threshold for all subscriptions of this user using raw SQL
-    await prisma.$executeRaw`
-      UPDATE push_subscription
-      SET threshold_value = ${thresholdValue}, updated_at = NOW()
-      WHERE user_id = ${userId};
-    `;
+    // Update threshold for all subscriptions of this user using Prisma
+    await prisma.push_subscription.updateMany({
+      where: {
+        user_id: userId
+      },
+      data: {
+        threshold_value: thresholdValue,
+        updated_at: new Date()
+      }
+    });
 
     logger.info(`User ${userId} updated notification threshold to ${thresholdValue}`);
     return res.status(200).json({ success: true });
@@ -148,14 +143,21 @@ export const updateThreshold = async (req: Request, res: Response) => {
  */
 export const sendNotification = async (userId: string, title: string, body: string, url?: string) => {
   try {
-    // Get all subscriptions for this user using raw SQL
-    const subscriptions = await prisma.$queryRaw`
-      SELECT id, endpoint, p256dh, auth, threshold_value
-      FROM push_subscription
-      WHERE user_id = ${userId};
-    `;
+    // Get all subscriptions for this user using Prisma
+    const subscriptions = await prisma.push_subscription.findMany({
+      where: {
+        user_id: userId
+      },
+      select: {
+        id: true,
+        endpoint: true,
+        p256dh: true,
+        auth: true,
+        threshold_value: true
+      }
+    });
 
-    if (!subscriptions || (subscriptions as any[]).length === 0) {
+    if (!subscriptions || subscriptions.length === 0) {
       logger.info(`No push subscriptions found for user ${userId}`);
       return;
     }
@@ -167,7 +169,7 @@ export const sendNotification = async (userId: string, title: string, body: stri
     });
 
     // Send notification to each subscription
-    const sendPromises = (subscriptions as any[]).map(async (subscription) => {
+    const sendPromises = subscriptions.map(async (subscription) => {
       try {
         await webpush.sendNotification({
           endpoint: subscription.endpoint,
@@ -180,10 +182,11 @@ export const sendNotification = async (userId: string, title: string, body: stri
       } catch (error: any) {
         // If subscription is expired or invalid, remove it
         if (error.statusCode === 404 || error.statusCode === 410) {
-          await prisma.$executeRaw`
-            DELETE FROM push_subscription
-            WHERE id = ${subscription.id};
-          `;
+          await prisma.push_subscription.delete({
+            where: {
+              id: subscription.id
+            }
+          });
           logger.info(`Removed invalid subscription for user ${userId}`);
         } else {
           logger.error(`Error sending notification to user ${userId}:`, error);

@@ -10,11 +10,14 @@ async function checkThresholds() {
   try {
     logger.info('Running threshold notification check');
     
-    // Get all active push subscriptions
-    const subscriptions = await prisma.$queryRaw`
-      SELECT DISTINCT user_id, threshold_value
-      FROM push_subscription;
-    ` as { user_id: string; threshold_value: number }[];
+    // Get all active push subscriptions using Prisma
+    const subscriptions = await prisma.push_subscription.findMany({
+      distinct: ['user_id'],
+      select: {
+        user_id: true,
+        threshold_value: true
+      }
+    });
     
     if (!subscriptions || subscriptions.length === 0) {
       logger.info('No push subscriptions found');
@@ -28,25 +31,60 @@ async function checkThresholds() {
       const { user_id, threshold_value } = subscription;
       
       // Find posts that have reached the threshold since the last check
-      const recentPosts = await prisma.$queryRaw`
-        SELECT p.id, p.content, SUM(l.amount) as total_locked
-        FROM post p
-        JOIN lock_like l ON p.id = l.post_id
-        WHERE l.created_at > NOW() - INTERVAL '1 hour'
-        GROUP BY p.id, p.content
-        HAVING SUM(l.amount) >= ${threshold_value}
-      ` as { id: string; content: string; total_locked: number }[];
+      // Using Prisma's groupBy feature
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
       
-      if (recentPosts.length > 0) {
-        logger.info(`Found ${recentPosts.length} posts that reached threshold ${threshold_value} for user ${user_id}`);
+      // First get post IDs with lock amounts that meet the threshold
+      const postAggregations = await prisma.lock_like.groupBy({
+        by: ['post_id'],
+        where: {
+          created_at: {
+            gte: oneHourAgo
+          }
+        },
+        having: {
+          amount: {
+            _sum: {
+              gte: threshold_value
+            }
+          }
+        },
+        _sum: {
+          amount: true
+        }
+      });
+      
+      // Then get the actual post details for those IDs
+      if (postAggregations.length > 0) {
+        const postIds = postAggregations.map(agg => agg.post_id);
         
-        // Send notification for each post
-        for (const post of recentPosts) {
-          const title = 'Threshold Alert';
-          const body = `A post has reached ${post.total_locked} BSV: "${post.content.substring(0, 50)}${post.content.length > 50 ? '...' : ''}"`;
-          const url = `/posts/${post.id}`;
+        const recentPosts = await prisma.post.findMany({
+          where: {
+            id: {
+              in: postIds
+            }
+          },
+          select: {
+            id: true,
+            content: true
+          }
+        });
+        
+        if (recentPosts.length > 0) {
+          logger.info(`Found ${recentPosts.length} posts that reached threshold ${threshold_value} for user ${user_id}`);
           
-          await sendNotification(user_id, title, body, url);
+          // Send notification for each post
+          for (const post of recentPosts) {
+            // Find the corresponding aggregation to get the total locked amount
+            const postAgg = postAggregations.find(agg => agg.post_id === post.id);
+            const totalLocked = postAgg?._sum.amount || 0;
+            
+            const title = 'Threshold Alert';
+            const body = `A post has reached ${totalLocked} BSV: "${post.content.substring(0, 50)}${post.content.length > 50 ? '...' : ''}"`;
+            const url = `/posts/${post.id}`;
+            
+            await sendNotification(user_id, title, body, url);
+          }
         }
       }
     }
