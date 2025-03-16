@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "name": "lockd-app",
   "builds": [
     {
       "src": "api/**/*.ts",
@@ -9,7 +10,8 @@
       "src": "package.json",
       "use": "@vercel/static-build",
       "config": {
-        "distDir": "dist"
+        "distDir": "dist",
+        "buildCommand": "npm run vercel-build"
       }
     }
   ],
@@ -25,5 +27,8 @@
   ],
   "env": {
     "NODE_ENV": "production"
+  },
+  "github": {
+    "silent": true
   }
 } 
