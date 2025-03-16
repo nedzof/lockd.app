@@ -13,7 +13,7 @@ interface ThresholdSettingsProps {
   walletAddress?: string;
 }
 
-const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected }) => {
+const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, walletAddress }) => {
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [milestoneThreshold, setMilestoneThreshold] = useState(() => {
@@ -29,7 +29,8 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected }) => {
   const getUserIdentifier = (): string | null => {
     const userId = localStorage.getItem('user_id');
     if (userId) return userId;
-    return connected ? 'connected-user' : null;
+    // Use the actual wallet address passed from props when connected
+    return connected && walletAddress ? walletAddress : null;
   };
   
   // Check notification permission and subscription status on mount
@@ -217,26 +218,37 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected }) => {
           }
           
           // Send subscription to server
-          const response = await axios.post(`${API_BASE_URL}/notifications/subscribe`, {
-            user_id: userId,
-            subscription: subscription.toJSON(),
-            threshold_value: milestoneThreshold
-          }, {
-            timeout: 8000 // 8 second timeout
-          });
-          
-          if (response.data.success) {
-            console.log('Successfully subscribed to notifications');
-            
-            // Make a visible notification to confirm subscription
-            new Notification('Notifications Enabled', {
-              body: `You will be notified when posts reach ${milestoneThreshold} BSV.`,
-              icon: '/favicon.ico'
+          try {
+            const response = await axios.post(`${API_BASE_URL}/notifications/subscribe`, {
+              user_id: userId,
+              subscription: subscription.toJSON(),
+              threshold_value: milestoneThreshold
+            }, {
+              timeout: 8000 // 8 second timeout
             });
             
-            return true;
-          } else {
-            console.error('Server did not accept subscription');
+            if (response.data.success) {
+              console.log('Successfully subscribed to notifications');
+              
+              // Make a visible notification to confirm subscription
+              new Notification('Notifications Enabled', {
+                body: `You will be notified when posts reach ${milestoneThreshold} BSV.`,
+                icon: '/favicon.ico'
+              });
+              
+              return true;
+            } else {
+              console.error('Server did not accept subscription', response.data);
+              return false;
+            }
+          } catch (err) {
+            console.error('Error creating push subscription:', err);
+            // Log more detailed error information
+            if (err && typeof err === 'object' && 'response' in err) {
+              const axiosError = err as { response?: { status?: number, data?: any } };
+              console.error(`Status code: ${axiosError.response?.status}, Error details:`, axiosError.response?.data);
+            }
+            setApiAvailable(false);
             return false;
           }
         } catch (err) {
@@ -353,27 +365,27 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected }) => {
         <>
           {/* Backdrop - closes modal when clicked */}
           <div 
-            className="fixed inset-0 bg-black bg-opacity-30 z-[999]" 
+            className="fixed inset-0 bg-black bg-opacity-40 backdrop-blur-sm z-[999] transition-opacity duration-300" 
             onClick={() => setIsOpen(false)}
           ></div>
           
           {/* Modal content - positioned under the threshold button */}
           <div
-            className="absolute top-6 right-0 w-80 bg-[#1C1C2E] rounded-md shadow-xl border border-gray-800/30 z-[1000]"
+            className="absolute top-6 right-0 w-80 bg-[#1A1B23] rounded-lg shadow-2xl border border-gray-800/40 z-[1000] backdrop-blur-xl overflow-hidden transition-all duration-300"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-4">
-              <div className="flex justify-between items-center mb-3">
+              <div className="flex justify-between items-center mb-4">
                 <h3 className="text-sm font-medium text-white">BSV Threshold</h3>
                 <button 
                   onClick={() => setIsOpen(false)}
-                  className="text-gray-400 hover:text-white"
+                  className="text-gray-400 hover:text-white transition-colors"
                 >
                   &times;
                 </button>
               </div>
               
-              <div className="mb-4">
+              <div className="mb-5">
                 <input
                   type="range"
                   min="0.1"
@@ -383,7 +395,7 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected }) => {
                   onChange={(e) => handleThresholdChange(e.target.value)}
                   className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-800"
                   style={{
-                    background: `linear-gradient(to right, #00E6CC ${milestoneThreshold}%, #1f2937 ${milestoneThreshold}%)`,
+                    background: `linear-gradient(to right, #00ffa3 ${milestoneThreshold}%, #1f2937 ${milestoneThreshold}%)`,
                   }}
                 />
                 <div className="flex justify-between text-xs text-gray-400 mt-2">
@@ -394,45 +406,45 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected }) => {
               </div>
               
               <div className="flex items-start space-x-2 mb-4">
-                <FiInfo className="w-3 h-3 mt-0.5 flex-shrink-0 text-[#00E6CC]" />
+                <FiInfo className="w-3 h-3 mt-0.5 flex-shrink-0 text-[#00ffa3]" />
                 <span className="text-xs text-gray-400">
                   Set your BSV threshold for post visibility and notifications
                 </span>
               </div>
               
               {/* Notification toggle */}
-              <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center justify-between mb-1 p-2 rounded-lg bg-[#00ffa3]/5 border border-[#00ffa3]/20">
                 <div className="flex items-center space-x-2">
-                  <FiBell className={`w-4 h-4 ${notificationsEnabled ? 'text-[#00E6CC]' : 'text-gray-400'}`} />
-                  <span className="text-xs text-gray-400">Enable Notifications</span>
+                  <FiBell className={`w-4 h-4 ${notificationsEnabled ? 'text-[#00ffa3]' : 'text-gray-400'}`} />
+                  <span className="text-xs text-gray-300">Enable Notifications</span>
                 </div>
                 
                 <div 
                   onClick={toggleNotifications}
-                  className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors duration-300 ease-in-out focus:outline-none cursor-pointer ${notificationsEnabled ? 'bg-[#00E6CC]' : 'bg-gray-600'}`}
+                  className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors duration-300 ease-in-out focus:outline-none cursor-pointer ${notificationsEnabled ? 'bg-[#00ffa3]' : 'bg-gray-600'}`}
                 >
                   <span
                     className={`${
                       notificationsEnabled ? 'translate-x-5' : 'translate-x-1'
-                    } inline-block h-3 w-3 transform rounded-full bg-white transition-transform duration-300 ease-in-out`}
+                    } inline-block h-3 w-3 transform rounded-full bg-white transition-transform duration-300 ease-in-out shadow-md`}
                   />
                 </div>
               </div>
               
               {isSubscribing && (
-                <p className="text-xs text-gray-400 mt-1 animate-pulse">
+                <p className="text-xs text-gray-400 mt-2 animate-pulse">
                   Processing...
                 </p>
               )}
               
               {!apiAvailable && (
-                <p className="text-xs text-red-400 mt-1">
+                <p className="text-xs text-red-400 mt-2">
                   Notification server is currently unavailable
                 </p>
               )}
               
               {!connected && (
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-gray-500 mt-2 p-1.5 bg-white/5 rounded border border-gray-700/30">
                   Connect wallet to enable notifications
                 </p>
               )}
