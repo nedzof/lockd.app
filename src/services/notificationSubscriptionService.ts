@@ -58,6 +58,23 @@ export class NotificationSubscriptionService {
         throw new Error('Subscription endpoint is required');
       }
       
+      // First, disable all existing active subscriptions for this wallet address
+      // to ensure we only have one active subscription per wallet
+      await prismaWithTypes.notification_subscription.updateMany({
+        where: {
+          wallet_address,
+          notifications_enabled: true,
+          // Don't update the current endpoint if it exists
+          NOT: {
+            endpoint
+          }
+        },
+        data: {
+          notifications_enabled: false,
+          updated_at: new Date()
+        }
+      });
+      
       // Find existing subscription by wallet and endpoint
       const existingSubscription = await prismaWithTypes.notification_subscription.findFirst({
         where: {
@@ -136,24 +153,38 @@ export class NotificationSubscriptionService {
   }
   
   /**
-   * Update notification threshold
+   * Update notification threshold for a wallet
    * 
    * @param wallet_address - User's wallet address
-   * @param threshold_value - New BSV threshold value
+   * @param threshold_value - New threshold value
    * @returns True if updated successfully
    */
-  async updateThreshold(wallet_address: string, threshold_value: number) {
+  async updateNotificationThreshold(wallet_address: string, threshold_value: number) {
     try {
-      logger.info(`Updating threshold for wallet: ${wallet_address} to ${threshold_value}`);
+      logger.info(`Updating notification threshold for wallet: ${wallet_address} to ${threshold_value}`);
       
-      await prismaWithTypes.notification_subscription.updateMany({
-        where: { 
+      // Find the active subscription for this wallet
+      const activeSubscription = await prismaWithTypes.notification_subscription.findFirst({
+        where: {
           wallet_address,
           notifications_enabled: true
         },
-        data: { 
+        orderBy: {
+          updated_at: 'desc'
+        }
+      });
+      
+      if (!activeSubscription) {
+        logger.warn(`No active subscription found for wallet: ${wallet_address}`);
+        return false;
+      }
+      
+      // Update only the active subscription
+      await prismaWithTypes.notification_subscription.update({
+        where: { id: activeSubscription.id },
+        data: {
           threshold_value,
-          updated_at: new Date(),
+          updated_at: new Date()
         }
       });
       
@@ -173,9 +204,11 @@ export class NotificationSubscriptionService {
   async getSubscriptionStatus(wallet_address: string) {
     try {
       const subscriptions = await prismaWithTypes.notification_subscription.findMany({
-        where: { wallet_address }
+        where: { wallet_address },
+        orderBy: { updated_at: 'desc' }
       });
       
+      // Get the most recent active subscription
       const activeSubscription = subscriptions.find(sub => sub.notifications_enabled);
       
       return {

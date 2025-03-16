@@ -180,6 +180,9 @@ export async function sendNotification(
       where: {
         wallet_address: user_id,
         notifications_enabled: true
+      },
+      orderBy: {
+        updated_at: 'desc'
       }
     });
     
@@ -188,55 +191,60 @@ export async function sendNotification(
       return false;
     }
     
-    // Send notification to all active subscriptions
+    // Only use the most recent active subscription to avoid duplicate notifications
+    const activeSubscription = subscriptions[0];
+    logger.info(`Using most recent active subscription for user ${user_id}`, {
+      subscription_id: activeSubscription.id,
+      updated_at: activeSubscription.updated_at
+    });
+    
+    // Send notification to the active subscription
     let sentCount = 0;
     
-    for (const subscription of subscriptions) {
-      try {
-        // The subscription data stored in the database
-        const pushSubscription = subscription.subscription_data;
-        
-        if (!pushSubscription) {
-          logger.warn(`Invalid subscription data for user ${user_id}, subscription ${subscription.id}`);
-          continue;
-        }
-        
-        // Payload
-        const payload = JSON.stringify({
-          title,
-          body,
-          url,
-          timestamp: new Date().getTime(),
-          icon: '/favicon.ico'
-        });
-        
-        // Send push notification
-        await webpush.sendNotification(pushSubscription, payload);
-        
-        // Update last notified timestamp
-        await notificationSubscriptionService.updateLastNotified(subscription.id);
-        
-        sentCount++;
-      } catch (subscriptionError) {
-        logger.error(`Failed to send notification to specific subscription:`, {
-          user_id,
-          subscription_id: subscription.id,
-          error: subscriptionError instanceof Error ? subscriptionError.message : String(subscriptionError)
-        });
-        
-        // Check if the subscription is invalid (expired, unsubscribed, etc.)
-        if (
-          subscriptionError instanceof Error && 
-          (subscriptionError.message.includes('410') || subscriptionError.message.includes('404'))
-        ) {
-          // Subscription is expired or invalid, disable it
-          await notificationSubscriptionService.unsubscribe(user_id, subscription.endpoint as string | undefined);
-          logger.info(`Disabled invalid subscription for user ${user_id}`);
-        }
+    try {
+      // The subscription data stored in the database
+      const pushSubscription = activeSubscription.subscription_data;
+      
+      if (!pushSubscription) {
+        logger.warn(`Invalid subscription data for user ${user_id}, subscription ${activeSubscription.id}`);
+        return false;
+      }
+      
+      // Payload
+      const payload = JSON.stringify({
+        title,
+        body,
+        url,
+        timestamp: new Date().getTime(),
+        icon: '/favicon.ico'
+      });
+      
+      // Send push notification
+      await webpush.sendNotification(pushSubscription, payload);
+      
+      // Update last notified timestamp
+      await notificationSubscriptionService.updateLastNotified(activeSubscription.id);
+      
+      sentCount = 1;
+    } catch (subscriptionError) {
+      logger.error(`Failed to send notification to subscription:`, {
+        user_id,
+        subscription_id: activeSubscription.id,
+        error: subscriptionError instanceof Error ? subscriptionError.message : String(subscriptionError)
+      });
+      
+      // Check if the subscription is invalid (expired, unsubscribed, etc.)
+      if (
+        subscriptionError instanceof Error && 
+        (subscriptionError.message.includes('410') || subscriptionError.message.includes('404'))
+      ) {
+        // Subscription is expired or invalid, disable it
+        await notificationSubscriptionService.unsubscribe(user_id, activeSubscription.endpoint as string | undefined);
+        logger.info(`Disabled invalid subscription for user ${user_id}`);
       }
     }
     
-    logger.info(`Sent notification to ${sentCount}/${subscriptions.length} subscriptions for user ${user_id}`);
+    logger.info(`Sent notification to user ${user_id}: ${sentCount > 0 ? 'success' : 'failed'}`);
     return sentCount > 0;
   } catch (error) {
     logger.error('Error sending notification:', error instanceof Error ? error.message : String(error));
@@ -348,10 +356,17 @@ export const updateNotificationThreshold = async (req: Request, res: Response) =
     }
     
     // Update threshold in the database
-    const success = await notificationSubscriptionService.updateThreshold(
+    const success = await notificationSubscriptionService.updateNotificationThreshold(
       user_id,
       Number(threshold_value)
     );
+    
+    if (!success) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active subscription found for this user'
+      });
+    }
     
     logger.info(`Threshold updated for user ${user_id} to ${threshold_value}`);
     

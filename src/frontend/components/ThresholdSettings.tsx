@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FiLock, FiInfo, FiBell } from 'react-icons/fi';
 import axios from 'axios';
+import { createPortal } from 'react-dom';
 
 // API base URL configuration
 const API_BASE_URL = '/api'; // This will use the Vite proxy configuration
@@ -230,6 +231,8 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
               subscription_json: subscription.toJSON()
             });
             
+            console.log('Note: The server will ensure only one active subscription per wallet address');
+            
             const response = await axios.post(`${API_BASE_URL}/notifications/subscribe`, {
               user_id: userId,
               subscription: subscription.toJSON(),
@@ -373,13 +376,24 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
         return;
       }
       
+      console.log(`Updating notification threshold to ${threshold} for user ${userId}`);
+      
       // Update threshold on server
-      await axios.post(`${API_BASE_URL}/notifications/threshold`, {
+      const response = await axios.post(`${API_BASE_URL}/notifications/threshold`, {
         user_id: userId,
         threshold_value: threshold
       });
       
-      console.log(`Notification threshold updated to ${threshold}`);
+      if (response.data.success) {
+        console.log(`Notification threshold updated to ${threshold}`);
+      } else {
+        console.warn('Failed to update notification threshold:', response.data.message);
+        // If the subscription wasn't found, we might need to resubscribe
+        if (response.status === 404) {
+          console.log('No active subscription found, resubscribing...');
+          await subscribeToNotifications();
+        }
+      }
     } catch (error) {
       console.error('Error updating notification threshold:', error);
       // We don't show an error to the user for threshold updates
@@ -403,15 +417,56 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
     };
   }, [showModal]);
   
+  // Handle body overflow when modal is open/closed
+  useEffect(() => {
+    if (showModal) {
+      // Save the current overflow style
+      const originalOverflow = document.body.style.overflow;
+      // Prevent body scrolling when modal is open
+      document.body.style.overflow = 'hidden';
+      
+      return () => {
+        // Restore original overflow when component unmounts or modal closes
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [showModal]);
+  
+  // Handle escape key press
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showModal) {
+        closeModal();
+      }
+    };
+
+    if (showModal) {
+      document.addEventListener('keydown', handleEscape);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showModal]);
+  
   // Open modal
   const openModal = () => {
     setShowModal(true);
+    console.log('ThresholdSettings modal opened');
   };
   
   // Close modal
   const closeModal = () => {
     setShowModal(false);
+    console.log('ThresholdSettings modal closed');
   };
+  
+  // Add effect to log when modal state changes
+  useEffect(() => {
+    if (showModal) {
+      console.log('ThresholdSettings modal is now shown');
+    }
+  }, [showModal]);
   
   return (
     <>
@@ -423,9 +478,18 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
         <span>BSV Threshold</span>
       </button>
       
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black bg-opacity-50 pt-24">
-          <div ref={modalRef} className="bg-gray-900 border border-gray-800 rounded-md shadow-lg p-6 max-w-md w-full mx-4">
+      {showModal && createPortal(
+        <div className="fixed inset-0 flex items-center justify-center overflow-auto backdrop-blur-sm" style={{ zIndex: 9999999 }}>
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-80" 
+            onClick={closeModal}
+            aria-hidden="true"
+          />
+          <div 
+            ref={modalRef} 
+            className="bg-gray-900 border border-gray-800 rounded-md shadow-lg p-6 max-w-md w-full mx-4 relative"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white">BSV Threshold Settings</h2>
               <button onClick={closeModal} className="text-gray-400 hover:text-white">
@@ -505,7 +569,8 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
