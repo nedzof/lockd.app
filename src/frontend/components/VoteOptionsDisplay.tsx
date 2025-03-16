@@ -1,3 +1,4 @@
+import { API_URL } from "../../config";
 import React, { useState, useEffect, useCallback } from 'react';
 import { HODLTransaction, vote_option } from '../types';
 import { useWallet } from '../providers/WalletProvider';
@@ -9,7 +10,6 @@ interface vote_optionsDisplayProps {
   onTotalLockedAmountChange?: (amount: number) => void;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({ 
   transaction, 

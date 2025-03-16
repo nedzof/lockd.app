@@ -7,6 +7,7 @@ import type { Post } from '../types';
 import { toast } from 'react-hot-toast';
 import VoteOptionLockInteraction from './VoteOptionLockInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
+import { API_URL } from '../../config';
 
 interface vote_option {
   id: string;
@@ -52,9 +53,6 @@ interface PostGridProps {
   selected_tags: string[];
   user_id: string;
 }
-
-// Use environment variable for API URL or default to localhost:3003
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 // Add debounce utility
 function debounce(func: Function, wait: number) {

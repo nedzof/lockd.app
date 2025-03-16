@@ -1,3 +1,4 @@
+import { API_URL } from "../../config";
 import React, { useState, useEffect, useCallback } from 'react';
 import { FiX } from 'react-icons/fi';
 
@@ -13,7 +14,6 @@ interface TagFilterProps {
 }
 
 // Use environment variable for API URL
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 // Preset categories/tags
 const PRESET_TAGS = [

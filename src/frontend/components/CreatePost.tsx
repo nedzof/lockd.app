@@ -1,3 +1,4 @@
+import { API_URL } from "../../config";
 import * as React from 'react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
@@ -7,7 +8,6 @@ import { FiX, FiPlus, FiCheck, FiRefreshCw, FiImage, FiFile, FiPlusCircle, FiTra
 import { createPost } from '../services/post.service';
 import { isWalletConnected, ensureWalletConnection, getWalletStatus } from '../utils/walletConnectionHelpers';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 interface CreatePostProps {
   onPostCreated?: () => void;
@@ -346,26 +346,24 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-80">
       <div 
         ref={modalRef}
-        className="bg-[#1A1B23] rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto border border-gray-800/40 relative"
+        className="bg-[#1A1B23] rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto relative border border-gray-800"
       >
-        {/* Header */}
-        <div className="flex justify-between items-center px-6 py-4 border-b border-gray-800/40">
+        <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold text-white">Create a Post</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-[#00ffa3] transition-colors duration-300"
-            aria-label="Close"
+            className="text-gray-400 hover:text-green-500 transition-colors"
           >
             <FiX size={24} />
           </button>
         </div>
 
         {!isConnected && (
-          <div className="bg-[#2A2A40]/20 backdrop-blur-sm p-4 rounded-lg m-6 mb-4 border border-gray-800/40">
-            <p className="text-[#00ffa3] mb-2 font-medium">Wallet not connected</p>
+          <div className="bg-gray-700 p-4 rounded-lg mb-4">
+            <p className="text-yellow-400 mb-2">Wallet not connected</p>
             <button
               onClick={async () => {
                 try {
@@ -392,15 +390,9 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                   toast.error('Failed to connect wallet. Please check your wallet extension.', { id: 'wallet-connect' });
                 }
               }}
-              className="group relative px-4 py-2 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 flex items-center justify-center mx-auto"
+              className="px-4 py-2 bg-[#00ffa3] hover:bg-opacity-80 text-black font-medium rounded-lg transition-colors flex items-center justify-center mx-auto"
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-lg transition-all duration-300"></div>
-              <div className="absolute inset-0 bg-gradient-to-r from-[#00ff9d] to-[#00ffa3] rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
-              <div className="relative flex items-center space-x-1 text-black">
-                <FiLink className="w-4 h-4 group-hover:rotate-45 transition-transform duration-300" />
-                <span className="text-sm">Connect Wallet</span>
-              </div>
-              <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-lg"></div>
+              <FiLink className="mr-2" /> Connect Wallet
             </button>
             <p className="text-gray-400 text-sm mt-2 text-center">
               You need to connect your wallet to create posts
@@ -408,37 +400,36 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           </div>
         )}
         
-        <form onSubmit={handleSubmit} className="p-6 pt-4 space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">
             <textarea
               ref={textareaRef}
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="What's on your mind?"
-              className="w-full p-4 bg-[#13141B] border border-gray-800/40 rounded-lg text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/20 min-h-[120px] transition-all duration-300"
+              className="w-full p-4 bg-[#13141B] border border-gray-800 rounded-lg text-gray-200 focus:outline-none focus:border-green-500 min-h-[120px] mb-4"
             />
             
             {/* Image preview overlay */}
             {imagePreview && (
-              <div className="mt-3 relative rounded-lg overflow-hidden">
+              <div className="mt-2 relative rounded-lg overflow-hidden">
                 <img 
                   src={imagePreview} 
                   alt="Upload preview" 
-                  className="max-h-60 w-auto mx-auto rounded-lg border border-gray-800/40"
+                  className="max-h-60 w-auto mx-auto rounded-lg border border-gray-700"
                 />
                 <button
                   type="button"
                   onClick={handleRemoveImage}
-                  className="absolute top-2 right-2 bg-red-500/80 text-white p-1.5 rounded-full hover:bg-red-600 transition-colors duration-300 backdrop-blur-sm"
-                  aria-label="Remove image"
+                  className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition-colors"
                 >
-                  <FiTrash2 size={14} />
+                  <FiTrash2 size={16} />
                 </button>
               </div>
             )}
             
             {/* Post controls toolbar */}
-            <div className="flex items-center mt-3 space-x-3 bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg p-2 border border-gray-800/40">
+            <div className="flex items-center mt-2 space-x-2">
               {/* Image upload button */}
               <div className="relative">
                 <input
@@ -451,45 +442,43 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 />
                 <label
                   htmlFor="image-upload"
-                  className="flex items-center justify-center p-2 text-gray-400 hover:text-[#00ffa3] focus:outline-none cursor-pointer transition-colors duration-300"
-                  title="Upload image"
+                  className="flex items-center justify-center p-2 text-green-500 hover:text-green-400 focus:outline-none cursor-pointer"
+                  title="Upload image (JPEG, PNG, GIF, BMP, SVG, WEBP, TIFF)"
                 >
-                  <FiImage size={18} />
+                  <FiImage size={20} />
                 </label>
+                {!imagePreview && (
+                  <div className="absolute top-full left-0 text-xs text-gray-400 mt-1 whitespace-nowrap">
+                    Supports: JPEG, PNG, GIF, BMP, SVG, WEBP, TIFF
+                  </div>
+                )}
               </div>
               
-              {/* Divider */}
-              <div className="h-4 w-px bg-gray-800/30" />
-              
               {/* Vote post toggle */}
-              <div className="flex items-center">
+              <div className="flex items-center mt-4 mb-2">
                 <div 
-                  className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors duration-300 cursor-pointer ${
-                    isVotePost ? 'bg-[#00ffa3]' : 'bg-gray-700'
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    isVotePost ? 'bg-green-600' : 'bg-gray-700'
                   }`}
                   onClick={() => setIsVotePost(!isVotePost)}
                 >
                   <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-md transition-transform duration-300 ${
-                      isVotePost ? 'translate-x-5' : 'translate-x-1'
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      isVotePost ? 'translate-x-6' : 'translate-x-1'
                     }`}
                   />
                 </div>
-                <span className="ml-2 text-xs text-gray-300">
+                <span className="ml-2 text-sm text-gray-300">
                   {isVotePost ? 'Vote Post' : 'Regular Post'}
                 </span>
               </div>
-            </div>
-            
-            <div className="text-xs text-gray-400 mt-1.5">
-              Supports: JPEG, PNG, GIF, BMP, SVG, WEBP, TIFF
             </div>
           </div>
           
           {/* Vote options section */}
           {isVotePost && (
-            <div className="mt-4 space-y-3 bg-[#2A2A40]/10 p-4 rounded-lg border border-gray-800/40">
-              <h3 className="text-sm font-medium text-[#00ffa3]">Vote Options</h3>
+            <div className="mt-4 space-y-3">
+              <h3 className="text-sm font-medium text-gray-300">Vote Options</h3>
               {vote_options.map((option, index) => (
                 <div key={index} className="flex items-center space-x-2">
                   <input
@@ -497,14 +486,13 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                     value={option}
                     onChange={(e) => handlevote_optionChange(index, e.target.value)}
                     placeholder={`Option ${index + 1}`}
-                    className="flex-grow px-3 py-2 bg-[#13141B] border border-gray-800/40 rounded-md text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/20 transition-all duration-300"
+                    className="flex-grow px-3 py-2 bg-[#13141B] border border-gray-800 rounded-md text-gray-200 focus:outline-none focus:border-green-500"
                   />
                   <button
                     type="button"
                     onClick={() => handleRemovevote_option(index)}
-                    className="p-1.5 text-gray-400 hover:text-red-400 focus:outline-none transition-colors duration-300"
+                    className="p-1 text-gray-400 hover:text-red-400 focus:outline-none"
                     disabled={vote_options.length <= 2}
-                    aria-label="Remove option"
                   >
                     <FiTrash2 size={16} />
                   </button>
@@ -513,29 +501,28 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               <button
                 type="button"
                 onClick={handleAddvote_option}
-                className="flex items-center px-3 py-2 text-sm text-gray-400 hover:text-[#00ffa3] focus:outline-none transition-colors duration-300"
-                disabled={vote_options.length >= 10}
+                className="flex items-center px-3 py-2 text-sm text-green-500 hover:text-green-400 focus:outline-none"
               >
-                <FiPlus size={16} className="mr-1.5" /> Add Option
+                <FiPlus size={16} className="mr-1" /> Add Option
               </button>
             </div>
           )}
           
           {/* Tags section */}
-          <div className="bg-[#2A2A40]/10 p-4 rounded-lg border border-gray-800/40">
-            <div className="flex justify-between items-center mb-3">
-              <label className="text-sm font-medium text-[#00ffa3]">Tags</label>
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-sm font-medium text-gray-300">Tags</label>
               <button
                 type="button"
                 onClick={() => generateTags()}
                 disabled={!content.trim() || isGeneratingTags}
-                className={`flex items-center px-3 py-1.5 text-xs rounded-md transition-colors duration-300 ${
+                className={`flex items-center px-3 py-2 text-sm ${
                   !content.trim() || isGeneratingTags 
-                    ? 'text-gray-500 bg-gray-800/30 cursor-not-allowed' 
-                    : 'text-gray-300 hover:text-white hover:bg-[#00ffa3]/10'
-                }`}
+                    ? 'text-gray-500 cursor-not-allowed' 
+                    : 'text-green-500 hover:text-green-400'
+                } focus:outline-none`}
               >
-                <FiRefreshCw className={`mr-1.5 ${isGeneratingTags ? 'animate-spin' : ''}`} />
+                <FiRefreshCw className={`mr-1 ${isGeneratingTags ? 'animate-spin' : ''}`} />
                 {isGeneratingTags ? 'Generating...' : 'Auto-tag'}
               </button>
             </div>
@@ -546,14 +533,13 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 {selected_tags.map((tag, index) => (
                   <div
                     key={index}
-                    className="flex items-center bg-[#13141B] border border-gray-800/40 rounded-md px-2 py-1 group"
+                    className="flex items-center bg-[#13141B] border border-gray-800 rounded-md px-2 py-1"
                   >
-                    <span className="text-xs text-gray-300 mr-1.5">{tag}</span>
+                    <span className="text-sm text-gray-300 mr-1">{tag}</span>
                     <button
                       type="button"
                       onClick={() => handleRemoveTag(index)}
-                      className="text-gray-500 group-hover:text-red-400 focus:outline-none transition-colors duration-300"
-                      aria-label="Remove tag"
+                      className="text-gray-400 hover:text-red-400 focus:outline-none"
                     >
                       <FiX size={14} />
                     </button>
@@ -570,15 +556,14 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 onChange={(e) => setNewTag(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Add a new tag"
-                className="flex-grow px-3 py-2 bg-[#13141B] border border-gray-800/40 rounded-l-md text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/20 transition-all duration-300 text-sm"
+                className="flex-grow px-3 py-2 bg-[#13141B] border border-gray-800 rounded-l-md text-gray-200 focus:outline-none focus:border-green-500"
               />
               <button
                 type="button"
                 onClick={handleAddTag}
-                className="px-3 py-2 bg-[#00ffa3] text-black rounded-r-md hover:bg-[#00ff9d] focus:outline-none transition-colors duration-300"
-                aria-label="Add tag"
+                className="px-3 py-2 bg-green-600 text-white rounded-r-md hover:bg-green-700 focus:outline-none"
               >
-                <FiCheck size={16} />
+                <FiCheck />
               </button>
             </div>
           </div>
@@ -588,28 +573,22 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-gray-800/50 text-gray-300 rounded-lg hover:bg-gray-700 focus:outline-none transition-all duration-300"
+              className="px-4 py-2 bg-gray-700 text-gray-300 rounded-md hover:bg-gray-600 focus:outline-none"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || (!content.trim() && !image)}
-              className={`group relative px-4 py-2 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 ${
-                (isSubmitting || (!content.trim() && !image)) ? 'opacity-50 cursor-not-allowed' : ''
+              disabled={isSubmitting || !content.trim()}
+              className={`px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none ${
+                (isSubmitting || !content.trim()) ? 'opacity-50 cursor-not-allowed' : ''
               }`}
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-lg transition-all duration-300"></div>
-              <div className="absolute inset-0 bg-gradient-to-r from-[#00ff9d] to-[#00ffa3] rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
-              <div className="relative flex items-center justify-center text-black">
-                <span>{isSubmitting ? 'Posting...' : 'Post'}</span>
-              </div>
-              <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-lg"></div>
+              {isSubmitting ? 'Posting...' : 'Post'}
             </button>
           </div>
-          
           {error && (
-            <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+            <div className="mt-3 p-2 rounded-md bg-gray-800 border border-red-500 text-red-400 text-sm">
               {error}
             </div>
           )}

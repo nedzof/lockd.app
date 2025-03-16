@@ -1,8 +1,8 @@
+import { API_URL } from "../../config";
 import React, { useState, useEffect } from 'react';
 import { useTags, Tag } from '../hooks/useTags';
 import { FiRefreshCw, FiTrash2, FiEdit, FiSave, FiX } from 'react-icons/fi';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 const TagAdmin: React.FC = () => {
   const { 

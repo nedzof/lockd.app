@@ -1,7 +1,7 @@
+import { API_URL } from "../../config";
 import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 export interface Tag {
   id?: string;
