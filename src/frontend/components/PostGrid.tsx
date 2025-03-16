@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2, FiExternalLink } from 'react-icons/fi';
+import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2, FiExternalLink, FiClock } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
 import type { Post } from '../types';
@@ -65,6 +65,31 @@ function debounce(func: Function, wait: number) {
       func(...args);
     }, wait);
   };
+}
+
+// Helper function to format date in a simplified way
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+  
+  if (diffInSeconds < 60) {
+    return `${diffInSeconds}s`;
+  } else if (diffInSeconds < 3600) {
+    return `${Math.floor(diffInSeconds / 60)}m`;
+  } else if (diffInSeconds < 86400) {
+    return `${Math.floor(diffInSeconds / 3600)}h`;
+  } else if (diffInSeconds < 604800) {
+    return `${Math.floor(diffInSeconds / 86400)}d`;
+  } else {
+    return `${date.toLocaleDateString()}`;
+  }
+}
+
+// Helper function to calculate percentage of locked amount
+function calculatePercentage(amount: number, total: number): number {
+  if (!total) return 0;
+  return Math.round((amount / total) * 100);
 }
 
 const PostGrid: React.FC<PostGridProps> = ({
@@ -480,23 +505,35 @@ const PostGrid: React.FC<PostGridProps> = ({
 
         {/* Posts grid */}
         {submissions.length > 0 && (
-          <div className="grid grid-cols-1 gap-6">
+          <div className="grid grid-cols-1 gap-4">
             {submissions.map((post) => (
               <div key={post.id} className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-xl border border-gray-800/10 shadow-lg hover:shadow-[#00ffa3]/5 transition-all duration-300">
-                <div className="flex items-center p-4 border-b border-gray-800/10">
-                  <div className="w-10 h-10 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-full flex items-center justify-center text-gray-900 font-bold">
-                    {post.author_address ? post.author_address.substring(0, 2).toUpperCase() : "?"}
+                {/* Post header */}
+                <div className="flex items-center justify-between p-3 border-b border-gray-800/10">
+                  <div className="flex items-center">
+                    <div>
+                      <p className="text-gray-200 font-medium">
+                        {post.author_address ? 
+                          `${post.author_address.substring(0, 6)}...${post.author_address.substring(post.author_address.length - 4)}` : 
+                          "Anonymous"}
+                      </p>
+                      <div className="flex items-center text-gray-400 text-xs">
+                        <FiClock className="mr-1" />
+                        {formatDate(post.created_at)}
+                      </div>
+                    </div>
                   </div>
-                  <div className="ml-3">
-                    <p className="text-gray-200 font-medium">
-                      {post.author_address ? 
-                        `${post.author_address.substring(0, 6)}...${post.author_address.substring(post.author_address.length - 4)}` : 
-                        "Anonymous"}
-                    </p>
-                    <p className="text-gray-400 text-xs">
-                      {new Date(post.created_at).toLocaleString()}
-                    </p>
-                  </div>
+                  
+                  {/* WhatsonChain link */}
+                  <a 
+                    href={`https://whatsonchain.com/tx/${post.tx_id}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-gray-400 hover:text-[#00ffa3] transition-colors"
+                    title="View on WhatsonChain"
+                  >
+                    <FiExternalLink size={16} />
+                  </a>
                 </div>
 
                 <div className="p-4">
@@ -564,31 +601,64 @@ const PostGrid: React.FC<PostGridProps> = ({
                     <h3 className="font-bold text-lg mb-3 text-gray-200 flex items-center">
                       <FiBarChart2 className="mr-2" /> Vote Options
                     </h3>
-                    <div className="space-y-3">
-                      {post.vote_options.map((option: vote_option) => (
-                        <div key={option.id} className="bg-white/5 p-4 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
-                          <p className="font-medium text-white">{option.content}</p>
-                          <div className="mt-2 flex items-center justify-between text-sm text-gray-400">
-                            <span className="flex items-center">
-                              <FiLock className="mr-1" /> {formatBSV(option.lock_amount)} BSV
-                            </span>
-                            <span className="flex items-center">
-                              <FiZap className="mr-1" /> {option.lock_duration} days
-                            </span>
-                          </div>
-                          <div className="mt-3">
-                            <VoteOptionLockInteraction 
-                              optionId={option.id} 
-                              onLock={handlevote_optionLock}
-                              isLocking={isLocking}
-                              connected={!!wallet}
-                            />
-                          </div>
+                    
+                    {/* Calculate total locked amount for percentages */}
+                    {(() => {
+                      const totalLocked = post.vote_options.reduce((sum, option) => sum + option.lock_amount, 0);
+                      
+                      return (
+                        <div className="space-y-3">
+                          {post.vote_options.map((option: vote_option) => {
+                            const percentage = calculatePercentage(option.lock_amount, totalLocked);
+                            
+                            return (
+                              <div key={option.id} className="bg-white/5 p-4 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
+                                <div className="flex justify-between items-center mb-2">
+                                  <p className="font-medium text-white">{option.content}</p>
+                                  <span className="text-sm font-bold text-[#00ffa3]">{percentage}%</span>
+                                </div>
+                                
+                                {/* Progress bar */}
+                                <div className="w-full bg-gray-800/50 rounded-full h-2.5 mb-3">
+                                  <div 
+                                    className="bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] h-2.5 rounded-full" 
+                                    style={{ width: `${percentage}%` }}
+                                  ></div>
+                                </div>
+                                
+                                <div className="flex items-center justify-between text-sm text-gray-400 mb-3">
+                                  <span className="flex items-center">
+                                    <FiLock className="mr-1" /> {formatBSV(option.lock_amount)} BSV
+                                  </span>
+                                  <span className="flex items-center">
+                                    <FiZap className="mr-1" /> {option.lock_duration} days
+                                  </span>
+                                </div>
+                                
+                                <VoteOptionLockInteraction 
+                                  optionId={option.id} 
+                                  onLock={handlevote_optionLock}
+                                  isLocking={isLocking}
+                                  connected={!!wallet}
+                                />
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })()}
                   </div>
                 )}
+                
+                {/* Post footer with BSV locked amount */}
+                <div className="p-3 border-t border-gray-800/10 flex justify-end">
+                  {post.totalLocked && post.totalLocked > 0 && (
+                    <div className="text-[#00ffa3] font-medium flex items-center">
+                      <FiLock className="mr-1" />
+                      {formatBSV(post.totalLocked)} BSV locked
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </div>
