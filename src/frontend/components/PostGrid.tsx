@@ -237,16 +237,79 @@ const PostGrid: React.FC<PostGridProps> = ({
       }
       
       console.log(`Fetching posts with params: ${queryParams.toString()}`);
-      const response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`);
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      // Add timeout and retry logic for fetch
+      let retryCount = 0;
+      const maxRetries = 2;
+      let response;
+      
+      while (retryCount <= maxRetries) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+          
+          response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`, {
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            break; // Success, exit the retry loop
+          } else {
+            console.warn(`Attempt ${retryCount + 1}/${maxRetries + 1} failed with status: ${response.status}`);
+            retryCount++;
+            
+            if (retryCount <= maxRetries) {
+              // Wait before retrying (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount - 1)));
+            }
+          }
+        } catch (fetchError) {
+          console.error(`Fetch attempt ${retryCount + 1}/${maxRetries + 1} failed:`, fetchError);
+          retryCount++;
+          
+          if (retryCount <= maxRetries) {
+            // Wait before retrying (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount - 1)));
+          } else {
+            // All retries failed
+            setError('Failed to connect to the server. Please check your connection and try again.');
+            setLoading(false);
+            setIsFetchingMore(false);
+            isFetchInProgress.current = false;
+            throw fetchError;
+          }
+        }
       }
       
-      const data = await response.json();
+      if (!response || !response.ok) {
+        const errorMessage = response ? `HTTP error! status: ${response.status}` : 'Failed to connect to the server';
+        setError(errorMessage);
+        setLoading(false);
+        setIsFetchingMore(false);
+        isFetchInProgress.current = false;
+        throw new Error(errorMessage);
+      }
+      
+      let data;
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        console.error('Error parsing response:', parseError);
+        setError('Invalid response from server');
+        setLoading(false);
+        setIsFetchingMore(false);
+        isFetchInProgress.current = false;
+        throw parseError;
+      }
       
       if (!data || !data.posts || !Array.isArray(data.posts)) {
         console.error('Invalid API response format:', data);
+        setError('Invalid response format from server');
+        setLoading(false);
+        setIsFetchingMore(false);
+        isFetchInProgress.current = false;
         throw new Error('Invalid API response format - posts array missing or malformed');
       }
       
@@ -293,6 +356,22 @@ const PostGrid: React.FC<PostGridProps> = ({
           // Store the URL in our map for future reference
           imageUrlMap.current.set(post.id, post.media_url);
         }
+        
+        // Calculate total locked amount for the post
+        let totalLocked = 0;
+        
+        // Sum up lock_likes amounts if available
+        if (post.lock_likes && Array.isArray(post.lock_likes)) {
+          totalLocked += post.lock_likes.reduce((sum: number, lock: any) => sum + (lock.amount || 0), 0);
+        }
+        
+        // For vote posts, also include the lock amounts from vote options
+        if (post.is_vote && post.vote_options && Array.isArray(post.vote_options)) {
+          totalLocked += post.vote_options.reduce((sum: number, option: any) => sum + (option.lock_amount || 0), 0);
+        }
+        
+        // Assign the calculated total locked amount
+        post.totalLocked = totalLocked;
         
         // For vote posts, fetch vote options if they're not already included
         if (post.is_vote && (!post.vote_options || post.vote_options.length === 0)) {
@@ -525,9 +604,26 @@ const PostGrid: React.FC<PostGridProps> = ({
 
         {/* Error state */}
         {error && (
-          <div className="bg-red-500 text-white p-4 rounded-lg mb-4">
-            <p className="font-bold">Error loading posts:</p>
-            <p>{error}</p>
+          <div className="bg-red-500/10 border border-red-500/30 text-white p-6 rounded-lg mb-4 flex flex-col items-center">
+            <div className="flex items-center mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <p className="font-bold text-lg">Connection Error</p>
+            </div>
+            <p className="text-center mb-4">{error}</p>
+            <button 
+              onClick={() => {
+                setError(null);
+                fetchPosts(true);
+              }}
+              className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-white rounded-lg transition-colors duration-200 flex items-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Retry
+            </button>
           </div>
         )}
 
@@ -753,12 +849,11 @@ const PostGrid: React.FC<PostGridProps> = ({
                     )}
                   </div>
                   
-                  {post.totalLocked && post.totalLocked > 0 && (
-                    <div className="text-[#00ffa3] font-medium flex items-center text-sm">
-                      <FiLock className="mr-1" size={14} />
-                      {formatBSV(post.totalLocked)} BSV locked
-                    </div>
-                  )}
+                  {/* Display locked BSV amount for all posts */}
+                  <div className="text-[#00ffa3] font-medium flex items-center text-sm">
+                    <FiLock className="mr-1" size={14} />
+                    {formatBSV(post.totalLocked || 0)} BSV
+                  </div>
                 </div>
               </div>
             ))}

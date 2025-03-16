@@ -15,32 +15,75 @@ interface TagFilterProps {
 // Use environment variable for API URL
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
+// Preset categories/tags
+const PRESET_TAGS = [
+  'memes',
+  'art',
+  'news',
+  'music',
+  'gaming',
+  'tech',
+  'crypto',
+  'bitcoin',
+  'bsv',
+  'nfts',
+  'defi',
+  'politics',
+  'sports',
+  'food',
+  'travel',
+  'photography',
+  'science',
+  'education',
+  'history',
+  'philosophy'
+];
+
 const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => {
-  const [tags, setTags] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [tags, setTags] = useState<string[]>(PRESET_TAGS);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchTags = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  // Optional: Fetch additional tags if server is available
+  const fetchAdditionalTags = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/tags`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+      
+      const response = await fetch(`${API_URL}/api/tags`, {
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
+      
       const data = await response.json();
-      setTags(data.tags || []);
-      setIsLoading(false);
+      
+      // Merge preset tags with fetched tags, removing duplicates
+      const fetchedTags = data.tags || [];
+      const mergedTags = [...new Set([...PRESET_TAGS, ...fetchedTags])];
+      
+      setTags(mergedTags);
     } catch (err) {
-      console.error('Error fetching tags:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch tags');
+      console.error('Error fetching additional tags:', err);
+      // Don't set error state - we're already using preset tags
+      // Just log the error for debugging purposes
+    } finally {
       setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchTags();
-  }, [fetchTags]);
+    // Start with preset tags immediately
+    setTags(PRESET_TAGS);
+    setIsLoading(false);
+    
+    // Optionally try to fetch additional tags in the background
+    fetchAdditionalTags();
+  }, [fetchAdditionalTags]);
 
   const handleTagClick = (tag: string) => {
     const newselected_tags = selected_tags.includes(tag)
@@ -49,7 +92,30 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
     onTagSelect(newselected_tags);
   };
 
-  if (isLoading) {
+  // Group tags into categories for better organization
+  const renderTagGroups = () => {
+    return (
+      <div className="flex flex-wrap gap-2 p-4">
+        {tags.map((tag) => (
+          <button
+            key={tag}
+            onClick={() => handleTagClick(tag)}
+            className={`
+              px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-300
+              ${selected_tags.includes(tag)
+                ? 'bg-[#00ffa3] text-black hover:bg-[#00ff9d]'
+                : 'bg-[#2A2B33] text-gray-300 hover:bg-[#3A3B43]'
+              }
+            `}
+          >
+            {tag}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  if (isLoading && tags.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[100px]">
         <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-[#00ffa3]"></div>
@@ -57,39 +123,7 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
     );
   }
 
-  if (error) {
-    return (
-      <div className="flex flex-col items-center space-y-4 min-h-[100px]">
-        <p className="text-red-500">{error}</p>
-        <button 
-          onClick={fetchTags}
-          className="px-4 py-2 text-[#00ffa3] border border-[#00ffa3] rounded-lg hover:bg-[#00ffa3] hover:text-black transition-all duration-300"
-        >
-          Try Again
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-wrap gap-2 p-4">
-      {tags.map((tag) => (
-        <button
-          key={tag}
-          onClick={() => handleTagClick(tag)}
-          className={`
-            px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-300
-            ${selected_tags.includes(tag)
-              ? 'bg-[#00ffa3] text-black hover:bg-[#00ff9d]'
-              : 'bg-[#2A2B33] text-gray-300 hover:bg-[#3A3B43]'
-            }
-          `}
-        >
-          {tag}
-        </button>
-      ))}
-    </div>
-  );
+  return renderTagGroups();
 };
 
 export default TagFilter;

@@ -61,6 +61,7 @@
     "react-router-dom": "^6.22.0",
     "recharts": "^2.15.1",
     "scrypt-ts": "^1.4.5",
+    "web-push": "^3.6.7",
     "winston": "^3.11.0",
     "yours-wallet-provider": "^3.6.0"
   },
@@ -71,6 +72,7 @@
     "@types/jest": "^29.5.12",
     "@types/natural": "^5.1.5",
     "@types/node": "^20.11.17",
+    "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.20",
     "concurrently": "^8.2.2",
