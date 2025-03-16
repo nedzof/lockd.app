@@ -11,9 +11,11 @@ import vote_optionsRouter from './api/vote-options';
 import bsvPriceRouter from './api/bsv-price';
 import tagGenerationRouter from './routes/tagGenerationRoutes';
 import postTaggingRouter from './routes/postTaggingRoutes';
+import notificationRouter from './routes/notificationRoutes';
 import { logger } from './utils/logger';
 import { initializeTagGenerationJob } from './jobs/tagGenerationJob';
 import { initializeStatsUpdateJob } from './jobs/statsUpdateJob';
+import { initializeThresholdNotificationJob } from './jobs/thresholdNotificationJob';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -71,6 +73,7 @@ app.use('/api/vote-options', vote_optionsRouter);
 app.use('/api/bsv-price', bsvPriceRouter);
 app.use('/api', tagGenerationRouter);
 app.use('/api', postTaggingRouter);
+app.use('/api/notifications', notificationRouter);
 
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -103,6 +106,9 @@ app.listen(PORT, () => {
   // Initialize the stats update job
   initializeStatsUpdateJob();
   logger.info('Stats update job initialized');
+  
+  // Initialize the threshold notification job
+  initializeThresholdNotificationJob();
 });
 
 // Handle graceful shutdown
