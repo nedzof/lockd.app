@@ -88,6 +88,17 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
     }
   };
   
+  // Handle slider change
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(e.target.value);
+    setMilestoneThreshold(Number(value.toFixed(2))); // Round to 2 decimal places
+    
+    // If notifications are enabled, update the subscription
+    if (notificationsEnabled) {
+      updateNotificationSubscription(value);
+    }
+  };
+  
   // Helper function to convert the VAPID key from base64 to Uint8Array
   function urlBase64ToUint8Array(base64String: string): Uint8Array {
     try {
@@ -472,65 +483,87 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
     <>
       <button
         onClick={openModal}
-        className="flex items-center justify-center space-x-2 py-1.5 px-3 bg-gray-800 text-white rounded hover:bg-gray-700 transition duration-200 text-sm"
+        className="flex items-center space-x-1 px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all duration-300"
+        title="BSV Threshold Settings"
       >
         <FiLock className="w-4 h-4" />
-        <span>BSV Threshold</span>
+        {!connected && (
+          <span className="text-sm font-medium">BSV Threshold</span>
+        )}
       </button>
       
       {showModal && createPortal(
         <div className="fixed inset-0 flex items-center justify-center overflow-auto backdrop-blur-sm" style={{ zIndex: 9999999 }}>
           <div 
-            className="fixed inset-0 bg-black bg-opacity-80" 
+            className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm transition-opacity duration-300" 
             onClick={closeModal}
             aria-hidden="true"
           />
           <div 
             ref={modalRef} 
-            className="bg-gray-900 border border-gray-800 rounded-md shadow-lg p-6 max-w-md w-full mx-4 relative"
+            className="bg-[#1A1B23] rounded-lg shadow-2xl p-6 max-w-md w-full mx-4 relative border border-gray-800/40 backdrop-blur-xl transition-all duration-300"
             onClick={(e) => e.stopPropagation()}
           >
+            <style>
+              {`
+                input[type=range]::-webkit-slider-thumb {
+                  -webkit-appearance: none;
+                  appearance: none;
+                  width: 18px;
+                  height: 18px;
+                  border-radius: 50%;
+                  background: #00ffa3;
+                  cursor: pointer;
+                  border: 2px solid #1A1B23;
+                  box-shadow: 0 0 0 2px rgba(0, 255, 163, 0.3);
+                }
+                
+                input[type=range]::-moz-range-thumb {
+                  width: 18px;
+                  height: 18px;
+                  border-radius: 50%;
+                  background: #00ffa3;
+                  cursor: pointer;
+                  border: 2px solid #1A1B23;
+                  box-shadow: 0 0 0 2px rgba(0, 255, 163, 0.3);
+                }
+                
+                input[type=range]:focus {
+                  outline: none;
+                }
+                
+                input[type=range]::-moz-range-progress {
+                  background-color: #00ffa3;
+                  height: 8px;
+                  border-radius: 4px;
+                }
+              `}
+            </style>
+            
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-white">BSV Threshold Settings</h2>
-              <button onClick={closeModal} className="text-gray-400 hover:text-white">
+              <h2 className="text-xl font-bold text-white">BSV Threshold</h2>
+              <button 
+                onClick={closeModal} 
+                className="text-gray-400 hover:text-[#00ffa3] transition-colors duration-300"
+              >
                 &times;
               </button>
             </div>
             
-            <div className="mb-6">
-              <p className="text-gray-300 mb-4">Set the minimum BSV threshold for items you see. Content with less BSV value will be hidden.</p>
-              
-              <div className="flex items-center mb-2">
-                <span className="text-gray-300 mr-3">Threshold:</span>
-                <input
-                  type="text"
-                  value={milestoneThreshold}
-                  onChange={(e) => handleThresholdChange(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white w-24"
-                />
-                <span className="text-gray-300 ml-3">BSV</span>
-              </div>
-              
-              <div className="text-gray-400 text-sm flex items-start">
-                <FiInfo className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" />
-                <span>Setting a higher threshold will show fewer items, but with higher value.</span>
-              </div>
-            </div>
-            
-            {notificationsSupported && (
-              <div className="border-t border-gray-800 pt-4 mb-4">
+            {notificationsSupported && connected && (
+              <div className="mb-6">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center">
-                    <FiBell className="w-5 h-5 mr-2 text-cyan-400" />
+                    <FiBell className="w-5 h-5 mr-2 text-[#00ffa3]" />
                     <span className="text-white font-medium">Notifications</span>
                   </div>
                   
                   <button
                     onClick={toggleNotifications}
-                    disabled={isSubscribing || !connected}
+                    disabled={isSubscribing}
                     className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ease-in-out duration-300 focus:outline-none ${
-                      notificationsEnabled ? 'bg-cyan-500' : 'bg-gray-700'
-                    } ${!connected ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      notificationsEnabled ? 'bg-[#00ffa3]' : 'bg-gray-700'
+                    }`}
                   >
                     <span
                       className={`inline-block w-4 h-4 transform transition ease-in-out duration-300 bg-white rounded-full ${
@@ -540,30 +573,60 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
                   </button>
                 </div>
                 
-                <p className="text-gray-400 text-sm mb-3">
-                  {notificationsEnabled
-                    ? `You will be notified when posts reach ${milestoneThreshold} BSV.`
-                    : `Enable to receive notifications when posts reach ${milestoneThreshold} BSV.`}
-                </p>
+                {notificationsEnabled && (
+                  <p className="text-gray-400 text-sm">
+                    Notify when posts reach threshold
+                  </p>
+                )}
                 
                 {notificationError && (
                   <div className="bg-red-900/30 border border-red-800 text-red-200 px-3 py-2 rounded text-sm mt-2">
                     {notificationError}
                   </div>
                 )}
-                
-                {!connected && (
-                  <div className="bg-gray-800 border border-gray-700 text-gray-300 px-3 py-2 rounded text-sm mt-2">
-                    Connect your wallet to enable notifications.
-                  </div>
-                )}
+              </div>
+            )}
+            
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-300">Threshold:</span>
+                <span className="text-[#00ffa3] font-medium">{milestoneThreshold.toFixed(2)} BSV</span>
+              </div>
+              
+              <div className="relative mb-6 px-1 pt-1">
+                <input
+                  type="range"
+                  min="0.01"
+                  max="10"
+                  step="0.01"
+                  value={milestoneThreshold}
+                  onChange={handleSliderChange}
+                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[#00ffa3]"
+                  style={{
+                    background: `linear-gradient(to right, #00ffa3 0%, #00ffa3 ${(milestoneThreshold / 10) * 100}%, #374151 ${(milestoneThreshold / 10) * 100}%, #374151 100%)`
+                  }}
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>0.01</span>
+                  <span>10</span>
+                </div>
+              </div>
+              
+              <p className="text-gray-400 text-sm">
+                Hide content below this value
+              </p>
+            </div>
+            
+            {!connected && notificationsSupported && (
+              <div className="bg-[#13141B]/80 border border-gray-800/40 p-3 rounded-lg text-gray-300 text-sm mb-4">
+                Connect wallet for notifications
               </div>
             )}
             
             <div className="flex justify-end">
               <button
                 onClick={closeModal}
-                className="px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 transition duration-200"
+                className="px-4 py-2 rounded-lg bg-gray-800 text-white hover:bg-gray-700 transition-all duration-300"
               >
                 Close
               </button>
