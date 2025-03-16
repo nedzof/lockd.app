@@ -230,7 +230,7 @@ export async function sendNotification(
           (subscriptionError.message.includes('410') || subscriptionError.message.includes('404'))
         ) {
           // Subscription is expired or invalid, disable it
-          await notificationSubscriptionService.unsubscribe(user_id, subscription.endpoint);
+          await notificationSubscriptionService.unsubscribe(user_id, subscription.endpoint as string | undefined);
           logger.info(`Disabled invalid subscription for user ${user_id}`);
         }
       }

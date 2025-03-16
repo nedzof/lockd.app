@@ -104,7 +104,7 @@ export class NotificationSubscriptionService {
    * @param endpoint - Push subscription endpoint
    * @returns True if unsubscribed successfully
    */
-  async unsubscribe(wallet_address: string, endpoint?: string) {
+  async unsubscribe(wallet_address: string, endpoint?: string | null) {
     try {
       logger.info(`Unsubscribing notifications for wallet: ${wallet_address}`);
       
