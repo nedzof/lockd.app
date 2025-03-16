@@ -612,43 +612,47 @@ const PostGrid: React.FC<PostGridProps> = ({
                             const percentage = calculatePercentage(option.lock_amount, totalLocked);
                             
                             return (
-                              <div key={option.id} className="bg-white/5 p-4 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
-                                {/* Option content - now more prominent */}
-                                <div className="mb-3">
-                                  <p className="text-lg font-semibold text-white">{option.content}</p>
-                                </div>
-                                
-                                {/* Progress bar and percentage */}
-                                <div className="flex items-center mb-2">
-                                  <div className="flex-grow">
-                                    <div className="w-full bg-gray-800/50 rounded-full h-3">
-                                      <div 
-                                        className="bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] h-3 rounded-full" 
-                                        style={{ width: `${percentage}%` }}
-                                      ></div>
+                              <div key={option.id} className="bg-white/5 p-3 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
+                                <div className="grid grid-cols-12 gap-2 items-center">
+                                  {/* Option content - left side */}
+                                  <div className="col-span-4 md:col-span-3">
+                                    <p className="text-base font-semibold text-white truncate">{option.content}</p>
+                                  </div>
+                                  
+                                  {/* Progress bar - middle */}
+                                  <div className="col-span-5 md:col-span-6">
+                                    <div className="flex items-center w-full">
+                                      <div className="flex-grow">
+                                        <div className="w-full bg-gray-800/50 rounded-full h-3">
+                                          <div 
+                                            className="bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] h-3 rounded-full" 
+                                            style={{ width: `${percentage}%` }}
+                                          ></div>
+                                        </div>
+                                      </div>
+                                      <span className="ml-2 text-sm font-bold text-[#00ffa3] min-w-[40px] text-right">{percentage}%</span>
+                                    </div>
+                                    
+                                    {/* Lock info below progress bar */}
+                                    <div className="flex items-center justify-between text-xs text-gray-400 mt-1">
+                                      <span className="flex items-center">
+                                        <FiLock className="mr-1" /> {formatBSV(option.lock_amount)} BSV
+                                      </span>
+                                      <span className="flex items-center">
+                                        <FiZap className="mr-1" /> {option.lock_duration} days
+                                      </span>
                                     </div>
                                   </div>
-                                  <span className="ml-3 text-sm font-bold text-[#00ffa3] min-w-[40px] text-right">{percentage}%</span>
-                                </div>
-                                
-                                {/* Lock info and duration */}
-                                <div className="flex items-center justify-between text-sm text-gray-400 mb-3">
-                                  <span className="flex items-center">
-                                    <FiLock className="mr-1" /> {formatBSV(option.lock_amount)} BSV
-                                  </span>
-                                  <span className="flex items-center">
-                                    <FiZap className="mr-1" /> {option.lock_duration} days
-                                  </span>
-                                </div>
-                                
-                                {/* Lock button - now more subtle */}
-                                <div className="mt-2">
-                                  <VoteOptionLockInteraction 
-                                    optionId={option.id} 
-                                    onLock={handlevote_optionLock}
-                                    isLocking={isLocking}
-                                    connected={!!wallet}
-                                  />
+                                  
+                                  {/* Lock button - right side */}
+                                  <div className="col-span-3">
+                                    <VoteOptionLockInteraction 
+                                      optionId={option.id} 
+                                      onLock={handlevote_optionLock}
+                                      isLocking={isLocking}
+                                      connected={!!wallet}
+                                    />
+                                  </div>
                                 </div>
                               </div>
                             );
