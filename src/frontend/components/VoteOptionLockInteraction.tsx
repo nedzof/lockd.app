@@ -31,7 +31,7 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
         <button
           onClick={() => setShowOptions(true)}
           disabled={!connected || isLocking}
-          className="w-full inline-flex items-center justify-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#00ffa3] transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full inline-flex items-center justify-center px-3 py-1 text-xs font-medium rounded-md shadow-sm text-gray-200 bg-white/10 hover:bg-white/15 border border-gray-700/30 focus:outline-none focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isLocking ? (
             <>

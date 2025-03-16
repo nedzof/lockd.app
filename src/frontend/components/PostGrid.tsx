@@ -613,19 +613,25 @@ const PostGrid: React.FC<PostGridProps> = ({
                             
                             return (
                               <div key={option.id} className="bg-white/5 p-4 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-colors">
-                                <div className="flex justify-between items-center mb-2">
-                                  <p className="font-medium text-white">{option.content}</p>
-                                  <span className="text-sm font-bold text-[#00ffa3]">{percentage}%</span>
+                                {/* Option content - now more prominent */}
+                                <div className="mb-3">
+                                  <p className="text-lg font-semibold text-white">{option.content}</p>
                                 </div>
                                 
-                                {/* Progress bar */}
-                                <div className="w-full bg-gray-800/50 rounded-full h-2.5 mb-3">
-                                  <div 
-                                    className="bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] h-2.5 rounded-full" 
-                                    style={{ width: `${percentage}%` }}
-                                  ></div>
+                                {/* Progress bar and percentage */}
+                                <div className="flex items-center mb-2">
+                                  <div className="flex-grow">
+                                    <div className="w-full bg-gray-800/50 rounded-full h-3">
+                                      <div 
+                                        className="bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] h-3 rounded-full" 
+                                        style={{ width: `${percentage}%` }}
+                                      ></div>
+                                    </div>
+                                  </div>
+                                  <span className="ml-3 text-sm font-bold text-[#00ffa3] min-w-[40px] text-right">{percentage}%</span>
                                 </div>
                                 
+                                {/* Lock info and duration */}
                                 <div className="flex items-center justify-between text-sm text-gray-400 mb-3">
                                   <span className="flex items-center">
                                     <FiLock className="mr-1" /> {formatBSV(option.lock_amount)} BSV
@@ -635,12 +641,15 @@ const PostGrid: React.FC<PostGridProps> = ({
                                   </span>
                                 </div>
                                 
-                                <VoteOptionLockInteraction 
-                                  optionId={option.id} 
-                                  onLock={handlevote_optionLock}
-                                  isLocking={isLocking}
-                                  connected={!!wallet}
-                                />
+                                {/* Lock button - now more subtle */}
+                                <div className="mt-2">
+                                  <VoteOptionLockInteraction 
+                                    optionId={option.id} 
+                                    onLock={handlevote_optionLock}
+                                    isLocking={isLocking}
+                                    connected={!!wallet}
+                                  />
+                                </div>
                               </div>
                             );
                           })}
