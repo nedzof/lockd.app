@@ -26,7 +26,7 @@
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:validate": "prisma validate",
-    "vercel-build": "prisma generate && vite build && tsc"
+    "vercel-build": "npm run prisma:generate && vite build"
   },
   "dependencies": {
     "@bsv/sdk": "^1.3.36",
