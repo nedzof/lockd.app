@@ -28,17 +28,14 @@ const prismaWithTypes = prisma as PrismaClient & {
  */
 async function checkThresholds() {
   try {
-    logger.info('Running threshold notification check');
+    logger.info('Running threshold check');
     
     // Find all active subscriptions with their threshold values
     const thresholds = await findUniqueThresholds();
     
     if (thresholds.length === 0) {
-      logger.info('No active notification subscriptions found');
       return;
     }
-    
-    logger.info(`Found ${thresholds.length} unique threshold values to check`);
     
     // For each threshold value, find posts that have reached it
     for (const threshold of thresholds) {
@@ -48,13 +45,11 @@ async function checkThresholds() {
         continue;
       }
       
-      logger.info(`Checking posts that reached ${threshold} BSV threshold (${subscriptions.length} subscriptions)`);
-      
       // Find posts that have reached the threshold since the last check
       const recentPosts = await findPostsAboveThreshold(threshold);
       
       if (recentPosts.length > 0) {
-        logger.info(`Found ${recentPosts.length} posts that reached threshold ${threshold}`);
+        logger.info(`Found ${recentPosts.length} posts that reached ${threshold} BSV threshold`);
         
         // For each post, notify all subscribers for this threshold
         for (const post of recentPosts) {
@@ -69,8 +64,6 @@ async function checkThresholds() {
         }
       }
     }
-    
-    logger.info('Threshold notification check completed');
   } catch (error) {
     logger.error('Error in threshold notification job:', error instanceof Error ? error.message : String(error));
   }
@@ -101,17 +94,17 @@ async function findUniqueThresholds(): Promise<number[]> {
 }
 
 /**
- * Find posts that have reached a specific threshold in the last hour
+ * Find posts that have reached a specific threshold in the last minute
  */
 async function findPostsAboveThreshold(threshold: number) {
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
   
   // First get post IDs with lock amounts that meet the threshold
   const postAggregations = await prisma.lock_like.groupBy({
     by: ['post_id'],
     where: {
       created_at: {
-        gte: oneHourAgo
+        gte: oneMinuteAgo
       }
     },
     having: {
@@ -162,11 +155,11 @@ async function findPostsAboveThreshold(threshold: number) {
  */
 export function initializeThresholdNotificationJob() {
   try {
-    // Run every 15 minutes
-    const job = new CronJob('*/15 * * * *', checkThresholds);
+    // Run every minute
+    const job = new CronJob('* * * * *', checkThresholds);
     
     job.start();
-    logger.info('Threshold notification job scheduled');
+    logger.info('Threshold notification job scheduled to run every minute');
     
     // Run immediately on startup
     checkThresholds();
