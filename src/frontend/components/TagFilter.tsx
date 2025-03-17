@@ -15,7 +15,7 @@ interface TagFilterProps {
 
 // Use environment variable for API URL
 
-// Preset categories/tags
+// Preset categories/tags sorted by popularity
 const PRESET_TAGS = [
   'memes',
   'art',
@@ -36,11 +36,32 @@ const PRESET_TAGS = [
   'science',
   'education',
   'history',
-  'philosophy'
+  'philosophy',
+  'davos',
+  'dump',
+  'plitics',
+  'switzerland',
+  'trump',
+  'wef'
+];
+
+// Tags sorted by popularity (first row only)
+const POPULAR_TAGS = [
+  'memes',
+  'art',
+  'news',
+  'music',
+  'gaming',
+  'tech',
+  'crypto',
+  'bitcoin',
+  'bsv',
+  'nfts',
+  'defi'
 ];
 
 const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => {
-  const [tags, setTags] = useState<string[]>(PRESET_TAGS);
+  const [tags, setTags] = useState<string[]>(POPULAR_TAGS);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,11 +83,25 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
       
       const data = await response.json();
       
-      // Merge preset tags with fetched tags, removing duplicates
+      // Get the most popular tags (first row only)
       const fetchedTags = data.tags || [];
-      const mergedTags = [...new Set([...PRESET_TAGS, ...fetchedTags])];
+      const sortedTags = [...fetchedTags].sort((a, b) => {
+        // Sort by popularity if available, otherwise use preset order
+        if (a.count && b.count) return b.count - a.count;
+        return 0;
+      });
       
-      setTags(mergedTags);
+      // Take only the first row (11 tags)
+      const popularTags = sortedTags.slice(0, 11).map(tag => 
+        typeof tag === 'string' ? tag : tag.name || tag.tag
+      );
+      
+      // If we have popular tags from the server, use them, otherwise fall back to preset
+      if (popularTags.length > 0) {
+        setTags(popularTags);
+      } else {
+        setTags(POPULAR_TAGS);
+      }
     } catch (err) {
       console.error('Error fetching additional tags:', err);
       // Don't set error state - we're already using preset tags
@@ -77,8 +112,8 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
   }, []);
 
   useEffect(() => {
-    // Start with preset tags immediately
-    setTags(PRESET_TAGS);
+    // Start with preset popular tags immediately
+    setTags(POPULAR_TAGS);
     setIsLoading(false);
     
     // Optionally try to fetch additional tags in the background
@@ -92,7 +127,7 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
     onTagSelect(newselected_tags);
   };
 
-  // Group tags into categories for better organization
+  // Render only the first row of tags
   const renderTagGroups = () => {
     return (
       <div className="flex flex-wrap gap-2 p-4">
