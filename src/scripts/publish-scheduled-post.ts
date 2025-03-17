@@ -65,34 +65,29 @@ async function publishScheduledPost(post_id: string) {
   }
 }
 
-// Run the function if this script is executed directly
-if (import.meta.url.startsWith('file:')) {
-  const modulePath = new URL(import.meta.url).pathname;
-  const executedFilePath = process.argv[1];
+// Run directly if script is called directly
+if (require.main === module) {
+  // Get post_id from command line arguments
+  const post_id = process.argv[2];
   
-  if (modulePath === executedFilePath || modulePath === '/' + executedFilePath) {
-    // Get post_id from command line arguments
-    const post_id = process.argv[2];
-    
-    if (!post_id) {
-      logger.error('Please provide a post ID as a command line argument');
-      process.exit(1);
-    }
-    
-    publishScheduledPost(post_id)
-      .then((result) => {
-        if (result.success) {
-          logger.info('Post published successfully:', result.message);
-        } else {
-          logger.error('Failed to publish post:', result.error);
-        }
-        process.exit(result.success ? 0 : 1);
-      })
-      .catch(error => {
-        logger.error('Script failed:', error);
-        process.exit(1);
-      });
+  if (!post_id) {
+    logger.error('Please provide a post ID as a command line argument');
+    process.exit(1);
   }
+  
+  publishScheduledPost(post_id)
+    .then((result) => {
+      if (result.success) {
+        logger.info('Post published successfully:', result.message);
+      } else {
+        logger.error('Failed to publish post:', result.error);
+      }
+      process.exit(result.success ? 0 : 1);
+    })
+    .catch(error => {
+      logger.error('Script failed:', error);
+      process.exit(1);
+    });
 }
 
-export { publishScheduledPost }; 
+module.exports = { publishScheduledPost }; 

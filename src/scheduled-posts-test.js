@@ -1,30 +1,31 @@
+// Test script for scheduled posts
 import { PrismaClient } from '@prisma/client';
-import { logger } from '../utils/logger';
 
+// Create a new PrismaClient instance
 const prisma = new PrismaClient();
 
 async function checkScheduledPosts() {
   try {
-    logger.info('Starting scheduled posts check');
+    console.log('Starting scheduled posts check');
     
     // Get all posts
     const allPosts = await prisma.post.findMany();
-    logger.info(`Found ${allPosts.length} total posts`);
+    console.log(`Found ${allPosts.length} total posts`);
     
     // Filter posts that have scheduled metadata
     const scheduledPosts = allPosts.filter(post => {
-      const metadata = post.metadata as Record<string, any> | null;
+      const metadata = post.metadata;
       return metadata && metadata.scheduled;
     });
     
-    logger.info(`Found ${scheduledPosts.length} posts with scheduled metadata`);
+    console.log(`Found ${scheduledPosts.length} posts with scheduled metadata`);
     
     // Display details for each scheduled post
     for (const post of scheduledPosts) {
-      const metadata = post.metadata as Record<string, any>;
+      const metadata = post.metadata;
       const scheduledInfo = metadata.scheduled;
       
-      logger.info('Scheduled post details:', {
+      console.log('Scheduled post details:', {
         post_id: post.id,
         tx_id: post.tx_id,
         content: post.content.substring(0, 50) + (post.content.length > 50 ? '...' : ''),
@@ -39,31 +40,27 @@ async function checkScheduledPosts() {
       const now = new Date();
       
       if (scheduledAt <= now) {
-        logger.info(`Post ${post.id} scheduled time has passed (${scheduledAt.toISOString()}), but post is still marked as scheduled`);
+        console.log(`Post ${post.id} scheduled time has passed (${scheduledAt.toISOString()}), but post is still marked as scheduled`);
       } else {
-        logger.info(`Post ${post.id} is scheduled for future publication (${scheduledAt.toISOString()})`);
+        console.log(`Post ${post.id} is scheduled for future publication (${scheduledAt.toISOString()})`);
       }
     }
     
-    logger.info('Scheduled posts check completed');
+    console.log('Scheduled posts check completed');
   } catch (error) {
-    logger.error('Error checking scheduled posts:', error);
+    console.error('Error checking scheduled posts:', error);
   } finally {
     await prisma.$disconnect();
   }
 }
 
-// Run directly if script is called directly
-if (require.main === module) {
-  checkScheduledPosts()
-    .then(() => {
-      logger.info('Script completed');
-      process.exit(0);
-    })
-    .catch(error => {
-      logger.error('Script failed:', error);
-      process.exit(1);
-    });
-}
-
-module.exports = { checkScheduledPosts }; 
+// Run the function
+checkScheduledPosts()
+  .then(() => {
+    console.log('Script completed');
+    process.exit(0);
+  })
+  .catch(error => {
+    console.error('Script failed:', error);
+    process.exit(1);
+  }); 
