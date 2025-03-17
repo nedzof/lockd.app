@@ -21,6 +21,8 @@ export interface TransactionOutput {
   metadata: LockProtocolData;
   type?: string;
   isValid: boolean;
+  _optionIndex?: number; // Add custom field for option index
+  _authorAddress?: string; // Add custom field for author address
 }
 
 export interface ParsedTransaction {
@@ -160,14 +162,12 @@ export class TxParser {
         const optionOutputs = outputs.filter(o => 
           o.isValid && 
           o !== questionOutput && 
-          (o.metadata?.option_index !== undefined || o.metadata?.is_vote === true)
+          (o.metadata?.is_vote === true)
         );
         
-        // Assign option indices if not already set
+        // Create custom properties to track indices without modifying the strictly typed metadata
         optionOutputs.forEach((output, index) => {
-          if (output.metadata.option_index === undefined) {
-            output.metadata.option_index = index + 1;
-          }
+          output._optionIndex = index + 1;
         });
         
         // Set total_options on question output if not already set
@@ -213,9 +213,8 @@ export class TxParser {
             
             // Set option indices if not already set
             optionOutputs.forEach((output, index) => {
-              if (output.metadata.option_index === undefined) {
-                output.metadata.option_index = index + 1;
-              }
+              // We're storing the index in a custom field instead of metadata
+              output._optionIndex = index + 1;
             });
             
             // Set total_options on question
@@ -253,9 +252,8 @@ export class TxParser {
           
           // Set option indices
           optionOutputs.forEach((output, index) => {
-            if (output.metadata.option_index === undefined) {
-              output.metadata.option_index = index + 1;
-            }
+            // Store in custom field to avoid type issues
+            output._optionIndex = index + 1;
           });
           
           // Set total_options on question
@@ -319,18 +317,21 @@ export class TxParser {
             // Parse output with our extraction methods
             const parsed = await this.parse_output(output);
             
-            // Add author address to metadata if available
-            if (authorAddress && parsed.metadata) {
-              parsed.metadata.author_address = authorAddress;
-            }
-            
-            outputs.push({
+            // Create the output object
+            const outputObj: TransactionOutput = {
               hex: output,
               content: parsed.content,
               metadata: parsed.metadata,
               type: parsed.type,
               isValid: true
-            });
+            };
+            
+            // Add author address to metadata if available
+            if (authorAddress) {
+              outputObj._authorAddress = authorAddress;
+            }
+            
+            outputs.push(outputObj);
           } catch (parseError: unknown) {
             const errorMessage = parseError instanceof Error ? parseError.message : String(parseError);
             logger.error(`Failed to parse output: ${errorMessage}`);

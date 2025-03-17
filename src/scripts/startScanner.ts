@@ -1,13 +1,13 @@
-import { Scanner } from '../services/scanner.js';
-import { logger } from '../utils/logger.js';
-import { DbClient } from '../services/dbClient.js';
-import { TransactionParser } from '../services/parser.js';
+/**
+ * Scanner Startup Script
+ * 
+ * This script starts the blockchain scanner that looks for lockd.app transactions
+ */
+
+import { scanner } from '../services/scanner.js';
+import logger from '../services/logger.js';
 
 async function main() {
-    const dbClient = DbClient.get_instance();
-    const parser = new TransactionParser(dbClient);
-    const scanner = new Scanner(parser, dbClient);
-    
     process.on('SIGINT', async () => {
         logger.info('Received SIGINT. Shutting down...');
         await scanner.stop();
@@ -24,7 +24,7 @@ async function main() {
         await scanner.start();
         logger.info('Scanner started successfully');
     } catch (error) {
-        logger.error('Failed to start scanner', { error });
+        logger.error(`Failed to start scanner: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
     }
 }

@@ -47,7 +47,10 @@ export class PostRepository {
       const content = metadata.content || '';
       const isVote = type === 'vote' || metadata.is_vote === true;
       const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
-      const isLocked = metadata.is_locked === true;
+      
+      // Check for custom metadata that might have been stored separately
+      const customMetadata = metadata._custom_metadata || {};
+      const isLocked = customMetadata.is_locked === true;
       
       // Extract image data if available
       let mediaType = null;
@@ -70,7 +73,7 @@ export class PostRepository {
       const postData = {
         tx_id,
         content,
-        author_address: metadata.author_address,
+        author_address: metadata.author_address || txData.authorAddress,
         is_vote: isVote,
         media_type: mediaType,
         content_type: contentTypeValue,
@@ -89,13 +92,16 @@ export class PostRepository {
       if (isVote && metadata.options && Array.isArray(metadata.options)) {
         // Create vote options
         for (const option of metadata.options) {
+          // Handle the updated structure where we use index instead of option_index
+          const optionIndex = option.index || option.option_index || 0;
+          
           await prisma.vote_option.create({
             data: {
               post_id: post.id,
               content: option.content || '',
-              tx_id: `${tx_id}-${option.option_index || 0}`, // Generate a unique tx_id for each option
-              option_index: option.option_index || 0,
-              author_address: metadata.author_address
+              tx_id: `${tx_id}-${optionIndex}`, // Generate a unique tx_id for each option
+              option_index: optionIndex,
+              author_address: metadata.author_address || txData.authorAddress
             }
           });
         }

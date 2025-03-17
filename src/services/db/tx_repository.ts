@@ -161,8 +161,13 @@ export class TxRepository {
         combinedMetadata.is_vote = true;
         combinedMetadata.options = optionOutputs.map((option, index) => ({
           content: option.content,
-          option_index: option.metadata?.option_index || index + 1
+          index: option._optionIndex || index + 1
         }));
+        
+        // Add author address if available
+        if (parsedTx.authorAddress) {
+          combinedMetadata.author_address = parsedTx.authorAddress;
+        }
       } else {
         // For regular posts, combine metadata from all outputs
         combinedMetadata = validOutputs.reduce((acc, output) => {
@@ -185,6 +190,26 @@ export class TxRepository {
             if (value !== undefined && (newAcc[key] === undefined || newAcc[key] === null || newAcc[key] === '')) {
               newAcc[key] = value;
             }
+          }
+          
+          // Add custom metadata fields if available
+          if ((output.metadata as any)._custom_metadata) {
+            if (!newAcc._custom_metadata) {
+              newAcc._custom_metadata = {};
+            }
+            
+            // Merge custom metadata
+            newAcc._custom_metadata = {
+              ...newAcc._custom_metadata,
+              ...(output.metadata as any)._custom_metadata
+            };
+          }
+          
+          // Add author address if available
+          if (output._authorAddress) {
+            newAcc.author_address = output._authorAddress;
+          } else if (parsedTx.authorAddress) {
+            newAcc.author_address = parsedTx.authorAddress;
           }
           
           return newAcc;

@@ -66,6 +66,9 @@ export function build_metadata(keyValuePairs: Record<string, string>, content: s
     content: content
   };
   
+  // Create a custom metadata object for properties not in LockProtocolData
+  const custom_metadata: Record<string, any> = {};
+  
   // Map extracted fields to metadata
   if (keyValuePairs.post_id) {
     // Extract just the ID pattern without additional data
@@ -96,12 +99,13 @@ export function build_metadata(keyValuePairs: Record<string, string>, content: s
     }
   }
   
-  // Handle both camelCase and snake_case variants
+  // Handle both camelCase and snake_case variants for option_index
+  // Store in custom_metadata instead of directly in LockProtocolData
   if (keyValuePairs.option_index || keyValuePairs.optionIndex) {
     const optionIndexValue = keyValuePairs.option_index || keyValuePairs.optionIndex;
     const numMatch = optionIndexValue.match(/^(\d+)/);
     if (numMatch) {
-      metadata.option_index = parseInt(numMatch[1], 10);
+      custom_metadata.option_index = parseInt(numMatch[1], 10);
     }
   }
   
@@ -121,9 +125,10 @@ export function build_metadata(keyValuePairs: Record<string, string>, content: s
     metadata.is_vote = value === 'true' || value === '1' || value === 'yes';
   }
   
+  // Store is_locked in custom_metadata
   if (keyValuePairs.is_locked !== undefined) {
     const value = keyValuePairs.is_locked.toLowerCase().trim();
-    metadata.is_locked = value === 'true' || value === '1' || value === 'yes';
+    custom_metadata.is_locked = value === 'true' || value === '1' || value === 'yes';
   }
   
   // Other fields
@@ -136,20 +141,24 @@ export function build_metadata(keyValuePairs: Record<string, string>, content: s
     metadata.content_type = keyValuePairs.content_type;
   }
   
+  // Store timestamp-related data in custom_metadata
   if (keyValuePairs.timestamp) {
     // Validate and clean up the timestamp format
     if (is_valid_iso_timestamp(keyValuePairs.timestamp)) {
-      metadata.created_at = new Date(keyValuePairs.timestamp);
+      custom_metadata.created_at = new Date(keyValuePairs.timestamp);
     } else {
       // Try to parse a partial timestamp
       try {
         const cleanedTimestamp = format_timestamp(keyValuePairs.timestamp);
-        metadata.created_at = new Date(cleanedTimestamp);
+        custom_metadata.created_at = new Date(cleanedTimestamp);
       } catch (e) {
         // If we can't parse the timestamp, don't set it
       }
     }
   }
+  
+  // Attach custom metadata to the main metadata object as a custom field
+  (metadata as any)._custom_metadata = custom_metadata;
   
   return metadata as LockProtocolData;
 } 
