@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { FiLock, FiZap, FiCheckCircle } from 'react-icons/fi';
+import { FiLock, FiZap, FiCheckCircle, FiLink } from 'react-icons/fi';
 
 export default function WTF() {
   return (
@@ -15,7 +15,7 @@ export default function WTF() {
         {/* Main explanation */}
         <section className="bg-[#1A1B23] rounded-xl p-5 shadow-lg border border-gray-800">
           <p className="text-gray-200 leading-relaxed text-lg mb-4">
-            Lockd.app lets you <span className="text-[#00ffa3] font-medium">temporarily lock BSV tokens</span> on content you value.
+            Lockd.app lets you <span className="text-[#00ffa3] font-medium">temporarily lock ₿ tokens</span> on content you value.
           </p>
           <p className="text-gray-200 leading-relaxed text-lg">
             Your tokens are safe and will return to you after the lock period.
@@ -62,16 +62,16 @@ export default function WTF() {
           
           <ol className="space-y-4 list-decimal pl-5">
             <li className="text-gray-200 text-lg pl-2">
-              Connect your BSV wallet
+              Connect your ₿ wallet
             </li>
             <li className="text-gray-200 text-lg pl-2">
               Find content you love
             </li>
             <li className="text-gray-200 text-lg pl-2">
-              Lock BSV to show appreciation
+              Lock ₿ to show appreciation
             </li>
             <li className="text-gray-200 text-lg pl-2">
-              Create content and earn rewards
+              Create content and de-psyop social media
             </li>
           </ol>
           

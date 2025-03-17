@@ -52,7 +52,7 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
           <div className="absolute top-full right-0 mt-2 z-20 bg-[#2A2A40] p-4 rounded-lg border border-gray-800/20 shadow-xl w-60 backdrop-blur-sm">
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-gray-300 mb-1.5">Amount (BSV)</label>
+                <label className="block text-xs font-medium text-gray-300 mb-1.5">Amount (₿)</label>
                 <div className="relative">
                   <input
                     type="number"

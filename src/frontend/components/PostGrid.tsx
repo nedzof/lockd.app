@@ -850,7 +850,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                   {/* Display locked BSV amount for all posts */}
                   <div className="text-[#00ffa3] font-medium flex items-center text-sm">
                     <FiLock className="mr-1" size={14} />
-                    {formatBSV(post.totalLocked || 0)} BSV
+                    {formatBSV(post.totalLocked || 0)} ₿
                   </div>
                 </div>
               </div>
