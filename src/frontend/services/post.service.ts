@@ -1083,13 +1083,23 @@ export const createPost = async (
         dbPost.id = tx_id;
         
         // Add vote options if this is a vote post
-        if (isVotePost && metadata.vote?.options) {
+        if (isVotePost) {
             dbPost.is_vote = true;
-            dbPost.vote_options = metadata.vote.options.map(option => ({
-                content: option.text,
-                option_index: option.optionIndex,
-                post_id: tx_id
-            })) as any; // Type assertion to bypass TypeScript error
+            
+            // Convert vote options to the format expected by the backend
+            if (vote_options && vote_options.length >= 2) {
+                // Filter out empty options
+                const validOptions = vote_options.filter(opt => opt.trim() !== '');
+                
+                if (validOptions.length >= 2) {
+                    console.log('Setting vote options in dbPost:', validOptions);
+                    // Format vote options as expected by the backend
+                    dbPost.vote_options = validOptions.map((text, index) => ({
+                        text,
+                        option_index: index
+                    })) as any; // Type assertion to bypass TypeScript error
+                }
+            }
         }
         
         console.log('Created database post object:', { 
