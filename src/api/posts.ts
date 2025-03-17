@@ -41,6 +41,10 @@ interface CreatePostBody {
     lock_duration: number;
     index: number;
   }>;
+  scheduled?: {
+    scheduledAt: string;
+    timezone: string;
+  };
   [key: string]: any; // Add index signature for dynamic field access
 }
 
@@ -620,7 +624,8 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       raw_image_data,
       media_type,
       tx_id,
-      post_id: clientProvidedpost_id // Extract post_id if client provides it
+      post_id: clientProvidedpost_id, // Extract post_id if client provides it
+      scheduled // Extract scheduled information
     } = req.body;
 
     // Validate required fields
@@ -666,6 +671,16 @@ const createPost: CreatePostHandler = async (req, res, next) => {
     
     console.log(`Creating post with ID: ${temptx_id}, clientProvidedpost_id: ${clientProvidedpost_id}`);
     
+    // Prepare metadata with post_id and scheduled information if provided
+    const metadata: Record<string, any> = {};
+    if (clientProvidedpost_id) {
+      metadata.post_id = clientProvidedpost_id;
+    }
+    if (scheduled) {
+      metadata.scheduled = scheduled;
+      console.log(`Post scheduled for: ${scheduled.scheduledAt} (${scheduled.timezone})`);
+    }
+    
     // Create a minimal post with required fields
     try {
       const post = await prisma.post.create({
@@ -676,7 +691,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
           author_address: author_address,
           tags: tags || [],
           isVote: isVote || false,
-          metadata: clientProvidedpost_id ? { post_id: clientProvidedpost_id } : undefined
+          metadata: Object.keys(metadata).length > 0 ? metadata : undefined
         }
       });
 

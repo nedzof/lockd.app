@@ -16,9 +16,40 @@ import { logger } from './utils/logger';
 import { initializeTagGenerationJob } from './jobs/tagGenerationJob';
 import { initializeStatsUpdateJob } from './jobs/statsUpdateJob';
 import { initializeThresholdNotificationJob } from './jobs/thresholdNotificationJob';
+import { processScheduledPosts } from './jobs/scheduled-posts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Initialize scheduled posts job
+function initializeScheduledPostsJob() {
+  // Run the job every minute to check for posts that need to be published
+  const INTERVAL = 60 * 1000; // 1 minute in milliseconds
+  
+  // Run the job immediately on startup
+  processScheduledPosts()
+    .then(result => {
+      logger.info('Initial scheduled posts job completed:', result);
+    })
+    .catch(error => {
+      logger.error('Error running initial scheduled posts job:', error);
+    });
+  
+  // Set up interval to run the job periodically
+  setInterval(() => {
+    processScheduledPosts()
+      .then(result => {
+        if (result.processed > 0) {
+          logger.info('Scheduled posts job completed:', result);
+        }
+      })
+      .catch(error => {
+        logger.error('Error running scheduled posts job:', error);
+      });
+  }, INTERVAL);
+  
+  logger.info(`Scheduled posts job initialized (running every ${INTERVAL / 1000} seconds)`);
+}
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3003;
@@ -95,7 +126,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Only start the server in development mode, not in Vercel's serverless environment
+// Start the server
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`);
@@ -110,6 +141,9 @@ if (process.env.NODE_ENV !== 'production') {
     
     // Initialize the threshold notification job
     initializeThresholdNotificationJob();
+    
+    // Initialize the scheduled posts job
+    initializeScheduledPostsJob();
   });
 
   // Handle graceful shutdown
@@ -126,6 +160,24 @@ if (process.env.NODE_ENV !== 'production') {
   // In production (Vercel), initialize jobs if needed
   // Note: Long-running jobs may not work well in serverless environments
   logger.info('Running in production mode (serverless)');
+  
+  // For serverless environments, we can trigger the scheduled posts job
+  // on each request to check for posts that need to be published
+  app.use((req, res, next) => {
+    // Only run the job occasionally to avoid excessive processing
+    if (Math.random() < 0.05) { // 5% chance to run on each request
+      processScheduledPosts()
+        .then(result => {
+          if (result.processed > 0) {
+            logger.info('Serverless scheduled posts job completed:', result);
+          }
+        })
+        .catch(error => {
+          logger.error('Error running serverless scheduled posts job:', error);
+        });
+    }
+    next();
+  });
 }
 
 // Export the Express app for Vercel

@@ -96,6 +96,10 @@ export interface PostMetadata {
     is_locked: boolean;
     lock_duration?: number;
     is_vote: boolean;
+    scheduled?: {
+        scheduledAt: string;
+        timezone: string;
+    };
     vote?: {
         is_vote_question: boolean;
         question?: string;
@@ -243,6 +247,12 @@ function createMapData(metadata: PostMetadata): MAP {
     // Only include lock_duration for non-vote options
     if (metadata.type !== 'vote_option' && metadata.lock_duration !== undefined) {
         mapData.lock_duration = metadata.lock_duration.toString();
+    }
+
+    // Add scheduling information if present
+    if (metadata.scheduled) {
+        mapData.scheduled_at = metadata.scheduled.scheduledAt;
+        mapData.timezone = metadata.scheduled.timezone;
     }
 
     if (metadata.vote) {
@@ -623,10 +633,12 @@ export const createPost = async (
     imageData?: string | File,
     imageMimeType?: string,
     isVotePost: boolean = false,
-    vote_options: string[] = []
+    vote_options: string[] = [],
+    scheduleInfo?: { scheduledAt: string; timezone: string }
 ): Promise<Post> => {
     console.log('Creating post with wallet:', wallet ? 'Wallet provided' : 'No wallet');
     console.log('Is vote post:', isVotePost, 'Vote options:', vote_options);
+    console.log('Schedule info:', scheduleInfo);
   
     if (!wallet) {
         console.error('No wallet provided to createPost');
@@ -652,7 +664,7 @@ export const createPost = async (
     const components: InscribeRequest[] = [];
 
     // Show pending toast
-    const pendingToast = toast.loading('Creating post...', {
+    const pendingToast = toast.loading(scheduleInfo ? 'Scheduling post...' : 'Creating post...', {
         style: {
             background: '#1A1B23',
             color: '#fff',
@@ -670,11 +682,19 @@ export const createPost = async (
             timestamp: new Date().toISOString(),
             version: '1.0.0',
             tags: [],
-            sequence: sequence.next(),
+            sequence: sequence.current,
             post_id,
             is_locked: false,
             is_vote: isVotePost
         };
+
+        // Add scheduling information if provided
+        if (scheduleInfo) {
+            metadata.scheduled = {
+                scheduledAt: scheduleInfo.scheduledAt,
+                timezone: scheduleInfo.timezone
+            };
+        }
 
         console.log('Created post metadata:', { ...metadata, content: content.substring(0, 50) + (content.length > 50 ? '...' : '') });
 
@@ -1071,6 +1091,10 @@ interface PostCreationData {
     lock_duration?: number;
     lock_amount?: number;
     unlock_height?: number;
+    scheduled?: {
+        scheduledAt: string;
+        timezone: string;
+    };
 }
 
 interface Post extends PostCreationData {
