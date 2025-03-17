@@ -61,40 +61,43 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
       ) : (
         <div 
           ref={dialogRef}
-          className="inline-flex items-center bg-[#2A2A40]/95 rounded-full border border-gray-800/50 shadow-md h-8 overflow-hidden animate-expandLeft"
+          className="inline-flex items-center bg-gradient-to-r from-[#2A2A40] to-[#323250] rounded-full border border-[#00ffa3]/20 shadow-md h-8 overflow-hidden animate-expandLeft"
         >
           <div className="px-3 flex items-center space-x-2">
-            <div className="flex items-center space-x-1">
-              <label className="text-xs text-gray-300 whitespace-nowrap">Lock</label>
+            <div className="flex items-center space-x-1.5">
+              <span className="text-xs text-[#00ffa3] font-medium whitespace-nowrap">Lock</span>
               <input
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(Number(e.target.value))}
                 min="0.00001"
                 step="0.00001"
-                className="w-16 bg-white/10 border border-gray-800/30 rounded-sm py-0.5 px-1 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50"
+                className="w-16 bg-[#1A1B23]/60 border border-[#00ffa3]/20 rounded-sm py-0.5 px-1.5 text-xs text-white focus:ring-[#00ffa3]/30 focus:border-[#00ffa3]/50 appearance-none"
+                style={{ WebkitAppearance: 'none', MozAppearance: 'textfield' }}
               />
-              <span className="text-xs text-gray-300">₿ for</span>
+              <span className="text-xs text-[#00ffa3] font-medium">₿</span>
+              <span className="text-xs text-gray-400">for</span>
               <input
                 type="number"
                 value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
                 min="1"
-                className="w-16 bg-white/10 border border-gray-800/30 rounded-sm py-0.5 px-1 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50"
+                className="w-16 bg-[#1A1B23]/60 border border-[#00ffa3]/20 rounded-sm py-0.5 px-1.5 text-xs text-white focus:ring-[#00ffa3]/30 focus:border-[#00ffa3]/50 appearance-none"
+                style={{ WebkitAppearance: 'none', MozAppearance: 'textfield' }}
               />
-              <span className="text-xs text-gray-300">blocks</span>
+              <span className="text-xs text-gray-400">blocks</span>
             </div>
-            <div className="flex space-x-1">
+            <div className="flex space-x-1.5">
               <button
                 onClick={handleLock}
                 disabled={!connected || isLocking || amount <= 0 || duration <= 0}
-                className="inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium rounded-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-1 focus:ring-[#00ffa3] disabled:opacity-50"
+                className="inline-flex items-center justify-center px-2.5 py-0.5 text-xs font-medium rounded-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-1 focus:ring-[#00ffa3] disabled:opacity-50 shadow-sm shadow-[#00ffa3]/20"
               >
                 {isLocking ? <FiLoader className="animate-spin" size={10} /> : "OK"}
               </button>
               <button
                 onClick={() => setShowOptions(false)}
-                className="inline-flex items-center justify-center w-5 h-5 text-xs rounded-full text-gray-400 hover:text-white bg-gray-800/30 hover:bg-gray-700"
+                className="inline-flex items-center justify-center w-5 h-5 text-xs rounded-full text-gray-300 hover:text-white bg-[#1A1B23]/60 hover:bg-[#1A1B23]/80 border border-[#00ffa3]/20"
               >
                 <FiX size={10} />
               </button>
