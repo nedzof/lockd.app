@@ -205,48 +205,23 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
     setError('');
+    setIsSubmitting(true);
 
     try {
       // Check if wallet is connected
       const isConnected = await isWalletConnected();
       if (!isConnected) {
         console.log('Wallet not connected, attempting to connect...');
-        try {
-          // The ensureWalletConnection function expects a non-undefined wallet
-          if (wallet) {
-            await ensureWalletConnection(wallet, connect);
-            console.log('Wallet connected successfully');
-            
-            // Verify we have an address after connection
-            const bsvAddress = await getBsvAddress(wallet);
-            if (!bsvAddress) {
-              console.log('No wallet address after initial connection, waiting briefly and checking again...');
-              
-              // Wait a moment and check if address is available
-              await new Promise(resolve => setTimeout(resolve, 1500));
-              
-              const addressAfterDelay = await getBsvAddress(wallet);
-              console.log('Checking wallet address after delay:', {
-                hasBsvAddress: !!addressAfterDelay,
-                bsvAddress: addressAfterDelay
-              });
-              
-              // If still no address, try connecting again
-              if (!addressAfterDelay && wallet.isReady) {
-                console.log('Still no address, attempting second connection...');
-                await connect();
-                console.log('Second connection attempt completed');
-              }
-            }
-          } else {
-            console.error('No wallet available for connection');
-            setError('Wallet not available. Please make sure you have a compatible wallet installed.');
+        if (wallet) {
+          const connectionResult = await ensureWalletConnection(wallet, connect);
+          if (!connectionResult.success) {
+            setError('Please connect your wallet to create a post');
+            setIsSubmitting(false);
+            return;
           }
-        } catch (walletError) {
-          console.error('Failed to connect wallet:', walletError);
-          setError('Please connect your wallet to create a post. Click the wallet button in the top right corner.');
+        } else {
+          setError('Wallet not available. Please make sure you have a compatible wallet installed.');
           setIsSubmitting(false);
           return;
         }
@@ -271,7 +246,25 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         return;
       }
 
+      // Add debugging for vote post parameters
       console.log('Creating post with content length:', content.length, 'and image:', image ? 'yes' : 'no');
+      console.log('Vote post parameters:');
+      console.log('- isVotePost:', isVotePost);
+      console.log('- vote_options:', vote_options);
+      console.log('- filtered vote_options:', vote_options.filter(option => option.trim() !== ''));
+      
+      // Validate vote options if this is a vote post
+      const filteredVoteOptions = vote_options.filter(option => option.trim() !== '');
+      const shouldBeVotePost = isVotePost && filteredVoteOptions.length >= 2;
+      
+      if (isVotePost && filteredVoteOptions.length < 2) {
+        console.warn('Vote post requested but fewer than 2 valid options provided');
+        setError('Vote posts require at least 2 valid options');
+        setIsSubmitting(false);
+        return;
+      }
+      
+      console.log('Final vote post decision:', shouldBeVotePost);
       
       try {
         // Create the post
@@ -280,8 +273,8 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           content,
           image || undefined, // Pass undefined instead of null
           image ? image.type : undefined,
-          isVotePost,
-          isVotePost ? vote_options.filter(option => option.trim() !== '') : [],
+          shouldBeVotePost, // Use the validated flag
+          shouldBeVotePost ? filteredVoteOptions : [], // Only pass options if it's a vote post
           isScheduled && scheduleDate && scheduleTime ? {
             scheduledAt: new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString(),
             timezone: scheduleTimezone
@@ -306,40 +299,20 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           }
         });
         
-        // Show additional toast for scheduled posts
-        if (isScheduled) {
-          toast(`Your post will be published on ${new Date(`${scheduleDate}T${scheduleTime}:00`).toLocaleString()} in your local timezone.`, {
-            duration: 5000,
-            icon: '🕒',
-            style: {
-              background: '#1A1B23',
-              color: '#60a5fa',
-              border: '1px solid rgba(96, 165, 250, 0.3)',
-              borderRadius: '0.375rem'
-            }
-          });
-        }
+        // Close the modal
+        onClose();
         
-        // Refresh posts
+        // Call the onPostCreated callback if provided
         if (onPostCreated) {
           onPostCreated();
         }
-      } catch (postError: any) {
-        console.error('Error creating post:', postError);
-        const errorMessage = postError.message || 'Unknown error occurred while creating post';
-        
-        // Provide more user-friendly error messages based on common errors
-        if (errorMessage.includes('wallet') || errorMessage.includes('address')) {
-          setError('Wallet connection issue. Please make sure your wallet is connected and try again.');
-        } else if (errorMessage.includes('image')) {
-          setError('There was a problem with your image. Please try a different image or post without an image.');
-        } else {
-          setError(`Failed to create post: ${errorMessage}`);
-        }
+      } catch (error: any) {
+        console.error('Error creating post:', error);
+        setError(error.message || 'Failed to create post');
       }
     } catch (error: any) {
-      console.error('Unexpected error in handleSubmit:', error);
-      setError(`An unexpected error occurred: ${error.message || 'Unknown error'}`);
+      console.error('Error in form submission:', error);
+      setError(error.message || 'An error occurred');
     } finally {
       setIsSubmitting(false);
     }
