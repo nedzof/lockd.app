@@ -257,22 +257,16 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       const filteredVoteOptions = vote_options.filter(option => option.trim() !== '');
       
       // Determine if this should be a vote post based on the toggle and valid options
-      let shouldBeVotePost = isVotePost && filteredVoteOptions.length >= 2;
+      let shouldBeVotePost = isVotePost || filteredVoteOptions.length >= 2;
       
-      // If user has entered vote options but forgot to toggle isVotePost, warn them
-      if (!isVotePost && filteredVoteOptions.length >= 2) {
-        const wantVotePost = window.confirm(
-          "You've entered vote options but haven't enabled vote post mode. Do you want to create this as a vote post?"
-        );
-        
-        if (wantVotePost) {
-          shouldBeVotePost = true;
-          // Update the UI state to match
-          setIsVotePost(true);
-        }
+      // No need for confirmation dialog - automatically treat as vote post if there are options
+      if (filteredVoteOptions.length >= 2 && !isVotePost) {
+        console.log('Auto-enabling vote post mode because valid options exist');
+        // Update the UI state to match
+        setIsVotePost(true);
       }
       
-      if (isVotePost && filteredVoteOptions.length < 2) {
+      if (shouldBeVotePost && filteredVoteOptions.length < 2) {
         console.warn('Vote post requested but fewer than 2 valid options provided');
         setError('Vote posts require at least 2 valid options');
         setIsSubmitting(false);
@@ -307,6 +301,8 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         setvote_options(['', '']);
         setIsVotePost(false);
         setselected_tags([]);
+        setIsScheduled(false);
+        setShowScheduleOptions(false);
         
         // Notify success
         toast.success(isScheduled ? 'Post scheduled successfully!' : 'Post created successfully!', {
@@ -459,7 +455,9 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
 
   const handleAddvote_option = () => {
     if (vote_options.length < 10) { // Limit to 10 options
-      setvote_options([...vote_options, '']);
+      const newOptions = [...vote_options, ''];
+      setvote_options(newOptions);
+      checkAndEnableVotePost(newOptions);
     }
   };
 
@@ -476,6 +474,11 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     const newOptions = [...vote_options];
     newOptions[index] = value;
     setvote_options(newOptions);
+    
+    // Check if we need to auto-enable vote post mode after the option change
+    const validOptions = newOptions.filter(opt => opt.trim() !== '');
+    console.log('Checking if vote post should be enabled:', validOptions.length >= 2);
+    checkAndEnableVotePost(newOptions);
   };
 
   // Function to adjust textarea height based on content
@@ -503,6 +506,15 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       }, 100);
     }
   }, [isOpen, adjustTextareaHeight]);
+
+  // Add a function to automatically check for valid vote options and enable vote post mode if needed
+  const checkAndEnableVotePost = (options: string[]) => {
+    const validOptions = options.filter(opt => opt.trim() !== '');
+    if (validOptions.length >= 2 && !isVotePost) {
+      console.log('Auto-enabling vote post mode because valid options exist', validOptions);
+      setIsVotePost(true);
+    }
+  };
 
   if (!isOpen) return null;
 
