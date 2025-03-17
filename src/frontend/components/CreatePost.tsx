@@ -679,10 +679,10 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           
           {/* Schedule options - only shown when isScheduled is true */}
           {showScheduleOptions && (
-            <div className="mt-2 p-2 bg-[#13141B] border border-gray-800/60 rounded-lg transition-all duration-300 animate-fadeIn">
-              <div className="flex items-center justify-between">
+            <div className="mt-2 p-3 bg-[#13141B] border border-gray-800/60 rounded-lg transition-all duration-300 animate-fadeIn">
+              <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center">
-                  <FiClock className="mr-1 text-[#00ffa3]" size={14} />
+                  <FiClock className="mr-1.5 text-[#00ffa3]" size={14} />
                   <span className="text-xs font-medium text-white">Schedule Post</span>
                 </div>
                 <button
@@ -694,35 +694,42 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 </button>
               </div>
               
-              <div className="flex items-center space-x-2 mt-1">
+              <div className="flex items-center space-x-3 mt-2">
                 <div className="flex-1">
-                  <div className="relative">
+                  <label htmlFor="schedule-date" className="block text-xs text-gray-400 mb-1 ml-1">Date</label>
+                  <div className="relative group">
                     <input
                       id="schedule-date"
                       type="date"
                       value={scheduleDate}
                       onChange={(e) => setScheduleDate(e.target.value)}
-                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300"
+                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 hover:border-gray-700 cursor-pointer appearance-none"
                     />
-                    <FiCalendar className="absolute right-2 top-1 text-gray-500" size={12} />
+                    <div className="absolute right-0 top-0 bottom-0 flex items-center pr-2 pointer-events-none">
+                      <FiCalendar className="text-[#00ffa3] group-hover:scale-110 transition-transform duration-300" size={12} />
+                    </div>
                   </div>
                 </div>
                 <div className="flex-1">
-                  <div className="relative">
+                  <label htmlFor="schedule-time" className="block text-xs text-gray-400 mb-1 ml-1">Time</label>
+                  <div className="relative group">
                     <input
                       id="schedule-time"
                       type="time"
                       value={scheduleTime}
                       onChange={(e) => setScheduleTime(e.target.value)}
-                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300"
+                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 hover:border-gray-700 cursor-pointer appearance-none"
                     />
-                    <FiClock className="absolute right-2 top-1 text-gray-500" size={12} />
+                    <div className="absolute right-0 top-0 bottom-0 flex items-center pr-2 pointer-events-none">
+                      <FiClock className="text-[#00ffa3] group-hover:scale-110 transition-transform duration-300" size={12} />
+                    </div>
                   </div>
                 </div>
               </div>
               
-              <div className="mt-1 text-xs text-[#00ffa3]/80 flex items-center">
-                <FiCheck className="mr-1" size={10} /> Will publish automatically in your local timezone
+              <div className="mt-3 text-xs text-[#00ffa3]/80 flex items-center bg-[#00ffa3]/5 p-2 rounded-md">
+                <FiCheck className="mr-1.5 flex-shrink-0" size={10} /> 
+                <span>Will publish automatically in your local timezone</span>
               </div>
             </div>
           )}
