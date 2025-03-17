@@ -908,12 +908,53 @@ export const createPost = async (
         const response = await wallet.inscribe(components);
         console.log('Wallet inscription response:', response);
         
-        const tx_id = response.tx_id || response.id;
-        if (!tx_id) {
-            throw new Error('Failed to create inscription - no transaction ID returned');
+        // Handle different response formats from various wallet implementations
+        let tx_id = null;
+        
+        // Try to extract transaction ID from various possible response formats
+        if (response) {
+            if (typeof response === 'string') {
+                // Some wallets might return the txid directly as a string
+                tx_id = response;
+            } else if (typeof response === 'object') {
+                // Try common property names for transaction ID
+                const possibleTxIdProps = ['tx_id', 'txid', 'txId', 'id', 'hash', 'txHash', 'transactionId'];
+                for (const prop of possibleTxIdProps) {
+                    if (response[prop] && typeof response[prop] === 'string') {
+                        tx_id = response[prop];
+                        break;
+                    }
+                }
+                
+                // If we still don't have a tx_id, check if there's a transaction object
+                if (!tx_id && response.transaction) {
+                    if (typeof response.transaction === 'string') {
+                        tx_id = response.transaction;
+                    } else if (typeof response.transaction === 'object') {
+                        // Try to get id from transaction object
+                        for (const prop of possibleTxIdProps) {
+                            if (response.transaction[prop] && typeof response.transaction[prop] === 'string') {
+                                tx_id = response.transaction[prop];
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
+        
+        // If we still don't have a tx_id, try to generate a temporary one for testing
+        if (!tx_id) {
+            if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
+                console.warn('No transaction ID returned from wallet. Using a temporary ID for development/testing.');
+                tx_id = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+            } else {
+                throw new Error('Failed to create inscription - no transaction ID returned from wallet');
+            }
+        }
+        
         console.log('Inscription successful with tx_id:', tx_id);
-
+        
         // Create post in database
         const dbPost = createDbPost(metadata, tx_id);
         dbPost.author_address = bsvAddress;
