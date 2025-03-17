@@ -634,11 +634,13 @@ export const createPost = async (
     imageMimeType?: string,
     isVotePost: boolean = false,
     vote_options: string[] = [],
-    scheduleInfo?: { scheduledAt: string; timezone: string }
+    scheduleInfo?: { scheduledAt: string; timezone: string },
+    tags: string[] = []
 ): Promise<Post> => {
     console.log('Creating post with wallet:', wallet ? 'Wallet provided' : 'No wallet');
     console.log('Is vote post:', isVotePost, 'Vote options:', vote_options);
     console.log('Schedule info:', scheduleInfo);
+    console.log('Tags:', tags);
   
     if (!wallet) {
         console.error('No wallet provided to createPost');
@@ -681,7 +683,7 @@ export const createPost = async (
             content,
             timestamp: new Date().toISOString(),
             version: '1.0.0',
-            tags: [],
+            tags: tags || [],
             sequence: sequence.current,
             post_id,
             is_locked: false,
@@ -908,53 +910,12 @@ export const createPost = async (
         const response = await wallet.inscribe(components);
         console.log('Wallet inscription response:', response);
         
-        // Handle different response formats from various wallet implementations
-        let tx_id = null;
-        
-        // Try to extract transaction ID from various possible response formats
-        if (response) {
-            if (typeof response === 'string') {
-                // Some wallets might return the txid directly as a string
-                tx_id = response;
-            } else if (typeof response === 'object') {
-                // Try common property names for transaction ID
-                const possibleTxIdProps = ['tx_id', 'txid', 'txId', 'id', 'hash', 'txHash', 'transactionId'];
-                for (const prop of possibleTxIdProps) {
-                    if (response[prop] && typeof response[prop] === 'string') {
-                        tx_id = response[prop];
-                        break;
-                    }
-                }
-                
-                // If we still don't have a tx_id, check if there's a transaction object
-                if (!tx_id && response.transaction) {
-                    if (typeof response.transaction === 'string') {
-                        tx_id = response.transaction;
-                    } else if (typeof response.transaction === 'object') {
-                        // Try to get id from transaction object
-                        for (const prop of possibleTxIdProps) {
-                            if (response.transaction[prop] && typeof response.transaction[prop] === 'string') {
-                                tx_id = response.transaction[prop];
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // If we still don't have a tx_id, try to generate a temporary one for testing
+        const tx_id = response.tx_id || response.id;
         if (!tx_id) {
-            if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
-                console.warn('No transaction ID returned from wallet. Using a temporary ID for development/testing.');
-                tx_id = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-            } else {
-                throw new Error('Failed to create inscription - no transaction ID returned from wallet');
-            }
+            throw new Error('Failed to create inscription - no transaction ID returned');
         }
-        
         console.log('Inscription successful with tx_id:', tx_id);
-        
+
         // Create post in database
         const dbPost = createDbPost(metadata, tx_id);
         dbPost.author_address = bsvAddress;
@@ -1009,21 +970,6 @@ export const createPost = async (
                         return attemptDatabasePost(retries - 1);
                     }
                     
-                    // In development mode, return a mock response instead of failing
-                    if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
-                        console.warn('Database error in development mode. Returning mock post data.');
-                        
-                        // Create a mock post response that mimics what the server would return
-                        const mockPost = {
-                            ...dbPost,
-                            created_at: new Date().toISOString(),
-                            // Add any other fields the server would normally add
-                            _mock: true // Flag to indicate this is a mock response
-                        };
-                        
-                        return mockPost;
-                    }
-                    
                     throw new Error(`Failed to create post in database: ${dbResponse.statusText}`);
                 }
                 
@@ -1034,22 +980,6 @@ export const createPost = async (
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     return attemptDatabasePost(retries - 1);
                 }
-                
-                // In development mode, return a mock response instead of failing
-                if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
-                    console.warn('Database error in development mode. Returning mock post data.');
-                    
-                    // Create a mock post response that mimics what the server would return
-                    const mockPost = {
-                        ...dbPost,
-                        created_at: new Date().toISOString(),
-                        // Add any other fields the server would normally add
-                        _mock: true // Flag to indicate this is a mock response
-                    };
-                    
-                    return mockPost;
-                }
-                
                 throw error;
             }
         };

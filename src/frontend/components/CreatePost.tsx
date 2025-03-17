@@ -285,13 +285,11 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           isScheduled && scheduleDate && scheduleTime ? {
             scheduledAt: new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString(),
             timezone: scheduleTimezone
-          } : undefined
+          } : undefined,
+          selected_tags // Pass the selected tags to the createPost function
         );
         
         console.log('Post created successfully:', newPost);
-        
-        // Check if this is a mock post (created in development mode when database is unavailable)
-        const isMockPost = newPost && (newPost as any)._mock === true;
         
         // Reset form and state
         setContent('');
@@ -299,22 +297,17 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         setImagePreview('');
         
         // Notify success
-        toast.success(
-          isMockPost 
-            ? 'Post created in development mode (database unavailable)' 
-            : (isScheduled ? 'Post scheduled successfully!' : 'Post created successfully!'), 
-          {
-            style: {
-              background: '#1A1B23',
-              color: '#34d399',
-              border: '1px solid rgba(52, 211, 153, 0.3)',
-              borderRadius: '0.375rem'
-            }
+        toast.success(isScheduled ? 'Post scheduled successfully!' : 'Post created successfully!', {
+          style: {
+            background: '#1A1B23',
+            color: '#34d399',
+            border: '1px solid rgba(52, 211, 153, 0.3)',
+            borderRadius: '0.375rem'
           }
-        );
+        });
         
         // Show additional toast for scheduled posts
-        if (isScheduled && !isMockPost) {
+        if (isScheduled) {
           toast(`Your post will be published on ${new Date(`${scheduleDate}T${scheduleTime}:00`).toLocaleString()} in your local timezone.`, {
             duration: 5000,
             icon: '🕒',
@@ -328,7 +321,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         }
         
         // Refresh posts
-        if (onPostCreated && !isMockPost) {
+        if (onPostCreated) {
           onPostCreated();
         }
       } catch (postError: any) {
@@ -336,18 +329,13 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         const errorMessage = postError.message || 'Unknown error occurred while creating post';
         
         // Provide more user-friendly error messages based on common errors
-        let friendlyError = '';
         if (errorMessage.includes('wallet') || errorMessage.includes('address')) {
-          friendlyError = 'Wallet connection issue. Please make sure your wallet is connected and try again.';
+          setError('Wallet connection issue. Please make sure your wallet is connected and try again.');
         } else if (errorMessage.includes('image')) {
-          friendlyError = 'There was a problem with your image. Please try a different image or post without an image.';
-        } else if (errorMessage.includes('database') || errorMessage.includes('500')) {
-          friendlyError = 'The server is currently unavailable. Please try again later.';
+          setError('There was a problem with your image. Please try a different image or post without an image.');
         } else {
-          friendlyError = `Failed to create post: ${errorMessage}`;
+          setError(`Failed to create post: ${errorMessage}`);
         }
-        
-        setError(friendlyError);
       }
     } catch (error: any) {
       console.error('Unexpected error in handleSubmit:', error);
