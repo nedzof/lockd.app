@@ -141,11 +141,6 @@ const PostGrid: React.FC<PostGridProps> = ({
     user_id
   }), [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
 
-  // Check if any filters are applied
-  const hasFilters = useMemo(() => {
-    return !!(time_filter || ranking_filter || personal_filter || block_filter || selected_tags.length > 0);
-  }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags]);
-
   // Function to check if filters have changed
   const haveFiltersChanged = useCallback(() => {
     // Deep comparison for arrays
@@ -560,8 +555,7 @@ const PostGrid: React.FC<PostGridProps> = ({
 
   // Set up intersection observer for infinite scrolling
   useEffect(() => {
-    // Only set up the observer if no filters are applied
-    if (hasFilters || !loaderRef.current) return;
+    if (!loaderRef.current) return;
 
     const options = {
       root: null, // Use the viewport as the root
@@ -584,7 +578,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         observer.unobserve(loaderRef.current);
       }
     };
-  }, [hasMore, isFetchingMore, hasFilters, handleLoadMore]);
+  }, [hasMore, isFetchingMore, handleLoadMore]);
 
   const handlevote_optionLock = async (optionId: string, amount: number, duration: number) => {
     // Check if wallet is connected
@@ -943,45 +937,19 @@ const PostGrid: React.FC<PostGridProps> = ({
           </div>
         )}
 
-        {/* Infinite scroll loader or Load more button */}
+        {/* Infinite scroll loader */}
         {hasMore && submissions.length > 0 && (
-          <>
-            {hasFilters ? (
-              // Show button when filters are applied
-              <div className="mt-6 text-center">
-                <button
-                  onClick={handleLoadMore}
-                  disabled={isFetchingMore}
-                  className="px-6 py-3 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 transform hover:scale-105 text-gray-900 flex items-center mx-auto disabled:opacity-50"
-                >
-                  {isFetchingMore ? (
-                    <>
-                      <FiLoader className="animate-spin mr-2" />
-                      Loading...
-                    </>
-                  ) : (
-                    <>
-                      <FiPlus className="mr-2" />
-                      Load More Posts
-                    </>
-                  )}
-                </button>
-              </div>
-            ) : (
-              // Show invisible loader for infinite scroll when no filters
-              <div 
-                ref={loaderRef} 
-                className="py-4 flex justify-center"
-              >
-                {isFetchingMore && (
-                  <div className="flex items-center space-x-2">
-                    <FiLoader className="animate-spin text-[#00ffa3]" />
-                    <span className="text-gray-400">Loading more posts...</span>
-                  </div>
-                )}
+          <div 
+            ref={loaderRef} 
+            className="py-4 flex justify-center"
+          >
+            {isFetchingMore && (
+              <div className="flex items-center space-x-2">
+                <FiLoader className="animate-spin text-[#00ffa3]" />
+                <span className="text-gray-400">Loading more posts...</span>
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>
