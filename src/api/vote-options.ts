@@ -88,56 +88,10 @@ router.get('/:tx_id', async (req: Request, res: Response) => {
 
     logger.debug(`Vote options found for post ${post.id}:`, vote_options);
 
-    // If no vote options found, create default ones
+    // If no vote options found, return an empty array instead of creating default ones
     if (vote_options.length === 0) {
-      logger.debug(`No vote options found for post ${post.id}, creating default options`);
-      
-      const defaultOptions = ['Yes', 'No', 'Maybe'];
-      const createdOptions = [];
-      
-      for (let i = 0; i < defaultOptions.length; i++) {
-        const optiontx_id = `${post.tx_id}-option-${i}`;
-        const newOption = await prisma.vote_option.create({
-          data: {
-            tx_id: optiontx_id,
-            content: defaultOptions[i],
-            post_id: post.id,
-            author_address: post.author_address || '',
-            created_at: new Date()
-          },
-          include: {
-            post: true,
-            lock_likes: true
-          }
-        });
-        createdOptions.push(newOption);
-      }
-      
-      // Calculate total locked amount for each option
-      const vote_optionsWithTotals = createdOptions.map(option => {
-        return {
-          ...option,
-          totalLocked: 0,
-          lock_likes: undefined // Don't expose the individual lock likes
-        };
-      });
-      
-      logger.debug(`Created default vote options for post ${post.id}:`, vote_optionsWithTotals);
-      
-      // Update the post to ensure it's marked as a vote post
-      await prisma.post.update({
-        where: { id: post.id },
-        data: { 
-          is_vote: true,
-          metadata: {
-            ...(typeof post.metadata === 'object' ? post.metadata : {}),
-            content_type: 'vote',
-            is_vote: true
-          }
-        }
-      });
-      
-      return res.json(vote_optionsWithTotals);
+      logger.debug(`No vote options found for post ${post.id}, returning empty array`);
+      return res.json([]);
     }
 
     // Calculate total locked amount for each option
