@@ -4,9 +4,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import { useWallet } from '../providers/WalletProvider';
 import { useTags } from '../hooks/useTags';
-import { FiX, FiPlus, FiCheck, FiRefreshCw, FiImage, FiFile, FiPlusCircle, FiTrash2, FiBarChart2, FiLink, FiHash, FiClock, FiCalendar } from 'react-icons/fi';
+import { FiX, FiPlus, FiCheck, FiRefreshCw, FiImage, FiFile, FiPlusCircle, FiTrash2, FiBarChart2, FiLink, FiHash } from 'react-icons/fi';
 import { createPost } from '../services/post.service';
-import { isWalletConnected, ensureWalletConnection, getBsvAddress, getWalletStatus } from '../utils/walletConnectionHelpers';
+import { isWalletConnected, ensureWalletConnection, getWalletStatus } from '../utils/walletConnectionHelpers';
 
 
 interface CreatePostProps {
@@ -40,19 +40,6 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const modalRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
-  const [isScheduled, setIsScheduled] = useState(false);
-  const [showScheduleOptions, setShowScheduleOptions] = useState(false);
-  const [scheduleDate, setScheduleDate] = useState('');
-  const [scheduleTime, setScheduleTime] = useState('');
-  const [scheduleTimezone, setScheduleTimezone] = useState('');
-  const timezones = [
-    { value: 'UTC', label: 'Coordinated Universal Time (UTC)' },
-    { value: 'PST', label: 'Pacific Standard Time (PST)' },
-    { value: 'EST', label: 'Eastern Standard Time (EST)' },
-    { value: 'CET', label: 'Central European Time (CET)' },
-    { value: 'JST', label: 'Japan Standard Time (JST)' },
-    // Add more timezones as needed
-  ];
 
   useEffect(() => {
     fetchTags();
@@ -98,6 +85,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       console.log('Component mounted, checking wallet connection:', {
         isConnected,
         hasWallet: !!wallet,
+        hasBsvAddress: !!wallet?.bsvAddress,
         walletReady: wallet?.isReady
       });
       
@@ -108,21 +96,19 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           console.log('Initial wallet connection completed');
           
           // Verify we have an address after connection
-          const bsvAddress = await getBsvAddress(wallet);
-          if (!bsvAddress) {
+          if (!wallet?.bsvAddress) {
             console.log('No wallet address after initial connection, waiting briefly and checking again...');
             
             // Wait a moment and check if address is available
             await new Promise(resolve => setTimeout(resolve, 1500));
             
-            const addressAfterDelay = await getBsvAddress(wallet);
             console.log('Checking wallet address after delay:', {
-              hasBsvAddress: !!addressAfterDelay,
-              bsvAddress: addressAfterDelay
+              hasBsvAddress: !!wallet?.bsvAddress,
+              bsvAddress: wallet?.bsvAddress
             });
             
             // If still no address, try connecting again
-            if (!addressAfterDelay && wallet?.isReady) {
+            if (!wallet?.bsvAddress && wallet?.isReady) {
               console.log('Still no address, attempting second connection...');
               await connect();
               console.log('Second connection attempt completed');
@@ -189,11 +175,6 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       setImagePreview(reader.result as string);
     };
     reader.readAsDataURL(file);
-    
-    // Close other option panels when an image is uploaded
-    setShowTagInput(false);
-    setIsVotePost(false);
-    setShowScheduleOptions(false);
   };
   
   const handleRemoveImage = () => {
@@ -219,35 +200,27 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       if (!isConnected) {
         console.log('Wallet not connected, attempting to connect...');
         try {
-          // The ensureWalletConnection function expects a non-undefined wallet
-          if (wallet) {
-            await ensureWalletConnection(wallet, connect);
-            console.log('Wallet connected successfully');
+          await ensureWalletConnection(wallet, connect);
+          console.log('Wallet connected successfully');
+          
+          // Verify we have an address after connection
+          if (!wallet?.bsvAddress) {
+            console.log('No wallet address after initial connection, waiting briefly and checking again...');
             
-            // Verify we have an address after connection
-            const bsvAddress = await getBsvAddress(wallet);
-            if (!bsvAddress) {
-              console.log('No wallet address after initial connection, waiting briefly and checking again...');
-              
-              // Wait a moment and check if address is available
-              await new Promise(resolve => setTimeout(resolve, 1500));
-              
-              const addressAfterDelay = await getBsvAddress(wallet);
-              console.log('Checking wallet address after delay:', {
-                hasBsvAddress: !!addressAfterDelay,
-                bsvAddress: addressAfterDelay
-              });
-              
-              // If still no address, try connecting again
-              if (!addressAfterDelay && wallet.isReady) {
-                console.log('Still no address, attempting second connection...');
-                await connect();
-                console.log('Second connection attempt completed');
-              }
+            // Wait a moment and check if address is available
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            console.log('Checking wallet address after delay:', {
+              hasBsvAddress: !!wallet?.bsvAddress,
+              bsvAddress: wallet?.bsvAddress
+            });
+            
+            // If still no address, try connecting again
+            if (!wallet?.bsvAddress && wallet?.isReady) {
+              console.log('Still no address, attempting second connection...');
+              await connect();
+              console.log('Second connection attempt completed');
             }
-          } else {
-            console.error('No wallet available for connection');
-            setError('Wallet not available. Please make sure you have a compatible wallet installed.');
           }
         } catch (walletError) {
           console.error('Failed to connect wallet:', walletError);
@@ -283,14 +256,10 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         const newPost = await createPost(
           walletInstance,
           content,
-          image || undefined, // Pass undefined instead of null
+          image, // Pass the File object directly
           image ? image.type : undefined,
           isVotePost,
-          isVotePost ? vote_options.filter(option => option.trim() !== '') : [],
-          isScheduled && scheduleDate && scheduleTime ? {
-            scheduledAt: new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString(),
-            timezone: scheduleTimezone || 'UTC'
-          } : undefined
+          isVotePost ? vote_options.filter(option => option.trim() !== '') : []
         );
         
         console.log('Post created successfully:', newPost);
@@ -301,7 +270,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         setImagePreview('');
         
         // Notify success
-        toast.success(isScheduled ? 'Post scheduled successfully!' : 'Post created successfully!', {
+        toast.success('Post created successfully!', {
           style: {
             background: '#1A1B23',
             color: '#34d399',
@@ -312,7 +281,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         
         // Refresh posts
         if (onPostCreated) {
-          onPostCreated();
+          onPostCreated(newPost);
         }
       } catch (postError: any) {
         console.error('Error creating post:', postError);
@@ -333,98 +302,6 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  // Toggle schedule options
-  const toggleScheduleOptions = () => {
-    // If we're opening the schedule options
-    if (!showScheduleOptions) {
-      // Set default date and time values
-      const now = new Date();
-      const tomorrow = new Date(now);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      
-      // Format date as YYYY-MM-DD
-      const formattedDate = tomorrow.toISOString().split('T')[0];
-      setScheduleDate(formattedDate);
-      
-      // Format time as HH:MM
-      const hours = now.getHours().toString().padStart(2, '0');
-      const minutes = now.getMinutes().toString().padStart(2, '0');
-      setScheduleTime(`${hours}:${minutes}`);
-      
-      // Set default timezone if not already set
-      if (!scheduleTimezone) {
-        setScheduleTimezone(timezones[0].value);
-      }
-      
-      setIsScheduled(true);
-      // Close other option panels
-      setShowTagInput(false);
-      setIsVotePost(false);
-      // Hide image preview but keep the image data
-      setImagePreview('');
-    } else {
-      // If we're closing the schedule options, only turn off scheduling
-      // if the user hasn't set a date and time
-      if (!scheduleDate || !scheduleTime) {
-        setIsScheduled(false);
-      }
-      // Show image preview again if there's an image
-      if (image) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setImagePreview(reader.result as string);
-        };
-        reader.readAsDataURL(image);
-      }
-    }
-    
-    setShowScheduleOptions(!showScheduleOptions);
-  };
-
-  const toggleTagInput = () => {
-    // If we're opening the tag input
-    if (!showTagInput) {
-      // Close other option panels
-      setShowScheduleOptions(false);
-      setIsVotePost(false);
-      // Hide image preview but keep the image data
-      setImagePreview('');
-    } else {
-      // Show image preview again if there's an image
-      if (image) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setImagePreview(reader.result as string);
-        };
-        reader.readAsDataURL(image);
-      }
-    }
-    
-    setShowTagInput(!showTagInput);
-  };
-
-  const toggleVotePost = () => {
-    // If we're opening the vote options
-    if (!isVotePost) {
-      // Close other option panels
-      setShowScheduleOptions(false);
-      setShowTagInput(false);
-      // Hide image preview but keep the image data
-      setImagePreview('');
-    } else {
-      // Show image preview again if there's an image
-      if (image) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setImagePreview(reader.result as string);
-        };
-        reader.readAsDataURL(image);
-      }
-    }
-    
-    setIsVotePost(!isVotePost);
   };
 
   const handleAddTag = () => {
@@ -471,32 +348,6 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     setvote_options(newOptions);
   };
 
-  // Function to adjust textarea height based on content
-  const adjustTextareaHeight = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      // Reset height to auto to get the correct scrollHeight
-      textarea.style.height = 'auto';
-      // Set the height to match the content (with a minimum height)
-      textarea.style.height = `${Math.max(120, textarea.scrollHeight)}px`;
-    }
-  }, []);
-
-  // Adjust height when content changes
-  useEffect(() => {
-    adjustTextareaHeight();
-  }, [content, adjustTextareaHeight]);
-
-  useEffect(() => {
-    // Focus the textarea when the modal opens
-    if (isOpen && textareaRef.current) {
-      setTimeout(() => {
-        textareaRef.current?.focus();
-        adjustTextareaHeight(); // Also adjust height when focused
-      }, 100);
-    }
-  }, [isOpen, adjustTextareaHeight]);
-
   if (!isOpen) return null;
 
   return (
@@ -522,34 +373,22 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               onClick={async () => {
                 try {
                   toast.loading('Connecting wallet...', { id: 'wallet-connect' });
-                  
-                  if (wallet) {
-                    await ensureWalletConnection(wallet, connect);
-                    
-                    // Check if we have an address
-                    const bsvAddress = await getBsvAddress(wallet);
-                    if (isConnected && bsvAddress) {
-                      toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
-                    } else {
-                      // If connect() succeeded but we still don't have an address, try again after a delay
-                      await new Promise(resolve => setTimeout(resolve, 1500));
-                      
-                      const addressAfterDelay = await getBsvAddress(wallet);
-                      if (!addressAfterDelay) {
-                        await ensureWalletConnection(wallet, connect);
-                        
-                        const finalAddress = await getBsvAddress(wallet);
-                        if (finalAddress) {
-                          toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
-                        } else {
-                          toast.error('Connected but failed to get wallet address. Please try again.', { id: 'wallet-connect' });
-                        }
-                      } else {
-                        toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
-                      }
-                    }
+                  await ensureWalletConnection(wallet, connect);
+                  if (isConnected && wallet?.bsvAddress) {
+                    toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
                   } else {
-                    toast.error('Wallet not available. Please install a compatible wallet.', { id: 'wallet-connect' });
+                    // If connect() succeeded but we still don't have an address, try again after a delay
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    if (!wallet?.bsvAddress) {
+                      await ensureWalletConnection(wallet, connect);
+                      if (wallet?.bsvAddress) {
+                        toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
+                      } else {
+                        toast.error('Connected but failed to get wallet address. Please try again.', { id: 'wallet-connect' });
+                      }
+                    } else {
+                      toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
+                    }
                   }
                 } catch (error) {
                   console.error('Error connecting wallet:', error);
@@ -574,7 +413,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">
-            <div className={`relative ${
+            <div className={`relative overflow-hidden ${
               imagePreview || showTagInput || isVotePost || showScheduleOptions
                 ? 'ring-2 ring-[#00ffa3] rounded-xl'
                 : ''
@@ -584,44 +423,40 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 placeholder="What's on your mind?"
-                className="w-full p-5 pb-16 bg-[#13141B] border border-gray-800/60 rounded-t-xl text-gray-200 focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 min-h-[120px] transition-all duration-300 resize-none overflow-hidden"
+                className="w-full p-5 pb-16 bg-[#13141B] border border-gray-800/60 border-b-0 rounded-t-xl text-gray-200 focus:outline-none focus:ring-0 min-h-[120px] transition-all duration-300 resize-none overflow-hidden"
                 onInput={adjustTextareaHeight}
                 rows={1}
               />
               
               {/* Bottom toolbar with additional options - positioned at the bottom of the textarea */}
-              <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-5 py-3 bg-[#13141B] border-t border-t-gray-800/40 rounded-b-xl">
+              <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-5 py-3 bg-[#13141B] border-t border-t-gray-800/40 border-x border-b border-gray-800/60 rounded-b-xl">
+                {/* Image upload button */}
+                <div className="relative">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/gif,image/bmp,image/svg+xml,image/webp,image/tiff"
+                    onChange={handleImageUpload}
+                    className="sr-only"
+                    id="image-upload"
+                  />
+                  <label
+                    htmlFor="image-upload"
+                    className="flex items-center justify-center p-2 text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10 rounded-full transition-all duration-300 focus:outline-none cursor-pointer"
+                    title="Upload image (JPEG, PNG, GIF, BMP, SVG, WEBP, TIFF)"
+                  >
+                    <FiImage size={20} />
+                  </label>
+                </div>
+                
+                {/* Subtle divider */}
+                <div className="h-6 w-px bg-gray-700/50"></div>
+                
+                {/* Vote post toggle */}
                 <div className="flex items-center">
-                  {/* Image upload button */}
-                  <div className="relative">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/jpeg,image/jpg,image/png,image/gif,image/bmp,image/svg+xml,image/webp,image/tiff"
-                      onChange={handleImageUpload}
-                      className="sr-only"
-                      id="image-upload"
-                    />
-                    <label
-                      htmlFor="image-upload"
-                      className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 focus:outline-none cursor-pointer ${
-                        imagePreview 
-                          ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
-                          : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
-                      }`}
-                      title="Upload image"
-                    >
-                      <FiImage size={18} />
-                    </label>
-                  </div>
-                  
-                  {/* Vertical separator */}
-                  <div className="h-5 w-px bg-gray-700/50 mx-2"></div>
-                  
-                  {/* Vote post toggle */}
                   <button
                     type="button"
-                    onClick={toggleVotePost}
+                    onClick={() => setIsVotePost(!isVotePost)}
                     className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
                       isVotePost 
                         ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
@@ -629,153 +464,94 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                     }`}
                     title={isVotePost ? "Switch to regular post" : "Create a vote post"}
                   >
-                    <FiBarChart2 size={18} />
+                    <FiBarChart2 size={20} />
                   </button>
-                  
-                  {/* Vertical separator */}
-                  <div className="h-5 w-px bg-gray-700/50 mx-2"></div>
-                  
-                  {/* Tag button */}
+                </div>
+                
+                {/* Subtle divider */}
+                <div className="h-6 w-px bg-gray-700/50"></div>
+                
+                {/* Tag button */}
+                <div className="relative">
                   <button
                     type="button"
-                    onClick={toggleTagInput}
+                    onClick={() => {
+                      // Toggle tag input visibility
+                      setShowTagInput(!showTagInput);
+                      
+                      // If opening the tag input, focus it after a brief delay to allow rendering
+                      if (!showTagInput) {
+                        setTimeout(() => {
+                          tagInputRef.current?.focus();
+                        }, 100);
+                        
+                        // Show a hint toast when opening the tag input if no tags exist
+                        if (selected_tags.length === 0) {
+                          toast.success('Add tags to categorize your post', { 
+                            duration: 3000,
+                            style: {
+                              background: '#1A1B23',
+                              color: '#00ffa3',
+                              border: '1px solid rgba(0, 255, 163, 0.3)',
+                              borderRadius: '0.375rem'
+                            }
+                          });
+                        }
+                      }
+                      
+                      // Extract hashtags from content when opening tag input
+                      if (!showTagInput) {
+                        const hashtags = content.match(/#(\w+)/g);
+                        if (hashtags && hashtags.length > 0) {
+                          // Add unique hashtags to selected_tags
+                          const newTags = hashtags.map(tag => tag.substring(1)).filter(tag => !selected_tags.includes(tag));
+                          if (newTags.length > 0) {
+                            setselected_tags([...selected_tags, ...newTags]);
+                            toast.success(`Added ${newTags.length} tag${newTags.length > 1 ? 's' : ''} from your text`);
+                          }
+                        }
+                      }
+                    }}
                     className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                      showTagInput
+                      showTagInput || selected_tags.length > 0
                         ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
                         : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
                     }`}
                     title="Add tags to your post"
                   >
-                    <FiHash size={18} />
+                    <FiHash size={20} />
                   </button>
-                  
-                  {/* Vertical separator */}
-                  <div className="h-5 w-px bg-gray-700/50 mx-2"></div>
-                  
-                  {/* Schedule button */}
-                  <button
-                    type="button"
-                    onClick={toggleScheduleOptions}
-                    className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                      showScheduleOptions
-                        ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
-                        : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
-                    }`}
-                    title={isScheduled ? "Cancel scheduling" : "Schedule for later"}
-                  >
-                    <FiClock size={18} />
-                  </button>
-                </div>
-                
-                <div className="text-xs text-gray-400">
-                  {content.length} characters
                 </div>
               </div>
+              
+              {/* Character counter */}
+              <div className="absolute bottom-3 right-3 text-xs text-gray-400">
+                {content.length} characters
+              </div>
+              
+              {/* Image preview overlay */}
+              {imagePreview && (
+                <div className="mt-4 relative rounded-lg overflow-hidden shadow-lg">
+                  <img 
+                    src={imagePreview} 
+                    alt="Upload preview" 
+                    className="max-h-60 w-auto mx-auto rounded-lg border border-gray-700/70"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRemoveImage}
+                    className="absolute top-2 right-2 bg-red-500/80 backdrop-blur-sm text-white p-1.5 rounded-full hover:bg-red-600 transition-colors duration-300"
+                  >
+                    <FiTrash2 size={16} />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
           
-          {/* Schedule options - only shown when isScheduled is true */}
-          {showScheduleOptions && (
-            <div className="mt-2 p-2 bg-[#13141B] border border-gray-800/60 rounded-lg transition-all duration-300 animate-fadeIn">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <FiClock className="mr-1 text-[#00ffa3]" size={14} />
-                  <span className="text-xs font-medium text-white">Schedule Post</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={toggleScheduleOptions}
-                  className="text-gray-400 hover:text-white p-1"
-                >
-                  <FiX size={12} />
-                </button>
-              </div>
-              
-              <div className="flex items-center space-x-2 mt-1">
-                <div className="flex-1">
-                  <div className="relative">
-                    <input
-                      id="schedule-date"
-                      type="date"
-                      value={scheduleDate}
-                      onChange={(e) => setScheduleDate(e.target.value)}
-                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300"
-                    />
-                    <FiCalendar className="absolute right-2 top-1 text-gray-500" size={12} />
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <div className="relative">
-                    <input
-                      id="schedule-time"
-                      type="time"
-                      value={scheduleTime}
-                      onChange={(e) => setScheduleTime(e.target.value)}
-                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300"
-                    />
-                    <FiClock className="absolute right-2 top-1 text-gray-500" size={12} />
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <select
-                    id="schedule-timezone"
-                    value={scheduleTimezone}
-                    onChange={(e) => setScheduleTimezone(e.target.value)}
-                    className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 appearance-none"
-                  >
-                    {timezones.map((tz) => (
-                      <option key={tz.value} value={tz.value}>
-                        {tz.value}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              
-              <div className="mt-1 text-xs text-[#00ffa3]/80 flex items-center">
-                <FiCheck className="mr-1" size={10} /> Will publish automatically
-              </div>
-            </div>
-          )}
-          
-          
-          {/* Image preview overlay - only shown when no other options are active */}
-          {imagePreview && !showScheduleOptions && !showTagInput && !isVotePost && (
-            <div className="mt-2 relative rounded-lg overflow-hidden shadow-lg border border-gray-800/60 bg-[#13141B]/80">
-              <img 
-                src={imagePreview} 
-                alt="Upload preview" 
-                className="max-h-60 w-auto mx-auto rounded-lg"
-              />
-              <button
-                type="button"
-                onClick={handleRemoveImage}
-                className="absolute top-2 right-2 bg-red-500/80 backdrop-blur-sm text-white p-1.5 rounded-full hover:bg-red-600 transition-colors duration-300"
-              >
-                <FiTrash2 size={16} />
-              </button>
-            </div>
-          )}
-          
           {/* Compact tag input area - only shown when showTagInput is true */}
           {showTagInput && (
-            <div className="mt-2 p-3 bg-[#13141B]/80 border border-gray-800/60 rounded-lg transition-all duration-300 animate-fadeIn">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="text-xs font-medium text-white flex items-center">
-                  <FiHash className="mr-1 text-[#00ffa3]" size={14} />
-                  Add Tags
-                </h3>
-                
-                {/* Close button */}
-                <button
-                  type="button"
-                  onClick={toggleTagInput}
-                  className="text-gray-400 hover:text-white p-1"
-                >
-                  <FiX size={12} />
-                </button>
-              </div>
-              
+            <div className="mt-2 p-3 bg-[#13141B]/80 border border-gray-800/60 rounded-lg transition-all duration-300">
               <div className="flex flex-col space-y-3">
                 {/* Tag input */}
                 <div className="flex items-center">
@@ -823,21 +599,22 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           
           {/* Vote options section - only shown when isVotePost is true */}
           {isVotePost && (
-            <div className="mt-2 p-3 bg-[#13141B]/80 border border-gray-800/60 rounded-lg transition-all duration-300 animate-fadeIn">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-medium text-white flex items-center">
-                  <FiBarChart2 className="mr-1 text-[#00ffa3]" size={14} />
-                  Vote Options
-                </h3>
+            <div className="mt-4 space-y-3 p-4 bg-[#13141B]/60 border border-gray-800/40 rounded-lg">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-white">Vote Options</h3>
                 
-                {/* Close button */}
-                <button
-                  type="button"
-                  onClick={toggleVotePost}
-                  className="text-gray-400 hover:text-white p-1"
-                >
-                  <FiX size={12} />
-                </button>
+                {/* Pill-shaped toggle for vote post option */}
+                <div className="flex items-center">
+                  <div 
+                    className="relative inline-flex h-6 w-16 items-center rounded-full transition-colors duration-300 bg-[#00ffa3] cursor-pointer px-1"
+                    onClick={() => setIsVotePost(!isVotePost)}
+                  >
+                    <span className="text-xs text-black font-medium ml-1">Vote</span>
+                    <span
+                      className="absolute right-1 inline-block h-4 w-4 transform rounded-full bg-white shadow-md"
+                    />
+                  </div>
+                </div>
               </div>
               
               {vote_options.map((option, index) => (
@@ -847,7 +624,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                     value={option}
                     onChange={(e) => handlevote_optionChange(index, e.target.value)}
                     placeholder={`Option ${index + 1}`}
-                    className="flex-grow px-3 py-2 bg-[#13141B] border border-gray-800/60 rounded-lg text-gray-200 focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-colors duration-300"
+                    className="flex-grow px-4 py-2 bg-[#13141B] border border-gray-800/60 rounded-lg text-gray-200 focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-colors duration-300"
                   />
                   <button
                     type="button"
@@ -863,16 +640,23 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 <button
                   type="button"
                   onClick={handleAddvote_option}
-                  className="flex items-center px-3 py-2 text-xs text-[#00ffa3] hover:text-[#00ffa3]/80 hover:bg-[#00ffa3]/10 rounded-md transition-colors duration-300 focus:outline-none"
+                  className="flex items-center px-3 py-2 text-sm text-[#00ffa3] hover:text-[#00ffa3]/80 hover:bg-[#00ffa3]/10 rounded-md transition-colors duration-300 focus:outline-none"
                 >
-                  <FiPlus size={14} className="mr-1" /> Add Option
+                  <FiPlus size={16} className="mr-1" /> Add Option
                 </button>
               </div>
             </div>
           )}
           
           {/* Action buttons */}
-          <div className="flex justify-end mt-6">
+          <div className="flex justify-end space-x-4 mt-6">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-2.5 bg-gray-800/80 text-gray-300 rounded-lg border border-gray-700/40 hover:bg-gray-700 hover:border-gray-600/60 focus:outline-none transition-all duration-300 min-w-[100px]"
+            >
+              Cancel
+            </button>
             <button
               type="submit"
               disabled={isSubmitting || !content.trim()}
