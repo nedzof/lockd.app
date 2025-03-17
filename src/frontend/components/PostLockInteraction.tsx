@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { FiLock, FiLoader, FiX } from 'react-icons/fi';
 
 interface PostLockInteractionProps {
@@ -17,6 +17,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
   const [amount, setAmount] = useState(0.00001);
   const [duration, setDuration] = useState(1000);
   const [showOptions, setShowOptions] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const handleLock = () => {
     if (connected) {
@@ -28,7 +29,8 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
   return (
     <div className="relative">
       <button
-        onClick={() => setShowOptions(true)}
+        ref={buttonRef}
+        onClick={() => setShowOptions(!showOptions)}
         disabled={!connected || isLocking}
         className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium rounded-full shadow-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-1 focus:ring-[#00ffa3] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transform hover:scale-105"
       >
@@ -41,44 +43,41 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
       </button>
       
       {showOptions && (
-        <div className="absolute top-0 right-0 z-50 bg-[#2A2A40]/95 p-2 rounded-lg border border-gray-800/50 shadow-xl w-60 backdrop-blur-sm mt-10">
-          <div className="flex flex-col">
-            <div className="flex space-x-1 items-center text-xs text-gray-300">
-              <span>Lock</span>
+        <div className="absolute left-0 bottom-full mb-2 z-50 bg-[#2A2A40]/95 py-1.5 px-2 rounded-lg border border-gray-800/50 shadow-xl whitespace-nowrap">
+          <div className="flex items-center gap-2 h-7">
+            <div className="flex items-center">
+              <span className="text-xs text-gray-300 mr-1">Lock</span>
               <input
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(Number(e.target.value))}
                 min="0.00001"
                 step="0.00001"
-                className="w-20 bg-white/5 border border-gray-800/20 rounded-md py-1 px-1.5 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50"
+                className="w-20 bg-white/5 border border-gray-800/20 rounded-md py-0.5 px-1.5 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50"
               />
-              <span>₿ for</span>
+              <span className="text-xs text-gray-300 ml-1 mr-1">₿ for</span>
               <input
                 type="number"
                 value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
                 min="1"
-                className="w-20 bg-white/5 border border-gray-800/20 rounded-md py-1 px-1.5 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50"
+                className="w-20 bg-white/5 border border-gray-800/20 rounded-md py-0.5 px-1.5 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50"
               />
-              <span>blocks</span>
+              <span className="text-xs text-gray-300 ml-1 mr-2">blocks</span>
             </div>
-            
-            <div className="flex space-x-2 mt-2">
-              <button
-                onClick={handleLock}
-                disabled={isLocking || amount <= 0 || duration <= 0}
-                className="flex-1 py-1 text-xs font-medium rounded text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] disabled:opacity-50"
-              >
-                {isLocking ? <FiLoader className="animate-spin mx-auto" size={12} /> : "Confirm"}
-              </button>
-              <button
-                onClick={() => setShowOptions(false)}
-                className="flex-none p-1 text-gray-400 hover:text-white"
-              >
-                <FiX size={12} />
-              </button>
-            </div>
+            <button
+              onClick={handleLock}
+              disabled={!connected || isLocking || amount <= 0 || duration <= 0}
+              className="h-6 px-2 rounded-md bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] text-gray-900 text-xs font-medium"
+            >
+              {isLocking ? <FiLoader className="animate-spin" size={10} /> : "✓"}
+            </button>
+            <button
+              onClick={() => setShowOptions(false)}
+              className="h-6 w-6 rounded-md bg-gray-700/50 text-gray-300 text-xs flex items-center justify-center"
+            >
+              <FiX size={12} />
+            </button>
           </div>
         </div>
       )}
