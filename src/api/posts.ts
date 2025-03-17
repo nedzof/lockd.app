@@ -767,11 +767,20 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       // If this is a vote post, create vote options
       if (is_vote && vote_options && vote_options.length >= 2) {
         console.log(`Creating ${vote_options.length} vote options for post ${post.id}`);
+        console.log('Vote options data structure:', JSON.stringify(vote_options, null, 2));
         
         // Create vote options
         const vote_optionPromises = vote_options.map(async (option: any, index: number) => {
           const vote_option_id = `vote_option_${temptx_id}_${index}`;
-          const optionText = typeof option === 'string' ? option : option.text;
+          
+          // Handle different formats of vote options
+          let optionText = '';
+          if (typeof option === 'string') {
+            optionText = option;
+          } else if (option && typeof option === 'object') {
+            // Handle object format with either 'text' or 'content' property
+            optionText = option.text || option.content || '';
+          }
           
           console.log(`Creating vote option ${index}: ${optionText}`);
           
@@ -983,11 +992,20 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
     // If this is a vote post, create vote options
     if (is_vote && vote_options && vote_options.length >= 2) {
       console.log(`Creating ${vote_options.length} vote options for post ${post.id}`);
+      console.log('Vote options data structure:', JSON.stringify(vote_options, null, 2));
       
       // Create vote options
       const vote_optionPromises = vote_options.map(async (option: any, index: number) => {
         const vote_option_id = `vote_option_${temptx_id}_${index}`;
-        const optionText = typeof option === 'string' ? option : option.text;
+        
+        // Handle different formats of vote options
+        let optionText = '';
+        if (typeof option === 'string') {
+          optionText = option;
+        } else if (option && typeof option === 'object') {
+          // Handle object format with either 'text' or 'content' property
+          optionText = option.text || option.content || '';
+        }
         
         console.log(`Creating vote option ${index}: ${optionText}`);
         
