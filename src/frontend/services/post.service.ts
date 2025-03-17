@@ -326,7 +326,8 @@ async function createImageComponent(
     post_id: string,
     sequence: number,
     parentSequence: number,
-    address: string
+    address: string,
+    tags: string[] = []
 ): Promise<InscribeRequest> {
     const metadata: PostMetadata = {
         app: 'lockd.app',
@@ -334,7 +335,7 @@ async function createImageComponent(
         content: imageData.description || '',
         timestamp: new Date().toISOString(),
         version: '1.0.0',
-        tags: [],
+        tags: tags,
         sequence,
         parentSequence,
         post_id,
@@ -348,6 +349,9 @@ async function createImageComponent(
 
     const map = createMapData(metadata);
     const satoshis = await calculateOutputSatoshis(imageData.base64Data.length);
+    
+    // Log the image component details for debugging
+    console.log(`Creating image component with tags:`, tags);
 
     return createInscriptionRequest(
         address,
@@ -365,7 +369,8 @@ async function createVoteQuestionComponent(
     post_id: string,
     sequence: number,
     parentSequence: number,
-    address: string
+    address: string,
+    tags: string[] = []
 ): Promise<InscribeRequest> {
     const options_hash = await hashContent(JSON.stringify(options));
     
@@ -375,7 +380,7 @@ async function createVoteQuestionComponent(
         content: question,
         timestamp: new Date().toISOString(),
         version: '1.0.0',
-        tags: [],
+        tags: tags,
         sequence,
         parentSequence,
         post_id,
@@ -392,6 +397,9 @@ async function createVoteQuestionComponent(
 
     const map = createMapData(metadata);
     const satoshis = await calculateOutputSatoshis(question.length);
+    
+    // Log the vote question details for debugging
+    console.log(`Creating vote question with ${options.length} options and tags:`, tags);
 
     return createInscriptionRequest(address, question, map, satoshis);
 }
@@ -402,7 +410,8 @@ async function createvote_optionComponent(
     post_id: string,
     sequence: number,
     parentSequence: number,
-    address: string
+    address: string,
+    tags: string[] = []
 ): Promise<InscribeRequest> {
     // Create minimal metadata for vote options
     const metadata: PostMetadata = {
@@ -411,10 +420,11 @@ async function createvote_optionComponent(
         content: option.text,
         timestamp: new Date().toISOString(),
         version: '1.0.0',
-        tags: [],
+        tags: tags,
         sequence,
         parentSequence,
         post_id,
+        is_locked: false,
         is_vote: true,
         vote: {
             is_vote_question: false,
@@ -426,7 +436,7 @@ async function createvote_optionComponent(
     const satoshis = option.feeSatoshis || await calculateOutputSatoshis(option.text.length, true);
     
     // Log the vote option details for debugging
-    console.log(`Creating vote option #${option.optionIndex}: "${option.text}" with ${satoshis} satoshis`);
+    console.log(`Creating vote option #${option.optionIndex}: "${option.text}" with ${satoshis} satoshis and tags:`, tags);
     
     return createInscriptionRequest(address, option.text, map, satoshis);
 }
@@ -805,12 +815,13 @@ export const createPost = async (
 
                 // Create image component
                 console.log('Creating image inscription request...');
-                const imageComponent = createInscriptionRequest(
+                const imageComponent = await createImageComponent(
+                    imageDataObj,
+                    post_id,
+                    sequence.next(),
+                    metadata.sequence,
                     bsvAddress,
-                    base64Data,
-                    createMapData({ ...metadata, type: 'image' }),
-                    await calculateOutputSatoshis(base64Data.length),
-                    imageDataObj.content_type
+                    tags
                 );
                 components.push(imageComponent);
                 console.log('Image component created successfully');
@@ -873,7 +884,8 @@ export const createPost = async (
                 post_id,
                 sequence.next(),
                 metadata.sequence,
-                bsvAddress
+                bsvAddress,
+                tags
             );
             components.push(voteQuestionComponent);
             
@@ -886,7 +898,8 @@ export const createPost = async (
                     post_id,
                     sequence.next(),
                     metadata.sequence,
-                    bsvAddress
+                    bsvAddress,
+                    tags
                 );
                 components.push(vote_optionComponent);
             }
