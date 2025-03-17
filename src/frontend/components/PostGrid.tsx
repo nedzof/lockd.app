@@ -118,6 +118,8 @@ const PostGrid: React.FC<PostGridProps> = ({
   const isMounted = useRef<boolean>(false);
   // Add a ref to track if a fetch is in progress
   const isFetchInProgress = useRef<boolean>(false);
+  // Add a ref for the intersection observer loader element
+  const loaderRef = useRef<HTMLDivElement>(null);
   // Add a ref to store previous filter values for comparison
   const prevFilters = useRef({
     time_filter: '',
@@ -550,6 +552,34 @@ const PostGrid: React.FC<PostGridProps> = ({
   useEffect(() => {
   }, [nextCursor, hasMore, submissions.length, isFetchingMore]);
 
+  // Setup intersection observer for infinite scrolling
+  useEffect(() => {
+    const options = {
+      root: null, // Use the viewport as the root
+      rootMargin: '100px', // Start loading when the element is 100px from viewport
+      threshold: 0.1 // Trigger when 10% of the element is visible
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      const [entry] = entries;
+      if (entry.isIntersecting && hasMore && !isFetchingMore && !isFetchInProgress.current && submissions.length > 0) {
+        console.log('Loader element is visible, loading more posts');
+        handleLoadMore();
+      }
+    }, options);
+
+    // Observe the loader element if it exists
+    if (loaderRef.current) {
+      observer.observe(loaderRef.current);
+    }
+
+    return () => {
+      if (loaderRef.current) {
+        observer.unobserve(loaderRef.current);
+      }
+    };
+  }, [hasMore, isFetchingMore, handleLoadMore, submissions.length]);
+
   const handlevote_optionLock = async (optionId: string, amount: number, duration: number) => {
     // Check if wallet is connected
     if (!wallet) {
@@ -627,7 +657,7 @@ const PostGrid: React.FC<PostGridProps> = ({
 
         {/* Empty state */}
         {!loading && submissions.length === 0 && (
-          <div className="bg-gray-700 p-8 rounded-lg text-center">
+          <div className="bg-gray-800/50 p-8 rounded-lg text-center">
             <h3 className="text-xl font-bold mb-2">No posts found</h3>
             <p>Try changing your filters or tags</p>
           </div>
@@ -635,7 +665,7 @@ const PostGrid: React.FC<PostGridProps> = ({
 
         {/* Posts grid */}
         {submissions.length > 0 && (
-          <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {submissions.map((post) => (
               <div key={post.id} className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-xl border border-gray-800/10 shadow-lg hover:shadow-[#00ffa3]/5 transition-all duration-300">
                 {/* Post header */}
@@ -858,26 +888,18 @@ const PostGrid: React.FC<PostGridProps> = ({
           </div>
         )}
 
-        {/* Load more button */}
+        {/* Infinite scroll loader - replaces the Load More button */}
         {hasMore && submissions.length > 0 && (
-          <div className="mt-6 text-center">
-            <button
-              onClick={handleLoadMore}
-              disabled={isFetchingMore}
-              className="px-6 py-3 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 transform hover:scale-105 text-gray-900 flex items-center mx-auto disabled:opacity-50"
-            >
-              {isFetchingMore ? (
-                <>
-                  <FiLoader className="animate-spin mr-2" />
-                  Loading...
-                </>
-              ) : (
-                <>
-                  <FiPlus className="mr-2" />
-                  Load More Posts
-                </>
-              )}
-            </button>
+          <div 
+            ref={loaderRef} 
+            className="mt-6 text-center py-4"
+          >
+            {isFetchingMore && (
+              <div className="flex items-center justify-center">
+                <FiLoader className="animate-spin mr-2" />
+                <span>Loading more posts...</span>
+              </div>
+            )}
           </div>
         )}
       </div>
