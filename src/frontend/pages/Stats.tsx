@@ -335,7 +335,7 @@ const Stats: React.FC = () => {
             <h1 className="text-3xl font-bold text-white">Platform Statistics</h1>
             <p className="text-[#00E6CC] text-sm flex items-center">
               <FiLock className="mr-1" /> 
-              100% Onchain Data Secured by Bitcoin SV
+              100% Onchain Data Secured by ₿
             </p>
           </div>
           

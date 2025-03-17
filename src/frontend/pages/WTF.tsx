@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { FiLock, FiZap, FiCheckCircle, FiLink } from 'react-icons/fi';
+import { FiLock, FiZap, FiCheckCircle } from 'react-icons/fi';
 
 export default function WTF() {
   return (
@@ -7,7 +7,7 @@ export default function WTF() {
       <header className="text-center mb-8">
         <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3">What is Lockd.app?</h1>
         <p className="text-lg text-gray-300 max-w-md mx-auto">
-          A simple way to support content with Bitcoin SV
+          A simple way to support content with ₿
         </p>
       </header>
       
@@ -15,7 +15,7 @@ export default function WTF() {
         {/* Main explanation */}
         <section className="bg-[#1A1B23] rounded-xl p-5 shadow-lg border border-gray-800">
           <p className="text-gray-200 leading-relaxed text-lg mb-4">
-            Lockd.app lets you <span className="text-[#00ffa3] font-medium">temporarily lock ₿ tokens</span> on content you value.
+            Lockd.app lets you <span className="text-[#00ffa3] font-medium">temporarily lock BSV tokens</span> on content you value.
           </p>
           <p className="text-gray-200 leading-relaxed text-lg">
             Your tokens are safe and will return to you after the lock period.
@@ -62,13 +62,13 @@ export default function WTF() {
           
           <ol className="space-y-4 list-decimal pl-5">
             <li className="text-gray-200 text-lg pl-2">
-              Connect your ₿ wallet
+              Connect your BSV wallet
             </li>
             <li className="text-gray-200 text-lg pl-2">
               Find content you love
             </li>
             <li className="text-gray-200 text-lg pl-2">
-              Lock ₿ to show appreciation
+              Lock BSV to show appreciation
             </li>
             <li className="text-gray-200 text-lg pl-2">
               Create content and de-psyop social media

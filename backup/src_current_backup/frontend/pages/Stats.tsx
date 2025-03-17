@@ -335,7 +335,7 @@ const Stats: React.FC = () => {
             <h1 className="text-3xl font-bold text-white">Platform Statistics</h1>
             <p className="text-[#00E6CC] text-sm flex items-center">
               <FiLock className="mr-1" /> 
-              100% Onchain Data Secured by Bitcoin SV
+              100% Onchain Data Secured by ₿
             </p>
           </div>
           
@@ -506,14 +506,14 @@ const Stats: React.FC = () => {
                 <div className="bg-[#2A2A40] p-3 rounded-md">
                   <div className="flex items-center space-x-2">
                     <div className="w-2 h-2 rounded-full bg-[#00E6CC]"></div>
-                    <span className="text-white text-xs">Total BSV Locked</span>
+                    <span className="text-white text-xs">Total ₿ Locked</span>
                   </div>
                   <p className="text-xl font-bold text-white mt-1">{formatBSV(stats?.total_bsv_locked || 0)}</p>
                 </div>
                 <div className="bg-[#2A2A40] p-3 rounded-md">
                   <div className="flex items-center space-x-2">
                     <div className="w-2 h-2 rounded-full bg-[#FF69B4]"></div>
-                    <span className="text-white text-xs">Current BSV Price</span>
+                    <span className="text-white text-xs">Current ₿ Price</span>
                   </div>
                   <p className="text-xl font-bold text-white mt-1">
                     ${stats?.current_bsv_price ? stats.current_bsv_price.toFixed(2) : 'N/A'}

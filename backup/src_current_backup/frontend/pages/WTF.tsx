@@ -7,7 +7,7 @@ export default function WTF() {
       <header className="text-center mb-12">
         <h1 className="text-5xl font-bold text-white mb-4">WTF is Lockd.app? 🤔</h1>
         <p className="text-xl text-gray-300 max-w-2xl mx-auto">
-          A new way to appreciate content with real value using Bitcoin SV
+          A new way to appreciate content with real value using ₿
         </p>
       </header>
       
@@ -19,7 +19,7 @@ export default function WTF() {
             <h2 className="text-3xl font-semibold text-[#00ffa3]">What is it?</h2>
           </div>
           <p className="text-gray-200 leading-relaxed text-lg mb-6">
-            Lockd.app is a social platform where you can lock BSV (Bitcoin SV) tokens to show appreciation for content. 
+            Lockd.app is a social platform where you can lock ₿ to show appreciation for content. 
             Think of it as <span className="font-medium text-white">"putting your money where your mouth is"</span> - instead of just liking a post, you temporarily 
             lock some BSV to show real value.
           </p>
@@ -133,7 +133,7 @@ export default function WTF() {
               </li>
               <li className="flex items-center">
                 <span className="flex-shrink-0 w-8 h-8 rounded-full bg-[#ffa500] bg-opacity-20 flex items-center justify-center text-[#ffa500] font-bold mr-4">4</span>
-                <p className="text-gray-200 text-lg">Create your own content and earn rewards</p>
+                <p className="text-gray-200 text-lg">Create your own uncensorable content</p>
               </li>
             </ol>
           </div>
