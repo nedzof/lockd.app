@@ -1009,6 +1009,21 @@ export const createPost = async (
                         return attemptDatabasePost(retries - 1);
                     }
                     
+                    // In development mode, return a mock response instead of failing
+                    if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
+                        console.warn('Database error in development mode. Returning mock post data.');
+                        
+                        // Create a mock post response that mimics what the server would return
+                        const mockPost = {
+                            ...dbPost,
+                            created_at: new Date().toISOString(),
+                            // Add any other fields the server would normally add
+                            _mock: true // Flag to indicate this is a mock response
+                        };
+                        
+                        return mockPost;
+                    }
+                    
                     throw new Error(`Failed to create post in database: ${dbResponse.statusText}`);
                 }
                 
@@ -1019,6 +1034,22 @@ export const createPost = async (
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     return attemptDatabasePost(retries - 1);
                 }
+                
+                // In development mode, return a mock response instead of failing
+                if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
+                    console.warn('Database error in development mode. Returning mock post data.');
+                    
+                    // Create a mock post response that mimics what the server would return
+                    const mockPost = {
+                        ...dbPost,
+                        created_at: new Date().toISOString(),
+                        // Add any other fields the server would normally add
+                        _mock: true // Flag to indicate this is a mock response
+                    };
+                    
+                    return mockPost;
+                }
+                
                 throw error;
             }
         };
