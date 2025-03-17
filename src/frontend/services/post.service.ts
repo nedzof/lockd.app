@@ -208,6 +208,15 @@ function createMapData(metadata: PostMetadata): MAP {
                   metadata.vote?.is_vote_question || 
                   (metadata.vote?.options && metadata.vote.options.length > 0);
 
+    console.log(`[DEBUG] Creating MAP data for type: ${metadata.type}`);
+    console.log(`[DEBUG] - Is vote: ${isVote}`);
+    console.log(`[DEBUG] - Has tags: ${metadata.tags?.length > 0}`);
+    console.log(`[DEBUG] - Tags: ${JSON.stringify(metadata.tags || [])}`);
+    
+    if (metadata.vote) {
+        console.log(`[DEBUG] - Vote details: is_question=${metadata.vote.is_vote_question}, optionIndex=${metadata.vote.optionIndex}`);
+    }
+
     const mapData: Record<string, string> = {
         app: metadata.app || 'lockd.app',
         type: metadata.type || 'content',
@@ -292,6 +301,7 @@ function createMapData(metadata: PostMetadata): MAP {
         }
     }
 
+    console.log(`[DEBUG] Final MAP data for ${metadata.type}:`, mapData);
     return mapData as MAP;
 }
 
@@ -311,13 +321,23 @@ function createInscriptionRequest(
     satoshis: number,
     mimeType: string = 'text/plain'
 ): InscribeRequest {
-    return {
+    console.log(`[DEBUG] Creating inscription request:`);
+    console.log(`[DEBUG] - Address: ${address}`);
+    console.log(`[DEBUG] - Content preview: ${content.substring(0, 20)}${content.length > 20 ? '...' : ''}`);
+    console.log(`[DEBUG] - Map type: ${map.type}`);
+    console.log(`[DEBUG] - Map tags: ${map.tags}`);
+    console.log(`[DEBUG] - Satoshis: ${satoshis}`);
+    console.log(`[DEBUG] - MIME type: ${mimeType}`);
+    
+    const request = {
         address,
         base64Data: mimeType.startsWith('image/') ? content : stringToBase64(content),
         mimeType: mimeType as MimeTypes,
         map,
         satoshis
     };
+    
+    return request;
 }
 
 // Create image component
@@ -435,10 +455,25 @@ async function createvote_optionComponent(
     const map = createMapData(metadata);
     const satoshis = option.feeSatoshis || await calculateOutputSatoshis(option.text.length, true);
     
-    // Log the vote option details for debugging
-    console.log(`Creating vote option #${option.optionIndex}: "${option.text}" with ${satoshis} satoshis and tags:`, tags);
+    // Enhanced logging for debugging
+    console.log(`[DEBUG] Vote Option #${option.optionIndex} Details:`);
+    console.log(`[DEBUG] - Text: "${option.text}"`);
+    console.log(`[DEBUG] - Tags: ${JSON.stringify(tags)}`);
+    console.log(`[DEBUG] - Sequence: ${sequence}`);
+    console.log(`[DEBUG] - Parent Sequence: ${parentSequence}`);
+    console.log(`[DEBUG] - Satoshis: ${satoshis}`);
+    console.log(`[DEBUG] - MAP data:`, map);
     
-    return createInscriptionRequest(address, option.text, map, satoshis);
+    const request = createInscriptionRequest(address, option.text, map, satoshis);
+    console.log(`[DEBUG] - Final inscription request:`, {
+        address,
+        contentPreview: option.text.substring(0, 20) + (option.text.length > 20 ? '...' : ''),
+        mapKeys: Object.keys(map),
+        satoshis,
+        mimeType: 'text/plain'
+    });
+    
+    return request;
 }
 
 // Helper function to calculate output satoshis
@@ -893,7 +928,15 @@ export const createPost = async (
                 components.push(vote_optionComponent);
             }
             
-            console.log(`Created ${components.length} components for vote post`);
+            console.log(`[DEBUG] Created ${components.length} components for vote post`);
+            console.log(`[DEBUG] Components summary:`, components.map((comp, idx) => ({
+                index: idx,
+                address: comp.address,
+                mimeType: comp.mimeType,
+                satoshis: comp.satoshis,
+                mapType: comp.map.type,
+                mapTags: comp.map.tags
+            })));
         } else {
             // Create regular content component
             console.log('Creating main content inscription request...');
@@ -908,9 +951,20 @@ export const createPost = async (
         }
 
         // Send to wallet
-        console.log('Sending inscription request to wallet...');
+        console.log('[DEBUG] Sending inscription request to wallet...');
+        console.log('[DEBUG] Number of components:', components.length);
+        console.log('[DEBUG] Component details:', components.map((comp, idx) => ({
+            index: idx,
+            address: comp.address,
+            mimeType: comp.mimeType,
+            satoshis: comp.satoshis,
+            mapType: comp.map.type,
+            mapTags: comp.map.tags,
+            mapKeys: Object.keys(comp.map)
+        })));
+
         const response = await wallet.inscribe(components);
-        console.log('Wallet inscription response:', response);
+        console.log('[DEBUG] Wallet inscription response:', response);
         
         const tx_id = response.tx_id || response.id;
         if (!tx_id) {
