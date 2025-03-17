@@ -815,10 +815,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                   : 'bg-[#00ffa3] text-black hover:bg-[#00ffa3]/80 hover:shadow-[0_0_20px_rgba(0,255,163,0.3)]'
               }`}
             >
-              {isSubmitting 
-                ? (isScheduled ? 'Scheduling...' : 'Posting...') 
-                : (isScheduled ? 'Schedule' : 'Post')
-              }
+              {isSubmitting ? 'Posting...' : 'Post'}
             </button>
           </div>
           {error && (
