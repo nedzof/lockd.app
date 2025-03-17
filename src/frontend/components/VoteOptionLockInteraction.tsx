@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { FiLock, FiLoader, FiX } from 'react-icons/fi';
 
 interface VoteOptionLockInteractionProps {
@@ -17,6 +17,18 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
   const [amount, setAmount] = useState(0.00001);
   const [duration, setDuration] = useState(1000);
   const [showOptions, setShowOptions] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (showOptions && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX
+      });
+    }
+  }, [showOptions]);
 
   const handleLock = () => {
     if (connected) {
@@ -29,6 +41,7 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
     <div className="relative">
       {!showOptions ? (
         <button
+          ref={buttonRef}
           onClick={() => setShowOptions(true)}
           disabled={!connected || isLocking}
           className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium rounded-full shadow-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-1 focus:ring-[#00ffa3] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transform hover:scale-105"
@@ -43,6 +56,7 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
       ) :
         <>
           <button
+            ref={buttonRef}
             onClick={() => setShowOptions(false)}
             disabled={isLocking}
             className="inline-flex items-center justify-center w-8 h-8 text-xs font-medium rounded-full shadow-sm text-gray-200 bg-gray-700/50 hover:bg-gray-700/70 border border-gray-700/30 focus:outline-none focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:border-gray-600"
@@ -50,11 +64,11 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
             <FiX size={16} />
           </button>
           <div 
-            className="fixed mt-2 z-50 bg-[#2A2A40] p-4 rounded-lg border border-gray-800/20 shadow-xl w-60 backdrop-blur-sm"
+            className="fixed z-[100] bg-[#2A2A40] p-4 rounded-lg border border-gray-800/20 shadow-xl w-60 backdrop-blur-sm"
             style={{
-              top: 'auto',
-              left: 'auto',
-              transform: 'translateY(10px)'
+              top: `${dropdownPosition.top}px`,
+              left: `${dropdownPosition.left}px`,
+              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)'
             }}
           >
             <div className="space-y-3">
