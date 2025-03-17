@@ -542,111 +542,109 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">
-            <textarea
-              ref={textareaRef}
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="What's on your mind?"
-              className={`w-full p-5 pb-16 bg-[#13141B] border rounded-xl text-gray-200 focus:outline-none focus:ring-1 min-h-[120px] transition-all duration-300 resize-none overflow-hidden ${
-                imagePreview || showTagInput || isVotePost || showScheduleOptions
-                  ? 'border-[#00ffa3] focus:border-[#00ffa3] focus:ring-[#00ffa3]/30'
-                  : 'border-gray-800/60 focus:border-[#00ffa3] focus:ring-[#00ffa3]/30'
-              }`}
-              onInput={adjustTextareaHeight}
-              rows={1}
-            />
-            
-            {/* Bottom toolbar with additional options - positioned at the bottom of the textarea */}
-            <div className={`absolute bottom-0 left-0 right-0 flex items-center justify-between px-5 py-3 border-t bg-[#13141B] rounded-b-xl ${
+            <div className={`relative ${
               imagePreview || showTagInput || isVotePost || showScheduleOptions
-                ? 'border-[#00ffa3]/30'
-                : 'border-gray-800/40'
+                ? 'ring-2 ring-[#00ffa3] rounded-xl'
+                : ''
             }`}>
-              <div className="flex items-center">
-                {/* Image upload button */}
-                <div className="relative">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/jpg,image/png,image/gif,image/bmp,image/svg+xml,image/webp,image/tiff"
-                    onChange={handleImageUpload}
-                    className="sr-only"
-                    id="image-upload"
-                  />
-                  <label
-                    htmlFor="image-upload"
-                    className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 focus:outline-none cursor-pointer ${
-                      imagePreview 
+              <textarea
+                ref={textareaRef}
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="What's on your mind?"
+                className="w-full p-5 pb-16 bg-[#13141B] border border-gray-800/60 rounded-t-xl text-gray-200 focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 min-h-[120px] transition-all duration-300 resize-none overflow-hidden"
+                onInput={adjustTextareaHeight}
+                rows={1}
+              />
+              
+              {/* Bottom toolbar with additional options - positioned at the bottom of the textarea */}
+              <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-5 py-3 bg-[#13141B] border-t border-t-gray-800/40 rounded-b-xl">
+                <div className="flex items-center">
+                  {/* Image upload button */}
+                  <div className="relative">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/jpg,image/png,image/gif,image/bmp,image/svg+xml,image/webp,image/tiff"
+                      onChange={handleImageUpload}
+                      className="sr-only"
+                      id="image-upload"
+                    />
+                    <label
+                      htmlFor="image-upload"
+                      className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 focus:outline-none cursor-pointer ${
+                        imagePreview 
+                          ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
+                          : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
+                      }`}
+                      title="Upload image"
+                    >
+                      <FiImage size={18} />
+                    </label>
+                  </div>
+                  
+                  {/* Vertical separator */}
+                  <div className="h-5 w-px bg-gray-700/50 mx-2"></div>
+                  
+                  {/* Vote post toggle */}
+                  <button
+                    type="button"
+                    onClick={toggleVotePost}
+                    className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
+                      isVotePost 
                         ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
                         : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
                     }`}
-                    title="Upload image"
+                    title={isVotePost ? "Switch to regular post" : "Create a vote post"}
                   >
-                    <FiImage size={18} />
-                  </label>
+                    <FiBarChart2 size={18} />
+                  </button>
+                  
+                  {/* Vertical separator */}
+                  <div className="h-5 w-px bg-gray-700/50 mx-2"></div>
+                  
+                  {/* Tag button */}
+                  <button
+                    type="button"
+                    onClick={toggleTagInput}
+                    className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
+                      showTagInput
+                        ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
+                        : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
+                    }`}
+                    title="Add tags to your post"
+                  >
+                    <FiHash size={18} />
+                  </button>
+                  
+                  {/* Vertical separator */}
+                  <div className="h-5 w-px bg-gray-700/50 mx-2"></div>
+                  
+                  {/* Schedule button */}
+                  <button
+                    type="button"
+                    onClick={toggleScheduleOptions}
+                    className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
+                      showScheduleOptions
+                        ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
+                        : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
+                    }`}
+                    title={isScheduled ? "Cancel scheduling" : "Schedule for later"}
+                  >
+                    <FiClock size={18} />
+                  </button>
                 </div>
                 
-                {/* Vertical separator */}
-                <div className="h-5 w-px bg-gray-700/50 mx-2"></div>
-                
-                {/* Vote post toggle */}
-                <button
-                  type="button"
-                  onClick={toggleVotePost}
-                  className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                    isVotePost 
-                      ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
-                      : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
-                  }`}
-                  title={isVotePost ? "Switch to regular post" : "Create a vote post"}
-                >
-                  <FiBarChart2 size={18} />
-                </button>
-                
-                {/* Vertical separator */}
-                <div className="h-5 w-px bg-gray-700/50 mx-2"></div>
-                
-                {/* Tag button */}
-                <button
-                  type="button"
-                  onClick={toggleTagInput}
-                  className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                    showTagInput
-                      ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
-                      : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
-                  }`}
-                  title="Add tags to your post"
-                >
-                  <FiHash size={18} />
-                </button>
-                
-                {/* Vertical separator */}
-                <div className="h-5 w-px bg-gray-700/50 mx-2"></div>
-                
-                {/* Schedule button */}
-                <button
-                  type="button"
-                  onClick={toggleScheduleOptions}
-                  className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                    showScheduleOptions
-                      ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
-                      : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
-                  }`}
-                  title={isScheduled ? "Cancel scheduling" : "Schedule for later"}
-                >
-                  <FiClock size={18} />
-                </button>
-              </div>
-              
-              <div className="text-xs text-gray-400">
-                {content.length} characters
+                <div className="text-xs text-gray-400">
+                  {content.length} characters
+                </div>
               </div>
             </div>
           </div>
           
           {/* Schedule options - only shown when isScheduled is true */}
           {showScheduleOptions && (
-            <div className="mt-2 p-2 bg-[#13141B] border border-[#00ffa3] rounded-lg transition-all duration-300 animate-fadeIn">
+            <div className="mt-2 p-2 bg-[#13141B] border border-gray-800/60 rounded-lg transition-all duration-300 animate-fadeIn">
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
                   <FiClock className="mr-1 text-[#00ffa3]" size={14} />
@@ -710,7 +708,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           
           {/* Image preview overlay */}
           {imagePreview && (
-            <div className="mt-2 relative rounded-lg overflow-hidden shadow-lg border border-[#00ffa3] bg-[#13141B]/80">
+            <div className="mt-2 relative rounded-lg overflow-hidden shadow-lg border border-gray-800/60 bg-[#13141B]/80">
               <img 
                 src={imagePreview} 
                 alt="Upload preview" 
@@ -728,7 +726,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           
           {/* Compact tag input area - only shown when showTagInput is true */}
           {showTagInput && (
-            <div className="mt-2 p-3 bg-[#13141B]/80 border border-[#00ffa3] rounded-lg transition-all duration-300 animate-fadeIn">
+            <div className="mt-2 p-3 bg-[#13141B]/80 border border-gray-800/60 rounded-lg transition-all duration-300 animate-fadeIn">
               <div className="flex justify-between items-center mb-2">
                 <h3 className="text-xs font-medium text-white flex items-center">
                   <FiHash className="mr-1 text-[#00ffa3]" size={14} />
@@ -792,7 +790,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           
           {/* Vote options section - only shown when isVotePost is true */}
           {isVotePost && (
-            <div className="mt-2 p-3 bg-[#13141B]/80 border border-[#00ffa3] rounded-lg transition-all duration-300 animate-fadeIn">
+            <div className="mt-2 p-3 bg-[#13141B]/80 border border-gray-800/60 rounded-lg transition-all duration-300 animate-fadeIn">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-xs font-medium text-white flex items-center">
                   <FiBarChart2 className="mr-1 text-[#00ffa3]" size={14} />
