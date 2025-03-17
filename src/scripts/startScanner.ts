@@ -4,7 +4,7 @@ import { DbClient } from '../services/dbClient.js';
 import { TransactionParser } from '../services/parser.js';
 
 async function main() {
-    const dbClient = DbClient.getInstance();
+    const dbClient = DbClient.get_instance();
     const parser = new TransactionParser(dbClient);
     const scanner = new Scanner(parser, dbClient);
     
