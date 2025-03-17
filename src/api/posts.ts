@@ -775,6 +775,11 @@ const createPost: CreatePostHandler = async (req, res, next) => {
           
           console.log(`Creating vote option ${index}: ${optionText}`);
           
+          if (!optionText || optionText.trim() === '') {
+            console.log(`Skipping empty vote option at index ${index}`);
+            return null;
+          }
+          
           return prisma.vote_option.create({
             data: {
               tx_id: `${temptx_id}_option_${index}`,
@@ -787,10 +792,28 @@ const createPost: CreatePostHandler = async (req, res, next) => {
         });
 
         try {
-          const createdOptions = await Promise.all(vote_optionPromises);
+          // Filter out null values (skipped empty options)
+          const validPromises = vote_optionPromises.filter(p => p !== null);
+          
+          if (validPromises.length < 2) {
+            console.error(`Not enough valid vote options: ${validPromises.length}`);
+            return res.status(400).json({ error: 'Vote posts require at least 2 valid options' });
+          }
+          
+          const createdOptions = await Promise.all(validPromises);
           console.log(`Successfully created ${createdOptions.length} vote options:`, createdOptions);
+          
+          // Update the post with the created options
+          const updatedPost = await prisma.post.findUnique({
+            where: { id: post.id },
+            include: { vote_options: true }
+          });
+          
+          // Return the post with vote options
+          return res.status(201).json(updatedPost);
         } catch (optionError) {
           console.error('Error creating vote options:', optionError);
+          // Continue and return the post without vote options
         }
       } else {
         console.log('Not creating vote options because:');
@@ -964,11 +987,19 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       // Create vote options
       const vote_optionPromises = vote_options.map(async (option: any, index: number) => {
         const vote_option_id = `vote_option_${temptx_id}_${index}`;
+        const optionText = typeof option === 'string' ? option : option.text;
+        
+        console.log(`Creating vote option ${index}: ${optionText}`);
+        
+        if (!optionText || optionText.trim() === '') {
+          console.log(`Skipping empty vote option at index ${index}`);
+          return null;
+        }
+        
         return prisma.vote_option.create({
           data: {
-            id: vote_option_id,
             tx_id: `${temptx_id}_option_${index}`,
-            content: option.text,
+            content: optionText,
             post_id: post.id,
             author_address: author_address,
             option_index: index
@@ -976,8 +1007,35 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
         });
       });
 
-      await Promise.all(vote_optionPromises);
-      console.log(`Created ${vote_options.length} vote options for post ${post.id}`);
+      try {
+        // Filter out null values (skipped empty options)
+        const validPromises = vote_optionPromises.filter(p => p !== null);
+        
+        if (validPromises.length < 2) {
+          console.error(`Not enough valid vote options: ${validPromises.length}`);
+          return res.status(400).json({ error: 'Vote posts require at least 2 valid options' });
+        }
+        
+        const createdOptions = await Promise.all(validPromises);
+        console.log(`Successfully created ${createdOptions.length} vote options:`, createdOptions);
+        
+        // Update the post with the created options
+        const updatedPost = await prisma.post.findUnique({
+          where: { id: post.id },
+          include: { vote_options: true }
+        });
+        
+        // Return the post with vote options
+        return res.status(201).json(updatedPost);
+      } catch (optionError) {
+        console.error('Error creating vote options:', optionError);
+        // Continue and return the post without vote options
+      }
+    } else {
+      console.log('Not creating vote options because:');
+      console.log('- is_vote:', is_vote);
+      console.log('- vote_options:', vote_options);
+      console.log('- vote_options length:', vote_options?.length || 0);
     }
 
     res.status(201).json(post);
