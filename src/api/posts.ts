@@ -34,7 +34,7 @@ interface CreatePostBody {
   metadata?: Record<string, any>;
   is_locked?: boolean;
   lock_duration?: number;
-  isVote?: boolean;
+  is_vote?: boolean;
   vote_options?: Array<{
     text: string;
     lock_amount: number;
@@ -642,7 +642,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       content,
       author_address,
       tags = [],
-      isVote = false,
+      is_vote = false,
       vote_options = [],
       raw_image_data,
       media_type,
@@ -684,7 +684,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
     }
 
     // Validate vote options if this is a vote post
-    if (isVote && (!vote_options || vote_options.length < 2)) {
+    if (is_vote && (!vote_options || vote_options.length < 2)) {
       console.error('Invalid vote options:', vote_options);
       return res.status(400).json({ error: 'Vote posts require at least 2 valid options' });
     }
@@ -713,7 +713,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
           content: content,
           author_address: author_address,
           tags: tags || [],
-          isVote: isVote || false,
+          is_vote: is_vote || false,
           metadata: Object.keys(metadata).length > 0 ? metadata : undefined
         }
       });
@@ -737,7 +737,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       console.log('Post created successfully:', post);
 
       // If this is a vote post, create vote options
-      if (isVote && vote_options && vote_options.length >= 2) {
+      if (is_vote && vote_options && vote_options.length >= 2) {
         // Create vote options
         const vote_optionPromises = vote_options.map(async (option: any, index: number) => {
           const vote_option_id = `vote_option_${temptx_id}_${index}`;

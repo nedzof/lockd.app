@@ -1099,6 +1099,10 @@ export const createPost = async (
             try {
                 console.log(`Attempting to create post in database (retries left: ${retries})`, dbPost);
                 
+                // Add more detailed logging to see the exact structure being sent
+                console.log('Database post structure:', JSON.stringify(dbPost, null, 2));
+                console.log('Keys in dbPost:', Object.keys(dbPost));
+                
                 const dbResponse = await fetch(`${API_BASE_URL}/api/posts`, {
                     method: 'POST',
                     headers: {
