@@ -53,6 +53,7 @@ interface PostGridProps {
   block_filter: string;
   selected_tags: string[];
   user_id: string;
+  onTagSelect?: (tag: string) => void;
 }
 
 // Add debounce utility
@@ -98,7 +99,8 @@ const PostGrid: React.FC<PostGridProps> = ({
   personal_filter,
   block_filter,
   selected_tags,
-  user_id
+  user_id,
+  onTagSelect
 }) => {
   const [submissions, setSubmissions] = useState<ExtendedPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -655,6 +657,13 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
   };
 
+  // Handle tag click
+  const handleTagClick = useCallback((tag: string) => {
+    if (onTagSelect) {
+      onTagSelect(tag);
+    }
+  }, [onTagSelect]);
+
   // Render the component
   return (
     <div className="w-full">
@@ -903,7 +912,14 @@ const PostGrid: React.FC<PostGridProps> = ({
                     {post.tags && post.tags.length > 0 && (
                       <div className="flex items-center space-x-1">
                         {post.tags.slice(0, 2).map(tag => (
-                          <span key={tag} className="bg-white/5 text-gray-300 text-xs px-1.5 py-0.5 rounded-full">
+                          <span 
+                            key={tag} 
+                            className="bg-white/5 text-gray-300 text-xs px-1.5 py-0.5 rounded-full cursor-pointer hover:bg-white/10 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTagClick(tag);
+                            }}
+                          >
                             #{tag}
                           </span>
                         ))}

@@ -84,6 +84,19 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     console.log('Refreshing posts with reset filters...');
   }, []);
 
+  // Handle tag selection from a post
+  const handleTagSelectFromPost = useCallback((tag: string) => {
+    // If the tag is already selected, do nothing
+    if (selected_tags.includes(tag)) {
+      return;
+    }
+    
+    // Otherwise, add the tag to the selected tags
+    setselected_tags([...selected_tags, tag]);
+    
+    console.log(`Added tag from post: ${tag}`);
+  }, [selected_tags]);
+
   // Memoize the user_id to prevent unnecessary re-renders
   const memoizeduser_id = useMemo(() => {
     return connected && bsvAddress ? bsvAddress : 'anon';
@@ -117,9 +130,10 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           block_filter={block_filter}
           selected_tags={selected_tags}
           user_id={memoizeduser_id}
+          onTagSelect={handleTagSelectFromPost}
         />
       );
-    }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, memoizeduser_id, handleStatsUpdate]);
+    }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, memoizeduser_id, handleStatsUpdate, handleTagSelectFromPost]);
 
     return (
       <div className="relative min-h-screen pb-20">
