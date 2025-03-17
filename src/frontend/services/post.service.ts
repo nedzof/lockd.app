@@ -702,6 +702,15 @@ export const createPost = async (
     console.log('[DEBUG] - Has image:', !!imageData);
     console.log('[DEBUG] - Schedule info:', scheduleInfo);
     console.log('[DEBUG] - Tags:', tags);
+    
+    // Add more detailed logging for vote post parameters
+    console.log('[DEBUG] - isVotePost type:', typeof isVotePost);
+    console.log('[DEBUG] - vote_options type:', typeof vote_options);
+    console.log('[DEBUG] - vote_options length:', vote_options?.length || 0);
+    console.log('[DEBUG] - vote_options is array:', Array.isArray(vote_options));
+    
+    // Log the call stack to see where createPost is being called from
+    console.log('[DEBUG] Call stack:', new Error().stack);
   
     if (!wallet) {
         console.error('No wallet provided to createPost');
@@ -906,7 +915,11 @@ export const createPost = async (
             // Filter out empty options
             const validOptions = vote_options.filter(opt => opt.trim() !== '');
             
+            console.log('[DEBUG] Valid options after filtering:', validOptions);
+            console.log('[DEBUG] Valid options length:', validOptions.length);
+            
             if (validOptions.length < 2) {
+                console.error('Vote post requires at least 2 valid options, but only found:', validOptions.length);
                 throw new Error('Vote posts require at least 2 valid options');
             }
             
@@ -988,6 +1001,11 @@ export const createPost = async (
                 contentPreview: comp.base64Data.substring(0, 30) + '...'
             })));
         } else {
+            console.log('[DEBUG] Not creating vote post because:');
+            console.log('[DEBUG] - isVotePost:', isVotePost);
+            console.log('[DEBUG] - vote_options.length:', vote_options?.length || 0);
+            console.log('[DEBUG] - vote_options:', vote_options);
+            
             // Create regular content component
             console.log('Creating main content inscription request...');
             const contentComponent = createInscriptionRequest(
