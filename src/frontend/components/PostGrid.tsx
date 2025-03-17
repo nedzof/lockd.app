@@ -725,13 +725,13 @@ const PostGrid: React.FC<PostGridProps> = ({
                 
                 {/* Vote Options Section - Full width to align with right edge */}
                 {post.is_vote && post.vote_options && post.vote_options.length > 0 && (
-                  <div className="mt-2 p-4 pt-0 w-full">
+                  <div className="mt-4 p-4 pt-0 w-full">
                     {/* Calculate total locked amount for percentages */}
                     {(() => {
                       const totalLocked = post.vote_options.reduce((sum, option) => sum + option.lock_amount, 0);
                       
                       return (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
                           {post.vote_options.map((option: vote_option) => {
                             const percentage = calculatePercentage(option.lock_amount, totalLocked);
                             // Determine color based on percentage
@@ -758,11 +758,11 @@ const PostGrid: React.FC<PostGridProps> = ({
                             
                             return (
                               <div key={option.id} className="bg-white/5 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-300 overflow-hidden shadow-lg">
-                                <div className="p-3">
+                                <div className="p-4">
                                   {/* Simplified layout with only essential elements */}
-                                  <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-4">
                                     {/* Circular progress indicator */}
-                                    <div className="relative h-12 w-12 flex-shrink-0">
+                                    <div className="relative h-14 w-14 flex-shrink-0">
                                       <svg className="w-full h-full" viewBox="0 0 36 36">
                                         {/* Background circle */}
                                         <circle 
@@ -806,7 +806,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                                     </div>
                                     
                                     {/* Lock button */}
-                                    <div className="flex-shrink-0">
+                                    <div className="flex-shrink-0 ml-2">
                                       <VoteOptionLockInteraction 
                                         optionId={option.id} 
                                         onLock={handlevote_optionLock}
