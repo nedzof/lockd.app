@@ -748,7 +748,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
               content: option.text,
               post_id: post.id,
               author_address: author_address,
-              optionIndex: index
+              option_index: index
             }
           });
         });

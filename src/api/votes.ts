@@ -99,7 +99,7 @@ router.get('/:tx_id/options', async (req: Request, res: Response) => {
       console.log(`[API] Post ${tx_id} is not a vote post. is_vote=${post.is_vote}, metadata=${JSON.stringify(post.metadata)}`);
       
       // If it's not marked as a vote post but should be, update it
-      if (post.metadata && (post.metadata.vote_options || post.metadata.content_type === 'vote' || post.metadata.isVote)) {
+      if (post.metadata && (post.metadata.vote_options || post.metadata.content_type === 'vote' || post.metadata.is_vote)) {
         console.log(`[API] Updating post ${tx_id} to mark it as a vote post`);
         await prisma.post.update({
           where: { id: post.id },
@@ -108,7 +108,7 @@ router.get('/:tx_id/options', async (req: Request, res: Response) => {
             metadata: {
               ...post.metadata,
               content_type: 'vote',
-              isVote: true
+              is_vote: true
             }
           }
         });
@@ -173,7 +173,7 @@ router.get('/:tx_id/options', async (req: Request, res: Response) => {
           metadata: {
             ...post.metadata,
             content_type: 'vote',
-            isVote: true
+            is_vote: true
           }
         }
       });
