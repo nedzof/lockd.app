@@ -6,6 +6,7 @@ import { getProgressColor } from '../utils/getProgressColor';
 import type { Post } from '../types';
 import { toast } from 'react-hot-toast';
 import VoteOptionLockInteraction from './VoteOptionLockInteraction';
+import PostLockInteraction from './PostLockInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
 import { API_URL } from '../config';
 
@@ -623,6 +624,43 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
   };
 
+  const handlePostLock = async (postId: string, amount: number, duration: number) => {
+    // Check if wallet is connected
+    if (!wallet) {
+      toast.error('Please connect your wallet first');
+      return;
+    }
+
+    try {
+      toast.loading('Checking wallet balance...');
+      
+      setIsLocking(true);
+      const response = await fetch(`${API_URL}/api/lock-likes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          post_id: postId,
+          amount,
+          lock_duration: duration,
+          author_address: user_id, // Use the user_id from props which should be the wallet address
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to lock BSV on post');
+      }
+
+      toast.success('Successfully locked BSV on post');
+      fetchPosts(); // Refresh posts to show updated lock amounts
+    } catch (error) {
+      toast.error('Failed to lock BSV on post');
+    } finally {
+      setIsLocking(false);
+    }
+  };
+
   // Render the component
   return (
     <div className="w-full">
@@ -882,10 +920,22 @@ const PostGrid: React.FC<PostGridProps> = ({
                     )}
                   </div>
                   
-                  {/* Display locked BSV amount for all posts */}
-                  <div className="text-[#00ffa3] font-medium flex items-center text-sm">
-                    <FiLock className="mr-1" size={14} />
-                    {formatBSV(post.totalLocked || 0)} ₿
+                  <div className="flex items-center space-x-3">
+                    {/* Lock button for simple posts */}
+                    {!post.is_vote && (
+                      <PostLockInteraction
+                        postId={post.id}
+                        onLock={handlePostLock}
+                        isLocking={isLocking}
+                        connected={!!wallet}
+                      />
+                    )}
+                    
+                    {/* Display locked BSV amount for all posts */}
+                    <div className="text-[#00ffa3] font-medium flex items-center text-sm">
+                      <FiLock className="mr-1" size={14} />
+                      {formatBSV(post.totalLocked || 0)} ₿
+                    </div>
                   </div>
                 </div>
               </div>
