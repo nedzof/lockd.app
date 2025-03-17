@@ -710,7 +710,7 @@ export const createPost = async (
 
         console.log('Created post metadata:', { ...metadata, content: content.substring(0, 50) + (content.length > 50 ? '...' : '') });
 
-        // Add image if present
+        // Handle image upload
         if (imageData) {
             try {
                 console.log('Processing image data of type:', typeof imageData);
@@ -751,32 +751,20 @@ export const createPost = async (
                     
                     processedImage = await processImage(imageFile);
                 } else if (typeof imageData === 'string') {
-                    // If imageData is a string (base64 or data URL)
-                    if (!imageMimeType) {
-                        // Try to detect MIME type from data URI
-                        if (imageData.startsWith('data:')) {
-                            const mimeMatch = imageData.match(/^data:([^;]+);/);
-                            if (mimeMatch && mimeMatch[1]) {
-                                imageMimeType = mimeMatch[1];
-                                console.log('Detected MIME type from data URI:', imageMimeType);
-                            } else {
-                                console.warn('Could not detect MIME type from data URI, defaulting to image/png');
-                                imageMimeType = 'image/png';
-                            }
-                        } else {
-                            console.warn('No MIME type provided for image data string, defaulting to image/png');
-                            imageMimeType = 'image/png';
-                        }
-                    }
-                    
+                    // If imageData is a base64 string
                     try {
-                        const blob = dataURItoBlob(imageData);
-                        console.log('Successfully converted string to blob:', { 
-                            type: blob.type, 
-                            size: blob.size 
-                        });
+                        // Extract the base64 data if it's a data URL
+                        const base64Data = imageData.includes('base64,') 
+                            ? imageData.split('base64,')[1] 
+                            : imageData;
                         
-                        imageFile = new File([blob], 'image', { type: imageMimeType });
+                        // Create a blob from the base64 data
+                        const blob = await fetch(`data:${imageMimeType || 'image/png'};base64,${base64Data}`).then(r => r.blob());
+                        
+                        // Create a File object from the blob
+                        imageFile = new File([blob], 'image.png', { type: imageMimeType || 'image/png' });
+                        
+                        // Process the image
                         processedImage = await processImage(imageFile);
                     } catch (error) {
                         console.error('Error processing image string:', error);
@@ -784,7 +772,7 @@ export const createPost = async (
                     }
                 } else {
                     console.error('Invalid image data format:', imageData);
-                    throw new Error('Invalid image data format');
+                    throw new Error('Invalid image data format. Please provide a File or base64 string.');
                 }
                 
                 console.log('Image processed successfully:', { 
@@ -797,20 +785,20 @@ export const createPost = async (
                 
                 const imageDataObj: ImageData = {
                     file: imageFile,
-                    content_type: `image/${imageMetadata.format}`,
+                    content_type: `image/${imageMetadata?.format || 'png'}`,
                     base64Data,
                     metadata: imageMetadata
                 };
                 
                 metadata.image = {
                     ...imageDataObj,
-                    format: imageMetadata.format
+                    format: imageMetadata?.format || 'png'
                 };
 
                 console.log('Added image to metadata:', { 
                     content_type: imageDataObj.content_type,
-                    format: imageMetadata.format,
-                    dimensions: `${imageMetadata.width}x${imageMetadata.height}`
+                    format: imageMetadata?.format || 'png',
+                    dimensions: imageMetadata ? `${imageMetadata.width}x${imageMetadata.height}` : 'unknown'
                 });
 
                 // Create image component
@@ -825,9 +813,9 @@ export const createPost = async (
                 );
                 components.push(imageComponent);
                 console.log('Image component created successfully');
-            } catch (imageError) {
+            } catch (imageError: any) {
                 console.error('Error processing image:', imageError);
-                toast.error(`Error processing image: ${imageError.message}`, {
+                toast.error(`Error processing image: ${imageError.message || 'Unknown error'}`, {
                     id: pendingToast,
                     style: {
                         background: '#1A1B23',
@@ -844,6 +832,7 @@ export const createPost = async (
         // Handle vote post
         if (isVotePost && vote_options.length >= 2) {
             console.log('Creating vote post with options:', vote_options);
+            console.log('Using tags:', tags);
             
             // Filter out empty options
             const validOptions = vote_options.filter(opt => opt.trim() !== '');
