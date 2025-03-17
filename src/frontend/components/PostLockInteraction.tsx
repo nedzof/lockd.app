@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { FiLock, FiLoader, FiX } from 'react-icons/fi';
 
 interface PostLockInteractionProps {
@@ -17,35 +17,6 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
   const [amount, setAmount] = useState(0.00001);
   const [duration, setDuration] = useState(1000);
   const [showOptions, setShowOptions] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Position the dropdown when it's shown
-  useEffect(() => {
-    const positionDropdown = () => {
-      if (showOptions && buttonRef.current && dropdownRef.current) {
-        const buttonRect = buttonRef.current.getBoundingClientRect();
-        const dropdownRect = dropdownRef.current.getBoundingClientRect();
-        
-        // Center the dropdown under the button
-        const leftPosition = buttonRect.left + (buttonRect.width / 2) - (dropdownRect.width / 2);
-        
-        // Ensure the dropdown doesn't go off-screen
-        const adjustedLeft = Math.max(10, Math.min(leftPosition, window.innerWidth - dropdownRect.width - 10));
-        
-        dropdownRef.current.style.top = `${buttonRect.bottom + window.scrollY + 5}px`;
-        dropdownRef.current.style.left = `${adjustedLeft + window.scrollX}px`;
-      }
-    };
-
-    // Position immediately and also on resize
-    positionDropdown();
-    window.addEventListener('resize', positionDropdown);
-    
-    return () => {
-      window.removeEventListener('resize', positionDropdown);
-    };
-  }, [showOptions]);
 
   const handleLock = () => {
     if (connected) {
@@ -54,29 +25,10 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
     }
   };
 
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (showOptions && 
-          buttonRef.current && 
-          dropdownRef.current &&
-          !buttonRef.current.contains(event.target as Node) &&
-          !dropdownRef.current.contains(event.target as Node)) {
-        setShowOptions(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [showOptions]);
-
   return (
     <div className="relative">
       {!showOptions ? (
         <button
-          ref={buttonRef}
           onClick={() => setShowOptions(true)}
           disabled={!connected || isLocking}
           className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium rounded-full shadow-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-1 focus:ring-[#00ffa3] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transform hover:scale-105"
@@ -91,70 +43,60 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
       ) :
         <>
           <button
-            ref={buttonRef}
             onClick={() => setShowOptions(false)}
             disabled={isLocking}
             className="inline-flex items-center justify-center w-8 h-8 text-xs font-medium rounded-full shadow-sm text-gray-200 bg-gray-700/50 hover:bg-gray-700/70 border border-gray-700/30 focus:outline-none focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:border-gray-600"
           >
             <FiX size={16} />
           </button>
-          {showOptions && (
-            <div 
-              ref={dropdownRef}
-              className="fixed z-[100] bg-[#2A2A40] p-4 rounded-lg border border-gray-800/20 shadow-xl w-60 backdrop-blur-sm"
-              style={{
-                position: 'absolute',
-                boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)'
-              }}
-            >
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-300 mb-1.5">Amount (₿)</label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      value={amount}
-                      onChange={(e) => setAmount(Number(e.target.value))}
-                      min="0.00001"
-                      step="0.00001"
-                      className="w-full bg-white/5 border border-gray-800/20 rounded-lg py-2 px-3 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-300 mb-1.5">Duration (days)</label>
+          <div className="absolute top-full right-0 mt-2 z-50 bg-[#2A2A40] p-4 rounded-lg border border-gray-800/20 shadow-xl w-60 backdrop-blur-sm">
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1.5">Amount (₿)</label>
+                <div className="relative">
                   <input
                     type="number"
-                    value={duration}
-                    onChange={(e) => setDuration(Number(e.target.value))}
-                    min="1"
+                    value={amount}
+                    onChange={(e) => setAmount(Number(e.target.value))}
+                    min="0.00001"
+                    step="0.00001"
                     className="w-full bg-white/5 border border-gray-800/20 rounded-lg py-2 px-3 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
                   />
                 </div>
-                <div className="flex space-x-2 mt-4">
-                  <button
-                    onClick={handleLock}
-                    disabled={!connected || isLocking || amount <= 0 || duration <= 0}
-                    className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#00ffa3] transition-all duration-300 disabled:opacity-50"
-                  >
-                    {isLocking ? (
-                      <>
-                        <FiLoader className="animate-spin mr-2" /> Locking...
-                      </>
-                    ) : (
-                      "Confirm"
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setShowOptions(false)}
-                    className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-gray-800/20 text-sm font-medium rounded-md shadow-sm text-gray-300 bg-white/5 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-                  >
-                    Cancel
-                  </button>
-                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1.5">Duration (days)</label>
+                <input
+                  type="number"
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                  min="1"
+                  className="w-full bg-white/5 border border-gray-800/20 rounded-lg py-2 px-3 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
+                />
+              </div>
+              <div className="flex space-x-2 mt-4">
+                <button
+                  onClick={handleLock}
+                  disabled={!connected || isLocking || amount <= 0 || duration <= 0}
+                  className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#00ffa3] transition-all duration-300 disabled:opacity-50"
+                >
+                  {isLocking ? (
+                    <>
+                      <FiLoader className="animate-spin mr-2" /> Locking...
+                    </>
+                  ) : (
+                    "Confirm"
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowOptions(false)}
+                  className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-gray-800/20 text-sm font-medium rounded-md shadow-sm text-gray-300 bg-white/5 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
-          )}
+          </div>
         </>
       }
     </div>
