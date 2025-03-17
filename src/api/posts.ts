@@ -326,6 +326,29 @@ const listPosts: PostListHandler = async (req, res, next) => {
     // Remove the extra item if we fetched more than requested
     let postsToReturn = hasMore ? posts.slice(0, parsedLimit) : posts;
 
+    // Filter out scheduled posts that haven't reached their scheduled time yet
+    const now = new Date();
+    postsToReturn = postsToReturn.filter(post => {
+      try {
+        const metadata = post.metadata as Record<string, any> | null;
+        // If the post has scheduled metadata and the scheduled time is in the future, filter it out
+        if (metadata && metadata.scheduled && metadata.scheduled.scheduledAt) {
+          const scheduledAt = new Date(metadata.scheduled.scheduledAt);
+          return scheduledAt <= now; // Only include posts whose scheduled time has passed
+        }
+        // Include posts without scheduled metadata
+        return true;
+      } catch (error) {
+        logger.error(`Error filtering scheduled post ${post.id}:`, error);
+        return true; // Include the post if there's an error processing it
+      }
+    });
+
+    logger.debug('Posts after filtering scheduled posts', {
+      count: postsToReturn.length,
+      post_ids: postsToReturn.map(post => post.id)
+    });
+
     // If time_filter is applied, log the created_at dates for debugging
     if (time_filter) {
       logger.debug('Posts before time filter applied:', 

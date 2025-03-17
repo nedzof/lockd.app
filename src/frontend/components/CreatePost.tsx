@@ -305,6 +305,20 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           }
         });
         
+        // Show additional toast for scheduled posts
+        if (isScheduled) {
+          toast(`Your post will be published on ${new Date(`${scheduleDate}T${scheduleTime}:00`).toLocaleString()} in your local timezone.`, {
+            duration: 5000,
+            icon: '🕒',
+            style: {
+              background: '#1A1B23',
+              color: '#60a5fa',
+              border: '1px solid rgba(96, 165, 250, 0.3)',
+              borderRadius: '0.375rem'
+            }
+          });
+        }
+        
         // Refresh posts
         if (onPostCreated) {
           onPostCreated();
@@ -729,7 +743,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               
               <div className="mt-3 text-xs text-[#00ffa3]/80 flex items-center bg-[#00ffa3]/5 p-2 rounded-md">
                 <FiCheck className="mr-1.5 flex-shrink-0" size={10} /> 
-                <span>Will publish automatically in your local timezone</span>
+                <span>Will publish automatically in your local timezone. Scheduled posts won't appear until their scheduled time.</span>
               </div>
             </div>
           )}
