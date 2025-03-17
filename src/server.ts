@@ -23,8 +23,8 @@ const __dirname = dirname(__filename);
 
 // Initialize scheduled posts job
 function initializeScheduledPostsJob() {
-  // Run the job every minute to check for posts that need to be published
-  const INTERVAL = 60 * 1000; // 1 minute in milliseconds
+  // Run the job more frequently to ensure scheduled posts are published promptly
+  const INTERVAL = 30 * 1000; // 30 seconds in milliseconds
   
   // Run the job immediately on startup
   processScheduledPosts()
@@ -41,6 +41,8 @@ function initializeScheduledPostsJob() {
       .then(result => {
         if (result.processed > 0) {
           logger.info('Scheduled posts job completed:', result);
+        } else {
+          logger.debug('Scheduled posts job completed with no posts processed');
         }
       })
       .catch(error => {
@@ -164,12 +166,15 @@ if (process.env.NODE_ENV !== 'production') {
   // For serverless environments, we can trigger the scheduled posts job
   // on each request to check for posts that need to be published
   app.use((req, res, next) => {
-    // Only run the job occasionally to avoid excessive processing
-    if (Math.random() < 0.05) { // 5% chance to run on each request
+    // Increase the chance to run the job on each request
+    if (Math.random() < 0.20) { // 20% chance to run on each request
+      logger.debug('Triggering serverless scheduled posts job');
       processScheduledPosts()
         .then(result => {
           if (result.processed > 0) {
             logger.info('Serverless scheduled posts job completed:', result);
+          } else {
+            logger.debug('Serverless scheduled posts job completed with no posts processed');
           }
         })
         .catch(error => {
@@ -177,6 +182,25 @@ if (process.env.NODE_ENV !== 'production') {
         });
     }
     next();
+  });
+  
+  // Add a specific endpoint to manually trigger the scheduled posts job
+  app.get('/api/admin/process-scheduled-posts', async (req, res) => {
+    try {
+      logger.info('Manual trigger of scheduled posts job');
+      const result = await processScheduledPosts();
+      res.json({ 
+        success: true, 
+        message: `Processed ${result.processed} scheduled posts`,
+        result
+      });
+    } catch (error) {
+      logger.error('Error manually triggering scheduled posts job:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to process scheduled posts'
+      });
+    }
   });
 }
 

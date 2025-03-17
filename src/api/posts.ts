@@ -335,13 +335,39 @@ const listPosts: PostListHandler = async (req, res, next) => {
 
     // Filter out scheduled posts that haven't reached their scheduled time yet
     const now = new Date();
+    
+    // Log the current time for reference
+    logger.debug('Current time for scheduled posts filtering:', now.toISOString());
+    
     postsToReturn = postsToReturn.filter(post => {
       try {
         const metadata = post.metadata as Record<string, any> | null;
         // If the post has scheduled metadata and the scheduled time is in the future, filter it out
         if (metadata && metadata.scheduled && metadata.scheduled.scheduledAt) {
           const scheduledAt = new Date(metadata.scheduled.scheduledAt);
-          return scheduledAt <= now; // Only include posts whose scheduled time has passed
+          
+          // Convert to user's timezone if provided
+          let adjustedScheduledAt = scheduledAt;
+          if (metadata.scheduled.timezone) {
+            try {
+              // This is a simple approach to timezone handling
+              // For more accurate timezone support, use a library like date-fns-tz or moment-timezone
+              adjustedScheduledAt = new Date(scheduledAt.toLocaleString('en-US', { timeZone: metadata.scheduled.timezone }));
+            } catch (tzError) {
+              logger.error(`Error adjusting timezone for post ${post.id}:`, tzError);
+              // Fall back to UTC if timezone adjustment fails
+            }
+          }
+          
+          const isReady = adjustedScheduledAt <= now;
+          
+          if (!isReady) {
+            logger.debug(`Filtering out scheduled post ${post.id} - scheduled for ${scheduledAt.toISOString()} (in timezone: ${metadata.scheduled.timezone || 'UTC'})`);
+          } else {
+            logger.debug(`Including scheduled post ${post.id} - scheduled time has passed (${scheduledAt.toISOString()})`);
+          }
+          
+          return isReady; // Only include posts whose scheduled time has passed
         }
         // Include posts without scheduled metadata
         return true;
@@ -1197,6 +1223,61 @@ router.get('/test', async (req, res) => {
       status: 'error',
       message: 'Database connection failed',
       error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// Add endpoint to manually publish a scheduled post
+router.post('/posts/:id/publish-scheduled', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({ error: 'Post ID is required' });
+    }
+    
+    logger.info(`Manually publishing scheduled post: ${id}`);
+    
+    // Find the post
+    const post = await prisma.post.findUnique({
+      where: { id }
+    });
+    
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+    
+    // Check if it has scheduled metadata
+    const metadata = post.metadata as Record<string, any> | null;
+    if (!metadata || !metadata.scheduled) {
+      return res.status(400).json({ error: 'Post is not scheduled' });
+    }
+    
+    // Update the metadata to remove scheduled info
+    const updatedMetadata = { ...metadata };
+    updatedMetadata.published_scheduled_info = metadata.scheduled;
+    delete updatedMetadata.scheduled;
+    
+    // Update the post
+    const updatedPost = await prisma.post.update({
+      where: { id },
+      data: {
+        metadata: updatedMetadata
+      }
+    });
+    
+    logger.info(`Successfully published scheduled post ${id}`);
+    
+    return res.status(200).json({ 
+      success: true, 
+      post: updatedPost,
+      message: `Post ${id} has been published` 
+    });
+  } catch (error) {
+    logger.error(`Error publishing scheduled post:`, error);
+    return res.status(500).json({ 
+      error: 'Failed to publish scheduled post',
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });

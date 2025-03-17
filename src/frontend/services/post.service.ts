@@ -158,6 +158,17 @@ export function createDbPost(metadata: PostMetadata, tx_id: string): DbPost {
         }
     };
 
+    // Ensure post.metadata is initialized as an object
+    if (!post.metadata) {
+        post.metadata = {};
+    }
+
+    // Ensure scheduled metadata is properly copied to the database post metadata
+    if (metadata.scheduled) {
+        post.metadata.scheduled = metadata.scheduled;
+        console.log('Added scheduled metadata to post:', post.metadata.scheduled);
+    }
+
     if (metadata.block_height) {
         post.block_height = metadata.block_height;
     }

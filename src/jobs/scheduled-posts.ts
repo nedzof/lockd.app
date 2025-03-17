@@ -12,16 +12,32 @@ export async function processScheduledPosts() {
   try {
     logger.info('Starting scheduled posts processing job');
     
-    // Find all posts with scheduled metadata where the scheduled time has passed
+    // Use the current time with a small buffer to account for potential timezone issues
     const now = new Date();
+    logger.info(`Current time: ${now.toISOString()}`);
     
-    // Get all posts and filter them in memory
-    const allPosts = await prisma.post.findMany();
+    // Get all posts and filter them in memory to improve debugging
+    const allPosts = await prisma.post.findMany({
+      include: {
+        vote_options: true
+      }
+    });
+    
+    logger.info(`Retrieved ${allPosts.length} total posts from the database`);
     
     // Filter posts that have scheduled metadata
     const postsWithScheduledMetadata = allPosts.filter(post => {
       const metadata = post.metadata as Record<string, any> | null;
-      return metadata && metadata.scheduled;
+      const hasScheduled = metadata && metadata.scheduled;
+      
+      if (hasScheduled) {
+        logger.debug(`Found post with scheduled metadata: ${post.id}`, {
+          scheduledInfo: metadata?.scheduled,
+          postCreatedAt: post.created_at
+        });
+      }
+      
+      return hasScheduled;
     });
     
     logger.info(`Found ${postsWithScheduledMetadata.length} posts with scheduled metadata`);
@@ -31,11 +47,33 @@ export async function processScheduledPosts() {
       try {
         const metadata = post.metadata as Record<string, any>;
         if (!metadata.scheduled || !metadata.scheduled.scheduledAt) {
+          logger.warn(`Post ${post.id} has scheduled metadata but missing scheduledAt property`);
           return false;
         }
         
         const scheduledAt = new Date(metadata.scheduled.scheduledAt);
-        return scheduledAt <= now;
+        
+        // Add timezone offset if provided
+        if (metadata.scheduled.timezone) {
+          try {
+            // Simple timezone handling (could be improved with a timezone library)
+            const scheduledInLocalTime = new Date(scheduledAt.toLocaleString('en-US', { timeZone: metadata.scheduled.timezone }));
+            logger.debug(`Post ${post.id} scheduled time: ${scheduledAt.toISOString()}, local time with timezone ${metadata.scheduled.timezone}: ${scheduledInLocalTime.toISOString()}`);
+          } catch (tzError) {
+            logger.warn(`Error processing timezone for post ${post.id}:`, tzError);
+            // Continue with UTC time if timezone processing fails
+          }
+        }
+        
+        const isReady = scheduledAt <= now;
+        
+        if (isReady) {
+          logger.info(`Post ${post.id} is ready to be published (scheduled: ${scheduledAt.toISOString()})`);
+        } else {
+          logger.debug(`Post ${post.id} is not ready yet (scheduled: ${scheduledAt.toISOString()}, now: ${now.toISOString()})`);
+        }
+        
+        return isReady;
       } catch (error) {
         logger.error(`Error processing scheduled post ${post.id}:`, error);
         return false;
@@ -53,6 +91,8 @@ export async function processScheduledPosts() {
         // Store the original scheduled info in a new field for record-keeping
         metadata.published_scheduled_info = metadata.scheduled;
         delete metadata.scheduled;
+        
+        logger.info(`Publishing scheduled post ${post.id} with content: "${post.content.substring(0, 50)}..."`);
         
         await prisma.post.update({
           where: { id: post.id },
