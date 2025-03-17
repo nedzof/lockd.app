@@ -61,6 +61,13 @@ interface DirectPostBody {
   is_locked: boolean;
   lock_duration?: number;
   lock_amount?: number;
+  is_vote?: boolean;
+  vote_options?: Array<{
+    text: string;
+    lock_amount?: number;
+    lock_duration?: number;
+    index?: number;
+  }>;
   created_at: string;
 }
 
@@ -805,6 +812,9 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       tags = [],
       is_locked = false,
       lock_amount = 0,
+      is_vote = false,
+      vote_options = [],
+      predictionMarketData,
       created_at = new Date().toISOString()
     } = req.body;
 
@@ -848,12 +858,17 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       });
     }
 
+    // Validate vote options if this is a vote post
+    if (is_vote && (!vote_options || vote_options.length < 2)) {
+      console.error('Invalid vote options:', vote_options);
+      return res.status(400).json({ error: 'Vote posts require at least 2 valid options' });
+    }
+
     // Create temporary tx_id for the post
     const temptx_id = `temp_${post_id}_${Date.now()}`;
     
     // Prepare metadata for scanner processing
     const metadata = {
-      predictionMarketData,
       app: 'lockd',
       version: '1.0.0',
       lock: {
@@ -867,6 +882,11 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       }
     };
 
+    // Add prediction market data if provided
+    if (predictionMarketData) {
+      metadata.predictionMarketData = predictionMarketData;
+    }
+
     const postData = {
       id: temptx_id,
       tx_id: temptx_id,
@@ -877,6 +897,7 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       tags,
       metadata,
       is_locked,
+      is_vote,
       created_at: new Date(created_at),
       block_height: null
     } as const;
@@ -892,12 +913,37 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
         tags: postData.tags,
         metadata: postData.metadata,
         is_locked: postData.is_locked,
+        is_vote: postData.is_vote,
         created_at: postData.created_at,
         block_height: postData.block_height
       }
     });
 
     console.log(`Direct post created successfully with ID: ${post.id}, ready for scanner processing`);
+    
+    // If this is a vote post, create vote options
+    if (is_vote && vote_options && vote_options.length >= 2) {
+      console.log(`Creating ${vote_options.length} vote options for post ${post.id}`);
+      
+      // Create vote options
+      const vote_optionPromises = vote_options.map(async (option: any, index: number) => {
+        const vote_option_id = `vote_option_${temptx_id}_${index}`;
+        return prisma.vote_option.create({
+          data: {
+            id: vote_option_id,
+            tx_id: `${temptx_id}_option_${index}`,
+            content: option.text,
+            post_id: post.id,
+            author_address: author_address,
+            option_index: index
+          }
+        });
+      });
+
+      await Promise.all(vote_optionPromises);
+      console.log(`Created ${vote_options.length} vote options for post ${post.id}`);
+    }
+
     res.status(201).json(post);
   } catch (error) {
     console.error('Error creating direct post:', error);
