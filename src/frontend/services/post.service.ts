@@ -472,10 +472,14 @@ async function createvote_optionComponent(
     console.log(`[DEBUG] - Timestamp: ${metadata.timestamp}`);
     console.log(`[DEBUG] - MAP data:`, map);
     
-    const request = createInscriptionRequest(address, option.text, map, satoshis);
+    // Add a unique identifier to the content for debugging
+    // This will help us track if the wallet is merging outputs
+    const debugContent = `${option.text} [DEBUG_ID:${option.optionIndex}]`;
+    
+    const request = createInscriptionRequest(address, debugContent, map, satoshis);
     console.log(`[DEBUG] - Final inscription request:`, {
         address,
-        contentPreview: option.text.substring(0, 20) + (option.text.length > 20 ? '...' : ''),
+        contentPreview: debugContent.substring(0, 30) + (debugContent.length > 30 ? '...' : ''),
         mapKeys: Object.keys(map),
         satoshis,
         mimeType: 'text/plain'
@@ -980,7 +984,8 @@ export const createPost = async (
                 mimeType: comp.mimeType,
                 satoshis: comp.satoshis,
                 mapType: comp.map.type,
-                mapTags: comp.map.tags
+                mapTags: comp.map.tags,
+                contentPreview: comp.base64Data.substring(0, 30) + '...'
             })));
         } else {
             // Create regular content component
@@ -1005,12 +1010,51 @@ export const createPost = async (
             satoshis: comp.satoshis,
             mapType: comp.map.type,
             mapTags: comp.map.tags,
-            mapKeys: Object.keys(comp.map)
+            mapKeys: Object.keys(comp.map),
+            // Add base64 content preview to see if we can identify components in wallet response
+            contentPreview: comp.mimeType === 'text/plain' 
+                ? atob(comp.base64Data).substring(0, 30) + '...' 
+                : `[Binary data, length: ${comp.base64Data.length}]`
         })));
+
+        // Add a pre-wallet hook to check if wallet has a custom inscribe method
+        console.log('[DEBUG] Wallet object inspection:');
+        console.log('[DEBUG] - Wallet type:', typeof wallet);
+        console.log('[DEBUG] - Has inscribe method:', typeof wallet.inscribe === 'function');
+        
+        // Check if wallet has any custom methods for handling multiple components
+        const walletMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(wallet))
+            .filter(method => typeof wallet[method] === 'function');
+        console.log('[DEBUG] - Available wallet methods:', walletMethods);
 
         const response = await wallet.inscribe(components);
         console.log('[DEBUG] Wallet inscription response:', response);
         
+        // Analyze the response to see if all components were processed
+        if (response) {
+            console.log('[DEBUG] Response analysis:');
+            console.log('[DEBUG] - Response type:', typeof response);
+            console.log('[DEBUG] - Response keys:', Object.keys(response));
+            
+            if (response.tx_id) {
+                console.log('[DEBUG] - Transaction ID:', response.tx_id);
+                
+                // Try to fetch transaction details to see outputs
+                try {
+                    const txDetails = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${response.tx_id}/raw`).then(r => r.json());
+                    console.log('[DEBUG] - Transaction details:', txDetails);
+                } catch (error) {
+                    console.log('[DEBUG] - Could not fetch transaction details:', error);
+                }
+            }
+            
+            // Check if response has outputs information
+            if (response.outputs) {
+                console.log('[DEBUG] - Number of outputs:', response.outputs.length);
+                console.log('[DEBUG] - Outputs:', response.outputs);
+            }
+        }
+
         const tx_id = response.tx_id || response.id;
         if (!tx_id) {
             throw new Error('Failed to create inscription - no transaction ID returned');
