@@ -1062,33 +1062,15 @@ export const createPost = async (
         const response = await wallet.inscribe(components);
         console.log('[DEBUG] Wallet inscription response:', response);
         
-        // Analyze the response to see if all components were processed
-        if (response) {
-            console.log('[DEBUG] Response analysis:');
-            console.log('[DEBUG] - Response type:', typeof response);
-            console.log('[DEBUG] - Response keys:', Object.keys(response));
-            
-            if (response.tx_id) {
-                console.log('[DEBUG] - Transaction ID:', response.tx_id);
-                
-                // Try to fetch transaction details to see outputs
-                try {
-                    const txDetails = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${response.tx_id}/raw`).then(r => r.json());
-                    console.log('[DEBUG] - Transaction details:', txDetails);
-                } catch (error) {
-                    console.log('[DEBUG] - Could not fetch transaction details:', error);
-                }
-            }
-            
-            // Check if response has outputs information
-            if (response.outputs) {
-                console.log('[DEBUG] - Number of outputs:', response.outputs.length);
-                console.log('[DEBUG] - Outputs:', response.outputs);
-            }
-        }
+        // Add logging for better debugging
+        console.log('[DEBUG] Response analysis:');
+        console.log('[DEBUG] - Response type:', typeof response);
+        console.log('[DEBUG] - Response keys:', Object.keys(response));
 
-        const tx_id = response.tx_id || response.id;
+        // Here's the fix: Check for txid in addition to tx_id and id
+        const tx_id = response.tx_id || response.id || response.txid;
         if (!tx_id) {
+            console.error('[DEBUG] Transaction ID not found in response:', response);
             throw new Error('Failed to create inscription - no transaction ID returned');
         }
         console.log('Inscription successful with tx_id:', tx_id);
