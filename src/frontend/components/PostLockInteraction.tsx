@@ -23,9 +23,12 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
   useEffect(() => {
     if (showOptions && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
+      // Calculate position to center the dropdown under the button
+      const left = Math.max(10, rect.left - (240 - rect.width) / 2); // 240px is dropdown width
+      
       setDropdownPosition({
-        top: rect.bottom + window.scrollY,
-        left: rect.left + window.scrollX
+        top: rect.bottom + window.scrollY + 5, // Add 5px gap
+        left: left + window.scrollX
       });
     }
   }, [showOptions]);
@@ -36,6 +39,23 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
       setShowOptions(false);
     }
   };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showOptions && 
+          buttonRef.current && 
+          !buttonRef.current.contains(event.target as Node) &&
+          !(event.target as Element).closest('.lock-dropdown')) {
+        setShowOptions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showOptions]);
 
   return (
     <div className="relative">
@@ -64,7 +84,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
             <FiX size={16} />
           </button>
           <div 
-            className="fixed z-[100] bg-[#2A2A40] p-4 rounded-lg border border-gray-800/20 shadow-xl w-60 backdrop-blur-sm"
+            className="fixed z-[100] bg-[#2A2A40] p-4 rounded-lg border border-gray-800/20 shadow-xl w-60 backdrop-blur-sm lock-dropdown"
             style={{
               top: `${dropdownPosition.top}px`,
               left: `${dropdownPosition.left}px`,
