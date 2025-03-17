@@ -547,13 +547,21 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="What's on your mind?"
-              className="w-full p-5 pb-16 bg-[#13141B] border border-gray-800/60 rounded-xl text-gray-200 focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 min-h-[120px] transition-all duration-300 resize-none overflow-hidden"
+              className={`w-full p-5 pb-16 bg-[#13141B] border rounded-xl text-gray-200 focus:outline-none focus:ring-1 min-h-[120px] transition-all duration-300 resize-none overflow-hidden ${
+                imagePreview || showTagInput || isVotePost || showScheduleOptions
+                  ? 'border-[#00ffa3] focus:border-[#00ffa3] focus:ring-[#00ffa3]/30'
+                  : 'border-gray-800/60 focus:border-[#00ffa3] focus:ring-[#00ffa3]/30'
+              }`}
               onInput={adjustTextareaHeight}
               rows={1}
             />
             
             {/* Bottom toolbar with additional options - positioned at the bottom of the textarea */}
-            <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-5 py-3 border-t border-gray-800/40 bg-[#13141B] rounded-b-xl">
+            <div className={`absolute bottom-0 left-0 right-0 flex items-center justify-between px-5 py-3 border-t bg-[#13141B] rounded-b-xl ${
+              imagePreview || showTagInput || isVotePost || showScheduleOptions
+                ? 'border-[#00ffa3]/30'
+                : 'border-gray-800/40'
+            }`}>
               <div className="flex items-center">
                 {/* Image upload button */}
                 <div className="relative">
@@ -638,7 +646,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           
           {/* Schedule options - only shown when isScheduled is true */}
           {showScheduleOptions && (
-            <div className="mt-2 p-2 bg-[#13141B] border border-[#00ffa3]/30 rounded-lg transition-all duration-300 animate-fadeIn">
+            <div className="mt-2 p-2 bg-[#13141B] border border-[#00ffa3] rounded-lg transition-all duration-300 animate-fadeIn">
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
                   <FiClock className="mr-1 text-[#00ffa3]" size={14} />
@@ -702,7 +710,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           
           {/* Image preview overlay */}
           {imagePreview && (
-            <div className="mt-2 relative rounded-lg overflow-hidden shadow-lg border border-[#00ffa3]/30 bg-[#13141B]/80">
+            <div className="mt-2 relative rounded-lg overflow-hidden shadow-lg border border-[#00ffa3] bg-[#13141B]/80">
               <img 
                 src={imagePreview} 
                 alt="Upload preview" 
@@ -720,7 +728,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           
           {/* Compact tag input area - only shown when showTagInput is true */}
           {showTagInput && (
-            <div className="mt-2 p-3 bg-[#13141B]/80 border border-[#00ffa3]/30 rounded-lg transition-all duration-300 animate-fadeIn">
+            <div className="mt-2 p-3 bg-[#13141B]/80 border border-[#00ffa3] rounded-lg transition-all duration-300 animate-fadeIn">
               <div className="flex justify-between items-center mb-2">
                 <h3 className="text-xs font-medium text-white flex items-center">
                   <FiHash className="mr-1 text-[#00ffa3]" size={14} />
@@ -784,7 +792,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           
           {/* Vote options section - only shown when isVotePost is true */}
           {isVotePost && (
-            <div className="mt-2 p-3 bg-[#13141B]/80 border border-[#00ffa3]/30 rounded-lg transition-all duration-300 animate-fadeIn">
+            <div className="mt-2 p-3 bg-[#13141B]/80 border border-[#00ffa3] rounded-lg transition-all duration-300 animate-fadeIn">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-xs font-medium text-white flex items-center">
                   <FiBarChart2 className="mr-1 text-[#00ffa3]" size={14} />
