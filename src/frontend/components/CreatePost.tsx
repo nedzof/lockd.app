@@ -255,7 +255,22 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       
       // Validate vote options if this is a vote post
       const filteredVoteOptions = vote_options.filter(option => option.trim() !== '');
-      const shouldBeVotePost = isVotePost && filteredVoteOptions.length >= 2;
+      
+      // Determine if this should be a vote post based on the toggle and valid options
+      let shouldBeVotePost = isVotePost && filteredVoteOptions.length >= 2;
+      
+      // If user has entered vote options but forgot to toggle isVotePost, warn them
+      if (!isVotePost && filteredVoteOptions.length >= 2) {
+        const wantVotePost = window.confirm(
+          "You've entered vote options but haven't enabled vote post mode. Do you want to create this as a vote post?"
+        );
+        
+        if (wantVotePost) {
+          shouldBeVotePost = true;
+          // Update the UI state to match
+          setIsVotePost(true);
+        }
+      }
       
       if (isVotePost && filteredVoteOptions.length < 2) {
         console.warn('Vote post requested but fewer than 2 valid options provided');
@@ -265,6 +280,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       }
       
       console.log('Final vote post decision:', shouldBeVotePost);
+      console.log('Final filtered vote options:', filteredVoteOptions);
       
       try {
         // Create the post
@@ -288,6 +304,9 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         setContent('');
         setImage(null);
         setImagePreview('');
+        setvote_options(['', '']);
+        setIsVotePost(false);
+        setselected_tags([]);
         
         // Notify success
         toast.success(isScheduled ? 'Post scheduled successfully!' : 'Post created successfully!', {
@@ -396,6 +415,11 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       setShowTagInput(false);
       // Hide image preview but keep the image data
       setImagePreview('');
+      
+      // Initialize with two empty options if none exist
+      if (vote_options.length === 0 || (vote_options.length === 2 && vote_options.every(opt => opt === ''))) {
+        setvote_options(['', '']);
+      }
     } else {
       // Show image preview again if there's an image
       if (image) {

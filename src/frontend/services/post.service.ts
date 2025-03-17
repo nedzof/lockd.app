@@ -751,6 +751,9 @@ export const createPost = async (
             // Filter out empty options
             const validOptions = vote_options.filter(opt => opt.trim() !== '');
             
+            console.log('[DEBUG] Valid options after filtering:', validOptions);
+            console.log('[DEBUG] Valid options length:', validOptions.length);
+            
             if (validOptions.length < 2) {
                 console.error('Vote post requires at least 2 valid options, but only found:', validOptions.length);
                 throw new Error('Vote posts require at least 2 valid options');
@@ -1044,6 +1047,17 @@ export const createPost = async (
         const walletMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(wallet))
             .filter(method => typeof wallet[method] === 'function');
         console.log('[DEBUG] - Available wallet methods:', walletMethods);
+
+        // Add a final check to ensure we have the right number of components
+        if (isVotePost) {
+            const expectedComponents = 1 + vote_options.filter(opt => opt.trim() !== '').length + (imageData ? 1 : 0);
+            console.log(`[DEBUG] Expected components for vote post: ${expectedComponents}`);
+            console.log(`[DEBUG] Actual components: ${components.length}`);
+            
+            if (components.length !== expectedComponents) {
+                console.error(`[DEBUG] Component count mismatch! Expected ${expectedComponents} but got ${components.length}`);
+            }
+        }
 
         const response = await wallet.inscribe(components);
         console.log('[DEBUG] Wallet inscription response:', response);
