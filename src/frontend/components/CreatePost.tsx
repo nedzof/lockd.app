@@ -439,6 +439,32 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     setvote_options(newOptions);
   };
 
+  // Function to adjust textarea height based on content
+  const adjustTextareaHeight = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      // Reset height to auto to get the correct scrollHeight
+      textarea.style.height = 'auto';
+      // Set the height to match the content (with a minimum height)
+      textarea.style.height = `${Math.max(120, textarea.scrollHeight)}px`;
+    }
+  }, []);
+
+  // Adjust height when content changes
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [content, adjustTextareaHeight]);
+
+  useEffect(() => {
+    // Focus the textarea when the modal opens
+    if (isOpen && textareaRef.current) {
+      setTimeout(() => {
+        textareaRef.current?.focus();
+        adjustTextareaHeight(); // Also adjust height when focused
+      }, 100);
+    }
+  }, [isOpen, adjustTextareaHeight]);
+
   if (!isOpen) return null;
 
   return (
@@ -521,7 +547,9 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="What's on your mind?"
-              className="w-full p-5 pb-16 bg-[#13141B] border border-gray-800/60 rounded-xl text-gray-200 focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 min-h-[120px] transition-all duration-300"
+              className="w-full p-5 pb-16 bg-[#13141B] border border-gray-800/60 rounded-xl text-gray-200 focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 min-h-[120px] transition-all duration-300 resize-none overflow-hidden"
+              onInput={adjustTextareaHeight}
+              rows={1}
             />
             
             {/* Bottom toolbar with additional options - positioned at the bottom of the textarea */}
