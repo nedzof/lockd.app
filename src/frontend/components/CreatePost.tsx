@@ -362,11 +362,21 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       // Close other option panels
       setShowTagInput(false);
       setIsVotePost(false);
+      // Hide image preview but keep the image data
+      setImagePreview('');
     } else {
       // If we're closing the schedule options, only turn off scheduling
       // if the user hasn't set a date and time
       if (!scheduleDate || !scheduleTime) {
         setIsScheduled(false);
+      }
+      // Show image preview again if there's an image
+      if (image) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setImagePreview(reader.result as string);
+        };
+        reader.readAsDataURL(image);
       }
     }
     
@@ -379,6 +389,17 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       // Close other option panels
       setShowScheduleOptions(false);
       setIsVotePost(false);
+      // Hide image preview but keep the image data
+      setImagePreview('');
+    } else {
+      // Show image preview again if there's an image
+      if (image) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setImagePreview(reader.result as string);
+        };
+        reader.readAsDataURL(image);
+      }
     }
     
     setShowTagInput(!showTagInput);
@@ -390,6 +411,17 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       // Close other option panels
       setShowScheduleOptions(false);
       setShowTagInput(false);
+      // Hide image preview but keep the image data
+      setImagePreview('');
+    } else {
+      // Show image preview again if there's an image
+      if (image) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setImagePreview(reader.result as string);
+        };
+        reader.readAsDataURL(image);
+      }
     }
     
     setIsVotePost(!isVotePost);
@@ -706,8 +738,9 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
             </div>
           )}
           
-          {/* Image preview overlay */}
-          {imagePreview && (
+          
+          {/* Image preview overlay - only shown when no other options are active */}
+          {imagePreview && !showScheduleOptions && !showTagInput && !isVotePost && (
             <div className="mt-2 relative rounded-lg overflow-hidden shadow-lg border border-gray-800/60 bg-[#13141B]/80">
               <img 
                 src={imagePreview} 
