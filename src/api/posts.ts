@@ -713,9 +713,27 @@ const createPost: CreatePostHandler = async (req, res, next) => {
     
     // Create a minimal post with required fields
     try {
+      // First check if a post with this tx_id already exists
+      const existingPost = await prisma.post.findUnique({
+        where: {
+          tx_id: temptx_id
+        }
+      });
+
+      if (existingPost) {
+        console.log(`Post with tx_id ${temptx_id} already exists, returning existing post`);
+        
+        // Return the existing post
+        return res.status(200).json({
+          ...existingPost,
+          message: 'Post already exists'
+        });
+      }
+
+      // Create new post with generated ID (not using temptx_id as the primary key)
       const post = await prisma.post.create({
         data: {
-          id: temptx_id,
+          // Let Prisma generate the UUID for the id field
           tx_id: temptx_id,
           content: content,
           author_address: author_address,
