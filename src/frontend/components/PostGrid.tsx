@@ -118,8 +118,6 @@ const PostGrid: React.FC<PostGridProps> = ({
   const isMounted = useRef<boolean>(false);
   // Add a ref to track if a fetch is in progress
   const isFetchInProgress = useRef<boolean>(false);
-  // Add a ref for the intersection observer loader element
-  const loaderRef = useRef<HTMLDivElement>(null);
   // Add a ref to store previous filter values for comparison
   const prevFilters = useRef({
     time_filter: '',
@@ -129,6 +127,8 @@ const PostGrid: React.FC<PostGridProps> = ({
     selected_tags: [] as string[],
     user_id: ''
   });
+  // Add a ref for the intersection observer loader element
+  const loaderRef = useRef<HTMLDivElement>(null);
 
   // Memoize current filters to avoid unnecessary re-renders
   const currentFilters = useMemo(() => ({
@@ -139,6 +139,11 @@ const PostGrid: React.FC<PostGridProps> = ({
     selected_tags,
     user_id
   }), [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
+
+  // Check if any filters are applied
+  const hasFilters = useMemo(() => {
+    return !!(time_filter || ranking_filter || personal_filter || block_filter || selected_tags.length > 0);
+  }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags]);
 
   // Function to check if filters have changed
   const haveFiltersChanged = useCallback(() => {
@@ -552,33 +557,33 @@ const PostGrid: React.FC<PostGridProps> = ({
   useEffect(() => {
   }, [nextCursor, hasMore, submissions.length, isFetchingMore]);
 
-  // Setup intersection observer for infinite scrolling
+  // Set up intersection observer for infinite scrolling
   useEffect(() => {
+    // Only set up the observer if no filters are applied
+    if (hasFilters || !loaderRef.current) return;
+
     const options = {
       root: null, // Use the viewport as the root
-      rootMargin: '100px', // Start loading when the element is 100px from viewport
+      rootMargin: '0px 0px 200px 0px', // Start loading when element is 200px from viewport
       threshold: 0.1 // Trigger when 10% of the element is visible
     };
 
     const observer = new IntersectionObserver((entries) => {
       const [entry] = entries;
-      if (entry.isIntersecting && hasMore && !isFetchingMore && !isFetchInProgress.current && submissions.length > 0) {
-        console.log('Loader element is visible, loading more posts');
+      if (entry.isIntersecting && hasMore && !isFetchingMore && !isFetchInProgress.current) {
+        console.log('Loader is visible, loading more posts');
         handleLoadMore();
       }
     }, options);
 
-    // Observe the loader element if it exists
-    if (loaderRef.current) {
-      observer.observe(loaderRef.current);
-    }
+    observer.observe(loaderRef.current);
 
     return () => {
       if (loaderRef.current) {
         observer.unobserve(loaderRef.current);
       }
     };
-  }, [hasMore, isFetchingMore, handleLoadMore, submissions.length]);
+  }, [hasMore, isFetchingMore, hasFilters, handleLoadMore]);
 
   const handlevote_optionLock = async (optionId: string, amount: number, duration: number) => {
     // Check if wallet is connected
@@ -657,7 +662,7 @@ const PostGrid: React.FC<PostGridProps> = ({
 
         {/* Empty state */}
         {!loading && submissions.length === 0 && (
-          <div className="bg-gray-800/50 p-8 rounded-lg text-center">
+          <div className="bg-gray-700 p-8 rounded-lg text-center">
             <h3 className="text-xl font-bold mb-2">No posts found</h3>
             <p>Try changing your filters or tags</p>
           </div>
@@ -665,7 +670,7 @@ const PostGrid: React.FC<PostGridProps> = ({
 
         {/* Posts grid */}
         {submissions.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 gap-4">
             {submissions.map((post) => (
               <div key={post.id} className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-xl border border-gray-800/10 shadow-lg hover:shadow-[#00ffa3]/5 transition-all duration-300">
                 {/* Post header */}
@@ -888,19 +893,45 @@ const PostGrid: React.FC<PostGridProps> = ({
           </div>
         )}
 
-        {/* Infinite scroll loader - replaces the Load More button */}
+        {/* Infinite scroll loader or Load more button */}
         {hasMore && submissions.length > 0 && (
-          <div 
-            ref={loaderRef} 
-            className="mt-6 text-center py-4"
-          >
-            {isFetchingMore && (
-              <div className="flex items-center justify-center">
-                <FiLoader className="animate-spin mr-2" />
-                <span>Loading more posts...</span>
+          <>
+            {hasFilters ? (
+              // Show button when filters are applied
+              <div className="mt-6 text-center">
+                <button
+                  onClick={handleLoadMore}
+                  disabled={isFetchingMore}
+                  className="px-6 py-3 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-xl font-medium hover:shadow-lg hover:from-[#00ff9d] hover:to-[#00ffa3] transition-all duration-300 transform hover:scale-105 text-gray-900 flex items-center mx-auto disabled:opacity-50"
+                >
+                  {isFetchingMore ? (
+                    <>
+                      <FiLoader className="animate-spin mr-2" />
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      <FiPlus className="mr-2" />
+                      Load More Posts
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              // Show invisible loader for infinite scroll when no filters
+              <div 
+                ref={loaderRef} 
+                className="py-4 flex justify-center"
+              >
+                {isFetchingMore && (
+                  <div className="flex items-center space-x-2">
+                    <FiLoader className="animate-spin text-[#00ffa3]" />
+                    <span className="text-gray-400">Loading more posts...</span>
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </div>
