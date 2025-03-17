@@ -44,15 +44,10 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const [showScheduleOptions, setShowScheduleOptions] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
-  const [scheduleTimezone, setScheduleTimezone] = useState('');
-  const timezones = [
-    { value: 'UTC', label: 'Coordinated Universal Time (UTC)' },
-    { value: 'PST', label: 'Pacific Standard Time (PST)' },
-    { value: 'EST', label: 'Eastern Standard Time (EST)' },
-    { value: 'CET', label: 'Central European Time (CET)' },
-    { value: 'JST', label: 'Japan Standard Time (JST)' },
-    // Add more timezones as needed
-  ];
+  const [scheduleTimezone, setScheduleTimezone] = useState(() => {
+    // Get user's local timezone
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  });
 
   useEffect(() => {
     fetchTags();
@@ -289,7 +284,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           isVotePost ? vote_options.filter(option => option.trim() !== '') : [],
           isScheduled && scheduleDate && scheduleTime ? {
             scheduledAt: new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString(),
-            timezone: scheduleTimezone || 'UTC'
+            timezone: scheduleTimezone
           } : undefined
         );
         
@@ -355,7 +350,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       
       // Set default timezone if not already set
       if (!scheduleTimezone) {
-        setScheduleTimezone(timezones[0].value);
+        setScheduleTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
       }
       
       setIsScheduled(true);
@@ -724,24 +719,10 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                     <FiClock className="absolute right-2 top-1 text-gray-500" size={12} />
                   </div>
                 </div>
-                <div className="flex-1">
-                  <select
-                    id="schedule-timezone"
-                    value={scheduleTimezone}
-                    onChange={(e) => setScheduleTimezone(e.target.value)}
-                    className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 appearance-none"
-                  >
-                    {timezones.map((tz) => (
-                      <option key={tz.value} value={tz.value}>
-                        {tz.value}
-                      </option>
-                    ))}
-                  </select>
-                </div>
               </div>
               
               <div className="mt-1 text-xs text-[#00ffa3]/80 flex items-center">
-                <FiCheck className="mr-1" size={10} /> Will publish automatically
+                <FiCheck className="mr-1" size={10} /> Will publish automatically in your local timezone
               </div>
             </div>
           )}
