@@ -453,7 +453,11 @@ async function createvote_optionComponent(
     };
 
     const map = createMapData(metadata);
-    const satoshis = option.feeSatoshis || await calculateOutputSatoshis(option.text.length, true);
+    
+    // Ensure each vote option has a unique satoshi value by adding the option index
+    // This helps prevent the wallet from merging outputs
+    const baseSatoshis = option.feeSatoshis || await calculateOutputSatoshis(option.text.length, true);
+    const satoshis = baseSatoshis + option.optionIndex + 1; // Add index to ensure uniqueness
     
     // Enhanced logging for debugging
     console.log(`[DEBUG] Vote Option #${option.optionIndex} Details:`);
@@ -461,7 +465,8 @@ async function createvote_optionComponent(
     console.log(`[DEBUG] - Tags: ${JSON.stringify(tags)}`);
     console.log(`[DEBUG] - Sequence: ${sequence}`);
     console.log(`[DEBUG] - Parent Sequence: ${parentSequence}`);
-    console.log(`[DEBUG] - Satoshis: ${satoshis}`);
+    console.log(`[DEBUG] - Base Satoshis: ${baseSatoshis}`);
+    console.log(`[DEBUG] - Final Satoshis: ${satoshis}`);
     console.log(`[DEBUG] - MAP data:`, map);
     
     const request = createInscriptionRequest(address, option.text, map, satoshis);
