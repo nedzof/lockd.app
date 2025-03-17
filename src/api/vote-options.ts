@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import prisma from '../db';
 import { logger } from '../utils/logger';
+import { JsonObject } from '@prisma/client/runtime/library';
 
 const router = express.Router();
 
@@ -24,19 +25,30 @@ router.get('/:tx_id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Post not found' });
     }
 
+    // Helper function to safely check metadata properties
+    const hasMetadataProperty = (key: string): boolean => {
+      if (!post.metadata) return false;
+      if (typeof post.metadata !== 'object') return false;
+      return Object.prototype.hasOwnProperty.call(post.metadata, key);
+    };
+
     // Check if this is a vote post
-    if (!post.is_vote && (!post.metadata || post.metadata.content_type !== 'vote')) {
+    if (!post.is_vote && (!post.metadata || !hasMetadataProperty('content_type') || (post.metadata as any).content_type !== 'vote')) {
       logger.debug(`Post ${tx_id} is not a vote post. is_vote=${post.is_vote}, metadata=${JSON.stringify(post.metadata)}`);
       
       // If it's not marked as a vote post but should be, update it
-      if (post.metadata && (post.metadata.vote_options || post.metadata.content_type === 'vote' || post.metadata.is_vote)) {
+      if (post.metadata && (
+          hasMetadataProperty('vote_options') || 
+          (hasMetadataProperty('content_type') && (post.metadata as any).content_type === 'vote') || 
+          hasMetadataProperty('is_vote')
+        )) {
         logger.debug(`Updating post ${tx_id} to mark it as a vote post`);
         await prisma.post.update({
           where: { id: post.id },
           data: { 
             is_vote: true,
             metadata: {
-              ...post.metadata,
+              ...(typeof post.metadata === 'object' ? post.metadata : {}),
               content_type: 'vote',
               is_vote: true
             }
@@ -45,6 +57,22 @@ router.get('/:tx_id', async (req: Request, res: Response) => {
       } else {
         return res.status(404).json({ error: 'Not a vote post' });
       }
+    }
+
+    // Update the post to mark it as a vote post if it's not already
+    if (!post.is_vote) {
+      logger.debug(`Updating post ${tx_id} to mark it as a vote post`);
+      await prisma.post.update({
+        where: { id: post.id },
+        data: { 
+          is_vote: true,
+          metadata: {
+            ...(typeof post.metadata === 'object' ? post.metadata : {}),
+            content_type: 'vote',
+            is_vote: true
+          }
+        }
+      });
     }
 
     // Get the vote options with their total locked amounts
@@ -75,7 +103,6 @@ router.get('/:tx_id', async (req: Request, res: Response) => {
             content: defaultOptions[i],
             post_id: post.id,
             author_address: post.author_address || '',
-            lock_duration: 1000,
             created_at: new Date()
           },
           include: {
@@ -103,7 +130,7 @@ router.get('/:tx_id', async (req: Request, res: Response) => {
         data: { 
           is_vote: true,
           metadata: {
-            ...post.metadata,
+            ...(typeof post.metadata === 'object' ? post.metadata : {}),
             content_type: 'vote',
             is_vote: true
           }

@@ -979,6 +979,81 @@ router.get('/:id/media', getPostMedia);
 router.post('/', createPost);
 router.post('/direct', createDirectPost);
 
+// Add a new endpoint for directly creating vote options for an existing post
+router.post('/:id/vote-options', async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const { vote_options } = req.body;
+
+    if (!vote_options || !Array.isArray(vote_options) || vote_options.length < 2) {
+      return res.status(400).json({ 
+        error: 'Invalid vote options', 
+        message: 'Vote options must be an array with at least 2 items' 
+      });
+    }
+
+    // Find the post
+    const post = await prisma.post.findUnique({
+      where: { id: postId }
+    });
+
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    // Update the post to mark it as a vote post if it's not already
+    if (!post.is_vote) {
+      await prisma.post.update({
+        where: { id: postId },
+        data: { 
+          is_vote: true,
+          metadata: {
+            ...post.metadata,
+            is_vote: true
+          }
+        }
+      });
+    }
+
+    // Create vote options
+    const createdOptions = [];
+    for (let i = 0; i < vote_options.length; i++) {
+      const option = vote_options[i];
+      const optionText = typeof option === 'string' ? option : option.text;
+      
+      if (!optionText || optionText.trim() === '') {
+        continue; // Skip empty options
+      }
+
+      const vote_option_id = `vote_option_${post.tx_id}_${i}`;
+      const newOption = await prisma.vote_option.create({
+        data: {
+          id: vote_option_id,
+          tx_id: `${post.tx_id}_option_${i}`,
+          content: optionText,
+          post_id: post.id,
+          author_address: post.author_address || '',
+          option_index: i
+        }
+      });
+      createdOptions.push(newOption);
+    }
+
+    // Return the created options
+    res.status(201).json({
+      success: true,
+      post_id: post.id,
+      vote_options: createdOptions
+    });
+  } catch (error) {
+    console.error('Error creating vote options:', error);
+    res.status(500).json({ 
+      error: 'Internal server error', 
+      message: error instanceof Error ? error.message : 'Unknown error' 
+    });
+  }
+});
+
 // Add a test endpoint to check database connection
 router.get('/test', async (req, res) => {
   try {

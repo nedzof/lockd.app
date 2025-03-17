@@ -1,7 +1,30 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import express, { Router, Request, Response, NextFunction } from 'express';
 import prisma from '../db';
+import { logger } from '../utils/logger';
 
 const router = Router();
+
+// Helper function to get the current block height
+async function getCurrentBlockHeight(): Promise<number> {
+  try {
+    // Try to get the latest block height from the processed_transaction table
+    const latestTransaction = await prisma.processed_transaction.findFirst({
+      orderBy: {
+        block_height: 'desc'
+      }
+    });
+    
+    if (latestTransaction && latestTransaction.block_height > 0) {
+      return latestTransaction.block_height;
+    }
+    
+    // Fallback to a default value if no transactions are found
+    return 800000; // Approximate current BSV block height
+  } catch (error) {
+    logger.error('Error getting current block height:', error);
+    return 800000; // Fallback to approximate current BSV block height
+  }
+}
 
 interface LockLikeRequest {
   post_id: string;  // The post's id
@@ -22,10 +45,10 @@ interface LockLikeResponse {
   tx_id: string;
   author_address: string | null;
   amount: number;
-  lock_duration: number;
   unlock_height: number | null;
   created_at: Date;
   post_id: string;
+  vote_option_id?: string | null;
 }
 
 const handleLockLike = async (
@@ -56,14 +79,20 @@ const handleLockLike = async (
       return;
     }
 
+    // Get the current block height
+    const currentBlockHeight = await getCurrentBlockHeight();
+    
+    // Calculate unlock height based on lock duration (in blocks)
+    const unlock_height = currentBlockHeight + lock_duration;
+
     // Create the lock like record using the post's id
     const lockLike = await prisma.lock_like.create({
       data: {
-        tx_id: `${post.id}_${Date.now()}`, // Temporary tx_id until we get the real one
+        tx_id: `lock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
         post_id: post.id,
         author_address,
         amount,
-        created_at: new Date()
+        unlock_height // Store the lock_duration as unlock_height
       }
     });
 
@@ -112,15 +141,21 @@ const handlevote_optionLock = async (
       return;
     }
 
-    // Create the lock like record for the vote option
+    // Get the current block height
+    const currentBlockHeight = await getCurrentBlockHeight();
+    
+    // Calculate unlock height based on lock duration (in blocks)
+    const unlock_height = currentBlockHeight + lock_duration;
+
+    // Create a new lock like for the vote option
     const lockLike = await prisma.lock_like.create({
       data: {
-        tx_id: `${vote_option.id}_${Date.now()}`, // Temporary tx_id until we get the real one
-        post_id: vote_option.post.id, // Link to the parent post
-        vote_option_id: vote_option.id, // Link to the specific vote option
+        tx_id: `lock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
         author_address,
         amount,
-        created_at: new Date()
+        unlock_height, // Store the lock_duration as unlock_height
+        post_id: vote_option.post_id,
+        vote_option_id: vote_option.id
       }
     });
 

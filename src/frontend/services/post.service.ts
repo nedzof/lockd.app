@@ -139,9 +139,9 @@ export interface PostMetadata {
 // Helper function to convert PostMetadata to database Post object
 export function createDbPost(metadata: PostMetadata, tx_id: string): DbPost {
     const post: DbPost = {
-        id: metadata.post_id,
+        id: tx_id,
         tx_id,
-        post_id: metadata.post_id,
+        post_id: tx_id,
         content: metadata.content,
         author_address: '', // This will be set by the caller
         created_at: new Date(metadata.timestamp),
@@ -190,12 +190,12 @@ export function createDbvote_options(metadata: PostMetadata, post_tx_id: string)
     }
 
     return metadata.vote.options.map((option, index) => ({
-        id: `${metadata.post_id}-option-${index}`,
+        id: `${post_tx_id}-option-${index}`,
         tx_id: '', // This will be set when the transaction is created
         content: option.text,
         author_address: '', // This will be set by the caller
         created_at: new Date(metadata.timestamp),
-        post_id: metadata.post_id,
+        post_id: post_tx_id,
         option_index: option.optionIndex,
         tags: metadata.tags
     }));
@@ -1079,12 +1079,16 @@ export const createPost = async (
         const dbPost = createDbPost(metadata, tx_id);
         dbPost.author_address = bsvAddress;
         
+        // Use the transaction ID as the post ID to avoid conflicts
+        dbPost.id = tx_id;
+        
         // Add vote options if this is a vote post
         if (isVotePost && metadata.vote?.options) {
             dbPost.is_vote = true;
             dbPost.vote_options = metadata.vote.options.map(option => ({
                 content: option.text,
-                option_index: option.optionIndex
+                option_index: option.optionIndex,
+                post_id: tx_id
             })) as any; // Type assertion to bypass TypeScript error
         }
         
@@ -1269,3 +1273,87 @@ interface Post extends PostCreationData {
 
 // Export other necessary functions and types
 export type { Post, PostCreationData, InscribeRequest };
+
+// Function to add vote options to an existing post
+export const addVoteOptionsToPost = async (
+    postId: string,
+    vote_options: string[]
+): Promise<any> => {
+    console.log('[DEBUG] Adding vote options to post:', postId);
+    console.log('[DEBUG] Vote options:', vote_options);
+    
+    // Validate vote options
+    const validOptions = vote_options.filter(opt => opt.trim() !== '');
+    
+    if (validOptions.length < 2) {
+        console.error('Vote post requires at least 2 valid options, but only found:', validOptions.length);
+        throw new Error('Vote posts require at least 2 valid options');
+    }
+    
+    try {
+        // Show pending toast
+        const pendingToast = toast.loading('Adding vote options...', {
+            style: {
+                background: '#1A1B23',
+                color: '#fff',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '0.375rem'
+            }
+        });
+        
+        // Send request to add vote options
+        const response = await fetch(`${API_BASE_URL}/api/posts/${postId}/vote-options`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ vote_options: validOptions })
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            let errorDetails;
+            try {
+                errorDetails = JSON.parse(errorText);
+            } catch (e) {
+                errorDetails = errorText;
+            }
+            
+            console.error('Error adding vote options:', {
+                status: response.status,
+                statusText: response.statusText,
+                body: errorDetails
+            });
+            
+            toast.error(`Failed to add vote options: ${response.statusText}`, {
+                id: pendingToast,
+                style: {
+                    background: '#1A1B23',
+                    color: '#f87171',
+                    border: '1px solid rgba(248, 113, 113, 0.3)',
+                    borderRadius: '0.375rem'
+                }
+            });
+            
+            throw new Error(`Failed to add vote options: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        
+        // Update toast
+        toast.success('Vote options added successfully!', {
+            id: pendingToast,
+            style: {
+                background: '#1A1B23',
+                color: '#34d399',
+                border: '1px solid rgba(52, 211, 153, 0.3)',
+                borderRadius: '0.375rem'
+            }
+        });
+        
+        return result;
+    } catch (error: any) {
+        console.error('Error adding vote options:', error);
+        throw error;
+    }
+};
