@@ -261,23 +261,4 @@ audio {
   html {
     font-family: "Inter var", system-ui, sans-serif;
   }
-}
-
-@keyframes expandLeft {
-  from {
-    width: 0;
-    opacity: 0;
-    transform: translateX(10px);
-  }
-  to {
-    width: auto;
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.animate-expandLeft {
-  animation: expandLeft 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  transform-origin: right center;
-  box-shadow: 0 0 15px rgba(0, 255, 163, 0.15);
 } 
