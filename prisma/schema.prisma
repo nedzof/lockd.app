@@ -43,6 +43,7 @@ model post {
   metadata       Json?         @map("metadata")
   is_locked      Boolean       @default(false) @map("is_locked")
   image_metadata Json?         @map("image_metadata")
+  schedule_at    DateTime?     @map("schedule_at")
   lock_likes     lock_like[]
   vote_options   vote_option[]
 
@@ -51,6 +52,7 @@ model post {
   @@index([created_at])
   @@index([tags])
   @@index([tx_id])
+  @@index([schedule_at])
 }
 
 model processed_transaction {

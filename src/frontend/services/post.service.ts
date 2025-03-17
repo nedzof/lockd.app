@@ -824,73 +824,58 @@ export const createPost = async (
                 if (imageData instanceof File) {
                     // If imageData is already a File
                     imageFile = imageData;
-                    
-                    // Validate supported image formats
-                    const supportedFormats = [
-                        'image/jpeg', 
-                        'image/jpg', 
-                        'image/png', 
-                        'image/gif', 
-                        'image/bmp', 
-                        'image/svg+xml', 
-                        'image/webp', 
-                        'image/tiff'
-                    ];
-                    
-                    if (!supportedFormats.includes(imageFile.type)) {
-                        throw new Error(`Unsupported image format: ${imageFile.type}. Please use JPEG, PNG, GIF, BMP, SVG, WEBP, or TIFF.`);
-                    }
-                    
-                    processedImage = await processImage(imageFile);
                 } else if (typeof imageData === 'string') {
                     // If imageData is a base64 string
+                    
+                    const base64Data = imageData.includes('base64,')
+                        ? imageData.split('base64,')[1]
+                        : imageData;
+                    
                     try {
-                        // Extract the base64 data if it's a data URL
-                        const base64Data = imageData.includes('base64,') 
-                            ? imageData.split('base64,')[1] 
-                            : imageData;
-                        
-                        // Create a blob from the base64 data
-                        const blob = await fetch(`data:${imageMimeType || 'image/png'};base64,${base64Data}`).then(r => r.blob());
-                        
-                        // Create a File object from the blob
-                        imageFile = new File([blob], 'image.png', { type: imageMimeType || 'image/png' });
-                        
-                        // Process the image
-                        processedImage = await processImage(imageFile);
+                        // Convert base64 to a File or Blob
+                        const blob = dataURItoBlob(imageData);
+                        imageFile = new File([blob], 'image.' + (blob.type.split('/')[1] || 'jpg'), { 
+                            type: blob.type || imageMimeType || 'image/jpeg' 
+                        });
                     } catch (error) {
                         console.error('Error processing image string:', error);
-                        throw new Error(`Failed to process image: ${error.message}`);
+                        throw new Error(`Failed to process image`);
                     }
                 } else {
-                    console.error('Invalid image data format:', imageData);
-                    throw new Error('Invalid image data format. Please provide a File or base64 string.');
+                    console.error('Invalid image data format');
+                    throw new Error('Invalid image data format');
                 }
                 
-                console.log('Image processed successfully:', { 
-                    hasBase64Data: !!processedImage.base64Data,
-                    base64Length: processedImage.base64Data?.length,
-                    metadata: processedImage.metadata
-                });
+                // Process the image file to get base64 and metadata
+                const { base64Data, metadata } = await processImage(imageFile);
                 
-                const { base64Data, metadata: imageMetadata } = processedImage;
-                
+                // Create an image data object
                 const imageDataObj: ImageData = {
                     file: imageFile,
-                    content_type: `image/${imageMetadata?.format || 'png'}`,
+                    content_type: imageFile.type || imageMimeType || 'image/jpeg',
                     base64Data,
-                    metadata: imageMetadata
+                    description: ''
                 };
+                
+                // Add the image metadata
+                imageDataObj.metadata = metadata;
+                
+                // Log successful image processing without the actual data
+                console.log('Image processed successfully', {
+                    size: Math.round(base64Data.length / 1024) + 'KB',
+                    type: imageDataObj.content_type,
+                    dimensions: `${metadata.width}x${metadata.height}`
+                });
                 
                 metadata.image = {
                     ...imageDataObj,
-                    format: imageMetadata?.format || 'png'
+                    format: metadata.format || 'png'
                 };
 
                 console.log('Added image to metadata:', { 
                     content_type: imageDataObj.content_type,
-                    format: imageMetadata?.format || 'png',
-                    dimensions: imageMetadata ? `${imageMetadata.width}x${imageMetadata.height}` : 'unknown'
+                    format: metadata.format || 'png',
+                    dimensions: `${metadata.width}x${metadata.height}`
                 });
 
                 // Create image component

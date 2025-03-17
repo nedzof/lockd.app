@@ -499,7 +499,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
         try {
           // Convert Bytes to base64 string for frontend use
           post.raw_image_data = Buffer.from(post.raw_image_data).toString('base64');
-          logger.debug('Converted raw_image_data from Bytes to base64 string', {
+          logger.debug('Converted raw_image_data to base64 string', {
             post_id: post.id,
             dataLength: post.raw_image_data.length
           });
@@ -566,7 +566,7 @@ const getPost: PostDetailHandler = async (req, res, next) => {
       try {
         // Convert Bytes to base64 string for frontend use
         post.raw_image_data = Buffer.from(post.raw_image_data).toString('base64');
-        logger.debug('Converted raw_image_data from Bytes to base64 string', {
+        logger.debug('Converted raw_image_data to base64 string', {
           post_id: post.id,
           dataLength: post.raw_image_data.length
         });
@@ -637,9 +637,8 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     logger.debug('Sending image data', {
       post_id: req.params.id,
       media_type: content_type,
-      dataType: typeof post.raw_image_data,
-      isBuffer: Buffer.isBuffer(post.raw_image_data),
-      dataLength: post.raw_image_data.length
+      hasData: !!post.raw_image_data,
+      size: post.raw_image_data ? `${Math.round(post.raw_image_data.length / 1024)}KB` : '0KB'
     });
 
     // Send the raw image data - it's already a Buffer in the database
@@ -654,22 +653,6 @@ const createPost: CreatePostHandler = async (req, res, next) => {
   try {
     console.log('Received post creation request with body:', req.body);
     
-    // Log database information for debugging
-    try {
-      const dbInfo = await prisma.$queryRaw`
-        SELECT column_name, data_type 
-        FROM information_schema.columns 
-        WHERE table_name = 'Post'
-      `;
-      console.log('Post table schema:', dbInfo);
-      
-      // Debug available Prisma post fields
-      const postFields = Object.keys(prisma.post.fields || {});
-      console.log('Available Prisma post fields:', postFields);
-    } catch (e) {
-      console.error('Failed to query schema information:', e);
-    }
-    
     // Extract post data from request body
     const {
       content,
@@ -680,7 +663,7 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       raw_image_data,
       media_type,
       tx_id,
-      post_id: clientProvidedpost_id, // Extract post_id if client provides it
+      post_id: clientProvidedpost_id,
       scheduled // Extract scheduled information
     } = req.body;
 
@@ -695,196 +678,44 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       return res.status(400).json({ error: 'Author address is required' });
     }
 
-    // Validate image format if provided
-    if (raw_image_data && media_type) {
-      const supportedFormats = [
-        'image/jpeg', 
-        'image/jpg', 
-        'image/png', 
-        'image/gif', 
-        'image/bmp', 
-        'image/svg+xml', 
-        'image/webp', 
-        'image/tiff'
-      ];
-      
-      if (!supportedFormats.includes(media_type)) {
-        console.error('Unsupported image format:', media_type);
-        return res.status(400).json({ 
-          error: 'Unsupported image format. Please use JPEG, PNG, GIF, BMP, SVG, WEBP, or TIFF.' 
-        });
+    // Create new post with generated ID
+    const post = await prisma.post.create({
+      data: {
+        tx_id: tx_id || `test_scheduled_${Date.now()}`,
+        content,
+        author_address,
+        tags: tags || [],
+        is_vote: is_vote || false,
+        schedule_at: scheduled ? new Date(scheduled.scheduledAt) : null,
+        raw_image_data: raw_image_data ? Buffer.from(raw_image_data, 'base64') : null,
+        media_type: media_type || null
       }
-    }
+    });
 
-    // Validate vote options if this is a vote post
-    if (is_vote && (!vote_options || vote_options.length < 2)) {
-      console.error('Invalid vote options:', vote_options);
-      return res.status(400).json({ error: 'Vote posts require at least 2 valid options' });
-    }
-
-    // Generate temporary transaction ID if not provided
-    const temptx_id = tx_id || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-    
-    console.log(`Creating post with ID: ${temptx_id}, clientProvidedpost_id: ${clientProvidedpost_id}`);
-    
-    // Prepare metadata with post_id and scheduled information if provided
-    const metadata: Record<string, any> = {};
-    if (clientProvidedpost_id) {
-      metadata.post_id = clientProvidedpost_id;
-    }
-    if (scheduled) {
-      metadata.scheduled = scheduled;
-      console.log(`Post scheduled for: ${scheduled.scheduledAt} (${scheduled.timezone})`);
-    }
-    
-    // Create a minimal post with required fields
-    try {
-      // First check if a post with this tx_id already exists
-      const existingPost = await prisma.post.findUnique({
-        where: {
-          tx_id: temptx_id
-        }
+    // If this is a vote post, create the vote options
+    if (is_vote && vote_options && vote_options.length > 0) {
+      const vote_optionPromises = vote_options.map((option: any, index: number) => {
+        return prisma.vote_option.create({
+          data: {
+            content: option.text,
+            post_id: post.id,
+            option_index: index,
+            tx_id: `${post.tx_id}_option_${index}`,
+            author_address,
+            tags: tags || []
+          }
+        });
       });
 
-      if (existingPost) {
-        console.log(`Post with tx_id ${temptx_id} already exists, returning existing post`);
-        
-        // Return the existing post
-        return res.status(200).json({
-          ...existingPost,
-          message: 'Post already exists'
-        });
-      }
-
-      // Log the vote options for debugging
-      console.log('Vote options before creating post:', vote_options);
-
-      // Create new post with generated ID (not using temptx_id as the primary key)
-      const post = await prisma.post.create({
-        data: {
-          // Let Prisma generate the UUID for the id field
-          tx_id: temptx_id,
-          content: content,
-          author_address: author_address,
-          tags: tags || [],
-          is_vote: is_vote || false,
-          metadata: Object.keys(metadata).length > 0 ? metadata : undefined
-        }
-      });
-
-      // If we succeeded with minimal data, now try to update with image if provided
-      if (raw_image_data) {
-        try {
-          await prisma.post.update({
-            where: { id: post.id },
-            data: {
-              raw_image_data: raw_image_data ? Buffer.from(raw_image_data, 'base64') : null,
-              media_type: media_type || null
-            }
-          });
-        } catch (imageError) {
-          console.error('Error updating post with image data:', imageError);
-          // We'll continue since the post was already created
-        }
-      }
-
-      console.log('Post created successfully:', post);
-
-      // If this is a vote post, create vote options
-      if (is_vote && vote_options && vote_options.length >= 2) {
-        console.log(`Creating ${vote_options.length} vote options for post ${post.id}`);
-        console.log('Vote options data structure:', JSON.stringify(vote_options, null, 2));
-        
-        // Create vote options
-        const vote_optionPromises = vote_options.map(async (option: any, index: number) => {
-          const vote_option_id = `vote_option_${temptx_id}_${index}`;
-          
-          // Handle different formats of vote options
-          let optionText = '';
-          if (typeof option === 'string') {
-            optionText = option;
-          } else if (option && typeof option === 'object') {
-            // Handle object format with either 'text' or 'content' property
-            optionText = option.text || option.content || '';
-          }
-          
-          console.log(`Creating vote option ${index}: ${optionText}`);
-          
-          if (!optionText || optionText.trim() === '') {
-            console.log(`Skipping empty vote option at index ${index}`);
-            return null;
-          }
-          
-          return prisma.vote_option.create({
-            data: {
-              tx_id: `${temptx_id}_option_${index}`,
-              content: optionText,
-              post_id: post.id,
-              author_address: author_address,
-              option_index: index
-            }
-          });
-        });
-
-        try {
-          // Filter out null values (skipped empty options)
-          const validPromises = vote_optionPromises.filter(p => p !== null);
-          
-          if (validPromises.length < 2) {
-            console.error(`Not enough valid vote options: ${validPromises.length}`);
-            return res.status(400).json({ error: 'Vote posts require at least 2 valid options' });
-          }
-          
-          const createdOptions = await Promise.all(validPromises);
-          console.log(`Successfully created ${createdOptions.length} vote options:`, createdOptions);
-          
-          // Update the post with the created options
-          const updatedPost = await prisma.post.findUnique({
-            where: { id: post.id },
-            include: { vote_options: true }
-          });
-          
-          // Return the post with vote options
-          return res.status(201).json(updatedPost);
-        } catch (optionError) {
-          console.error('Error creating vote options:', optionError);
-          // Continue and return the post without vote options
-        }
-      } else {
-        console.log('Not creating vote options because:');
-        console.log('- is_vote:', is_vote);
-        console.log('- vote_options:', vote_options);
-        console.log('- vote_options length:', vote_options?.length || 0);
-      }
-
-      // Return the created post
-      res.status(201).json(post);
-    } catch (error) {
-      console.error('Error creating post:', error);
-      res.status(500).json({ error: 'Internal server error', message: error.message });
+      await Promise.all(vote_optionPromises);
+      logger.info(`Created ${vote_options.length} vote options for post ${post.id}`);
     }
+
+    console.log('Post created successfully:', post);
+    res.status(201).json(post);
   } catch (error) {
     console.error('Error creating post:', error);
-    // Provide more detailed error information
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      console.error(`Prisma error code: ${error.code}, message: ${error.message}`);
-      
-      // Handle specific Prisma errors
-      if (error.code === 'P2002') {
-        return res.status(409).json({ 
-          error: 'Conflict error', 
-          message: 'A post with this ID already exists',
-          details: error.meta
-        });
-      }
-    }
-    
-    // For other types of errors, return a more informative response
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
-    });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -943,12 +774,11 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
         });
       }
       
-      // Log image details for debugging
-      console.log('Image upload details:', {
-        has_imageData: true,
-        imageDataLength: raw_image_data.length,
-        media_type: media_type,
-        imageDataPreview: raw_image_data.substring(0, 100) + '...'
+      // Log minimal image details for debugging
+      console.log('Image upload detected:', {
+        media_type,
+        has_data: !!raw_image_data,
+        size: raw_image_data ? `${Math.round(raw_image_data.length / 1024)}KB` : '0KB'
       });
     }
 

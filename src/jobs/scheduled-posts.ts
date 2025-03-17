@@ -9,108 +9,43 @@ const prisma = new PrismaClient();
  * when the scheduled time has arrived
  */
 export async function processScheduledPosts() {
+  logger.info('Starting scheduled posts processing job');
+  logger.info(`Current time: ${new Date().toISOString()}`);
+  
   try {
-    logger.info('Starting scheduled posts processing job');
+    // Get all posts
+    const posts = await prisma.post.findMany();
+    logger.info(`Retrieved ${posts.length} total posts from the database`);
     
-    // Use the current time with a small buffer to account for potential timezone issues
+    // Find posts that have a schedule_at date in the past
     const now = new Date();
-    logger.info(`Current time: ${now.toISOString()}`);
+    const scheduledPosts = posts.filter(post => post.schedule_at && post.schedule_at <= now);
     
-    // Get all posts and filter them in memory to improve debugging
-    const allPosts = await prisma.post.findMany({
-      include: {
-        vote_options: true
-      }
-    });
+    logger.info(`Found ${scheduledPosts.length} posts ready to be published`);
     
-    logger.info(`Retrieved ${allPosts.length} total posts from the database`);
-    
-    // Filter posts that have scheduled metadata
-    const postsWithScheduledMetadata = allPosts.filter(post => {
-      const metadata = post.metadata as Record<string, any> | null;
-      const hasScheduled = metadata && metadata.scheduled;
-      
-      if (hasScheduled) {
-        logger.debug(`Found post with scheduled metadata: ${post.id}`, {
-          scheduledInfo: metadata?.scheduled,
-          postCreatedAt: post.created_at
-        });
-      }
-      
-      return hasScheduled;
-    });
-    
-    logger.info(`Found ${postsWithScheduledMetadata.length} posts with scheduled metadata`);
-    
-    // Filter posts that are ready to be published
-    const postsToPublish = postsWithScheduledMetadata.filter(post => {
+    // Process each scheduled post
+    let processed = 0;
+    for (const post of scheduledPosts) {
       try {
-        const metadata = post.metadata as Record<string, any>;
-        if (!metadata.scheduled || !metadata.scheduled.scheduledAt) {
-          logger.warn(`Post ${post.id} has scheduled metadata but missing scheduledAt property`);
-          return false;
-        }
-        
-        const scheduledAt = new Date(metadata.scheduled.scheduledAt);
-        
-        // Add timezone offset if provided
-        if (metadata.scheduled.timezone) {
-          try {
-            // Simple timezone handling (could be improved with a timezone library)
-            const scheduledInLocalTime = new Date(scheduledAt.toLocaleString('en-US', { timeZone: metadata.scheduled.timezone }));
-            logger.debug(`Post ${post.id} scheduled time: ${scheduledAt.toISOString()}, local time with timezone ${metadata.scheduled.timezone}: ${scheduledInLocalTime.toISOString()}`);
-          } catch (tzError) {
-            logger.warn(`Error processing timezone for post ${post.id}:`, tzError);
-            // Continue with UTC time if timezone processing fails
-          }
-        }
-        
-        const isReady = scheduledAt <= now;
-        
-        if (isReady) {
-          logger.info(`Post ${post.id} is ready to be published (scheduled: ${scheduledAt.toISOString()})`);
-        } else {
-          logger.debug(`Post ${post.id} is not ready yet (scheduled: ${scheduledAt.toISOString()}, now: ${now.toISOString()})`);
-        }
-        
-        return isReady;
-      } catch (error) {
-        logger.error(`Error processing scheduled post ${post.id}:`, error);
-        return false;
-      }
-    });
-    
-    logger.info(`Found ${postsToPublish.length} posts ready to be published`);
-    
-    // Publish each post
-    for (const post of postsToPublish) {
-      try {
-        // Update the post to remove the scheduled metadata
-        const metadata = { ...(post.metadata as Record<string, any>) };
-        
-        // Store the original scheduled info in a new field for record-keeping
-        metadata.published_scheduled_info = metadata.scheduled;
-        delete metadata.scheduled;
-        
-        logger.info(`Publishing scheduled post ${post.id} with content: "${post.content.substring(0, 50)}..."`);
-        
+        // Update the post to remove the schedule_at date
         await prisma.post.update({
           where: { id: post.id },
           data: {
-            metadata
+            schedule_at: null
           }
         });
         
-        logger.info(`Published scheduled post ${post.id}`);
+        logger.info(`Successfully published scheduled post ${post.id}`);
+        processed++;
       } catch (error) {
         logger.error(`Error publishing scheduled post ${post.id}:`, error);
       }
     }
     
     logger.info('Completed scheduled posts processing job');
-    return { processed: postsToPublish.length };
+    return { processed };
   } catch (error) {
-    logger.error('Error in scheduled posts processing job:', error);
+    logger.error('Error processing scheduled posts:', error);
     throw error;
   }
 }

@@ -24,7 +24,7 @@ const __dirname = dirname(__filename);
 // Initialize scheduled posts job
 function initializeScheduledPostsJob() {
   // Run the job more frequently to ensure scheduled posts are published promptly
-  const INTERVAL = 30 * 1000; // 30 seconds in milliseconds
+  const INTERVAL = 15 * 1000; // 15 seconds in milliseconds
   
   // Run the job immediately on startup
   processScheduledPosts()
@@ -77,7 +77,7 @@ app.use((req, res, next) => {
     method: req.method,
     path: req.path,
     query: req.query,
-    body: req.method === 'POST' || req.method === 'PUT' ? req.body : undefined
+    body: req.method === 'POST' || req.method === 'PUT' ? sanitizeRequestBody(req.body) : undefined
   });
 
   // Log response
@@ -95,6 +95,34 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// Helper function to sanitize request bodies before logging
+function sanitizeRequestBody(body: any): any {
+  if (!body) return body;
+  
+  // Create a copy to avoid modifying the original
+  const sanitized = { ...body };
+  
+  // List of fields that might contain image data
+  const imageFields = ['raw_image_data', 'imageData', 'base64Data', 'image'];
+  
+  // Sanitize any image fields
+  for (const field of imageFields) {
+    if (sanitized[field]) {
+      if (typeof sanitized[field] === 'string') {
+        // Replace the content with a placeholder indicating the data length
+        sanitized[field] = `[Image data: ${sanitized[field].length} chars]`;
+      } else if (sanitized[field] instanceof Buffer) {
+        sanitized[field] = `[Image buffer: ${sanitized[field].length} bytes]`;
+      } else if (typeof sanitized[field] === 'object') {
+        // For file objects or complex objects
+        sanitized[field] = '[Image object]';
+      }
+    }
+  }
+  
+  return sanitized;
+}
 
 // API Routes
 app.use('/api/posts', postsRouter);

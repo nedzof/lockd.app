@@ -324,30 +324,16 @@ const PostGrid: React.FC<PostGridProps> = ({
             // Check if we already have a blob URL for this image
             if (imageUrlMap.current.has(post.id)) {
               post.imageUrl = imageUrlMap.current.get(post.id);
-              console.log(`Using cached blob URL for post ${post.id}`);
             } else {
               // Create a direct data URL from the base64 string
-              console.log(`Processing image for post ${post.id} with media type ${post.media_type || 'image/jpeg'}`);
-              
               if (typeof post.raw_image_data === 'string') {
                 // Create a data URL directly from the base64 string
                 post.imageUrl = `data:${post.media_type || 'image/jpeg'};base64,${post.raw_image_data}`;
-                console.log(`Created data URL for post ${post.id}`);
                 
                 // Store the URL in our map for future reference
                 imageUrlMap.current.set(post.id, post.imageUrl);
               } else {
                 console.warn(`Unexpected raw_image_data type for post ${post.id}:`, typeof post.raw_image_data);
-                // Try to convert to string if it's not already a string
-                try {
-                  const base64String = typeof post.raw_image_data.toString === 'function' 
-                    ? post.raw_image_data.toString('base64')
-                    : String(post.raw_image_data);
-                  post.imageUrl = `data:${post.media_type || 'image/jpeg'};base64,${base64String}`;
-                  imageUrlMap.current.set(post.id, post.imageUrl);
-                } catch (error) {
-                  console.error(`Error creating data URL for post ${post.id}:`, error);
-                }
               }
             }
           } catch (error) {
@@ -768,16 +754,14 @@ const PostGrid: React.FC<PostGridProps> = ({
                           alt={`Image for post ${post.id}`}
                           className="w-full h-auto object-contain max-h-[400px] rounded"
                           onError={(e) => {
-                            console.error(`Error loading image for post ${post.id}`);
                             // Try to reload the image once
                             const currentSrc = e.currentTarget.src;
                             if (!e.currentTarget.dataset.retried) {
-                              console.log(`Retrying image load for post ${post.id}`);
                               e.currentTarget.dataset.retried = 'true';
                               // Add a cache-busting parameter
                               e.currentTarget.src = `${currentSrc}${currentSrc.includes('?') ? '&' : '?'}retry=${Date.now()}`;
                             } else {
-                              console.log(`Failed to load image for post ${post.id} after retry`);
+                              // Hide the failed image element
                               e.currentTarget.style.display = 'none';
                               
                               // Show a fallback message
