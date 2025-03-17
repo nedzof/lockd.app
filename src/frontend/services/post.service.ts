@@ -433,12 +433,14 @@ async function createvote_optionComponent(
     address: string,
     tags: string[] = []
 ): Promise<InscribeRequest> {
-    // Create minimal metadata for vote options
+    // Create minimal metadata for vote options with a unique timestamp for each option
+    // This helps ensure each option is treated as a separate entity
     const metadata: PostMetadata = {
         app: 'lockd.app',
         type: 'vote_option',
         content: option.text,
-        timestamp: new Date().toISOString(),
+        // Add a small delay to the timestamp to ensure uniqueness
+        timestamp: new Date(Date.now() + option.optionIndex * 100).toISOString(),
         version: '1.0.0',
         tags: tags,
         sequence,
@@ -467,6 +469,7 @@ async function createvote_optionComponent(
     console.log(`[DEBUG] - Parent Sequence: ${parentSequence}`);
     console.log(`[DEBUG] - Base Satoshis: ${baseSatoshis}`);
     console.log(`[DEBUG] - Final Satoshis: ${satoshis}`);
+    console.log(`[DEBUG] - Timestamp: ${metadata.timestamp}`);
     console.log(`[DEBUG] - MAP data:`, map);
     
     const request = createInscriptionRequest(address, option.text, map, satoshis);
@@ -687,10 +690,14 @@ export const createPost = async (
     scheduleInfo?: { scheduledAt: string; timezone: string },
     tags: string[] = []
 ): Promise<Post> => {
-    console.log('Creating post with wallet:', wallet ? 'Wallet provided' : 'No wallet');
-    console.log('Is vote post:', isVotePost, 'Vote options:', vote_options);
-    console.log('Schedule info:', scheduleInfo);
-    console.log('Tags:', tags);
+    console.log('[DEBUG] Creating post with parameters:');
+    console.log('[DEBUG] - Wallet provided:', !!wallet);
+    console.log('[DEBUG] - Content:', content.substring(0, 50) + (content.length > 50 ? '...' : ''));
+    console.log('[DEBUG] - Is vote post:', isVotePost);
+    console.log('[DEBUG] - Vote options:', vote_options);
+    console.log('[DEBUG] - Has image:', !!imageData);
+    console.log('[DEBUG] - Schedule info:', scheduleInfo);
+    console.log('[DEBUG] - Tags:', tags);
   
     if (!wallet) {
         console.error('No wallet provided to createPost');
@@ -706,7 +713,7 @@ export const createPost = async (
             throw new Error('Could not retrieve wallet address. Please ensure your wallet is connected.');
         }
         console.log('Using BSV address for post creation:', bsvAddress);
-    } catch (walletError) {
+    } catch (walletError: any) {
         console.error('Error getting BSV address:', walletError);
         throw new Error(`Wallet connection error: ${walletError.message || 'Could not connect to wallet'}`);
     }
@@ -726,6 +733,19 @@ export const createPost = async (
     });
 
     try {
+        // Validate vote post parameters
+        if (isVotePost) {
+            // Filter out empty options
+            const validOptions = vote_options.filter(opt => opt.trim() !== '');
+            
+            if (validOptions.length < 2) {
+                console.error('Vote post requires at least 2 valid options, but only found:', validOptions.length);
+                throw new Error('Vote posts require at least 2 valid options');
+            }
+            
+            console.log('[DEBUG] Vote post validated with', validOptions.length, 'options');
+        }
+
         // Create main content metadata
         const metadata: PostMetadata = {
             app: 'lockd.app',
@@ -748,7 +768,12 @@ export const createPost = async (
             };
         }
 
-        console.log('Created post metadata:', { ...metadata, content: content.substring(0, 50) + (content.length > 50 ? '...' : '') });
+        console.log('[DEBUG] Created post metadata:', { 
+            ...metadata, 
+            content: content.substring(0, 50) + (content.length > 50 ? '...' : ''),
+            type: metadata.type,
+            is_vote: metadata.is_vote
+        });
 
         // Handle image upload
         if (imageData) {
@@ -871,8 +896,8 @@ export const createPost = async (
 
         // Handle vote post
         if (isVotePost && vote_options.length >= 2) {
-            console.log('Creating vote post with options:', vote_options);
-            console.log('Using tags:', tags);
+            console.log('[DEBUG] Creating vote post with options:', vote_options);
+            console.log('[DEBUG] Using tags:', tags);
             
             // Filter out empty options
             const validOptions = vote_options.filter(opt => opt.trim() !== '');
@@ -887,13 +912,20 @@ export const createPost = async (
             
             // Create vote options objects
             const vote_optionObjects: vote_option[] = await Promise.all(
-                validOptions.map(async (text, index) => ({
-                    text,
-                    lock_amount: 1000, // Base lock amount in satoshis
-                    lock_duration: 144, // Default to 1 day (144 blocks)
-                    optionIndex: index,
-                    feeSatoshis: await calculateOutputSatoshis(text.length, true)
-                }))
+                validOptions.map(async (text, index) => {
+                    // Calculate a unique fee for each option
+                    const baseFee = await calculateOutputSatoshis(text.length, true);
+                    // Add index to ensure uniqueness
+                    const uniqueFee = baseFee + index + 1;
+                    
+                    return {
+                        text,
+                        lock_amount: 1000, // Base lock amount in satoshis
+                        lock_duration: 144, // Default to 1 day (144 blocks)
+                        optionIndex: index,
+                        feeSatoshis: uniqueFee
+                    };
+                })
             );
             
             // Add vote data to metadata
@@ -906,7 +938,7 @@ export const createPost = async (
             };
             
             // Create main vote question component
-            console.log('Creating vote question component...');
+            console.log('[DEBUG] Creating vote question component...');
             const voteQuestionComponent = await createVoteQuestionComponent(
                 content,
                 vote_optionObjects,
@@ -920,17 +952,25 @@ export const createPost = async (
             
             // Create individual components for each vote option
             // Each with its own transaction output for easy parsing
-            for (const option of vote_optionObjects) {
-                console.log(`Creating vote option component for "${option.text}"...`);
+            for (let i = 0; i < vote_optionObjects.length; i++) {
+                const option = vote_optionObjects[i];
+                console.log(`[DEBUG] Creating vote option component #${i} for "${option.text}"...`);
+                
+                // Create a unique sequence for each option
+                const optionSequence = sequence.next();
+                
+                // Create vote option component with unique sequence and satoshi value
                 const vote_optionComponent = await createvote_optionComponent(
                     option,
                     post_id,
-                    sequence.next(),
+                    optionSequence,
                     metadata.sequence,
                     bsvAddress,
                     tags
                 );
+                
                 components.push(vote_optionComponent);
+                console.log(`[DEBUG] Added vote option #${i} component to components array`);
             }
             
             console.log(`[DEBUG] Created ${components.length} components for vote post`);
@@ -987,7 +1027,7 @@ export const createPost = async (
             dbPost.vote_options = metadata.vote.options.map(option => ({
                 content: option.text,
                 option_index: option.optionIndex
-            }));
+            })) as any; // Type assertion to bypass TypeScript error
         }
         
         console.log('Created database post object:', { 
@@ -1035,7 +1075,7 @@ export const createPost = async (
                 }
                 
                 return dbResponse.json();
-            } catch (error) {
+            } catch (error: any) {
                 if (retries > 0) {
                     console.log(`Network error, retrying database post creation in 1 second...`, error);
                     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -1061,7 +1101,7 @@ export const createPost = async (
 
         return createdPost;
 
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error in post creation:', error);
         toast.error(`Failed to create post: ${error.message}`, {
             id: pendingToast,
