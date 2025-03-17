@@ -49,7 +49,14 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
           >
             <FiX size={16} />
           </button>
-          <div className="absolute top-full right-0 mt-2 z-20 bg-[#2A2A40] p-4 rounded-lg border border-gray-800/20 shadow-xl w-60 backdrop-blur-sm">
+          <div 
+            className="fixed mt-2 z-50 bg-[#2A2A40] p-4 rounded-lg border border-gray-800/20 shadow-xl w-60 backdrop-blur-sm"
+            style={{
+              top: 'auto',
+              left: 'auto',
+              transform: 'translateY(10px)'
+            }}
+          >
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-300 mb-1.5">Amount (₿)</label>
