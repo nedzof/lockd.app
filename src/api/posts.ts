@@ -730,6 +730,9 @@ const createPost: CreatePostHandler = async (req, res, next) => {
         });
       }
 
+      // Log the vote options for debugging
+      console.log('Vote options before creating post:', vote_options);
+
       // Create new post with generated ID (not using temptx_id as the primary key)
       const post = await prisma.post.create({
         data: {
@@ -763,14 +766,19 @@ const createPost: CreatePostHandler = async (req, res, next) => {
 
       // If this is a vote post, create vote options
       if (is_vote && vote_options && vote_options.length >= 2) {
+        console.log(`Creating ${vote_options.length} vote options for post ${post.id}`);
+        
         // Create vote options
         const vote_optionPromises = vote_options.map(async (option: any, index: number) => {
           const vote_option_id = `vote_option_${temptx_id}_${index}`;
+          const optionText = typeof option === 'string' ? option : option.text;
+          
+          console.log(`Creating vote option ${index}: ${optionText}`);
+          
           return prisma.vote_option.create({
             data: {
-              id: vote_option_id,
               tx_id: `${temptx_id}_option_${index}`,
-              content: option.text,
+              content: optionText,
               post_id: post.id,
               author_address: author_address,
               option_index: index
@@ -778,7 +786,17 @@ const createPost: CreatePostHandler = async (req, res, next) => {
           });
         });
 
-        await Promise.all(vote_optionPromises);
+        try {
+          const createdOptions = await Promise.all(vote_optionPromises);
+          console.log(`Successfully created ${createdOptions.length} vote options:`, createdOptions);
+        } catch (optionError) {
+          console.error('Error creating vote options:', optionError);
+        }
+      } else {
+        console.log('Not creating vote options because:');
+        console.log('- is_vote:', is_vote);
+        console.log('- vote_options:', vote_options);
+        console.log('- vote_options length:', vote_options?.length || 0);
       }
 
       // Return the created post
