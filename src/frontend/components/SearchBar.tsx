@@ -97,7 +97,7 @@ const SearchBar: React.FC = () => {
       ) : (
         <button
           onClick={toggleExpand}
-          className="flex items-center space-x-1 px-2 py-1.5 text-xs rounded-md bg-white/5 border border-gray-700/30 hover:border-gray-600 text-gray-300 transition-all duration-200"
+          className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-white/5 border border-gray-700/30 hover:border-gray-600 text-gray-300 transition-all duration-200"
           aria-label="Open search"
           title="Search"
         >

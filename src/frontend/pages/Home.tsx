@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX, FiLink, FiCalendar, FiSearch, FiTag } from 'react-icons/fi';
+import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX, FiLink, FiCalendar, FiSearch, FiTag, FiSettings, FiEdit, FiBookmark } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
@@ -402,15 +402,15 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
               
               {/* Personal Filters - only show when connected */}
               {connected && (
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
                   {[
-                    { id: 'mylocks', label: 'My Posts', icon: <FiUser size={12} />, title: 'Show posts you created' },
+                    { id: 'mylocks', label: 'My Posts', icon: <FiEdit size={12} />, title: 'Show posts you created' },
                     { id: 'locked', label: 'My Locks', icon: <FiLock size={12} />, title: 'Show posts where you locked BSV' }
                   ].map(({ id, label, icon, title }) => (
                     <button
                       key={id}
                       onClick={() => handlePersonalFilter(id)}
-                      className={`flex items-center p-1.5 text-xs rounded-md transition-all duration-200 ${
+                      className={`flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md transition-all duration-200 ${
                         personal_filter === id
                           ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20'
                           : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
@@ -418,11 +418,27 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                       title={title}
                     >
                       {icon}
+                      <span className="hidden sm:inline-block whitespace-nowrap">{label}</span>
                     </button>
                   ))}
                   
-                  {/* Threshold Settings */}
-                  <ThresholdSettings connected={connected} walletAddress={bsvAddress || undefined} />
+                  {/* Threshold Settings with label */}
+                  <div className="relative">
+                    <button
+                      onClick={() => {
+                        const settingsButton = document.querySelector('[data-threshold-settings-toggle]');
+                        if (settingsButton) {
+                          (settingsButton as HTMLButtonElement).click();
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
+                      title="Threshold Settings"
+                    >
+                      <FiSettings size={12} />
+                      <span className="hidden sm:inline-block whitespace-nowrap">Settings</span>
+                    </button>
+                    <ThresholdSettings connected={connected} walletAddress={bsvAddress || undefined} />
+                  </div>
                 </div>
               )}
               
@@ -430,10 +446,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
               {isAnyFilterActive && (
                 <button
                   onClick={clearAllFilters}
-                  className="text-xs p-1.5 text-gray-400 hover:text-white rounded flex items-center"
+                  className="flex items-center gap-1 text-xs p-1.5 text-gray-400 hover:text-white rounded"
                   title="Clear all filters"
                 >
                   <FiX size={12} />
+                  <span className="hidden sm:inline-block">Clear</span>
                 </button>
               )}
             </div>
