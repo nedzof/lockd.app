@@ -203,6 +203,58 @@ const listPosts: PostListHandler = async (req, res, next) => {
     // Build the where clause for the query
     const whereConditions: any[] = [];
     
+    // Filter out scheduled posts that haven't been published
+    const now = new Date();
+    logger.debug('Current time for scheduled posts filtering:', now.toISOString());
+    
+    // Add scheduled post filtering directly in the database query
+    whereConditions.push({
+      OR: [
+        // Case 1: No scheduled_at date
+        { scheduled_at: null },
+        // Case 2: scheduled_at date is in the past
+        { scheduled_at: { lt: now } }
+      ]
+    });
+    
+    // Also check for metadata.scheduled.published flag when scheduled_at is null
+    if (process.env.STRICT_SCHEDULED_POSTS === 'true') {
+      // Replace the previous condition with a more specific one
+      whereConditions.pop();
+      whereConditions.push({
+        OR: [
+          // Case 1: No scheduled_at and no scheduled metadata
+          {
+            AND: [
+              { scheduled_at: null },
+              {
+                NOT: {
+                  metadata: {
+                    path: ['scheduled'],
+                    not: null
+                  }
+                }
+              }
+            ]
+          },
+          // Case 2: scheduled_at is null and metadata.scheduled.published is true
+          {
+            AND: [
+              { scheduled_at: null },
+              {
+                metadata: {
+                  path: ['scheduled', 'published'],
+                  equals: true
+                }
+              }
+            ]
+          },
+          // Case 3: (For backward compatibility) scheduled_at is in the past
+          { scheduled_at: { lt: now } }
+        ]
+      });
+    }
+    
     // Add tag filtering
     if (parsedTags.length > 0) {
       whereConditions.push({
@@ -439,12 +491,9 @@ const listPosts: PostListHandler = async (req, res, next) => {
     // Remove the extra item if we fetched more than requested
     let postsToReturn = hasMore ? posts.slice(0, effectiveLimit) : posts; // Use effectiveLimit
 
-    // Filter out scheduled posts that haven't reached their scheduled time yet
-    const now = new Date();
-    
-    // Log the current time for reference
-    logger.debug('Current time for scheduled posts filtering:', now.toISOString());
-    
+    // We now filter in the database query, but we'll still apply the shouldShowScheduledPost
+    // function as a safety check to ensure no scheduled posts slip through
+    // (this would be a rare case if there's a race condition or DB replication lag)
     postsToReturn = postsToReturn.filter(post => shouldShowScheduledPost(post, now));
 
     logger.debug('Posts after filtering scheduled posts', {
