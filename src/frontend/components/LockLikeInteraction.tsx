@@ -9,6 +9,30 @@ import { toast } from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
 import { createPortal } from 'react-dom';
 
+// Simple direct logging to ensure logs are captured
+function directLog(message: string, data?: any) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] [LockLike Debug] ${message}`;
+  
+  if (data) {
+    console.log(logMessage, data);
+  } else {
+    console.log(logMessage);
+  }
+}
+
+// Log a function call
+function logCall(fnName: string) {
+  directLog(`${fnName} called`);
+  return performance.now();
+}
+
+// Log completion of a function
+function logComplete(fnName: string, startTime: number) {
+  const elapsed = performance.now() - startTime;
+  directLog(`${fnName} completed in ${Math.round(elapsed)}ms`);
+}
+
 // Block height cache to prevent repeated network calls
 // This caches the block height for 10 minutes (600000ms)
 const BLOCK_HEIGHT_CACHE_DURATION = 600000;
@@ -17,29 +41,38 @@ let blockHeightCacheTime: number = 0;
 
 // Get current block height with caching
 const getBlockHeight = async (): Promise<number> => {
+  directLog('getBlockHeight called');
+  const startTime = performance.now();
+  
   const now = Date.now();
   
   // Use cached value if available and not expired
   if (cachedBlockHeight && now - blockHeightCacheTime < BLOCK_HEIGHT_CACHE_DURATION) {
-    console.log('[LockLike] Using cached block height:', cachedBlockHeight);
+    directLog(`Using cached block height: ${cachedBlockHeight}`);
     return cachedBlockHeight;
   }
 
   try {
-    console.log('[LockLike] Fetching current block height from API');
+    directLog('Fetching block height from API...');
     const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
     const data = await response.json();
+    
+    directLog('Block height API response:', data);
     
     if (data.blocks) {
       cachedBlockHeight = data.blocks;
       blockHeightCacheTime = now;
-      console.log('[LockLike] Updated cached block height:', cachedBlockHeight);
+      directLog(`Updated cached block height: ${cachedBlockHeight}`);
+      
+      const elapsed = performance.now() - startTime;
+      directLog(`getBlockHeight completed in ${Math.round(elapsed)}ms`);
+      
       return data.blocks;
     }
     
     throw new Error('Block height not found in API response');
   } catch (error) {
-    console.error('[LockLike] Error fetching block height:', error);
+    directLog('Error fetching block height:', error);
     // Fallback to approximate BSV block height if we can't get real data
     return 800000;
   }
@@ -49,7 +82,12 @@ const getBlockHeight = async (): Promise<number> => {
 const logPerformance = (step: string, startTime?: number) => {
   const now = performance.now();
   const elapsed = startTime ? `${Math.round(now - startTime)}ms` : 'start';
-  console.log(`[LockLike Performance] ${step}: ${elapsed}`);
+  const message = `[LockLike Performance] ${step}: ${elapsed}`;
+  
+  // Log to console directly to ensure it appears
+  console.log(message);
+  directLog(message);
+  
   return now;
 };
 
@@ -70,6 +108,8 @@ const SATS_PER_BSV = 100000000;
 const MIN_SATS = 1;
 
 export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLike }: LockLikeInteractionProps) {
+  directLog('LockLikeInteraction rendering', { posttx_id, replytx_id });
+  
   const { wallet, connect, isConnected, isWalletDetected, balance, refreshBalance } = useWallet();
   const [loading, setLoading] = React.useState(false);
   const [showInput, setShowInput] = React.useState(false);
@@ -79,35 +119,65 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   // Add a ref to track the operation sequence
   const operationIdRef = React.useRef(0);
   
+  // Add extra debugging info
+  React.useEffect(() => {
+    directLog('Component mounted with props:', { posttx_id, replytx_id });
+    directLog('Wallet state on mount:', { isConnected, isWalletDetected, balance });
+    
+    return () => {
+      directLog('Component unmounting');
+    };
+  }, []);
+  
+  // Log state changes
+  React.useEffect(() => {
+    directLog('showInput state changed:', showInput);
+  }, [showInput]);
+  
+  React.useEffect(() => {
+    directLog('loading state changed:', loading);
+  }, [loading]);
+  
+  React.useEffect(() => {
+    directLog('wallet connection state changed:', { isConnected, isWalletDetected });
+  }, [isConnected, isWalletDetected]);
+  
   // Pre-fetch block height on component mount
   React.useEffect(() => {
-    getBlockHeight().catch(err => console.error("Failed to pre-fetch block height:", err));
+    directLog('Pre-fetching block height');
+    getBlockHeight().catch(err => directLog("Failed to pre-fetch block height:", err));
   }, []);
 
   // Handle escape key press and body scroll lock
   React.useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && showInput) {
+        directLog('Escape key pressed, closing modal');
         setShowInput(false);
       }
     };
 
     if (showInput) {
+      directLog('Adding escape key listener and disabling body scroll');
       document.addEventListener('keydown', handleEscape);
       // Prevent body scrolling when modal is open
       document.body.style.overflow = 'hidden';
     }
 
     return () => {
-      document.removeEventListener('keydown', handleEscape);
-      // Restore body scrolling when modal is closed
-      document.body.style.overflow = 'unset';
+      if (showInput) {
+        directLog('Removing escape key listener and enabling body scroll');
+        document.removeEventListener('keydown', handleEscape);
+        // Restore body scrolling when modal is closed
+        document.body.style.overflow = 'unset';
+      }
     };
   }, [showInput]);
 
   // Fetch wallet balance when showing input
   React.useEffect(() => {
     if (showInput && isConnected) {
+      directLog('Modal shown and wallet connected, refreshing balance');
       const startTime = logPerformance('Begin refreshBalance');
       refreshBalance().finally(() => {
         logPerformance('End refreshBalance', startTime);
@@ -116,80 +186,111 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   }, [showInput, isConnected, refreshBalance]);
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    directLog('Amount input changed:', e.target.value);
     const newValue = e.target.value;
     const parsedValue = parseFloat(newValue);
     
     // Don't allow negative numbers
     if (parsedValue < 0) {
+      directLog('Amount negative, setting to 0');
       setAmount('0');
       return;
     }
 
     // Don't allow more than max balance
     if (parsedValue > balance.bsv) {
+      directLog('Amount exceeds balance, setting to max balance:', balance.bsv);
       setAmount(balance.bsv.toString());
       return;
     }
 
     // Ensure we have at least 1 sat
     if (parsedValue * SATS_PER_BSV < MIN_SATS && parsedValue !== 0) {
-      setAmount((MIN_SATS / SATS_PER_BSV).toString());
+      const minAmount = (MIN_SATS / SATS_PER_BSV).toString();
+      directLog('Amount below minimum, setting to:', minAmount);
+      setAmount(minAmount);
       return;
     }
 
+    directLog('Setting amount to:', newValue);
     setAmount(newValue);
   };
 
   const handleDurationChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    directLog('Duration input changed:', e.target.value);
     const newValue = e.target.value;
     const parsedValue = parseInt(newValue, 10);
     
     // Don't allow negative numbers
     if (parsedValue < 0) {
+      directLog('Duration negative, setting to 1');
       setLockDuration('1');
       return;
     }
 
     // Don't allow less than 1 block
     if (parsedValue < 1) {
+      directLog('Duration below minimum, setting to 1');
       setLockDuration('1');
       return;
     }
 
     // Cap at 52560 blocks (approximately 1 year)
     if (parsedValue > 52560) {
+      directLog('Duration above maximum, setting to 52560');
       setLockDuration('52560');
       return;
     }
 
+    directLog('Setting duration to:', newValue);
     setLockDuration(newValue);
   };
 
   const handleLockClick = async () => {
-    const operationId = ++operationIdRef.current;
-    const startTime = logPerformance(`[${operationId}] Lock button clicked`);
-    
     try {
-      console.log(`[LockLike] Wallet status: detected=${isWalletDetected}, connected=${isConnected}`);
+      // Direct log first to ensure we see it
+      directLog('🔵 LOCK BUTTON CLICKED 🔵');
+      directLog('Current wallet state:', { 
+        isConnected, 
+        isWalletDetected, 
+        balance, 
+        showInput,
+        loading
+      });
+      
+      // Now use performance logging
+      const operationId = ++operationIdRef.current;
+      const startTime = logPerformance(`[${operationId}] Lock button clicked`);
+      
+      directLog(`[${operationId}] Wallet status: detected=${isWalletDetected}, connected=${isConnected}`);
       
       if (!isWalletDetected) {
-        console.log(`[LockLike] Wallet not detected, redirecting to yours.org`);
+        directLog(`[${operationId}] Wallet not detected, redirecting to yours.org`);
         window.open('https://yours.org', '_blank');
         return;
       }
 
       // Set showInput immediately for better UX
+      directLog(`[${operationId}] Setting showInput to true for immediate feedback`);
       setShowInput(true);
       
       // If wallet is not connected, connect it
       if (!isConnected) {
+        directLog(`[${operationId}] Wallet not connected, attempting to connect`);
+        let connectStartTime: number | undefined;
+        
         try {
-          const connectStartTime = logPerformance(`[${operationId}] Starting wallet connection`);
+          connectStartTime = logPerformance(`[${operationId}] Starting wallet connection`);
           await connect();
           logPerformance(`[${operationId}] Wallet connection completed`, connectStartTime);
+          directLog(`[${operationId}] Wallet connection successful`);
           toast.success('Wallet connected successfully!');
         } catch (error) {
-          logPerformance(`[${operationId}] Wallet connection failed`, connectStartTime);
+          // Safe access to connectStartTime
+          if (connectStartTime) {
+            logPerformance(`[${operationId}] Wallet connection failed`, connectStartTime);
+          }
+          directLog(`[${operationId}] Wallet connection error:`, error);
           console.error('Error connecting wallet:', error);
           toast.error(error instanceof Error ? error.message : 'Failed to connect wallet');
           setShowInput(false); // Close modal if connection fails
@@ -198,11 +299,12 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
       }
 
       // Start pre-fetching block height asynchronously, but don't wait for it
-      getBlockHeight().catch(err => console.warn("Prefetch block height error:", err));
+      directLog(`[${operationId}] Starting background block height fetch`);
+      getBlockHeight().catch(err => directLog(`[${operationId}] Prefetch block height error:`, err));
       
-      logPerformance(`[${operationId}] Showing lock input modal`, startTime);
+      logPerformance(`[${operationId}] Lock button click processing complete`, startTime);
     } catch (error) {
-      logPerformance(`[${operationId}] Error in lock click handler`, startTime);
+      directLog('❌ Error in handleLockClick:', error);
       console.error('Error handling lock click:', error);
       toast.error(error instanceof Error ? error.message : 'An error occurred');
       setShowInput(false);
@@ -210,119 +312,164 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   };
 
   const handleLockLike = async () => {
-    const operationId = ++operationIdRef.current;
-    const startTime = logPerformance(`[${operationId}] Lock BSV button clicked`);
-    
-    if (!wallet || !isConnected) {
-      logPerformance(`[${operationId}] Wallet not connected, aborting`, startTime);
-      toast.error('Please connect your wallet first');
-      setShowInput(false);
-      return;
-    }
-
-    setLoading(true);
     try {
-      const parsedAmount = parseFloat(amount);
-      const parsedDuration = parseInt(lockDuration, 10);
-
-      logPerformance(`[${operationId}] Input validation: amount=${parsedAmount}, duration=${parsedDuration}`, startTime);
-
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        throw new Error('Invalid amount');
-      }
-
-      if (parsedAmount > balance.bsv) {
-        throw new Error('Amount exceeds available balance');
-      }
-
-      if (isNaN(parsedDuration) || parsedDuration <= 0) {
-        throw new Error('Invalid lock duration');
-      }
-
-      // Get the user's identity address
-      const addressStartTime = logPerformance(`[${operationId}] Getting user identity address`);
-      const addresses = await wallet.getAddresses();
-      logPerformance(`[${operationId}] Got user identity address`, addressStartTime);
-      
-      if (!addresses?.identityAddress) {
-        throw new Error('Could not get identity address');
-      }
-
-      // Get current block height from the network using our optimized cached getter
-      const blockHeightStartTime = logPerformance(`[${operationId}] Fetching current block height`);
-      const currentblock_height = await getBlockHeight();
-      logPerformance(`[${operationId}] Got current block height: ${currentblock_height}`, blockHeightStartTime);
-
-      if (!currentblock_height) {
-        throw new Error('Could not get current block height');
-      }
-
-      const nLockTime = currentblock_height + parsedDuration;
-      console.log(`[LockLike] Calculated nLockTime: ${nLockTime}`);
-
-      // Create the lock transaction using the wallet's lockBsv function
-      const lockStartTime = logPerformance(`[${operationId}] Creating lock transaction`);
-      const satoshiAmount = Math.floor(parsedAmount * SATS_PER_BSV);
-      console.log(`[LockLike] Locking ${satoshiAmount} sats to address ${addresses.identityAddress} until block ${nLockTime}`);
-      
-      const lockResponse = await wallet.lockBsv([{
-        address: addresses.identityAddress,
-        blockHeight: nLockTime,
-        sats: satoshiAmount,
-      }]);
-      logPerformance(`[${operationId}] Lock transaction created`, lockStartTime);
-
-      console.log(`[LockLike] Lock response:`, JSON.stringify(lockResponse, null, 2));
-
-      if (!lockResponse || !lockResponse.txid) {
-        throw new Error('Failed to create lock transaction');
-      }
-
-      // Create the lock like record
-      const apiStartTime = logPerformance(`[${operationId}] Creating lock like record via API`);
-      const apiRequestBody = {
-        post_id: posttx_id || replytx_id,
-        author_address: addresses.identityAddress,
-        amount: satoshiAmount,
-        lock_duration: parsedDuration,
-        tx_id: lockResponse.txid,
-      };
-      
-      console.log(`[LockLike] API request:`, JSON.stringify(apiRequestBody, null, 2));
-      
-      const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(apiRequestBody),
+      // Direct log first to ensure we see it
+      directLog('🔵 LOCK BSV BUTTON CLICKED 🔵');
+      directLog('Wallet and form state:', {
+        isConnected,
+        isWalletDetected,
+        balance,
+        amount,
+        lockDuration,
+        loading
       });
       
-      const responseStatus = apiResponse.status;
-      const responseBody = await apiResponse.json();
-      logPerformance(`[${operationId}] API response status: ${responseStatus}`, apiStartTime);
-      console.log(`[LockLike] API response:`, JSON.stringify(responseBody, null, 2));
-
-      if (!apiResponse.ok) {
-        throw new Error(responseBody.message || responseBody.error || 'Error creating lock like');
+      const operationId = ++operationIdRef.current;
+      const startTime = logPerformance(`[${operationId}] Lock BSV button clicked`);
+      
+      if (!wallet || !isConnected) {
+        directLog(`[${operationId}] Wallet not connected, aborting`);
+        logPerformance(`[${operationId}] Wallet not connected, aborting`, startTime);
+        toast.error('Please connect your wallet first');
+        setShowInput(false);
+        return;
       }
 
-      toast.success(`Successfully locked ${parsedAmount} BSV for ${parsedDuration} blocks!`);
-      setShowInput(false);
-      setAmount(DEFAULT_LOCKLIKE_AMOUNT.toString());
-      setLockDuration(DEFAULT_LOCKLIKE_BLOCKS.toString());
+      directLog(`[${operationId}] Setting loading state to true`);
+      setLoading(true);
       
-      // Refresh balance after successful lock
-      const refreshStartTime = logPerformance(`[${operationId}] Refreshing balance after lock`);
-      await refreshBalance();
-      logPerformance(`[${operationId}] Balance refreshed`, refreshStartTime);
-      
-      logPerformance(`[${operationId}] Lock operation completed successfully`, startTime);
-    } catch (error) {
-      logPerformance(`[${operationId}] Error in lock operation`, startTime);
-      console.error('Error locking:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to lock BSV');
-    } finally {
+      try {
+        const parsedAmount = parseFloat(amount);
+        const parsedDuration = parseInt(lockDuration, 10);
+
+        directLog(`[${operationId}] Parsed values: amount=${parsedAmount}, duration=${parsedDuration}`);
+        logPerformance(`[${operationId}] Input validation: amount=${parsedAmount}, duration=${parsedDuration}`, startTime);
+
+        if (isNaN(parsedAmount) || parsedAmount <= 0) {
+          directLog(`[${operationId}] Invalid amount: ${parsedAmount}`);
+          throw new Error('Invalid amount');
+        }
+
+        if (parsedAmount > balance.bsv) {
+          directLog(`[${operationId}] Amount ${parsedAmount} exceeds balance ${balance.bsv}`);
+          throw new Error('Amount exceeds available balance');
+        }
+
+        if (isNaN(parsedDuration) || parsedDuration <= 0) {
+          directLog(`[${operationId}] Invalid duration: ${parsedDuration}`);
+          throw new Error('Invalid lock duration');
+        }
+
+        // Get the user's identity address
+        directLog(`[${operationId}] Getting identity address`);
+        const addressStartTime = logPerformance(`[${operationId}] Getting user identity address`);
+        const addresses = await wallet.getAddresses();
+        directLog(`[${operationId}] Got addresses:`, addresses);
+        logPerformance(`[${operationId}] Got user identity address`, addressStartTime);
+        
+        if (!addresses?.identityAddress) {
+          directLog(`[${operationId}] No identity address found`);
+          throw new Error('Could not get identity address');
+        }
+
+        // Get current block height from the network using our optimized cached getter
+        directLog(`[${operationId}] Getting block height`);
+        const blockHeightStartTime = logPerformance(`[${operationId}] Fetching current block height`);
+        const currentblock_height = await getBlockHeight();
+        directLog(`[${operationId}] Got block height: ${currentblock_height}`);
+        logPerformance(`[${operationId}] Got current block height: ${currentblock_height}`, blockHeightStartTime);
+
+        if (!currentblock_height) {
+          directLog(`[${operationId}] No block height received`);
+          throw new Error('Could not get current block height');
+        }
+
+        const nLockTime = currentblock_height + parsedDuration;
+        directLog(`[${operationId}] Calculated nLockTime: ${nLockTime}`);
+
+        // Create the lock transaction using the wallet's lockBsv function
+        directLog(`[${operationId}] Creating lock transaction`);
+        const lockStartTime = logPerformance(`[${operationId}] Creating lock transaction`);
+        const satoshiAmount = Math.floor(parsedAmount * SATS_PER_BSV);
+        directLog(`[${operationId}] Locking ${satoshiAmount} sats to ${addresses.identityAddress} until block ${nLockTime}`);
+        
+        const lockParams = [{
+          address: addresses.identityAddress,
+          blockHeight: nLockTime,
+          sats: satoshiAmount,
+        }];
+        directLog(`[${operationId}] Lock params:`, lockParams);
+        
+        const lockResponse = await wallet.lockBsv(lockParams);
+        directLog(`[${operationId}] Lock response:`, lockResponse);
+        logPerformance(`[${operationId}] Lock transaction created`, lockStartTime);
+
+        if (!lockResponse || !lockResponse.txid) {
+          directLog(`[${operationId}] Lock response invalid:`, lockResponse);
+          throw new Error('Failed to create lock transaction');
+        }
+
+        // Create the lock like record
+        directLog(`[${operationId}] Creating lock like record via API`);
+        const apiStartTime = logPerformance(`[${operationId}] Creating lock like record via API`);
+        const apiRequestBody = {
+          post_id: posttx_id || replytx_id,
+          author_address: addresses.identityAddress,
+          amount: satoshiAmount,
+          lock_duration: parsedDuration,
+          tx_id: lockResponse.txid,
+        };
+        
+        directLog(`[${operationId}] API request:`, apiRequestBody);
+        
+        const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(apiRequestBody),
+        });
+        
+        const responseStatus = apiResponse.status;
+        directLog(`[${operationId}] API response status: ${responseStatus}`);
+        
+        const responseBody = await apiResponse.json();
+        directLog(`[${operationId}] API response body:`, responseBody);
+        
+        logPerformance(`[${operationId}] API response status: ${responseStatus}`, apiStartTime);
+
+        if (!apiResponse.ok) {
+          directLog(`[${operationId}] API error: ${responseStatus}`, responseBody);
+          throw new Error(responseBody.message || responseBody.error || 'Error creating lock like');
+        }
+
+        directLog(`[${operationId}] Lock successful, cleaning up`);
+        toast.success(`Successfully locked ${parsedAmount} BSV for ${parsedDuration} blocks!`);
+        setShowInput(false);
+        setAmount(DEFAULT_LOCKLIKE_AMOUNT.toString());
+        setLockDuration(DEFAULT_LOCKLIKE_BLOCKS.toString());
+        
+        // Refresh balance after successful lock
+        directLog(`[${operationId}] Refreshing balance`);
+        const refreshStartTime = logPerformance(`[${operationId}] Refreshing balance after lock`);
+        await refreshBalance();
+        logPerformance(`[${operationId}] Balance refreshed`, refreshStartTime);
+        
+        logPerformance(`[${operationId}] Lock operation completed successfully`, startTime);
+      } catch (error) {
+        directLog(`[${operationId}] Error in lock operation:`, error);
+        logPerformance(`[${operationId}] Error in lock operation`, startTime);
+        console.error('Error locking:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to lock BSV');
+      } finally {
+        directLog(`[${operationId}] Setting loading state to false`);
+        setLoading(false);
+      }
+    } catch (e) {
+      // This is a safety catch for any errors that might occur in the outer scope
+      directLog('❌ Unexpected error in handleLockLike:', e);
+      console.error('Unexpected error:', e);
+      toast.error('An unexpected error occurred');
       setLoading(false);
     }
   };
