@@ -17,9 +17,9 @@ export async function processScheduledPosts() {
     const posts = await prisma.post.findMany();
     logger.info(`Retrieved ${posts.length} total posts from the database`);
     
-    // Find posts that have a schedule_at date in the past
+    // Find posts that have a scheduled_at date in the past
     const now = new Date();
-    const scheduledPosts = posts.filter(post => post.schedule_at && post.schedule_at <= now);
+    const scheduledPosts = posts.filter(post => post.scheduled_at && post.scheduled_at <= now);
     
     logger.info(`Found ${scheduledPosts.length} posts ready to be published`);
     
@@ -27,11 +27,11 @@ export async function processScheduledPosts() {
     let processed = 0;
     for (const post of scheduledPosts) {
       try {
-        // Update the post to remove the schedule_at date
+        // Update the post to remove the scheduled_at date
         await prisma.post.update({
           where: { id: post.id },
           data: {
-            schedule_at: null
+            scheduled_at: null
           }
         });
         

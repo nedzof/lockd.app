@@ -692,8 +692,12 @@ const createPost: CreatePostHandler = async (req, res, next) => {
       media_type,
       tx_id,
       post_id: clientProvidedpost_id,
-      scheduled // Extract scheduled information
+      scheduled_at,
+      metadata
     } = req.body;
+
+    // Extract scheduled information from metadata if present
+    const scheduled = metadata?.scheduled || req.body.scheduled;
 
     // Validate required fields
     if (!content && !raw_image_data) {
@@ -714,7 +718,8 @@ const createPost: CreatePostHandler = async (req, res, next) => {
         author_address,
         tags: tags || [],
         is_vote: is_vote || false,
-        schedule_at: scheduled ? new Date(scheduled.scheduledAt) : null,
+        scheduled_at: scheduled_at || (scheduled ? new Date(scheduled.scheduledAt) : null),
+        metadata: metadata || (scheduled ? { scheduled } : null),
         raw_image_data: raw_image_data ? Buffer.from(raw_image_data, 'base64') : null,
         media_type: media_type || null
       }
