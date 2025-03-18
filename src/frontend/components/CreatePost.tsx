@@ -134,6 +134,17 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     attemptWalletConnection();
   }, [isConnected, wallet, connect]);
 
+  // Add a helper function to restore image preview
+  const restoreImagePreview = () => {
+    if (image) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(image);
+    }
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -333,6 +344,13 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     }
   };
 
+  // Add an effect to restore image preview when the image changes
+  useEffect(() => {
+    if (image) {
+      restoreImagePreview();
+    }
+  }, [image]);
+
   // Toggle schedule options
   const toggleScheduleOptions = () => {
     // If we're opening the schedule options
@@ -360,21 +378,12 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       // Close other option panels
       setShowTagInput(false);
       setIsVotePost(false);
-      // Hide image preview but keep the image data
-      setImagePreview('');
+      // No longer hide image preview
     } else {
       // If we're closing the schedule options, only turn off scheduling
       // if the user hasn't set a date and time
       if (!scheduleDate || !scheduleTime) {
         setIsScheduled(false);
-      }
-      // Show image preview again if there's an image
-      if (image) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setImagePreview(reader.result as string);
-        };
-        reader.readAsDataURL(image);
       }
     }
     
@@ -387,17 +396,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       // Close other option panels
       setShowScheduleOptions(false);
       setIsVotePost(false);
-      // Hide image preview but keep the image data
-      setImagePreview('');
-    } else {
-      // Show image preview again if there's an image
-      if (image) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setImagePreview(reader.result as string);
-        };
-        reader.readAsDataURL(image);
-      }
+      // No longer hide image preview
     }
     
     setShowTagInput(!showTagInput);
@@ -409,21 +408,11 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       // Close other option panels
       setShowScheduleOptions(false);
       setShowTagInput(false);
-      // Hide image preview but keep the image data
-      setImagePreview('');
+      // No longer hide image preview
       
       // Initialize with two empty options if none exist
       if (vote_options.length === 0 || (vote_options.length === 2 && vote_options.every(opt => opt === ''))) {
         setvote_options(['', '']);
-      }
-    } else {
-      // Show image preview again if there's an image
-      if (image) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setImagePreview(reader.result as string);
-        };
-        reader.readAsDataURL(image);
       }
     }
     
@@ -758,14 +747,15 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
             </div>
           )}
           
-          
-          {/* Image preview overlay - only shown when no other options are active */}
-          {imagePreview && !showScheduleOptions && !showTagInput && !isVotePost && (
-            <div className="mt-2 relative rounded-lg overflow-hidden shadow-lg border border-gray-800/60 bg-[#13141B]/80">
+          {/* Image preview - show when an image is selected regardless of which tab is active */}
+          {image && (
+            <div className={`${(!showScheduleOptions && !showTagInput && !isVotePost) ? 'mt-2' : 'absolute top-0 right-0 m-4 z-10 w-28 h-28'} relative rounded-lg overflow-hidden shadow-lg border border-gray-800/60 bg-[#13141B]/80 ${
+              (showScheduleOptions || showTagInput || isVotePost) ? 'opacity-70 hover:opacity-100 transition-opacity' : ''
+            }`}>
               <img 
                 src={imagePreview} 
                 alt="Upload preview" 
-                className="max-h-60 w-auto mx-auto rounded-lg"
+                className={`${(!showScheduleOptions && !showTagInput && !isVotePost) ? 'max-h-60 w-auto mx-auto' : 'w-full h-full object-cover'} rounded-lg`}
               />
               <button
                 type="button"
