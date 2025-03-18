@@ -1140,40 +1140,88 @@ router.post('/posts/:id/publish-scheduled', async (req: Request, res: Response, 
   }
 });
 
-// Search posts by content, username, or tags
-export async function searchPosts(query: string, limit = 50): Promise<any> {
+// Search posts by content, username, tags, vote options, block numbers, and other criteria
+export async function searchPosts(query: string, limit = 50, searchType = 'all'): Promise<any> {
   try {
     const whereConditions = [];
     
-    // Search in content (case insensitive)
-    if (query) {
-      whereConditions.push(`LOWER(content) LIKE LOWER('%${query}%')`);
+    // Clean the query to prevent SQL injection
+    const cleanQuery = query.replace(/(['%_])/g, '\\$1');
+    const likePattern = `%${cleanQuery}%`;
+    
+    // Apply filters based on search type
+    if (searchType === 'all' || searchType === 'content') {
+      // Search in content (case insensitive)
+      whereConditions.push(`LOWER(posts.content) LIKE LOWER('${likePattern}')`);
+    }
+    
+    if (searchType === 'all' || searchType === 'tags') {
+      // Search in tags (using array contains)
+      whereConditions.push(`posts.tags ?| array['${cleanQuery}']`);
+    }
+    
+    if (searchType === 'all' || searchType === 'votes') {
+      // Search in vote options content
+      whereConditions.push(`EXISTS (
+        SELECT 1 FROM vote_option 
+        WHERE vote_option.post_id = posts.id AND 
+        LOWER(vote_option.content) LIKE LOWER('${likePattern}')
+      )`);
+    }
+    
+    if (searchType === 'all') {
+      // Search by username or display name
+      whereConditions.push(`LOWER(users.username) LIKE LOWER('${likePattern}')`);
+      whereConditions.push(`LOWER(users.display_name) LIKE LOWER('${likePattern}')`);
+    }
+    
+    // Search by block number if query is numeric
+    if ((searchType === 'all' || searchType === 'blocks') && /^\d+$/.test(query)) {
+      whereConditions.push(`posts.block_height = ${query}`);
+    }
+    
+    // If no conditions were added (unlikely), add a default to prevent SQL error
+    if (whereConditions.length === 0) {
+      whereConditions.push(`1=0`); // No results
     }
     
     // Build the SQL query with proper pagination
     let sql = `
-      SELECT posts.*, 
-             users.display_name, 
-             users.username, 
-             users.avatar_url
+      SELECT 
+        posts.*,
+        users.display_name, 
+        users.username, 
+        users.avatar_url,
+        (SELECT COUNT(*) FROM lock_like WHERE lock_like.post_id = posts.id) as lock_count,
+        (SELECT json_agg(vo.*) FROM vote_option vo WHERE vo.post_id = posts.id) as vote_options
       FROM posts
       LEFT JOIN users ON posts.author_address = users.address
-      WHERE ${whereConditions.length > 0 ? whereConditions.join(' OR ') : '1=1'}
+      WHERE ${whereConditions.join(' OR ')}
       ORDER BY posts.created_at DESC
       LIMIT ${limit}
     `;
     
     console.log('Search query:', sql);
-    const { data, error } = await prisma.$queryRawUnsafe(sql);
+    const results = await prisma.$queryRawUnsafe(sql);
     
-    if (error) {
-      console.error('Error searching posts:', error);
-      throw new Error('Failed to search posts');
-    }
+    // Process raw_image_data for each post
+    const processedResults = Array.isArray(results) ? results.map(post => {
+      // Process raw_image_data to ensure it's in the correct format
+      if (post.raw_image_data) {
+        try {
+          // Convert Buffer to base64 string for frontend use
+          post.raw_image_data = Buffer.from(post.raw_image_data).toString('base64');
+        } catch (e) {
+          console.error('Error processing raw_image_data:', e);
+          post.raw_image_data = null;
+        }
+      }
+      return post;
+    }) : [];
     
     return { 
-      posts: data || [], 
-      count: data?.length || 0 
+      posts: processedResults, 
+      count: processedResults.length 
     };
   } catch (error) {
     console.error('Error searching posts:', error);
