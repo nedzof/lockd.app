@@ -156,29 +156,27 @@ const listPosts: PostListHandler = async (req, res, next) => {
     if (time_filter) {
       logger.debug('Applying time filter', { time_filter });
       const now = new Date();
-      let days = 0;
+      let startDate: Date | null = null;
       
-      if (time_filter === '1d') {
-        days = 1;
-      } else if (time_filter === '7d') {
-        days = 7;
-      } else if (time_filter === '30d') {
-        days = 30;
+      switch (time_filter) {
+        case '1d':
+          startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          break;
+        case '7d':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case '30d':
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          break;
       }
       
-      if (days > 0) {
-        // For testing purposes, since the posts have future dates (2025),
-        // we'll use a different approach to filter by time
-        // Instead of filtering in the database query, we'll filter the results after fetching
-        
-        // Store the time filter value for post-processing
-        const timeFilterDays = days;
-        
-        // Log that we're using post-processing for time filtering
-        logger.debug(`Using post-processing for time filter: ${time_filter} (${days} days)`);
-        
-        // We'll apply the time filter after fetching the posts
-        // This is handled in the post-processing section below
+      if (startDate) {
+        whereConditions.push({
+          created_at: {
+            gte: startDate
+          }
+        });
+        logger.debug(`Added date filter for posts created after ${startDate.toISOString()}`);
       }
     }
     
@@ -203,6 +201,11 @@ const listPosts: PostListHandler = async (req, res, next) => {
           const latestTransaction = await prisma.processed_transaction.findFirst({
             orderBy: {
               block_height: 'desc'
+            },
+            where: {
+              block_height: {
+                gt: 0
+              }
             }
           });
           
@@ -211,11 +214,12 @@ const listPosts: PostListHandler = async (req, res, next) => {
             
             whereConditions.push({
               block_height: {
-                gte: minBlockHeight
+                gte: minBlockHeight,
+                lte: latestTransaction.block_height
               }
             });
             
-            logger.debug(`Added block filter for posts with block_height >= ${minBlockHeight} (current: ${latestTransaction.block_height})`);
+            logger.debug(`Added block filter for posts with block_height between ${minBlockHeight} and ${latestTransaction.block_height}`);
           } else {
             logger.warn('No transactions found with block_height, using time-based approximation');
             
@@ -258,13 +262,15 @@ const listPosts: PostListHandler = async (req, res, next) => {
         });
         logger.debug(`Added author filter for user: ${user_id}`);
       } else if (personal_filter === 'locked') {
-        // Show only posts that have lock_likes
+        // Show only posts that have lock_likes from the current user
         whereConditions.push({
           lock_likes: {
-            some: {} // At least one lock_like
+            some: {
+              author_address: user_id as string
+            }
           }
         });
-        logger.debug('Added filter for posts with lock_likes');
+        logger.debug(`Added filter for posts with lock_likes by user: ${user_id}`);
       }
     } else if (user_id && user_id !== 'anon') {
       // If no personal filter but user_id is provided and not 'anon', filter by that user
@@ -280,19 +286,50 @@ const listPosts: PostListHandler = async (req, res, next) => {
       { id: 'desc' }
     ];
     
+    // Flag to check if we need to apply top-N filtering
+    let applyTopFilter = false;
+    let topLimit = 0;
+    let effectiveLimit = parsedLimit; // Add a mutable copy of the limit
+    
     if (ranking_filter) {
       logger.debug('Applying ranking filter', { ranking_filter });
       
       if (ranking_filter === 'top-1' || ranking_filter === 'top-3' || ranking_filter === 'top-10') {
-        // For top posts, we'll fetch all posts and then sort them by lock_likes count in post-processing
-        logger.debug(`Will apply ${ranking_filter} filter after fetching posts`);
+        // Set the top limit and flag for post-processing
+        applyTopFilter = true;
+        
+        if (ranking_filter === 'top-1') {
+          topLimit = 1;
+        } else if (ranking_filter === 'top-3') {
+          topLimit = 3;
+        } else if (ranking_filter === 'top-10') {
+          topLimit = 10;
+        }
+        
+        // For top posts, change the order by to prioritize posts with the most lock_likes
+        // We'll get more than we need and then trim in post-processing
+        orderBy = [
+          {
+            lock_likes: {
+              _count: 'desc'
+            }
+          },
+          { created_at: 'desc' }
+        ];
+        
+        logger.debug(`Will get posts ordered by lock count and then limit to top ${topLimit}`);
+        
+        // Increase the limit to ensure we get enough posts to choose from
+        // but cap it at a reasonable number
+        effectiveLimit = Math.min(50, Math.max(parsedLimit, topLimit * 2));
+        logger.debug(`Adjusted limit to ${effectiveLimit} for top posts filtering`);
       }
     }
     
     // VALIDATION: Log the exact query we're about to execute
     const queryParams = {
-      take: parsedLimit + 1,
-      ...(cursor ? { 
+      take: effectiveLimit + 1, // Use effectiveLimit instead of parsedLimit
+      ...(cursor && !applyTopFilter ? { // Only use cursor for pagination when not doing top filtering
         cursor: { 
           id: cursor as string 
         },
@@ -328,10 +365,10 @@ const listPosts: PostListHandler = async (req, res, next) => {
     });
 
     // Check if there are more items
-    const hasMore = posts.length > parsedLimit;
+    let hasMore = posts.length > effectiveLimit; // Use effectiveLimit instead of parsedLimit
     
     // Remove the extra item if we fetched more than requested
-    let postsToReturn = hasMore ? posts.slice(0, parsedLimit) : posts;
+    let postsToReturn = hasMore ? posts.slice(0, effectiveLimit) : posts; // Use effectiveLimit
 
     // Filter out scheduled posts that haven't reached their scheduled time yet
     const now = new Date();
@@ -428,59 +465,50 @@ const listPosts: PostListHandler = async (req, res, next) => {
     }
 
     // Apply top limit for ranking filters if needed
-    if (ranking_filter && ['top-1', 'top-3', 'top-10'].includes(ranking_filter)) {
-      let topLimit = 0;
-      if (ranking_filter === 'top-1') {
-        topLimit = 1;
-      } else if (ranking_filter === 'top-3') {
-        topLimit = 3;
-      } else if (ranking_filter === 'top-10') {
-        topLimit = 10;
-      }
+    if (applyTopFilter && topLimit > 0) {
+      logger.debug(`Applying top-${topLimit} filter to results`);
       
-      if (topLimit > 0) {
-        logger.debug(`Sorting and limiting results to top ${topLimit} posts by lock_likes count`);
+      // Sort posts by lock_likes count in case our order by didn't quite do it
+      postsToReturn = [...postsToReturn].sort((a, b) => {
+        // Get the count of lock_likes for each post
+        const aLikes = a.lock_likes?.length || 0;
+        const bLikes = b.lock_likes?.length || 0;
         
-        // Sort posts by lock_likes count (descending)
-        postsToReturn = [...postsToReturn].sort((a, b) => {
-          // Get the count of lock_likes for each post
-          const aLikes = a.lock_likes?.length || 0;
-          const bLikes = b.lock_likes?.length || 0;
-          
-          // If lock counts are equal, sort by created_at (newest first)
-          if (bLikes === aLikes) {
-            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-          }
-          
-          // Sort by lock_likes count (descending)
-          return bLikes - aLikes;
-        });
-        
-        // Log the IDs and lock_likes counts before limiting
-        logger.debug('Posts sorted by lock_likes before limiting', {
-          count: postsToReturn.length,
-          posts: postsToReturn.map(p => ({
-            id: p.id,
-            lock_likes_count: p.lock_likes?.length || 0,
-            created_at: p.created_at
-          }))
-        });
-        
-        // Limit to the top N posts
-        if (postsToReturn.length > topLimit) {
-          postsToReturn = postsToReturn.slice(0, topLimit);
+        // If lock counts are equal, sort by created_at (newest first)
+        if (bLikes === aLikes) {
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
         }
         
-        // Log the IDs and lock_likes counts of the top posts for debugging
-        logger.debug('Top posts after sorting by lock_likes', {
-          topLimit,
-          posts: postsToReturn.map(p => ({
-            id: p.id,
-            lock_likes_count: p.lock_likes?.length || 0,
-            created_at: p.created_at
-          }))
-        });
+        // Sort by lock_likes count (descending)
+        return bLikes - aLikes;
+      });
+      
+      // Log the IDs and lock_likes counts before limiting
+      logger.debug('Posts sorted by lock_likes before limiting', {
+        count: postsToReturn.length,
+        posts: postsToReturn.map(p => ({
+          id: p.id,
+          lock_likes_count: p.lock_likes?.length || 0,
+          created_at: p.created_at
+        }))
+      });
+      
+      // Limit to the top N posts
+      if (postsToReturn.length > topLimit) {
+        postsToReturn = postsToReturn.slice(0, topLimit);
+        // When using top filter, there are no more posts to load
+        hasMore = false;
       }
+      
+      // Log the IDs and lock_likes counts of the top posts for debugging
+      logger.debug('Top posts after applying filter', {
+        topLimit,
+        posts: postsToReturn.map(p => ({
+          id: p.id,
+          lock_likes_count: p.lock_likes?.length || 0,
+          created_at: p.created_at
+        }))
+      });
     }
 
     // VALIDATION: Log the IDs of posts we're returning

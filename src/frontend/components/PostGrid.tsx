@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2, FiExternalLink, FiClock } from 'react-icons/fi';
+import { FiLock, FiZap, FiLoader, FiPlus, FiHeart, FiMaximize2, FiX, FiBarChart2, FiExternalLink, FiClock, FiTrendingUp, FiUser } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import { getProgressColor } from '../utils/getProgressColor';
 import type { Post } from '../types';
@@ -545,6 +545,15 @@ const PostGrid: React.FC<PostGridProps> = ({
   useEffect(() => {
     if (!loaderRef.current) return;
 
+    // Check if ranking filter is active - disable infinite scrolling for top-N filters
+    const isTopRankingActive = ranking_filter && ['top-1', 'top-3', 'top-10'].includes(ranking_filter);
+    
+    // If top ranking filter is active, don't set up the observer
+    if (isTopRankingActive) {
+      console.log('Top ranking filter active, disabling infinite scrolling');
+      return;
+    }
+
     const options = {
       root: null, // Use the viewport as the root
       rootMargin: '0px 0px 200px 0px', // Start loading when element is 200px from viewport
@@ -566,7 +575,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         observer.unobserve(loaderRef.current);
       }
     };
-  }, [hasMore, isFetchingMore, handleLoadMore]);
+  }, [hasMore, isFetchingMore, handleLoadMore, ranking_filter]);
 
   const handlevote_optionLock = async (optionId: string, amount: number, duration: number) => {
     // Check if wallet is connected
@@ -655,6 +664,60 @@ const PostGrid: React.FC<PostGridProps> = ({
     <div className="w-full">
       {/* Main post grid */}
       <div className="w-full">
+        {/* Active filters indicators */}
+        {(time_filter || block_filter || personal_filter || ['top-1', 'top-3', 'top-10'].includes(ranking_filter)) && (
+          <div className="mb-4 bg-[#00ffa3]/10 border border-[#00ffa3]/20 rounded-lg p-3">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {/* Time filter indicator */}
+              {time_filter && (
+                <div className="bg-[#00ffa3]/20 px-2 py-1 rounded-md text-[#00ffa3] text-sm font-medium flex items-center">
+                  <FiClock className="mr-1" size={14} />
+                  {time_filter === '1d' ? 'Last 24 hours' : 
+                   time_filter === '7d' ? 'Last 7 days' : 
+                   time_filter === '30d' ? 'Last 30 days' : time_filter}
+                </div>
+              )}
+              
+              {/* Block filter indicator */}
+              {block_filter && (
+                <div className="bg-[#00ffa3]/20 px-2 py-1 rounded-md text-[#00ffa3] text-sm font-medium flex items-center">
+                  <FiBarChart2 className="mr-1" size={14} />
+                  {block_filter === 'last-block' ? 'Last block' : 
+                   block_filter === 'last-5-blocks' ? 'Last 5 blocks' : 
+                   block_filter === 'last-10-blocks' ? 'Last 10 blocks' : block_filter}
+                </div>
+              )}
+              
+              {/* Ranking filter indicator */}
+              {['top-1', 'top-3', 'top-10'].includes(ranking_filter) && (
+                <div className="bg-[#00ffa3]/20 px-2 py-1 rounded-md text-[#00ffa3] text-sm font-medium flex items-center">
+                  <FiTrendingUp className="mr-1" size={14} />
+                  {ranking_filter === 'top-1' ? 'Top post' : 
+                   ranking_filter === 'top-3' ? 'Top 3 posts' : 
+                   ranking_filter === 'top-10' ? 'Top 10 posts' : ranking_filter}
+                </div>
+              )}
+              
+              {/* Personal filter indicator */}
+              {personal_filter && (
+                <div className="bg-[#00ffa3]/20 px-2 py-1 rounded-md text-[#00ffa3] text-sm font-medium flex items-center">
+                  {personal_filter === 'mylocks' ? (
+                    <>
+                      <FiUser className="mr-1" size={14} />
+                      Posts you created
+                    </>
+                  ) : personal_filter === 'locked' ? (
+                    <>
+                      <FiLock className="mr-1" size={14} />
+                      Posts where you've locked BSV
+                    </>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Loading state */}
         {loading && submissions.length === 0 && (
           <div className="text-center py-10">
@@ -938,7 +1001,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         )}
 
         {/* Infinite scroll loader */}
-        {hasMore && submissions.length > 0 && (
+        {hasMore && submissions.length > 0 && !['top-1', 'top-3', 'top-10'].includes(ranking_filter) && (
           <div 
             ref={loaderRef} 
             className="py-4 flex justify-center"
@@ -949,6 +1012,21 @@ const PostGrid: React.FC<PostGridProps> = ({
                 <span className="text-gray-400">Loading more posts...</span>
               </div>
             )}
+          </div>
+        )}
+        
+        {/* Top posts indicator */}
+        {['top-1', 'top-3', 'top-10'].includes(ranking_filter) && submissions.length > 0 && (
+          <div className="mt-6 bg-[#00ffa3]/10 border border-[#00ffa3]/20 rounded-lg p-4 text-center">
+            <div className="flex items-center justify-center gap-2 text-[#00ffa3]">
+              <FiBarChart2 className="text-[#00ffa3]" size={18} />
+              <span className="font-medium">
+                Showing {ranking_filter === 'top-1' ? 'the top post' : `top ${ranking_filter.split('-')[1]} posts`} by popularity
+              </span>
+            </div>
+            <p className="text-gray-300 text-sm mt-1">
+              Disable the "{ranking_filter === 'top-1' ? 'Top 1' : ranking_filter === 'top-3' ? 'Top 3' : 'Top 10'}" filter to see more posts
+            </p>
           </div>
         )}
       </div>

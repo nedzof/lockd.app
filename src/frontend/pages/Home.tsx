@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { FiTrendingUp, FiClock, FiHeart, FiStar } from 'react-icons/fi';
+import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
@@ -28,11 +28,13 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     if (time_filter === filter) {
       settime_filter('');
     } else {
-      // Otherwise, set the new filter and clear other filter types
+      // Set the new filter and clear block filter
       settime_filter(filter);
       setblock_filter(''); // Clear block filter when time filter is set
     }
-    console.log(`Set time filter to: ${filter || 'none'}`);
+    
+    // Log the filter change
+    console.log(`Set time filter to: ${filter || 'none'}, cleared block filter`);
   };
 
   const handleblock_filter = (filter: string) => {
@@ -143,18 +145,22 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
             <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800/10">
               {/* Time Filters */}
               <div className="flex items-center space-x-1">
-                {['1d', '7d', '30d'].map((filter) => (
+                {[
+                  { id: '1d', label: '24H' },
+                  { id: '7d', label: '7D' },
+                  { id: '30d', label: '30D' }
+                ].map(({ id, label }) => (
                   <button
-                    key={filter}
-                    onClick={() => handletime_filter(filter)}
+                    key={id}
+                    onClick={() => handletime_filter(id)}
                     className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                      time_filter === filter
+                      time_filter === id
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
-                    title={`Show posts from the last ${filter === '1d' ? 'day' : filter === '7d' ? '7 days' : '30 days'}`}
+                    title={`Show posts from the last ${label === '24H' ? 'day' : label === '7D' ? '7 days' : '30 days'}`}
                   >
-                    {filter.toUpperCase()}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -197,7 +203,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                   <button
                     key={id}
                     onClick={() => handleranking_filter(id)}
-                    className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
+                    className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 relative ${
                       ranking_filter === id
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -205,6 +211,12 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                     title={`Show ${label.toLowerCase()} posts by popularity`}
                   >
                     {label}
+                    {ranking_filter === id && (
+                      <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                        <span className="absolute inline-flex h-full w-full rounded-full bg-[#00ffa3] opacity-75 animate-ping"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-[#00ffa3]"></span>
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -218,20 +230,36 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                   {/* Personal Filters */}
                   <div className="flex items-center space-x-1">
                     {[
-                      { id: 'mylocks', label: 'My Posts' },
-                      { id: 'locked', label: 'Locked Posts' }
-                    ].map(({ id, label }) => (
+                      { id: 'mylocks', label: 'My Posts', icon: 'user', title: 'Show posts you created' },
+                      { id: 'locked', label: 'My Locks', icon: 'lock', title: 'Show posts where you locked BSV' }
+                    ].map(({ id, label, icon, title }) => (
                       <button
                         key={id}
                         onClick={() => handlepersonal_filter(id)}
-                        className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
+                        className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 relative ${
                           personal_filter === id
                             ? 'bg-white/10 text-white'
                             : 'text-gray-400 hover:text-white hover:bg-white/5'
                         }`}
-                        title={id === 'mylocks' ? 'Show only your posts' : 'Show only posts with locked BSV'}
+                        title={title}
                       >
-                        {label}
+                        {icon === 'user' ? (
+                          <span className="inline-flex items-center">
+                            <FiUser className="mr-1" size={12} />
+                            {label}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center">
+                            <FiLock className="mr-1" size={12} />
+                            {label}
+                          </span>
+                        )}
+                        {personal_filter === id && (
+                          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-[#00ffa3] opacity-75 animate-ping"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-[#00ffa3]"></span>
+                          </span>
+                        )}
                       </button>
                     ))}
                   </div>
