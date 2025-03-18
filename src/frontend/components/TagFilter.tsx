@@ -173,8 +173,8 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
   }
 
   return (
-    <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg mb-6 relative z-20">
-      <div className="px-4 py-2">
+    <div className={`bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg mt-2 mb-2 relative z-20 transition-all duration-300 ${isTagsVisible ? 'opacity-100' : 'opacity-90'}`}>
+      <div className="px-3 py-1.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <FiTag size={14} className="text-gray-400" />
@@ -196,6 +196,7 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
           </div>
           <button
             onClick={toggleTagsVisibility}
+            id="tag-toggle-button"
             className="flex items-center space-x-1 text-xs text-gray-400 hover:text-gray-300 focus:outline-none px-2 py-1 rounded-md hover:bg-white/5"
           >
             <span>{isTagsVisible ? 'Hide Tags' : 'Show Tags'}</span>

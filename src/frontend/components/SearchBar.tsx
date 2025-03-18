@@ -66,7 +66,7 @@ const SearchBar: React.FC = () => {
       {isExpanded ? (
         <form 
           onSubmit={handleSearch}
-          className="flex items-center bg-[#13141B] border border-gray-700/30 rounded-md overflow-hidden transition-all duration-300 w-44 md:w-56 shadow-lg"
+          className="flex items-center bg-[#13141B] border border-gray-700/30 rounded-md overflow-hidden transition-all duration-300 w-44 md:w-56 shadow-lg absolute right-0"
         >
           <input
             id="search-input"
@@ -97,11 +97,12 @@ const SearchBar: React.FC = () => {
       ) : (
         <button
           onClick={toggleExpand}
-          className="flex items-center space-x-1.5 px-3 py-1.5 text-xs rounded-md bg-white/5 border border-gray-700/30 hover:border-gray-600 text-gray-300 transition-all duration-200"
+          className="flex items-center space-x-1 px-2 py-1.5 text-xs rounded-md bg-white/5 border border-gray-700/30 hover:border-gray-600 text-gray-300 transition-all duration-200"
           aria-label="Open search"
+          title="Search"
         >
           <FiSearch size={12} />
-          <span>Search</span>
+          <span className="hidden sm:inline-block">Search</span>
         </button>
       )}
     </div>

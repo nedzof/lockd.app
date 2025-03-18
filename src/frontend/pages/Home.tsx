@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX, FiLink, FiCalendar, FiSearch } from 'react-icons/fi';
+import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX, FiLink, FiCalendar, FiSearch, FiTag } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
@@ -214,6 +214,32 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     });
   }, [period_filter, ranking_filter, personal_filter, selected_tags, searchTerm, memoizeduser_id, time_filter, block_filter]);
 
+  // Add state for tracking tag visibility
+  const [isTagSectionVisible, setIsTagSectionVisible] = useState(false);
+  
+  // Add effect to listen for click on the tag toggle button
+  useEffect(() => {
+    const tagToggleButton = document.getElementById('tag-toggle-button');
+    if (tagToggleButton) {
+      const handleTagToggle = () => {
+        setIsTagSectionVisible(prev => !prev);
+      };
+      
+      tagToggleButton.addEventListener('click', handleTagToggle);
+      return () => {
+        tagToggleButton.removeEventListener('click', handleTagToggle);
+      };
+    }
+  }, []);
+  
+  // Update tag filter button to manage state directly
+  const handleTagFilterToggle = useCallback(() => {
+    const tagButton = document.getElementById('tag-toggle-button');
+    if (tagButton) {
+      tagButton.click();
+    }
+  }, []);
+
   const renderContent = () => {
     if (isStats) {
       return <BSVStats />;
@@ -241,29 +267,25 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       <div className="relative min-h-screen pb-20">
         {/* Filter bar */}
         <div className="mb-6 relative z-20">
-          <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg">
-            <div className="flex items-center px-4 py-2 space-x-2">
-              {/* Filter icon */}
-              <div className="text-gray-400">
-                <FiFilter size={16} />
-              </div>
-              
-              {/* Time Period Filter Dropdown */}
+          <div className={`bg-[#2A2A40]/20 backdrop-blur-sm rounded-t-lg ${!isTagSectionVisible || selected_tags.length === 0 ? 'rounded-b-lg' : ''}`}>
+            <div className="flex items-center px-3 py-2 gap-2">
+              {/* Filter icon with time period dropdown */}
               <div ref={periodDropdownRef} className="relative">
                 <button
                   onClick={() => {
                     setPeriodDropdownOpen(!periodDropdownOpen);
                     setRankingDropdownOpen(false);
                   }}
-                  className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-32 ${
+                  className={`flex items-center justify-between px-2 py-1.5 text-xs rounded-md transition-all duration-200 ${
                     period_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
                   }`}
+                  title="Time Period Filter"
                 >
                   <div className="flex items-center space-x-1.5">
                     <FiCalendar size={12} />
-                    <span className="truncate">{getCurrentPeriodFilterLabel()}</span>
+                    <span className="truncate hidden sm:inline-block">{getCurrentPeriodFilterLabel()}</span>
                   </div>
-                  <FiChevronDown size={12} className={`transition-transform duration-200 ${periodDropdownOpen ? 'rotate-180' : ''}`} />
+                  <FiChevronDown size={12} className={`transition-transform duration-200 ml-1 ${periodDropdownOpen ? 'rotate-180' : ''}`} />
                 </button>
                 
                 {periodDropdownOpen && (
@@ -327,15 +349,16 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                     setRankingDropdownOpen(!rankingDropdownOpen);
                     setPeriodDropdownOpen(false);
                   }}
-                  className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-28 ${
+                  className={`flex items-center justify-between px-2 py-1.5 text-xs rounded-md transition-all duration-200 ${
                     ranking_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
                   }`}
+                  title="Ranking Filter"
                 >
                   <div className="flex items-center space-x-1.5">
                     <FiStar size={12} />
-                    <span className="truncate">{getCurrentRankingFilterLabel()}</span>
+                    <span className="truncate hidden sm:inline-block">{getCurrentRankingFilterLabel()}</span>
                   </div>
-                  <FiChevronDown size={12} className={`transition-transform duration-200 ${rankingDropdownOpen ? 'rotate-180' : ''}`} />
+                  <FiChevronDown size={12} className={`transition-transform duration-200 ml-1 ${rankingDropdownOpen ? 'rotate-180' : ''}`} />
                 </button>
                 
                 {rankingDropdownOpen && (
@@ -373,35 +396,47 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 )}
               </div>
 
+              {/* Tag filter toggle */}
+              <button
+                onClick={handleTagFilterToggle}
+                className={`flex items-center justify-center p-1.5 text-xs rounded-md transition-all duration-200 ${
+                  selected_tags.length > 0 ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
+                }`}
+                title={`Tags ${selected_tags.length > 0 ? `(${selected_tags.length} selected)` : ''}`}
+              >
+                <FiTag size={12} />
+                {selected_tags.length > 0 && (
+                  <span className="ml-1 text-[0.65rem] bg-[#00ffa3]/20 px-1 rounded-full">
+                    {selected_tags.length}
+                  </span>
+                )}
+              </button>
+
               {/* Search */}
               <div className="flex-grow flex justify-end">
                 <SearchBar />
               </div>
               
-              {/* Only show Personal Filters and Threshold Settings when connected */}
+              {/* Personal Filters - only show when connected */}
               {connected && (
-                <div className="flex items-center space-x-2">
-                  {/* Personal Filters */}
-                  <div className="flex items-center space-x-1">
-                    {[
-                      { id: 'mylocks', label: 'My Posts', icon: <FiUser size={12} />, title: 'Show posts you created' },
-                      { id: 'locked', label: 'My Locks', icon: <FiLock size={12} />, title: 'Show posts where you locked BSV' }
-                    ].map(({ id, label, icon, title }) => (
-                      <button
-                        key={id}
-                        onClick={() => handlepersonal_filter(id)}
-                        className={`flex items-center px-3 py-1.5 text-xs rounded-md transition-all duration-200 ${
-                          personal_filter === id
-                            ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20'
-                            : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
-                        }`}
-                        title={title}
-                      >
-                        <span className="mr-1.5">{icon}</span>
-                        <span className="whitespace-nowrap">{label}</span>
-                      </button>
-                    ))}
-                  </div>
+                <div className="flex items-center gap-1.5">
+                  {[
+                    { id: 'mylocks', label: 'My Posts', icon: <FiUser size={12} />, title: 'Show posts you created' },
+                    { id: 'locked', label: 'My Locks', icon: <FiLock size={12} />, title: 'Show posts where you locked BSV' }
+                  ].map(({ id, label, icon, title }) => (
+                    <button
+                      key={id}
+                      onClick={() => handlepersonal_filter(id)}
+                      className={`flex items-center p-1.5 text-xs rounded-md transition-all duration-200 ${
+                        personal_filter === id
+                          ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20'
+                          : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                      title={title}
+                    >
+                      {icon}
+                    </button>
+                  ))}
                   
                   {/* Threshold Settings */}
                   <ThresholdSettings connected={connected} walletAddress={bsvAddress || undefined} />
@@ -412,11 +447,10 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
               {isAnyFilterActive && (
                 <button
                   onClick={clearAllFilters}
-                  className="text-xs px-2 py-1 text-gray-400 hover:text-white rounded flex items-center"
+                  className="text-xs p-1.5 text-gray-400 hover:text-white rounded flex items-center"
                   title="Clear all filters"
                 >
-                  <FiX size={12} className="mr-1" />
-                  <span>Clear</span>
+                  <FiX size={12} />
                 </button>
               )}
             </div>
