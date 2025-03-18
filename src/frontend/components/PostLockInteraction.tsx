@@ -83,10 +83,10 @@ interface PostLockInteractionProps {
 
 // Constants for locking
 const SATS_PER_BSV = 100000000;
-const MIN_BSV_AMOUNT = 0.01; // Increased minimum amount in BSV (1,000,000 satoshis)
-const DEFAULT_BSV_AMOUNT = 0.01; // Default amount
-const DEFAULT_LOCK_DURATION = 144; // Default lock duration of 144 blocks (approx 1 day)
-const MIN_LOCK_DURATION = 10; // Minimum lock duration
+const MIN_BSV_AMOUNT = 0.001; // Minimum amount in BSV (100,000 satoshis)
+const DEFAULT_BSV_AMOUNT = 0.001; // Default amount
+const DEFAULT_LOCK_DURATION = 10; // Default lock duration in blocks
+const MIN_LOCK_DURATION = 1; // Minimum lock duration
 
 const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
   postId,
@@ -182,39 +182,6 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
     setDuration(newValue);
   };
 
-  // Create a simplified alternate lock method to bypass any potential issues
-  const simplifiedLock = async (address: string, unlockHeight: number, satoshiAmount: number) => {
-    directLog('Using simplified lock method');
-    
-    // This is a direct, raw call to lockBsv with minimal parameters
-    const lockParams = [{
-      address: address,
-      blockHeight: unlockHeight,
-      sats: satoshiAmount,
-    }];
-    
-    directLog('Simplified lock params:', lockParams);
-    
-    try {
-      // Explicitly cast parameters to the correct types
-      const params = [{
-        address: String(address),
-        blockHeight: Number(unlockHeight),
-        sats: Number(satoshiAmount)
-      }];
-      
-      directLog('Final params after type casting:', params);
-      
-      // Call lockBsv with raw parameters
-      const response = await wallet.lockBsv(params);
-      directLog('Simplified lock response:', response);
-      return response;
-    } catch (error) {
-      directLog('Simplified lock error:', error);
-      throw error;
-    }
-  };
-
   const handleLock = async () => {
     try {
       // Direct log first to ensure we see it
@@ -283,7 +250,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         const unlockHeight = currentBlockHeight + duration;
         directLog(`Calculated unlock height: ${unlockHeight}`);
         
-        // 4. Convert BSV to satoshis with integer conversion
+        // 4. Convert BSV to satoshis
         const satoshiAmount = Math.floor(amount * SATS_PER_BSV);
         directLog(`Converting ${amount} BSV to ${satoshiAmount} satoshis`);
         
@@ -292,19 +259,35 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
           throw new Error(`Lock amount too small. Minimum is ${MIN_BSV_AMOUNT} BSV`);
         }
         
-        // Log wallet state
-        directLog('Wallet state before locking:', { wallet });
+        // 5. Create lock parameters for wallet.lockBsv
+        const lockParams = [{
+          address: addresses.identityAddress,
+          blockHeight: Math.floor(unlockHeight),
+          sats: Math.floor(satoshiAmount),
+        }];
+        directLog('Lock parameters for wallet:', lockParams);
         
-        // 5. Use simplified direct lock method to avoid complex parameter issues
-        directLog('Using simplified lock method');
-        const walletStartTime = logPerformance('Calling simplified wallet.lockBsv');
+        // 6. Call wallet.lockBsv to trigger wallet confirmation prompt
+        directLog('Calling wallet.lockBsv to trigger confirmation prompt');
+        directLog('Detailed parameter inspection:', {
+          address: addresses.identityAddress,
+          blockHeight: Math.floor(unlockHeight),
+          sats: Math.floor(satoshiAmount),
+          addressType: typeof addresses.identityAddress,
+          blockHeightType: typeof Math.floor(unlockHeight),
+          satsType: typeof Math.floor(satoshiAmount)
+        });
+        
+        const walletStartTime = logPerformance('Calling wallet.lockBsv');
         
         try {
-          const lockResponse = await simplifiedLock(
-            addresses.identityAddress,
-            unlockHeight,
-            satoshiAmount
-          );
+          // Try with a more direct parameter object approach
+          directLog('Using array of parameters for lockBsv');
+          const lockResponse = await wallet.lockBsv([{
+            address: addresses.identityAddress,
+            blockHeight: Math.floor(unlockHeight),
+            sats: Math.floor(satoshiAmount)
+          }]);
           
           directLog('Wallet lock response:', lockResponse);
           logPerformance('Received wallet lock response', walletStartTime);
@@ -321,8 +304,8 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
           const apiRequestBody = {
             post_id: postId,
             author_address: addresses.identityAddress,
-            amount: satoshiAmount, // Integer satoshi amount
-            lock_duration: duration, // Duration in blocks
+            amount: Math.floor(satoshiAmount), // Ensure integer
+            lock_duration: Math.floor(duration), // Ensure integer
             tx_id: lockResponse.txid,
           };
           
@@ -358,7 +341,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
           // 8. Hide options and show success toast
           directLog('Lock successful, hiding options');
           toast.success(`Successfully locked ${amount} BSV for ${duration} blocks!`);
-          setShowOptions(false);
+      setShowOptions(false);
           
           // 9. Call the original onLock handler to refresh UI
           directLog('Calling original onLock handler to refresh UI');
@@ -368,24 +351,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         } catch (walletError) {
           directLog('Error during wallet lock operation:', walletError);
           logPerformance('Wallet lock process failed', walletStartTime);
-          
-          // Provide a more user-friendly error message
-          let errorMessage = 'Failed to lock BSV';
-          if (walletError instanceof Error) {
-            directLog('Wallet error details:', walletError.message);
-            errorMessage = walletError.message;
-            
-            // Replace cryptic errors with more user-friendly messages
-            if (errorMessage.includes('Insufficient funds')) {
-              errorMessage = 'Insufficient funds in your wallet';
-            } else if (errorMessage.includes('Amount too small')) {
-              errorMessage = `Amount too small. Try locking at least ${MIN_BSV_AMOUNT} BSV`;
-            } else if (errorMessage.toLowerCase().includes('unknown error')) {
-              errorMessage = `Transaction rejected. Please try with ${MIN_BSV_AMOUNT * 2} BSV or more`;
-            }
-          }
-          
-          toast.error(errorMessage);
+          toast.error(walletError instanceof Error ? walletError.message : 'Failed to lock BSV');
           throw walletError;
         }
       } catch (error) {
@@ -452,7 +418,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
                     value={amount}
                     onChange={handleAmountChange}
                     min={MIN_BSV_AMOUNT}
-                    step="0.01"
+                    step="0.001"
                     className="w-full bg-white/5 border border-gray-800/20 rounded-md py-1.5 px-2 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
                   />
                   <div className="text-xs text-gray-400 mt-1">Minimum: {MIN_BSV_AMOUNT} BSV</div>
