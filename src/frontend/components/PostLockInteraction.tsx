@@ -202,8 +202,8 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         // 5. Create lock parameters for wallet.lockBsv
         const lockParams = [{
           address: addresses.identityAddress,
-          blockHeight: unlockHeight,
-          sats: satoshiAmount,
+          blockHeight: Math.floor(unlockHeight),
+          sats: Math.floor(satoshiAmount),
         }];
         directLog('Lock parameters for wallet:', lockParams);
         
@@ -211,88 +211,73 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         directLog('Calling wallet.lockBsv to trigger confirmation prompt');
         const walletStartTime = logPerformance('Calling wallet.lockBsv');
         
-        let lockResponse;
         try {
-          // Wrap the wallet call in try-catch to handle any wallet-specific errors
-          lockResponse = await wallet.lockBsv(lockParams);
+          const lockResponse = await wallet.lockBsv(lockParams);
           directLog('Wallet lock response:', lockResponse);
+          logPerformance('Received wallet lock response', walletStartTime);
+          
+          if (!lockResponse || !lockResponse.txid) {
+            throw new Error('Failed to create lock transaction');
+          }
+          
+          // 7. Now call the API with the transaction ID
+          directLog(`Calling API with tx_id: ${lockResponse.txid}`);
+          const apiStartTime = logPerformance('Calling lock API');
+          
+          // Create the API request body with the tx_id from the wallet
+          const apiRequestBody = {
+            post_id: postId,
+            author_address: addresses.identityAddress,
+            amount: Math.floor(satoshiAmount), // Ensure integer
+            lock_duration: Math.floor(duration), // Ensure integer
+            tx_id: lockResponse.txid,
+          };
+          
+          directLog('API request payload:', apiRequestBody);
+          
+          // Call the lock API
+          const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(apiRequestBody),
+          });
+          
+          const responseStatus = apiResponse.status;
+          directLog(`API response status: ${responseStatus}`);
+          
+          let responseBody;
+          try {
+            responseBody = await apiResponse.json();
+            directLog('API response body:', responseBody);
+          } catch (jsonError) {
+            directLog('Error parsing API response:', jsonError);
+            responseBody = null;
+          }
+          
+          logPerformance('API call completed', apiStartTime);
+          
+          if (!apiResponse.ok) {
+            throw new Error(responseBody?.message || responseBody?.error || `API error: ${responseStatus}`);
+          }
+          
+          // 8. Hide options and show success toast
+          directLog('Lock successful, hiding options');
+          toast.success(`Successfully locked ${amount} BSV for ${duration} blocks!`);
+          setShowOptions(false);
+          
+          // 9. Call the original onLock handler to refresh UI
+          directLog('Calling original onLock handler to refresh UI');
+          await onLock(postId, amount, duration);
+          
+          logPerformance('Entire lock process completed', startTime);
         } catch (walletError) {
-          // Handle specific wallet errors
-          directLog('Error in wallet.lockBsv call:', walletError);
-          const errorMessage = walletError instanceof Error ? walletError.message : 'Transaction was declined or failed';
-          logPerformance('Wallet lock call failed', walletStartTime);
-          throw new Error(`Wallet transaction failed: ${errorMessage}`);
+          directLog('Error during wallet lock operation:', walletError);
+          logPerformance('Wallet lock process failed', walletStartTime);
+          toast.error(walletError instanceof Error ? walletError.message : 'Failed to lock BSV');
+          throw walletError;
         }
-        
-        logPerformance('Received wallet lock response', walletStartTime);
-        
-        // Validate the response - check several possible property names for txid
-        if (!lockResponse) {
-          directLog('Lock response is null or undefined');
-          throw new Error('No response received from wallet');
-        }
-        
-        // Check for different possible property names for the transaction ID
-        // Use type assertion to safely access potential properties
-        const lockResponseObj = lockResponse as Record<string, any>;
-        const transactionId = lockResponseObj.txid || 
-                             (lockResponseObj as any).tx_id || 
-                             (lockResponseObj as any).txId || 
-                             (lockResponseObj as any).id;
-        
-        if (!transactionId) {
-          directLog('No transaction ID in response:', lockResponse);
-          throw new Error('Missing transaction ID in wallet response');
-        }
-        
-        directLog(`Successfully got transaction ID: ${transactionId}`);
-        
-        // 7. Now call the API with the transaction ID
-        directLog(`Calling API with tx_id: ${transactionId}`);
-        const apiStartTime = logPerformance('Calling lock API');
-        
-        // Create the API request body with the tx_id from the wallet
-        const apiRequestBody = {
-          post_id: postId,
-          author_address: addresses.identityAddress,
-          amount: satoshiAmount,
-          lock_duration: duration,
-          tx_id: transactionId,
-        };
-        
-        directLog('API request payload:', apiRequestBody);
-        
-        // Call the lock API
-        const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(apiRequestBody),
-        });
-        
-        const responseStatus = apiResponse.status;
-        directLog(`API response status: ${responseStatus}`);
-        
-        const responseBody = await apiResponse.json();
-        directLog('API response body:', responseBody);
-        
-        logPerformance('API call completed', apiStartTime);
-        
-        if (!apiResponse.ok) {
-          throw new Error(responseBody.message || responseBody.error || 'Error creating lock');
-        }
-        
-        // 8. Hide options and show success toast
-        directLog('Lock successful, hiding options');
-        toast.success(`Successfully locked ${amount} BSV for ${duration} blocks!`);
-        setShowOptions(false);
-        
-        // 9. Call the original onLock handler to refresh UI
-        directLog('Calling original onLock handler to refresh UI');
-        await onLock(postId, amount, duration);
-        
-        logPerformance('Entire lock process completed', startTime);
       } catch (error) {
         directLog('Error during lock process:', error);
         logPerformance('Lock process failed', startTime);
