@@ -3,7 +3,7 @@ import * as React from 'react';
 import { SiBitcoinsv } from 'react-icons/si';
 import { FiX } from 'react-icons/fi';
 import { LockLike } from '../types';
-import { DEFAULT_LOCKLIKE_AMOUNT } from '../types';
+import { DEFAULT_LOCKLIKE_AMOUNT, DEFAULT_LOCKLIKE_BLOCKS } from '../types';
 import { useWallet } from '../providers/WalletProvider';
 import { toast } from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
@@ -31,6 +31,7 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   const [loading, setLoading] = React.useState(false);
   const [showInput, setShowInput] = React.useState(false);
   const [amount, setAmount] = React.useState(DEFAULT_LOCKLIKE_AMOUNT.toString());
+  const [lockDuration, setLockDuration] = React.useState(DEFAULT_LOCKLIKE_BLOCKS.toString());
 
   // Handle escape key press and body scroll lock
   React.useEffect(() => {
@@ -85,6 +86,31 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
     setAmount(newValue);
   };
 
+  const handleDurationChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    const parsedValue = parseInt(newValue, 10);
+    
+    // Don't allow negative numbers
+    if (parsedValue < 0) {
+      setLockDuration('1');
+      return;
+    }
+
+    // Don't allow less than 1 block
+    if (parsedValue < 1) {
+      setLockDuration('1');
+      return;
+    }
+
+    // Cap at 52560 blocks (approximately 1 year)
+    if (parsedValue > 52560) {
+      setLockDuration('52560');
+      return;
+    }
+
+    setLockDuration(newValue);
+  };
+
   const handleLockClick = async () => {
     try {
       if (!isWalletDetected) {
@@ -124,6 +150,7 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
     setLoading(true);
     try {
       const parsedAmount = parseFloat(amount);
+      const parsedDuration = parseInt(lockDuration, 10);
 
       if (isNaN(parsedAmount) || parsedAmount <= 0) {
         throw new Error('Invalid amount');
@@ -131,6 +158,10 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
 
       if (parsedAmount > balance.bsv) {
         throw new Error('Amount exceeds available balance');
+      }
+
+      if (isNaN(parsedDuration) || parsedDuration <= 0) {
+        throw new Error('Invalid lock duration');
       }
 
       // Get the user's identity address
@@ -148,18 +179,20 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
         throw new Error('Could not get current block height');
       }
 
-      const nLockTime = currentblock_height + 1; // Lock for 1 block
+      const nLockTime = currentblock_height + parsedDuration; // Lock for specified blocks
 
-      // Create the lock transaction
+      // Create the lock transaction using the wallet's lockBsv function
       const lockResponse = await wallet.lockBsv([{
         address: addresses.identityAddress,
-        block_height: nLockTime,
-        sats: parsedAmount * SATS_PER_BSV,
+        blockHeight: nLockTime,
+        sats: Math.floor(parsedAmount * SATS_PER_BSV),
       }]);
 
-      if (!lockResponse) {
+      if (!lockResponse || !lockResponse.txid) {
         throw new Error('Failed to create lock transaction');
       }
+
+      console.log('Lock transaction created:', lockResponse);
 
       // Create the lock like record
       const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
@@ -170,9 +203,9 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
         body: JSON.stringify({
           post_id: posttx_id || replytx_id,
           author_address: addresses.identityAddress,
-          amount: parsedAmount * SATS_PER_BSV,
-          lock_duration: nLockTime,
-          tx_id: lockResponse.tx_id,
+          amount: Math.floor(parsedAmount * SATS_PER_BSV),
+          lock_duration: parsedDuration,
+          tx_id: lockResponse.txid,
         }),
       });
 
@@ -181,9 +214,16 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
         throw new Error(error.message || 'Error creating lock like');
       }
 
-      toast.success('Successfully locked BSV!');
+      const responseData = await apiResponse.json();
+      console.log('Lock like created:', responseData);
+
+      toast.success(`Successfully locked ${parsedAmount} BSV for ${parsedDuration} blocks!`);
       setShowInput(false);
       setAmount(DEFAULT_LOCKLIKE_AMOUNT.toString());
+      setLockDuration(DEFAULT_LOCKLIKE_BLOCKS.toString());
+      
+      // Refresh balance after successful lock
+      refreshBalance();
     } catch (error) {
       console.error('Error locking:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to lock BSV');
@@ -249,67 +289,82 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
                         onClick={() => setShowInput(false)}
                       >
                         <span className="sr-only">Close</span>
-                        <FiX className="h-6 w-6" />
+                        <FiX className="h-6 w-6" aria-hidden="true" />
                       </button>
                     </div>
-
-                    {/* Content */}
-                    <div className="p-8">
-                      <h3 className="text-2xl font-semibold text-gray-900 dark:text-white mb-6">
-                        Lock BSV
-                      </h3>
-                      
-                      <div className="space-y-6">
+                    
+                    {/* Modal header */}
+                    <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                      <h3 className="text-lg font-medium text-gray-900 dark:text-white">Lock BSV</h3>
+                    </div>
+                    
+                    {/* Modal body */}
+                    <div className="px-6 py-4">
+                      <div className="space-y-4">
                         <div>
-                          <label className="block text-base font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          <label htmlFor="amount" className="block text-sm font-medium text-gray-700 dark:text-gray-200">
                             Amount (BSV)
                           </label>
-                          <input
-                            type="number"
-                            value={amount}
-                            onChange={handleAmountChange}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                handleLockLike();
-                              } else if (e.key === 'Escape') {
-                                e.preventDefault();
-                                setShowInput(false);
-                              }
-                            }}
-                            onWheel={(e) => {
-                              // Instead of preventing default (which causes the error),
-                              // we handle the wheel event directly
-                              const delta = e.deltaY > 0 ? -1 : 1;
-                              const currentSats = Math.floor(parseFloat(amount) * SATS_PER_BSV);
-                              const newSats = Math.max(MIN_SATS, currentSats + delta);
-                              setAmount((newSats / SATS_PER_BSV).toString());
-                              // Keep focus on the input
-                              e.currentTarget.focus();
-                            }}
-                            className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-700 shadow-sm focus:border-orange-500 focus:ring-orange-500 bg-white dark:bg-gray-900 text-lg py-3 px-4"
-                            placeholder="0.00000000"
-                            min="0"
-                            max={balance.bsv}
-                            step={1 / SATS_PER_BSV}
-                          />
-                          <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
-                            Available balance: {balance.bsv.toLocaleString(undefined, {
-                              minimumFractionDigits: 0,
-                              maximumFractionDigits: 8
-                            })} BSV
-                          </p>
-                          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                            Locks for 1 block (≈ 10 minutes)
+                          <div className="mt-1 relative rounded-md shadow-sm">
+                            <input
+                              type="number"
+                              name="amount"
+                              id="amount"
+                              className="focus:ring-orange-500 focus:border-orange-500 block w-full rounded-md sm:text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                              placeholder="0.001"
+                              value={amount}
+                              onChange={handleAmountChange}
+                              step="0.00000001" // Allow for satoshi-level precision
+                              min="0"
+                              max={balance.bsv.toString()}
+                            />
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Available: {balance.bsv.toFixed(8)} BSV
                           </p>
                         </div>
-                        <button
-                          onClick={handleLockLike}
-                          className="w-full px-6 py-3 text-base font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 transition-colors duration-200"
-                        >
-                          Lock BSV
-                        </button>
+                        
+                        <div>
+                          <label htmlFor="lockDuration" className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                            Lock Duration (blocks)
+                          </label>
+                          <div className="mt-1 relative rounded-md shadow-sm">
+                            <input
+                              type="number"
+                              name="lockDuration"
+                              id="lockDuration"
+                              className="focus:ring-orange-500 focus:border-orange-500 block w-full rounded-md sm:text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                              placeholder={DEFAULT_LOCKLIKE_BLOCKS.toString()}
+                              value={lockDuration}
+                              onChange={handleDurationChange}
+                              step="1"
+                              min="1"
+                            />
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Approximately {Math.round(parseInt(lockDuration, 10) * 10 / 60 / 24)} days
+                          </p>
+                        </div>
                       </div>
+                    </div>
+                    
+                    {/* Modal footer */}
+                    <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+                      <button
+                        type="button"
+                        className="inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 shadow-sm px-4 py-2 bg-white dark:bg-gray-700 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                        onClick={() => setShowInput(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="ml-3 inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-orange-600 text-sm font-medium text-white hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                        onClick={handleLockLike}
+                        disabled={loading || parseFloat(amount) <= 0}
+                      >
+                        Lock BSV
+                      </button>
                     </div>
                   </div>
                 </div>

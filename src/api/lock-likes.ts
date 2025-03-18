@@ -31,6 +31,7 @@ interface LockLikeRequest {
   author_address: string;
   amount: number;
   lock_duration: number;
+  tx_id?: string;   // Optional transaction id from the wallet
 }
 
 interface vote_optionLockRequest {
@@ -38,6 +39,7 @@ interface vote_optionLockRequest {
   author_address: string;
   amount: number;
   lock_duration: number;
+  tx_id?: string;   // Optional transaction id from the wallet
 }
 
 interface LockLikeResponse {
@@ -88,7 +90,7 @@ const handleLockLike = async (
     // Create the lock like record using the post's id
     const lockLike = await prisma.lock_like.create({
       data: {
-        tx_id: `lock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        tx_id: req.body.tx_id || `lock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
         post_id: post.id,
         author_address,
         amount,
@@ -150,7 +152,7 @@ const handlevote_optionLock = async (
     // Create a new lock like for the vote option
     const lockLike = await prisma.lock_like.create({
       data: {
-        tx_id: `lock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        tx_id: req.body.tx_id || `lock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
         author_address,
         amount,
         unlock_height, // Store the lock_duration as unlock_height
