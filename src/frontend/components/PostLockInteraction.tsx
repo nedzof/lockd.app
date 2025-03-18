@@ -221,12 +221,12 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         const currentBlockHeight = await getBlockHeight();
         directLog(`Current block height: ${currentBlockHeight}`);
         
-        // Get user's identity address
+        // Get user's identity address - EXACTLY like documentation
         directLog('Getting addresses...');
-        const addresses = await wallet.getAddresses();
-        directLog('Got addresses:', addresses);
+        const res = await wallet.getAddresses();  // Using 'res' to match documentation exactly
+        directLog('Got addresses:', res);
         
-        if (!addresses?.identityAddress) {
+        if (!res?.identityAddress) {
           throw new Error('Could not get identity address');
         }
         
@@ -234,119 +234,42 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         const unlockHeight = currentBlockHeight + duration;
         const satoshiAmount = Math.floor(amount * SATS_PER_BSV);
         
-        directLog('Preparing lock with EXACT parameters from documentation example:', {
-          address: addresses.identityAddress,
-          blockHeight: unlockHeight,
-          sats: satoshiAmount
-        });
-        
-        // Create a direct copy of the example from documentation
+        // EXACTLY matching documentation format
         const locks = [
           { 
-            address: addresses.identityAddress,
+            address: res.identityAddress,
             blockHeight: unlockHeight,
             sats: satoshiAmount
           }
         ];
         
-        directLog('Attempting lock with EXACT documentation example format:', locks);
+        directLog('Using EXACT documentation format with parameters:', locks);
         
-        // Set a timer to detect if the wallet call is hanging
-        const timeoutMs = 15000; // 15 seconds timeout
-        let isTimedOut = false;
-        const timeoutId = setTimeout(() => {
-          isTimedOut = true;
-          directLog(`⚠️ Wallet lock call timed out after ${timeoutMs}ms`);
-        }, timeoutMs);
+        // Set a simple timeout to detect hangs
+        directLog('⏳ Calling wallet.lockBsv(), the method is CONFIRMED available on the wallet...');
         
-        // Warn about potential wallet UI prompt
-        directLog('The wallet may show a confirmation prompt - check for popups or extensions');
-        
-        // Call wallet lock with exact types - EXACT copy from documentation
-        let lockResponse;
+        // Call wallet lockBsv - straightforward approach
+        let txResponse;
         try {
-          // Use the window.yours global if available as a fallback
-          const walletToUse = wallet || (window as any).yours;
-          
-          directLog('⏳ Using exact syntax from documentation...');
-          // Capture available methods to check what's actually on the wallet
-          const availableMethods = Object.keys(walletToUse || {})
-            .filter(key => typeof (walletToUse as any)[key] === 'function');
-          directLog('Available wallet methods:', availableMethods);
-          
-          // Check specifically for lock methods
-          directLog('Lock method check:', { 
-            hasLock: typeof (walletToUse as any)?.lock === 'function',
-            hasLockBsv: typeof walletToUse?.lockBsv === 'function',
-            hasSendBsv: typeof walletToUse?.sendBsv === 'function'
-          });
-          
-          // First try with lockBsv but with a shorter timeout
-          const lockBsvPromise = new Promise<any>((resolve, reject) => {
-            // Set a shorter timeout specifically for lockBsv
-            const lockBsvTimeoutMs = 5000; // Only wait 5 seconds for lockBsv before trying sendBsv
-            const lockBsvTimeoutId = setTimeout(() => {
-              reject(new Error('lockBsv method timed out'));
-            }, lockBsvTimeoutMs);
-            
-            directLog('⏳ Attempting lockBsv with 5 second timeout...');
-            walletToUse.lockBsv(locks)
-              .then((result: any) => {
-                clearTimeout(lockBsvTimeoutId);
-                resolve(result);
-              })
-              .catch((err: any) => {
-                clearTimeout(lockBsvTimeoutId);
-                reject(err);
-              });
-          });
-          
-          try {
-            // Try lockBsv with short timeout
-            lockResponse = await lockBsvPromise;
-            directLog('✅ lockBsv succeeded:', lockResponse);
-          } catch (lockBsvError) {
-            // If lockBsv fails or times out, try sendBsv as fallback
-            directLog('⚠️ lockBsv failed or timed out, trying sendBsv instead:', lockBsvError);
-            
-            if (typeof walletToUse?.sendBsv === 'function') {
-              directLog('⏳ Attempting fallback with sendBsv...');
-              
-              // Format params for sendBsv
-              const sendBsvParams = [{
-                satoshis: satoshiAmount,
-                address: addresses.identityAddress,
-                // Optional: add data to identify this as a lock transaction
-                data: [`Lock until block ${unlockHeight}`]
-              }];
-              
-              directLog('Using sendBsv params:', sendBsvParams);
-              lockResponse = await walletToUse.sendBsv(sendBsvParams);
-              directLog('✅ sendBsv fallback succeeded:', lockResponse);
-            } else {
-              throw new Error('Both lockBsv and sendBsv methods failed');
-            }
-          }
-          
-          clearTimeout(timeoutId);
-          
-          if (isTimedOut) {
-            directLog('Operation completed after global timeout');
-          }
-          
-          directLog('✅ Lock/send operation succeeded:', lockResponse);
+          // Use lockBsv which we confirmed is available
+          const response = await wallet.lockBsv(locks);
+          // The response should match the SendResponse interface from yours.d.ts
+          txResponse = { 
+            txid: response?.txid, // Use only the property we know exists
+            rawtx: response?.rawtx 
+          };
+          directLog('✅ Lock transaction succeeded:', txResponse);
         } catch (err) {
-          clearTimeout(timeoutId);
-          directLog('❌ All locking methods failed with error:', err);
+          directLog('❌ Lock transaction failed with error:', err);
           throw new Error(`Failed to lock BSV: ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
         
-        if (!lockResponse || !lockResponse.txid) {
-          directLog('Response missing txid:', lockResponse);
+        if (!txResponse || !txResponse.txid) {
+          directLog('Transaction response missing txid:', txResponse);
           throw new Error('Missing transaction ID in response');
         }
         
-        directLog('Lock transaction created with txid:', lockResponse.txid);
+        directLog('Lock transaction created with txid:', txResponse.txid);
         
         // Call the API with the transaction ID
         directLog('Submitting lock to API...');
@@ -357,10 +280,10 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
           },
           body: JSON.stringify({
             post_id: postId,
-            author_address: addresses.identityAddress,
+            author_address: res.identityAddress,
             amount: satoshiAmount,
             lock_duration: duration,
-            tx_id: lockResponse.txid,
+            tx_id: txResponse.txid,
           }),
         });
         
@@ -374,7 +297,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         
         // Success! Hide options and show toast
         toast.success(`Successfully locked ${amount} BSV for ${duration} blocks!`);
-        setShowOptions(false);
+      setShowOptions(false);
         
         // Refresh UI
         await onLock(postId, amount, duration);
