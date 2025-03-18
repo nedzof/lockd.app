@@ -24,6 +24,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const [vote_options, setvote_options] = useState<string[]>(['', '']);
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
+  const [showImagePanel, setShowImagePanel] = useState(false);
   const [error, setError] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
   const { wallet, connect, isConnected } = useWallet();
@@ -189,6 +190,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     setShowTagInput(false);
     setIsVotePost(false);
     setShowScheduleOptions(false);
+    setShowImagePanel(true);
   };
   
   const handleRemoveImage = () => {
@@ -200,15 +202,25 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   };
   
   const handleClickUpload = () => {
-    // If there's already an image, don't show the file dialog again
+    // If there's already an image, toggle the image panel
     if (imagePreview) {
-      // Close other panels and show the image
+      toggleImagePanel();
+      return;
+    }
+    // Otherwise show the file selector
+    fileInputRef.current?.click();
+  };
+
+  const toggleImagePanel = () => {
+    // If we're opening the image panel
+    if (!showImagePanel) {
+      // Close other option panels
       setShowTagInput(false);
       setIsVotePost(false);
       setShowScheduleOptions(false);
-      return;
     }
-    fileInputRef.current?.click();
+    
+    setShowImagePanel(!showImagePanel);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -368,6 +380,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       // Close other option panels
       setShowTagInput(false);
       setIsVotePost(false);
+      setShowImagePanel(false);
     }
     
     setShowScheduleOptions(!showScheduleOptions);
@@ -379,6 +392,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       // Close other option panels
       setShowScheduleOptions(false);
       setIsVotePost(false);
+      setShowImagePanel(false);
     }
     
     setShowTagInput(!showTagInput);
@@ -390,6 +404,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       // Close other option panels
       setShowScheduleOptions(false);
       setShowTagInput(false);
+      setShowImagePanel(false);
       
       // Initialize with two empty options if none exist
       if (vote_options.length === 0 || (vote_options.length === 2 && vote_options.every(opt => opt === ''))) {
@@ -735,13 +750,13 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
             </div>
           )}
           
-          {/* Image preview overlay - shown regardless of which panel is active */}
-          {imagePreview && (showScheduleOptions || showTagInput || isVotePost) && (
+          {/* Image preview overlay - shown when showImagePanel is true */}
+          {imagePreview && showImagePanel && (
             <div className="mt-2 mb-3 relative rounded-lg overflow-hidden shadow-lg border border-gray-800/60 bg-[#13141B]/80">
               <img 
                 src={imagePreview} 
                 alt="Upload preview" 
-                className="max-h-40 w-auto mx-auto rounded-lg"
+                className="max-h-60 w-auto mx-auto rounded-lg"
               />
               <button
                 type="button"
@@ -754,7 +769,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           )}
           
           {/* Larger image preview when no other panels are active */}
-          {imagePreview && !showScheduleOptions && !showTagInput && !isVotePost && (
+          {imagePreview && !showScheduleOptions && !showTagInput && !isVotePost && !showImagePanel && (
             <div className="mt-2 relative rounded-lg overflow-hidden shadow-lg border border-gray-800/60 bg-[#13141B]/80">
               <img 
                 src={imagePreview} 
