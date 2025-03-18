@@ -196,7 +196,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         isLocking,
         hasWallet: !!wallet,
         walletIsReady: wallet?.isReady,
-        walletHasLockBsv: !!wallet?.lockBsv,
+        walletHasSendBsv: !!wallet?.sendBsv,
       });
       
       const startTime = logPerformance('Confirm lock button clicked');
@@ -234,51 +234,49 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         const unlockHeight = currentBlockHeight + duration;
         const satoshiAmount = Math.floor(amount * SATS_PER_BSV);
         
-        directLog('Preparing lock with parameters:', {
+        directLog('Preparing payment with parameters:', {
           address: addresses.identityAddress,
-          blockHeight: unlockHeight,
-          sats: satoshiAmount
+          unlockHeight,
+          satoshis: satoshiAmount
         });
         
-        // Create the params object exactly matching the type definition
-        const lockParams: Array<{
-          address: string;
-          blockHeight: number;
-          sats: number;
-        }> = [{
+        // Use sendBsv instead of lockBsv
+        // Create the params object for sendBsv
+        const paymentParams = [{
+          satoshis: satoshiAmount,
           address: addresses.identityAddress,
-          blockHeight: unlockHeight,
-          sats: satoshiAmount
+          // Optional data to track the lock information
+          data: [`Lock until block: ${unlockHeight}`]
         }];
         
-        directLog('Calling wallet.lockBsv with params:', lockParams);
+        directLog('Calling wallet.sendBsv with params:', paymentParams);
         
         // Set a timer to detect if the wallet call is hanging
         const timeoutMs = 15000; // 15 seconds timeout
         let isTimedOut = false;
         const timeoutId = setTimeout(() => {
           isTimedOut = true;
-          directLog(`⚠️ lockBsv call timed out after ${timeoutMs}ms`);
+          directLog(`⚠️ sendBsv call timed out after ${timeoutMs}ms`);
         }, timeoutMs);
         
         // Warn about potential wallet UI prompt
         directLog('The wallet may show a confirmation prompt - check for popups or extensions');
         
-        // Call wallet lockBsv with exact types
+        // Call wallet sendBsv instead of lockBsv
         let lockResponse;
         try {
-          directLog('⏳ wallet.lockBsv call started...');
-          lockResponse = await wallet.lockBsv(lockParams);
+          directLog('⏳ wallet.sendBsv call started...');
+          lockResponse = await wallet.sendBsv(paymentParams);
           clearTimeout(timeoutId);
           
           if (isTimedOut) {
-            directLog('lockBsv call completed after timeout');
+            directLog('sendBsv call completed after timeout');
           }
           
-          directLog('✅ wallet.lockBsv call succeeded:', lockResponse);
+          directLog('✅ wallet.sendBsv call succeeded:', lockResponse);
         } catch (err) {
           clearTimeout(timeoutId);
-          directLog('❌ wallet.lockBsv call failed with error:', err);
+          directLog('❌ wallet.sendBsv call failed with error:', err);
           throw err;
         }
         
@@ -287,7 +285,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
           throw new Error('Missing transaction ID in response');
         }
         
-        directLog('Lock transaction created with txid:', lockResponse.txid);
+        directLog('Transaction created with txid:', lockResponse.txid);
         
         // Call the API with the transaction ID
         directLog('Submitting lock to API...');
