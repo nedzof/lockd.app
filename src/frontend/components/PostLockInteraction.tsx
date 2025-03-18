@@ -249,13 +249,13 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         } catch (err) {
           directLog('First approach failed:', err);
           
-          // If that fails, try with plain parameters
-          directLog('Trying alternative parameter structure');
+          // Last resort - try as a direct object not in array
+          directLog('Trying as direct object');
           lockResponse = await wallet.lockBsv({
             address: addresses.identityAddress,
             blockHeight: unlockHeight,
             sats: satoshiAmount
-          });
+          } as any); // Use type assertion to bypass type checking
         }
         
         directLog('Wallet response:', lockResponse);
