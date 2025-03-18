@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FiLock, FiInfo, FiBell } from 'react-icons/fi';
+import { FiSettings, FiInfo, FiBell } from 'react-icons/fi';
 import axios from 'axios';
 import { createPortal } from 'react-dom';
 
@@ -9,20 +9,6 @@ const API_BASE_URL = '/api'; // This will use the Vite proxy configuration
 // Hard-coded VAPID key as fallback - get from env variable if available
 const PUBLIC_VAPID_KEY = import.meta.env.VITE_PUBLIC_VAPID_KEY || 'BMQUltZhc7nPTZSef5a-GtJF1QakZgQRHQA7l0Brh5BhRUya32Y8rlKdBl-xVnPRCdKI6tRosY7LBsrGuEXyE3E';
 
-// Predefined threshold values (exponentially rising)
-const THRESHOLD_VALUES = [
-  1,    // 1 BSV
-  2,    // 2 BSV
-  5,    // 5 BSV
-  10,   // 10 BSV
-  20,   // 20 BSV
-  50,   // 50 BSV
-  100,  // 100 BSV
-  200,  // 200 BSV
-  500,  // 500 BSV
-  1000  // 1000 BSV
-];
-
 interface ThresholdSettingsProps {
   connected: boolean;
   walletAddress?: string;
@@ -30,8 +16,7 @@ interface ThresholdSettingsProps {
 
 const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, walletAddress }) => {
   const [showModal, setShowModal] = useState(false);
-  const [milestoneThreshold, setMilestoneThreshold] = useState<number>(1);
-  const [selectedThresholdIndex, setSelectedThresholdIndex] = useState<number>(0);
+  const [milestoneThreshold, setMilestoneThreshold] = useState<number>(0.1);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
   const [isSubscribing, setIsSubscribing] = useState<boolean>(false);
   const [notificationError, setNotificationError] = useState<string | null>(null);
@@ -69,14 +54,7 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
             
             // If there's a threshold set, use it
             if (response.data.threshold) {
-              // Find the closest threshold value
-              const closestIndex = THRESHOLD_VALUES.reduce((prev, curr, index) => {
-                return Math.abs(curr - response.data.threshold) < Math.abs(THRESHOLD_VALUES[prev] - response.data.threshold)
-                  ? index
-                  : prev;
-              }, 0);
-              setSelectedThresholdIndex(closestIndex);
-              setMilestoneThreshold(THRESHOLD_VALUES[closestIndex]);
+              setMilestoneThreshold(response.data.threshold);
             }
           }
         } catch (error) {
@@ -95,15 +73,29 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
     }
   }, [connected]);
   
+  // Handle threshold change
+  const handleThresholdChange = (value: string) => {
+    // Convert to number and validate
+    const numValue = parseFloat(value);
+    
+    if (!isNaN(numValue) && numValue > 0) {
+      setMilestoneThreshold(numValue);
+      
+      // If notifications are enabled, update the subscription
+      if (notificationsEnabled) {
+        updateNotificationSubscription(numValue);
+      }
+    }
+  };
+  
   // Handle slider change
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const index = parseInt(e.target.value);
-    setSelectedThresholdIndex(index);
-    setMilestoneThreshold(THRESHOLD_VALUES[index]);
+    const value = parseFloat(e.target.value);
+    setMilestoneThreshold(Number(value.toFixed(2))); // Round to 2 decimal places
     
     // If notifications are enabled, update the subscription
     if (notificationsEnabled) {
-      updateNotificationSubscription(THRESHOLD_VALUES[index]);
+      updateNotificationSubscription(value);
     }
   };
   
@@ -490,15 +482,13 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
   return (
     <>
       <button
+        data-threshold-settings-toggle
         onClick={openModal}
-        className="hidden"
+        className="flex items-center space-x-1 text-xs px-2 py-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/5 border border-transparent transition-all duration-200"
         title="BSV Threshold Settings"
-        data-threshold-settings-toggle="true"
       >
-        <FiLock className="w-4 h-4" />
-        {!connected && (
-          <span className="text-sm font-medium">BSV Threshold</span>
-        )}
+        <FiSettings className="w-3 h-3" />
+        <span className="hidden sm:inline-block whitespace-nowrap">Threshold</span>
       </button>
       
       {showModal && createPortal(
@@ -599,25 +589,25 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
             <div className="mb-6">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-gray-300">Threshold:</span>
-                <span className="text-[#00ffa3] font-medium">{milestoneThreshold} BSV</span>
+                <span className="text-[#00ffa3] font-medium">{milestoneThreshold.toFixed(2)} BSV</span>
               </div>
               
               <div className="relative mb-6 px-1 pt-1">
                 <input
                   type="range"
-                  min="0"
-                  max={THRESHOLD_VALUES.length - 1}
-                  step="1"
-                  value={selectedThresholdIndex}
+                  min="0.01"
+                  max="10"
+                  step="0.01"
+                  value={milestoneThreshold}
                   onChange={handleSliderChange}
                   className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[#00ffa3]"
                   style={{
-                    background: `linear-gradient(to right, #00ffa3 0%, #00ffa3 ${(selectedThresholdIndex / (THRESHOLD_VALUES.length - 1)) * 100}%, #374151 ${(selectedThresholdIndex / (THRESHOLD_VALUES.length - 1)) * 100}%, #374151 100%)`
+                    background: `linear-gradient(to right, #00ffa3 0%, #00ffa3 ${(milestoneThreshold / 10) * 100}%, #374151 ${(milestoneThreshold / 10) * 100}%, #374151 100%)`
                   }}
                 />
                 <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>{THRESHOLD_VALUES[0]}</span>
-                  <span>{THRESHOLD_VALUES[THRESHOLD_VALUES.length - 1]}</span>
+                  <span>0.01</span>
+                  <span>10</span>
                 </div>
               </div>
               

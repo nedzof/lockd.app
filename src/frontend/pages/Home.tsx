@@ -452,23 +452,8 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                     </button>
                   ))}
                   
-                  {/* Threshold Settings with label */}
-                  <div className="relative">
-                    <button
-                      onClick={() => {
-                        const settingsButton = document.querySelector('[data-threshold-settings-toggle]');
-                        if (settingsButton) {
-                          (settingsButton as HTMLButtonElement).click();
-                        }
-                      }}
-                      className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
-                      title="Threshold Settings"
-                    >
-                      <FiSettings size={12} />
-                      <span className="hidden sm:inline-block whitespace-nowrap">Settings</span>
-                    </button>
-                    <ThresholdSettings connected={connected} walletAddress={bsvAddress || undefined} />
-                  </div>
+                  {/* Threshold Settings */}
+                  <ThresholdSettings connected={connected} walletAddress={bsvAddress || undefined} />
                 </div>
               )}
               
