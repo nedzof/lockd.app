@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX, FiLink } from 'react-icons/fi';
+import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX, FiLink, FiCalendar } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
@@ -19,42 +19,30 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const navigate = useNavigate();
   const isPosts = location.pathname === '/posts' || location.pathname === '/';
   const isStats = location.pathname === '/stats';
-  const [time_filter, settime_filter] = useState('');
+  const [period_filter, setPeriod_filter] = useState('');
   const [ranking_filter, setranking_filter] = useState('top-1');
   const [personal_filter, setpersonal_filter] = useState('');
-  const [block_filter, setblock_filter] = useState('');
   const [selected_tags, setselected_tags] = useState<string[]>([]);
   const [tx_filter, setTx_filter] = useState('');
   
   // Add refs for dropdown menus
-  const timeDropdownRef = useRef<HTMLDivElement>(null);
-  const blockDropdownRef = useRef<HTMLDivElement>(null);
+  const periodDropdownRef = useRef<HTMLDivElement>(null);
   const rankingDropdownRef = useRef<HTMLDivElement>(null);
   const txDropdownRef = useRef<HTMLDivElement>(null);
   
   // Add state for dropdown visibility
-  const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
-  const [blockDropdownOpen, setBlockDropdownOpen] = useState(false);
+  const [periodDropdownOpen, setPeriodDropdownOpen] = useState(false);
   const [rankingDropdownOpen, setRankingDropdownOpen] = useState(false);
   const [txDropdownOpen, setTxDropdownOpen] = useState(false);
   
-  // Add predefined options for dropdowns
-  const timeOptions = [
-    { id: '1d', label: '24 Hours' },
-    { id: '3d', label: '3 Days' },
-    { id: '7d', label: '7 Days' },
-    { id: '14d', label: '2 Weeks' },
-    { id: '30d', label: '30 Days' },
-    { id: '90d', label: '90 Days' }
-  ];
-  
-  const blockOptions = [
-    { id: 'last-block', label: 'Last Block' },
-    { id: 'last-5-blocks', label: 'Last 5 Blocks' },
-    { id: 'last-10-blocks', label: 'Last 10 Blocks' },
-    { id: 'last-20-blocks', label: 'Last 20 Blocks' },
-    { id: 'last-50-blocks', label: 'Last 50 Blocks' },
-    { id: 'last-100-blocks', label: 'Last 100 Blocks' }
+  // Add combined time period options
+  const timePeriodOptions = [
+    { id: '1d', label: '24 Hours', type: 'time' },
+    { id: '7d', label: '7 Days', type: 'time' },
+    { id: '30d', label: '30 Days', type: 'time' },
+    { id: 'last-block', label: 'Latest Block', type: 'block' },
+    { id: 'last-10-blocks', label: 'Last 10 Blocks', type: 'block' },
+    { id: 'last-50-blocks', label: 'Last 50 Blocks', type: 'block' }
   ];
   
   const rankingOptions = [
@@ -69,11 +57,8 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   // Function to close dropdowns when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (timeDropdownRef.current && !timeDropdownRef.current.contains(event.target as Node)) {
-        setTimeDropdownOpen(false);
-      }
-      if (blockDropdownRef.current && !blockDropdownRef.current.contains(event.target as Node)) {
-        setBlockDropdownOpen(false);
+      if (periodDropdownRef.current && !periodDropdownRef.current.contains(event.target as Node)) {
+        setPeriodDropdownOpen(false);
       }
       if (rankingDropdownRef.current && !rankingDropdownRef.current.contains(event.target as Node)) {
         setRankingDropdownOpen(false);
@@ -89,37 +74,20 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     };
   }, []);
 
-  const handletime_filter = (filter: string) => {
+  const handlePeriodFilter = (filter: string) => {
     // If the same filter is clicked again, clear it
-    if (time_filter === filter) {
-      settime_filter('');
+    if (period_filter === filter) {
+      setPeriod_filter('');
     } else {
-      // Set the new filter and clear block filter
-      settime_filter(filter);
-      setblock_filter(''); // Clear block filter when time filter is set
+      // Set the new filter
+      setPeriod_filter(filter);
     }
     
     // Close dropdown
-    setTimeDropdownOpen(false);
+    setPeriodDropdownOpen(false);
     
     // Log the filter change
-    console.log(`Set time filter to: ${filter || 'none'}, cleared block filter`);
-  };
-
-  const handleblock_filter = (filter: string) => {
-    // If the same filter is clicked again, clear it
-    if (block_filter === filter) {
-      setblock_filter('');
-    } else {
-      // Otherwise, set the new filter and clear other filter types
-      setblock_filter(filter);
-      settime_filter(''); // Clear time filter when block filter is set
-    }
-    
-    // Close dropdown
-    setBlockDropdownOpen(false);
-    
-    console.log(`Set block filter to: ${filter || 'none'}`);
+    console.log(`Set period filter to: ${filter || 'none'}`);
   };
 
   const handleranking_filter = (filter: string) => {
@@ -154,11 +122,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
   const handleRefreshPosts = useCallback(() => {
     // Reset all filters
-    settime_filter('');
-    setblock_filter('');
+    setPeriod_filter('');
     setranking_filter('top-1');
     setpersonal_filter('');
     setselected_tags([]);
+    setTx_filter('');
     
     console.log('Refreshing posts with reset filters...');
   }, []);
@@ -176,16 +144,16 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     console.log(`Added tag from post: ${tag}`);
   }, [selected_tags]);
 
-  // Get the current time filter label
-  const getCurrentTimeFilterLabel = () => {
-    const option = timeOptions.find(option => option.id === time_filter);
-    return option ? option.label : 'Time';
+  // Get the current period filter label
+  const getCurrentPeriodFilterLabel = () => {
+    const option = timePeriodOptions.find(option => option.id === period_filter);
+    return option ? option.label : 'Time Period';
   };
   
-  // Get the current block filter label
-  const getCurrentBlockFilterLabel = () => {
-    const option = blockOptions.find(option => option.id === block_filter);
-    return option ? option.label : 'Blocks';
+  // Get the period filter type (time or block)
+  const getPeriodFilterType = () => {
+    const option = timePeriodOptions.find(option => option.id === period_filter);
+    return option ? option.type : null;
   };
   
   // Get the current ranking filter label
@@ -211,8 +179,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
   // Function to clear all filters
   const clearAllFilters = () => {
-    settime_filter('');
-    setblock_filter('');
+    setPeriod_filter('');
     setranking_filter('');
     setpersonal_filter('');
     setselected_tags([]);
@@ -220,16 +187,35 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   };
 
   // Check if any filter is active
-  const isAnyFilterActive = time_filter || block_filter || ranking_filter || personal_filter || selected_tags.length > 0 || tx_filter;
+  const isAnyFilterActive = period_filter || ranking_filter || personal_filter || selected_tags.length > 0 || tx_filter;
+
+  // Determine time_filter and block_filter values for PostGrid based on period_filter
+  const getFiltersForPostGrid = () => {
+    const periodType = getPeriodFilterType();
+    
+    if (!period_filter) {
+      return { time_filter: '', block_filter: '' };
+    }
+    
+    if (periodType === 'time') {
+      return { time_filter: period_filter, block_filter: '' };
+    } else {
+      return { time_filter: '', block_filter: period_filter };
+    }
+  };
 
   // Memoize the user_id to prevent unnecessary re-renders
   const memoizeduser_id = useMemo(() => {
     return connected && bsvAddress ? bsvAddress : 'anon';
   }, [connected, bsvAddress]);
 
+  // Get time and block filter values for PostGrid
+  const { time_filter, block_filter } = getFiltersForPostGrid();
+
   // Debug current filter state
   useEffect(() => {
     console.log('Current filter state:', {
+      period_filter,
       time_filter,
       block_filter,
       ranking_filter,
@@ -238,7 +224,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       tx_filter,
       user_id: memoizeduser_id
     });
-  }, [time_filter, block_filter, ranking_filter, personal_filter, selected_tags, tx_filter, memoizeduser_id]);
+  }, [period_filter, ranking_filter, personal_filter, selected_tags, tx_filter, memoizeduser_id, time_filter, block_filter]);
 
   const renderContent = () => {
     if (isStats) {
@@ -272,89 +258,63 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 <FiFilter size={16} />
               </div>
               
-              {/* Time Filter Dropdown */}
-              <div ref={timeDropdownRef} className="relative">
+              {/* Time Period Filter Dropdown */}
+              <div ref={periodDropdownRef} className="relative">
                 <button
                   onClick={() => {
-                    setTimeDropdownOpen(!timeDropdownOpen);
-                    setBlockDropdownOpen(false);
+                    setPeriodDropdownOpen(!periodDropdownOpen);
                     setRankingDropdownOpen(false);
+                    setTxDropdownOpen(false);
                   }}
-                  className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-28 ${
-                    time_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
+                  className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-32 ${
+                    period_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
                   }`}
                 >
                   <div className="flex items-center space-x-1.5">
-                    <FiClock size={12} />
-                    <span className="truncate">{getCurrentTimeFilterLabel()}</span>
+                    <FiCalendar size={12} />
+                    <span className="truncate">{getCurrentPeriodFilterLabel()}</span>
                   </div>
-                  <FiChevronDown size={12} className={`transition-transform duration-200 ${timeDropdownOpen ? 'rotate-180' : ''}`} />
+                  <FiChevronDown size={12} className={`transition-transform duration-200 ${periodDropdownOpen ? 'rotate-180' : ''}`} />
                 </button>
                 
-                {timeDropdownOpen && (
-                  <div className="absolute z-10 mt-1 w-36 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
-                    {time_filter && (
+                {periodDropdownOpen && (
+                  <div className="absolute z-10 mt-1 w-40 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
+                    {period_filter && (
                       <button
-                        onClick={() => handletime_filter('')}
+                        onClick={() => handlePeriodFilter('')}
                         className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
                       >
                         <FiX size={12} className="mr-1.5" />
-                        Clear Time Filter
+                        Clear Period Filter
                       </button>
                     )}
-                    {timeOptions.map(option => (
+                    
+                    {/* Time-based options */}
+                    <div className="px-3 py-1 text-xs text-gray-500">Time-based</div>
+                    {timePeriodOptions.filter(option => option.type === 'time').map(option => (
                       <button
                         key={option.id}
-                        onClick={() => handletime_filter(option.id)}
+                        onClick={() => handlePeriodFilter(option.id)}
                         className={`flex items-center w-full px-3 py-1.5 text-xs ${
-                          time_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
+                          period_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
                         }`}
                       >
+                        <FiClock size={10} className="mr-1.5" />
                         {option.label}
                       </button>
                     ))}
-                  </div>
-                )}
-              </div>
-              
-              {/* Block Filter Dropdown */}
-              <div ref={blockDropdownRef} className="relative">
-                <button
-                  onClick={() => {
-                    setBlockDropdownOpen(!blockDropdownOpen);
-                    setTimeDropdownOpen(false);
-                    setRankingDropdownOpen(false);
-                  }}
-                  className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-32 ${
-                    block_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
-                  }`}
-                >
-                  <div className="flex items-center space-x-1.5">
-                    <FiTrendingUp size={12} />
-                    <span className="truncate">{getCurrentBlockFilterLabel()}</span>
-                  </div>
-                  <FiChevronDown size={12} className={`transition-transform duration-200 ${blockDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
-                
-                {blockDropdownOpen && (
-                  <div className="absolute z-10 mt-1 w-40 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
-                    {block_filter && (
-                      <button
-                        onClick={() => handleblock_filter('')}
-                        className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
-                      >
-                        <FiX size={12} className="mr-1.5" />
-                        Clear Block Filter
-                      </button>
-                    )}
-                    {blockOptions.map(option => (
+                    
+                    {/* Block-based options */}
+                    <div className="px-3 py-1 text-xs text-gray-500 mt-1">Block-based</div>
+                    {timePeriodOptions.filter(option => option.type === 'block').map(option => (
                       <button
                         key={option.id}
-                        onClick={() => handleblock_filter(option.id)}
+                        onClick={() => handlePeriodFilter(option.id)}
                         className={`flex items-center w-full px-3 py-1.5 text-xs ${
-                          block_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
+                          period_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
                         }`}
                       >
+                        <FiTrendingUp size={10} className="mr-1.5" />
                         {option.label}
                       </button>
                     ))}
@@ -367,8 +327,8 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 <button
                   onClick={() => {
                     setRankingDropdownOpen(!rankingDropdownOpen);
-                    setTimeDropdownOpen(false);
-                    setBlockDropdownOpen(false);
+                    setPeriodDropdownOpen(false);
+                    setTxDropdownOpen(false);
                   }}
                   className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-28 ${
                     ranking_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
@@ -412,8 +372,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 <button
                   onClick={() => {
                     setTxDropdownOpen(!txDropdownOpen);
-                    setTimeDropdownOpen(false);
-                    setBlockDropdownOpen(false);
+                    setPeriodDropdownOpen(false);
                     setRankingDropdownOpen(false);
                   }}
                   className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-32 ${
