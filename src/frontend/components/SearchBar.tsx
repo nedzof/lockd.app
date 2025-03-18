@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { FiSearch, FiX } from 'react-icons/fi';
 import { API_URL } from '../config';
@@ -12,6 +12,7 @@ const SearchBar: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchType, setSearchType] = useState<string>('all');
   const [isExpanded, setIsExpanded] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -60,13 +61,28 @@ const SearchBar: React.FC = () => {
       setIsExpanded(false);
     }
   };
+
+  // Add click outside handler to close the expanded search
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node) && isExpanded) {
+        setIsExpanded(false);
+      }
+    }
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isExpanded]);
   
   return (
-    <div className="relative z-30 inline-block w-auto">
+    <div ref={containerRef} className="relative z-30 min-w-[44px] md:min-w-[56px]">
       {isExpanded ? (
         <form 
           onSubmit={handleSearch}
-          className="flex items-center bg-[#13141B] border border-gray-700/30 rounded-md overflow-hidden transition-all duration-300 w-64 shadow-lg absolute right-0 top-0"
+          className="flex items-center bg-[#13141B] border border-gray-700/30 rounded-md overflow-hidden transition-all duration-300 w-44 md:w-56 shadow-xl fixed md:absolute right-3 md:right-0 top-3 md:top-0"
+          onClick={(e) => e.stopPropagation()}
         >
           <input
             id="search-input"
