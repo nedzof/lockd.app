@@ -9,6 +9,42 @@ import { toast } from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
 import { createPortal } from 'react-dom';
 
+// Block height cache to prevent repeated network calls
+// This caches the block height for 10 minutes (600000ms)
+const BLOCK_HEIGHT_CACHE_DURATION = 600000;
+let cachedBlockHeight: number | null = null;
+let blockHeightCacheTime: number = 0;
+
+// Get current block height with caching
+const getBlockHeight = async (): Promise<number> => {
+  const now = Date.now();
+  
+  // Use cached value if available and not expired
+  if (cachedBlockHeight && now - blockHeightCacheTime < BLOCK_HEIGHT_CACHE_DURATION) {
+    console.log('[LockLike] Using cached block height:', cachedBlockHeight);
+    return cachedBlockHeight;
+  }
+
+  try {
+    console.log('[LockLike] Fetching current block height from API');
+    const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+    const data = await response.json();
+    
+    if (data.blocks) {
+      cachedBlockHeight = data.blocks;
+      blockHeightCacheTime = now;
+      console.log('[LockLike] Updated cached block height:', cachedBlockHeight);
+      return data.blocks;
+    }
+    
+    throw new Error('Block height not found in API response');
+  } catch (error) {
+    console.error('[LockLike] Error fetching block height:', error);
+    // Fallback to approximate BSV block height if we can't get real data
+    return 800000;
+  }
+};
+
 // Create a performance logging utility
 const logPerformance = (step: string, startTime?: number) => {
   const now = performance.now();
@@ -42,6 +78,11 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   
   // Add a ref to track the operation sequence
   const operationIdRef = React.useRef(0);
+  
+  // Pre-fetch block height on component mount
+  React.useEffect(() => {
+    getBlockHeight().catch(err => console.error("Failed to pre-fetch block height:", err));
+  }, []);
 
   // Handle escape key press and body scroll lock
   React.useEffect(() => {
@@ -137,30 +178,34 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
         return;
       }
 
+      // Set showInput immediately for better UX
+      setShowInput(true);
+      
+      // If wallet is not connected, connect it
       if (!isConnected) {
-        const connectStartTime = logPerformance(`[${operationId}] Starting wallet connection`);
-        const loadingToastId = toast.loading('Connecting wallet...');
         try {
+          const connectStartTime = logPerformance(`[${operationId}] Starting wallet connection`);
           await connect();
           logPerformance(`[${operationId}] Wallet connection completed`, connectStartTime);
-          toast.dismiss(loadingToastId);
           toast.success('Wallet connected successfully!');
         } catch (error) {
           logPerformance(`[${operationId}] Wallet connection failed`, connectStartTime);
-          toast.dismiss(loadingToastId);
           console.error('Error connecting wallet:', error);
           toast.error(error instanceof Error ? error.message : 'Failed to connect wallet');
+          setShowInput(false); // Close modal if connection fails
           return;
         }
       }
 
-      // Only show input after confirming wallet is connected
+      // Start pre-fetching block height asynchronously, but don't wait for it
+      getBlockHeight().catch(err => console.warn("Prefetch block height error:", err));
+      
       logPerformance(`[${operationId}] Showing lock input modal`, startTime);
-      setShowInput(true);
     } catch (error) {
       logPerformance(`[${operationId}] Error in lock click handler`, startTime);
       console.error('Error handling lock click:', error);
       toast.error(error instanceof Error ? error.message : 'An error occurred');
+      setShowInput(false);
     }
   };
 
@@ -203,11 +248,9 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
         throw new Error('Could not get identity address');
       }
 
-      // Get current block height from the network
+      // Get current block height from the network using our optimized cached getter
       const blockHeightStartTime = logPerformance(`[${operationId}] Fetching current block height`);
-      const currentblock_height = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info')
-        .then(res => res.json())
-        .then(data => data.blocks);
+      const currentblock_height = await getBlockHeight();
       logPerformance(`[${operationId}] Got current block height: ${currentblock_height}`, blockHeightStartTime);
 
       if (!currentblock_height) {
