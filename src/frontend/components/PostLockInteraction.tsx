@@ -208,157 +208,91 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         return;
       }
       
-      // Validate amount and duration
-      if (amount < MIN_BSV_AMOUNT) {
-        directLog(`Amount (${amount}) below minimum (${MIN_BSV_AMOUNT}), aborting`);
-        toast.error(`Minimum amount is ${MIN_BSV_AMOUNT} BSV`);
-        return;
-      }
-      
-      if (duration < MIN_LOCK_DURATION) {
-        directLog(`Duration (${duration}) below minimum (${MIN_LOCK_DURATION}), aborting`);
-        toast.error(`Minimum duration is ${MIN_LOCK_DURATION} blocks`);
-        return;
-      }
-      
-      directLog(`Starting lock process for post ${postId}`);
-      directLog(`Lock parameters: amount=${amount}, duration=${duration}`);
-      
       // Set internal loading state
       setInternalLoading(true);
       
       try {
-        // 1. Get current block height
-        directLog('Getting current block height');
-        const blockHeightStartTime = logPerformance('Fetching current block height');
+        // Get current block height
         const currentBlockHeight = await getBlockHeight();
         directLog(`Current block height: ${currentBlockHeight}`);
-        logPerformance('Got current block height', blockHeightStartTime);
         
-        // 2. Get user's identity address
-        directLog('Getting user identity address');
-        const addressStartTime = logPerformance('Getting user identity address');
+        // Get user's identity address
         const addresses = await wallet.getAddresses();
         directLog('Got addresses:', addresses);
-        logPerformance('Got user identity address', addressStartTime);
         
         if (!addresses?.identityAddress) {
           throw new Error('Could not get identity address');
         }
         
-        // 3. Calculate unlock height
+        // Calculate unlock height and satoshi amount
         const unlockHeight = currentBlockHeight + duration;
-        directLog(`Calculated unlock height: ${unlockHeight}`);
-        
-        // 4. Convert BSV to satoshis
         const satoshiAmount = Math.floor(amount * SATS_PER_BSV);
-        directLog(`Converting ${amount} BSV to ${satoshiAmount} satoshis`);
         
-        // Ensure minimum satoshi amount (extra safety check)
-        if (satoshiAmount < MIN_BSV_AMOUNT * SATS_PER_BSV) {
-          throw new Error(`Lock amount too small. Minimum is ${MIN_BSV_AMOUNT} BSV`);
-        }
-        
-        // 5. Create lock parameters for wallet.lockBsv
-        const lockParams = [{
+        directLog('Lock parameters:', {
           address: addresses.identityAddress,
-          blockHeight: Math.floor(unlockHeight),
-          sats: Math.floor(satoshiAmount),
-        }];
-        directLog('Lock parameters for wallet:', lockParams);
-        
-        // 6. Call wallet.lockBsv to trigger wallet confirmation prompt
-        directLog('Calling wallet.lockBsv to trigger confirmation prompt');
-        directLog('Detailed parameter inspection:', {
-          address: addresses.identityAddress,
-          blockHeight: Math.floor(unlockHeight),
-          sats: Math.floor(satoshiAmount),
-          addressType: typeof addresses.identityAddress,
-          blockHeightType: typeof Math.floor(unlockHeight),
-          satsType: typeof Math.floor(satoshiAmount)
+          blockHeight: unlockHeight,
+          sats: satoshiAmount
         });
         
-        const walletStartTime = logPerformance('Calling wallet.lockBsv');
-        
+        // Simplest possible call to lockBsv
+        let lockResponse;
         try {
-          // Try with a more direct parameter object approach
-          directLog('Using array of parameters for lockBsv');
-          const lockResponse = await wallet.lockBsv([{
+          // First try with the array of objects approach
+          directLog('Attempting lockBsv with array of objects');
+          lockResponse = await wallet.lockBsv([
+            {
+              address: addresses.identityAddress,
+              blockHeight: unlockHeight,
+              sats: satoshiAmount
+            }
+          ]);
+        } catch (err) {
+          directLog('First approach failed:', err);
+          
+          // If that fails, try with plain parameters
+          directLog('Trying alternative parameter structure');
+          lockResponse = await wallet.lockBsv({
             address: addresses.identityAddress,
-            blockHeight: Math.floor(unlockHeight),
-            sats: Math.floor(satoshiAmount)
-          }]);
-          
-          directLog('Wallet lock response:', lockResponse);
-          logPerformance('Received wallet lock response', walletStartTime);
-          
-          if (!lockResponse || !lockResponse.txid) {
-            throw new Error('Failed to create lock transaction');
-          }
-          
-          // 7. Now call the API with the transaction ID
-          directLog(`Calling API with tx_id: ${lockResponse.txid}`);
-          const apiStartTime = logPerformance('Calling lock API');
-          
-          // Create the API request body with the tx_id from the wallet
-          const apiRequestBody = {
+            blockHeight: unlockHeight,
+            sats: satoshiAmount
+          });
+        }
+        
+        directLog('Wallet response:', lockResponse);
+        
+        if (!lockResponse || !lockResponse.txid) {
+          throw new Error('Failed to create lock transaction');
+        }
+        
+        // Call the API with the transaction ID
+        const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
             post_id: postId,
             author_address: addresses.identityAddress,
-            amount: Math.floor(satoshiAmount), // Ensure integer
-            lock_duration: Math.floor(duration), // Ensure integer
+            amount: satoshiAmount,
+            lock_duration: duration,
             tx_id: lockResponse.txid,
-          };
-          
-          directLog('API request payload:', apiRequestBody);
-          
-          // Call the lock API
-          const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(apiRequestBody),
-          });
-          
-          const responseStatus = apiResponse.status;
-          directLog(`API response status: ${responseStatus}`);
-          
-          let responseBody;
-          try {
-            responseBody = await apiResponse.json();
-            directLog('API response body:', responseBody);
-          } catch (jsonError) {
-            directLog('Error parsing API response:', jsonError);
-            responseBody = null;
-          }
-          
-          logPerformance('API call completed', apiStartTime);
-          
-          if (!apiResponse.ok) {
-            throw new Error(responseBody?.message || responseBody?.error || `API error: ${responseStatus}`);
-          }
-          
-          // 8. Hide options and show success toast
-          directLog('Lock successful, hiding options');
-          toast.success(`Successfully locked ${amount} BSV for ${duration} blocks!`);
-      setShowOptions(false);
-          
-          // 9. Call the original onLock handler to refresh UI
-          directLog('Calling original onLock handler to refresh UI');
-          await onLock(postId, amount, duration);
-          
-          logPerformance('Entire lock process completed', startTime);
-        } catch (walletError) {
-          directLog('Error during wallet lock operation:', walletError);
-          logPerformance('Wallet lock process failed', walletStartTime);
-          toast.error(walletError instanceof Error ? walletError.message : 'Failed to lock BSV');
-          throw walletError;
+          }),
+        });
+        
+        if (!apiResponse.ok) {
+          throw new Error('API error when creating lock');
         }
+        
+        // Success! Hide options and show toast
+        toast.success(`Successfully locked ${amount} BSV for ${duration} blocks!`);
+        setShowOptions(false);
+        
+        // Refresh UI
+        await onLock(postId, amount, duration);
+        
       } catch (error) {
         directLog('Error during lock process:', error);
-        logPerformance('Lock process failed', startTime);
         toast.error(error instanceof Error ? error.message : 'Failed to lock BSV');
-        throw error;
       } finally {
         setInternalLoading(false);
       }
