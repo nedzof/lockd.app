@@ -54,6 +54,8 @@ interface PostGridProps {
   selected_tags: string[];
   user_id: string;
   onTagSelect?: (tag: string) => void;
+  searchTerm?: string;
+  searchType?: string;
 }
 
 // Add debounce utility
@@ -100,7 +102,9 @@ const PostGrid: React.FC<PostGridProps> = ({
   block_filter,
   selected_tags,
   user_id,
-  onTagSelect
+  onTagSelect,
+  searchTerm,
+  searchType = 'all'
 }) => {
   const [submissions, setSubmissions] = useState<ExtendedPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -128,7 +132,9 @@ const PostGrid: React.FC<PostGridProps> = ({
     personal_filter: '',
     block_filter: '',
     selected_tags: [] as string[],
-    user_id: ''
+    user_id: '',
+    searchTerm: '',
+    searchType: ''
   });
   // Add a ref for the intersection observer loader element
   const loaderRef = useRef<HTMLDivElement>(null);
@@ -140,8 +146,10 @@ const PostGrid: React.FC<PostGridProps> = ({
     personal_filter,
     block_filter,
     selected_tags,
-    user_id
-  }), [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
+    user_id,
+    searchTerm,
+    searchType
+  }), [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, searchTerm, searchType]);
 
   // Function to check if filters have changed
   const haveFiltersChanged = useCallback(() => {
@@ -162,9 +170,11 @@ const PostGrid: React.FC<PostGridProps> = ({
       prevFilters.current.personal_filter !== personal_filter ||
       prevFilters.current.block_filter !== block_filter ||
       prevFilters.current.user_id !== user_id ||
+      prevFilters.current.searchTerm !== searchTerm ||
+      prevFilters.current.searchType !== searchType ||
       !areTagsEqual()
     );
-  }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
+  }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, searchTerm, searchType]);
 
   const fetchPosts = useCallback(async (reset = true) => {
     if (!isMounted.current) {
@@ -223,6 +233,13 @@ const PostGrid: React.FC<PostGridProps> = ({
       if (block_filter) {
         queryParams.append('block_filter', block_filter);
         console.log(`Adding block_filter: ${block_filter}`);
+      }
+      
+      // Add search parameters if provided
+      if (searchTerm) {
+        queryParams.append('q', searchTerm);
+        queryParams.append('type', searchType || 'all');
+        console.log(`Adding search query: ${searchTerm}, type: ${searchType || 'all'}`);
       }
       
       // Add tags if selected
@@ -430,7 +447,16 @@ const PostGrid: React.FC<PostGridProps> = ({
       }
       
       // Update previous filters after fetch completes
-      prevFilters.current = { ...currentFilters };
+      prevFilters.current = { 
+        time_filter,
+        ranking_filter,
+        personal_filter,
+        block_filter,
+        selected_tags: [...selected_tags],
+        user_id,
+        searchTerm: searchTerm || '',
+        searchType: searchType || ''
+      };
       
       // Reset the fetch in progress flag
       isFetchInProgress.current = false;

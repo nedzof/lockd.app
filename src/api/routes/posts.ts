@@ -5,35 +5,31 @@ const router = express.Router();
 
 // Search posts endpoint
 router.get('/search', async (req, res) => {
+  const searchTerm = req.query.q as string;
+  const limit = parseInt(req.query.limit as string) || 20;
+  const searchType = req.query.type as string || 'all';
+  
+  if (!searchTerm) {
+    return res.status(400).json({ error: 'Search query is required' });
+  }
+  
   try {
-    const { q, limit, type } = req.query;
+    console.log(`Searching for "${searchTerm}" with type "${searchType}"`);
+    const results = await searchPosts(searchTerm, limit, searchType);
     
-    if (!q) {
-      return res.status(400).json({ error: 'Search query is required' });
-    }
-    
-    console.log('Search request:', { query: q, limit, type });
-    
-    const searchType = type as string || 'all';
-    const limitValue = parseInt(limit as string) || 50;
-    
-    // Call searchPosts with the prisma-based implementation
-    const results = await searchPosts(q as string, limitValue, searchType);
-    
-    // Debug log first few results
-    if (results.posts && results.posts.length > 0) {
-      console.log(`Found ${results.posts.length} results. First result:`, {
-        id: results.posts[0].id,
-        content: results.posts[0].content?.substring(0, 30),
-        lock_count: results.posts[0].lock_count
-      });
-    } else {
-      console.log('No search results found');
-    }
-    
-    return res.json(results);
+    // Format response in the structure expected by PostGrid
+    return res.json({
+      posts: results.posts || [],
+      hasMore: false,  // Search doesn't support pagination yet
+      nextCursor: null,
+      stats: {
+        totalLocked: 0,
+        participantCount: 0,
+        roundNumber: 0
+      }
+    });
   } catch (error) {
-    console.error('Error searching posts:', error);
+    console.error('Search error:', error);
     return res.status(500).json({ error: 'Failed to search posts' });
   }
 });
