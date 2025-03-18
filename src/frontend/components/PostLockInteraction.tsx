@@ -211,16 +211,44 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         directLog('Calling wallet.lockBsv to trigger confirmation prompt');
         const walletStartTime = logPerformance('Calling wallet.lockBsv');
         
-        const lockResponse = await wallet.lockBsv(lockParams);
-        directLog('Wallet lock response:', lockResponse);
-        logPerformance('Received wallet lock response', walletStartTime);
-        
-        if (!lockResponse || !lockResponse.txid) {
-          throw new Error('Failed to create lock transaction');
+        let lockResponse;
+        try {
+          // Wrap the wallet call in try-catch to handle any wallet-specific errors
+          lockResponse = await wallet.lockBsv(lockParams);
+          directLog('Wallet lock response:', lockResponse);
+        } catch (walletError) {
+          // Handle specific wallet errors
+          directLog('Error in wallet.lockBsv call:', walletError);
+          const errorMessage = walletError instanceof Error ? walletError.message : 'Transaction was declined or failed';
+          logPerformance('Wallet lock call failed', walletStartTime);
+          throw new Error(`Wallet transaction failed: ${errorMessage}`);
         }
         
+        logPerformance('Received wallet lock response', walletStartTime);
+        
+        // Validate the response - check several possible property names for txid
+        if (!lockResponse) {
+          directLog('Lock response is null or undefined');
+          throw new Error('No response received from wallet');
+        }
+        
+        // Check for different possible property names for the transaction ID
+        // Use type assertion to safely access potential properties
+        const lockResponseObj = lockResponse as Record<string, any>;
+        const transactionId = lockResponseObj.txid || 
+                             (lockResponseObj as any).tx_id || 
+                             (lockResponseObj as any).txId || 
+                             (lockResponseObj as any).id;
+        
+        if (!transactionId) {
+          directLog('No transaction ID in response:', lockResponse);
+          throw new Error('Missing transaction ID in wallet response');
+        }
+        
+        directLog(`Successfully got transaction ID: ${transactionId}`);
+        
         // 7. Now call the API with the transaction ID
-        directLog(`Calling API with tx_id: ${lockResponse.txid}`);
+        directLog(`Calling API with tx_id: ${transactionId}`);
         const apiStartTime = logPerformance('Calling lock API');
         
         // Create the API request body with the tx_id from the wallet
@@ -229,7 +257,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
           author_address: addresses.identityAddress,
           amount: satoshiAmount,
           lock_duration: duration,
-          tx_id: lockResponse.txid,
+          tx_id: transactionId,
         };
         
         directLog('API request payload:', apiRequestBody);
