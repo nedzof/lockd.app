@@ -90,7 +90,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     console.log(`Set period filter to: ${filter || 'none'}`);
   };
 
-  const handleranking_filter = (filter: string) => {
+  const handleRankingFilter = (filter: string) => {
     // If the same filter is clicked again, clear it
     if (ranking_filter === filter) {
       setranking_filter('');
@@ -105,7 +105,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     console.log(`Set ranking filter to: ${filter || 'none'}`);
   };
 
-  const handlepersonal_filter = (filter: string) => {
+  const handlePersonalFilter = (filter: string) => {
     // If the same filter is clicked again, clear it
     if (personal_filter === filter) {
       setpersonal_filter('');
@@ -215,30 +215,12 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   }, [period_filter, ranking_filter, personal_filter, selected_tags, searchTerm, memoizeduser_id, time_filter, block_filter]);
 
   // Add state for tracking tag visibility
-  const [isTagSectionVisible, setIsTagSectionVisible] = useState(false);
+  const [isTagsVisible, setIsTagsVisible] = useState(false);
   
-  // Add effect to listen for click on the tag toggle button
-  useEffect(() => {
-    const tagToggleButton = document.getElementById('tag-toggle-button');
-    if (tagToggleButton) {
-      const handleTagToggle = () => {
-        setIsTagSectionVisible(prev => !prev);
-      };
-      
-      tagToggleButton.addEventListener('click', handleTagToggle);
-      return () => {
-        tagToggleButton.removeEventListener('click', handleTagToggle);
-      };
-    }
-  }, []);
-  
-  // Update tag filter button to manage state directly
-  const handleTagFilterToggle = useCallback(() => {
-    const tagButton = document.getElementById('tag-toggle-button');
-    if (tagButton) {
-      tagButton.click();
-    }
-  }, []);
+  // Toggle tag visibility
+  const toggleTagsVisibility = () => {
+    setIsTagsVisible(!isTagsVisible);
+  };
 
   const renderContent = () => {
     if (isStats) {
@@ -267,7 +249,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       <div className="relative min-h-screen pb-20">
         {/* Filter bar */}
         <div className="mb-6 relative z-20">
-          <div className={`bg-[#2A2A40]/20 backdrop-blur-sm rounded-t-lg ${!isTagSectionVisible || selected_tags.length === 0 ? 'rounded-b-lg' : ''}`}>
+          <div className={`bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg ${isTagsVisible ? 'rounded-b-none' : ''}`}>
             <div className="flex items-center px-3 py-2 gap-2">
               {/* Filter icon with time period dropdown */}
               <div ref={periodDropdownRef} className="relative">
@@ -372,7 +354,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                     >
                       {ranking_filter && (
                         <button
-                          onClick={() => handleranking_filter('')}
+                          onClick={() => handleRankingFilter('')}
                           className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
                         >
                           <FiX size={12} className="mr-1.5" />
@@ -382,7 +364,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                       {rankingOptions.map(option => (
                         <button
                           key={option.id}
-                          onClick={() => handleranking_filter(option.id)}
+                          onClick={() => handleRankingFilter(option.id)}
                           className={`flex items-center w-full px-3 py-1.5 text-xs ${
                             ranking_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
                           }`}
@@ -398,11 +380,12 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
               {/* Tag filter toggle */}
               <button
-                onClick={handleTagFilterToggle}
+                onClick={toggleTagsVisibility}
                 className={`flex items-center justify-center p-1.5 text-xs rounded-md transition-all duration-200 ${
                   selected_tags.length > 0 ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
                 }`}
-                title={`Tags ${selected_tags.length > 0 ? `(${selected_tags.length} selected)` : ''}`}
+                title={`${isTagsVisible ? 'Hide' : 'Show'} Tags ${selected_tags.length > 0 ? `(${selected_tags.length} selected)` : ''}`}
+                aria-label={`${isTagsVisible ? 'Hide' : 'Show'} Tags ${selected_tags.length > 0 ? `(${selected_tags.length} selected)` : ''}`}
               >
                 <FiTag size={12} />
                 {selected_tags.length > 0 && (
@@ -426,7 +409,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                   ].map(({ id, label, icon, title }) => (
                     <button
                       key={id}
-                      onClick={() => handlepersonal_filter(id)}
+                      onClick={() => handlePersonalFilter(id)}
                       className={`flex items-center p-1.5 text-xs rounded-md transition-all duration-200 ${
                         personal_filter === id
                           ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20'
@@ -460,6 +443,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           <TagFilter
             selected_tags={selected_tags}
             onTagSelect={setselected_tags}
+            isVisible={isTagsVisible}
           />
         </div>
 
