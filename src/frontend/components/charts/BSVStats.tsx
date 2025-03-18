@@ -125,11 +125,15 @@ export const BSVStats: React.FC = () => {
   }
 
   const timelineData = {
-    labels: statsData.timeSeriesData.map(d => new Date(d.timestamp).toLocaleDateString()),
+    labels: [...statsData.timeSeriesData]
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      .map(d => new Date(d.timestamp).toLocaleDateString()),
     datasets: [
       {
         label: 'Locked BSV',
-        data: statsData.timeSeriesData.map(d => d.lockedAmount),
+        data: [...statsData.timeSeriesData]
+          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+          .map(d => d.lockedAmount),
         borderColor: '#00ffa3',
         backgroundColor: 'rgba(0, 255, 163, 0.1)',
         fill: true,
@@ -137,7 +141,9 @@ export const BSVStats: React.FC = () => {
       },
       {
         label: 'Unique Locks',
-        data: statsData.timeSeriesData.map(d => d.uniqueLocks),
+        data: [...statsData.timeSeriesData]
+          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+          .map(d => d.uniqueLocks),
         borderColor: '#ff00ff',
         backgroundColor: 'rgba(255, 0, 255, 0.1)',
         fill: true,
@@ -174,11 +180,15 @@ export const BSVStats: React.FC = () => {
   };
 
   const volumeData = {
-    labels: statsData.volumeOverTime.map(d => new Date(d.timestamp).toLocaleDateString()),
+    labels: [...statsData.volumeOverTime]
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      .map(d => new Date(d.timestamp).toLocaleDateString()),
     datasets: [
       {
         label: 'Volume (BSV)',
-        data: statsData.volumeOverTime.map(d => d.volume),
+        data: [...statsData.volumeOverTime]
+          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+          .map(d => d.volume),
         borderColor: '#ffa500',
         backgroundColor: 'rgba(255, 165, 0, 0.1)',
         fill: true,
@@ -204,7 +214,8 @@ export const BSVStats: React.FC = () => {
         },
         ticks: {
           color: '#fff'
-        }
+        },
+        reverse: true
       },
       y: {
         grid: {

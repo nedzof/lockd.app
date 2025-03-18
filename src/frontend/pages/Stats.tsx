@@ -34,6 +34,7 @@ const Stats: React.FC = () => {
     locks: number;
     bsv: number;
     price: number;
+    date?: string; // Optional date property
   }>>([]);
 
   useEffect(() => {
@@ -217,10 +218,15 @@ const Stats: React.FC = () => {
         return dayA - dayB; // Normal order (oldest to newest)
       });
     } else {
-      // For all time, sort by month
-      const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      // For all time, we need to sort in reverse chronological order (newest to oldest)
+      // Since the XAxis has reversed={true}, this will make it display newest first on the left
+      const monthOrder = ['Dec', 'Nov', 'Oct', 'Sep', 'Aug', 'Jul', 'Jun', 'May', 'Apr', 'Mar', 'Feb', 'Jan'];
+      
+      // Sort by month (December to January)
       result.sort((a, b) => {
-        return monthOrder.indexOf(a.name) - monthOrder.indexOf(b.name); // Normal order (oldest to newest)
+        const monthIndexA = monthOrder.indexOf(a.name);
+        const monthIndexB = monthOrder.indexOf(b.name);
+        return monthIndexA - monthIndexB;
       });
     }
     
@@ -301,7 +307,11 @@ const Stats: React.FC = () => {
         }
       } else {
         // For all time, create monthly data points for the last 7 months
-        for (let i = 6; i >= 0; i--) {
+        // Sort them newest to oldest so when the XAxis reverses them, they display correctly
+        const months = [];
+        
+        // Get all months needed (from current month going back)
+        for (let i = 0; i <= 6; i++) {
           const date = new Date(now);
           date.setMonth(date.getMonth() - i);
           
@@ -309,21 +319,56 @@ const Stats: React.FC = () => {
           const monthName = date.toLocaleString('default', { month: 'short' });
           
           // Generate values
-          const lockValue = 100 + Math.floor(Math.random() * 150) + (i * 20);
-          const bsvValue = 0.000005 + (Math.random() * 0.000008) + (i * 0.000001);
+          const lockValue = 100 + Math.floor(Math.random() * 150) + ((6-i) * 20); // More locks in later months
+          const bsvValue = 0.000005 + (Math.random() * 0.000008) + ((6-i) * 0.000001);
           const priceValue = 35 + (Math.random() * 10);
           
-          sampleData.push({
+          months.push({
             name: monthName,
             locks: lockValue,
             bsv: bsvValue,
-            price: priceValue
+            price: priceValue,
+            date: date.toISOString(),
+            month: date.getMonth(),
+            year: date.getFullYear()
           });
         }
+        
+        // Sort newest to oldest (reverse chronological)
+        months.sort((a, b) => {
+          if (a.year !== b.year) {
+            return b.year - a.year; // Newest year first
+          }
+          return b.month - a.month; // Newest month first
+        });
+        
+        sampleData.push(...months);
       }
       
+      console.log('Sample data months in order:', sampleData.map(item => item.name).join(', '));
       return sampleData;
     }
+    
+    if (timeRange === 'all') {
+      // Ensure months are in reverse chronological order for the "All Time" view
+      // This matches the approach in combineDatasets
+      const monthOrder = ['Dec', 'Nov', 'Oct', 'Sep', 'Aug', 'Jul', 'Jun', 'May', 'Apr', 'Mar', 'Feb', 'Jan'];
+      
+      // Create a copy to sort
+      const sortedData = [...combinedData];
+      
+      // Sort by month index in reverse chronological order
+      sortedData.sort((a, b) => {
+        const monthIndexA = monthOrder.indexOf(a.name);
+        const monthIndexB = monthOrder.indexOf(b.name);
+        return monthIndexA - monthIndexB;
+      });
+      
+      console.log('Combined data months in order (sorted):', sortedData.map(item => item.name).join(', '));
+      return sortedData;
+    }
+    
+    console.log('Combined data months in order:', combinedData.map(item => item.name).join(', '));
     return combinedData;
   };
 
