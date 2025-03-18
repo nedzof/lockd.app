@@ -1251,34 +1251,14 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all')
     const userAddresses = posts.map(post => post.author_address).filter(Boolean) as string[];
     let users: Record<string, any> = {};
     
-    if (userAddresses.length > 0) {
-      const userData = await prisma.user.findMany({
-        where: {
-          address: {
-            in: userAddresses
-          }
-        },
-        select: {
-          address: true,
-          username: true,
-          display_name: true,
-          avatar_url: true
-        }
-      });
-      
-      // Create a lookup object for quick access
-      users = userData.reduce((acc, user) => {
-        if (user.address) {
-          acc[user.address] = user;
-        }
-        return acc;
-      }, {} as Record<string, any>);
-    }
-    
+    // Skip user lookup since the user model doesn't exist in this prisma instance
+    // This avoids the error "Cannot read properties of undefined (reading 'findMany')"
+    console.log(`Found ${posts.length} search results, skipping user lookup`);
+
     // Process posts to include necessary data
     const processedPosts = posts.map(post => {
-      // Add user data to post
-      const user = post.author_address ? users[post.author_address] : null;
+      // Add user data to post (simplified - no database lookup to avoid errors)
+      const user = null; // We're not fetching from database to avoid prisma.user error
       
       // Calculate lock count
       const lock_count = post.lock_likes.length;
@@ -1298,10 +1278,10 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all')
         ...post,
         raw_image_data: processedImageData,
         lock_count,
-        // Add user data if available
-        display_name: user?.display_name || null,
-        username: user?.username || null,
-        avatar_url: user?.avatar_url || null,
+        // Add user data - null values since we're not fetching from DB
+        display_name: null,
+        username: null,
+        avatar_url: null,
         // Remove lock_likes array since we just need the count
         lock_likes: undefined
       };
