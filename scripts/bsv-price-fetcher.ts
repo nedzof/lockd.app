@@ -99,7 +99,7 @@ async function insertIntoDatabase(priceData: PriceData[]): Promise<void> {
     // Get the latest stats record
     const latestStats = await prisma.stats.findFirst({
       orderBy: {
-        lastUpdated: 'desc'
+        last_updated: 'desc'
       }
     });
     
@@ -161,7 +161,7 @@ async function checkIfColumnExists(prisma: PrismaClient, tableName: string, colu
       );
     `;
     
-    return result[0].exists;
+    return (result as any)[0].exists;
   } catch (error) {
     console.error(`Error checking if column ${columnName} exists in table ${tableName}:`, error);
     return false;
@@ -228,7 +228,7 @@ function getWeekNumber(date: Date): number {
 }
 
 // Function to format price data for the frontend chart
-function formatPriceDataForChart(priceData: PriceData[]): Array<{ name: string; price: number }> {
+function formatPriceDataForChart(priceData: PriceData[]): Array<{ name: string; price: number; date: string }> {
   // Get the last 6 months of data
   const last6Months = priceData.slice(0, 6);
   
@@ -240,7 +240,8 @@ function formatPriceDataForChart(priceData: PriceData[]): Array<{ name: string; 
     
     return {
       name: monthName,
-      price: record.price
+      price: record.price,
+      date: record.date
     };
   }).reverse(); // Reverse to show oldest to newest
 }

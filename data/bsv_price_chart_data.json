@@ -1,26 +1,26 @@
 [
   {
-    "name": "Feb",
-    "price": 35.15
-  },
-  {
-    "name": "Feb",
-    "price": 34.54
+    "name": "Mar",
+    "price": 33.48
   },
   {
     "name": "Mar",
-    "price": 35.22
+    "price": 34.37
   },
   {
     "name": "Mar",
-    "price": 36.65
+    "price": 34.3
   },
   {
     "name": "Mar",
-    "price": 32.89
+    "price": 33.75
   },
   {
     "name": "Mar",
-    "price": 34.24
+    "price": 34.06
+  },
+  {
+    "name": "Mar",
+    "price": 33.79
   }
 ]
