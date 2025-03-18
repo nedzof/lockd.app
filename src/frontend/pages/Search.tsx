@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FiSearch, FiLoader, FiTag, FiBarChart2, FiClock, FiHash } from 'react-icons/fi';
+import { FiSearch, FiLoader, FiTag, FiBarChart2, FiClock, FiHash, FiLink } from 'react-icons/fi';
 import { API_URL } from '../config';
 import PostGrid from '../components/PostGrid';
 import { toast } from 'react-hot-toast';
@@ -34,7 +34,8 @@ export default function Search() {
     { id: 'content', label: 'Content', icon: <FiSearch /> },
     { id: 'tags', label: 'Tags', icon: <FiTag /> },
     { id: 'votes', label: 'Vote Options', icon: <FiBarChart2 /> },
-    { id: 'blocks', label: 'Block #', icon: <FiHash /> }
+    { id: 'blocks', label: 'Block #', icon: <FiHash /> },
+    { id: 'tx', label: 'Transaction ID', icon: <FiLink /> }
   ];
   
   // Function to handle filter change

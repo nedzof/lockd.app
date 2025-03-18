@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
-import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX } from 'react-icons/fi';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX, FiLink } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
@@ -16,6 +16,7 @@ interface HomeProps {
 
 export default function Home({ connected, bsvAddress }: HomeProps) {
   const location = useLocation();
+  const navigate = useNavigate();
   const isPosts = location.pathname === '/posts' || location.pathname === '/';
   const isStats = location.pathname === '/stats';
   const [time_filter, settime_filter] = useState('');
@@ -23,16 +24,19 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const [personal_filter, setpersonal_filter] = useState('');
   const [block_filter, setblock_filter] = useState('');
   const [selected_tags, setselected_tags] = useState<string[]>([]);
+  const [tx_filter, setTx_filter] = useState('');
   
   // Add refs for dropdown menus
   const timeDropdownRef = useRef<HTMLDivElement>(null);
   const blockDropdownRef = useRef<HTMLDivElement>(null);
   const rankingDropdownRef = useRef<HTMLDivElement>(null);
+  const txDropdownRef = useRef<HTMLDivElement>(null);
   
   // Add state for dropdown visibility
   const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
   const [blockDropdownOpen, setBlockDropdownOpen] = useState(false);
   const [rankingDropdownOpen, setRankingDropdownOpen] = useState(false);
+  const [txDropdownOpen, setTxDropdownOpen] = useState(false);
   
   // Add predefined options for dropdowns
   const timeOptions = [
@@ -73,6 +77,9 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       }
       if (rankingDropdownRef.current && !rankingDropdownRef.current.contains(event.target as Node)) {
         setRankingDropdownOpen(false);
+      }
+      if (txDropdownRef.current && !txDropdownRef.current.contains(event.target as Node)) {
+        setTxDropdownOpen(false);
       }
     }
     
@@ -187,6 +194,21 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     return option ? option.label : 'Ranking';
   };
 
+  // Function to handle transaction ID filter
+  const handleTxFilter = (txId: string) => {
+    // If there's an input but not a full search
+    if (txId && txId !== tx_filter) {
+      setTx_filter(txId);
+      // Navigate to search page with transaction ID type search
+      navigate(`/search?q=${encodeURIComponent(txId)}&type=tx`);
+    } else {
+      setTx_filter('');
+    }
+    
+    // Close dropdown
+    setTxDropdownOpen(false);
+  };
+
   // Function to clear all filters
   const clearAllFilters = () => {
     settime_filter('');
@@ -194,10 +216,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     setranking_filter('');
     setpersonal_filter('');
     setselected_tags([]);
+    setTx_filter('');
   };
 
   // Check if any filter is active
-  const isAnyFilterActive = time_filter || block_filter || ranking_filter || personal_filter || selected_tags.length > 0;
+  const isAnyFilterActive = time_filter || block_filter || ranking_filter || personal_filter || selected_tags.length > 0 || tx_filter;
 
   // Memoize the user_id to prevent unnecessary re-renders
   const memoizeduser_id = useMemo(() => {
@@ -212,9 +235,10 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       ranking_filter,
       personal_filter,
       selected_tags,
+      tx_filter,
       user_id: memoizeduser_id
     });
-  }, [time_filter, block_filter, ranking_filter, personal_filter, selected_tags, memoizeduser_id]);
+  }, [time_filter, block_filter, ranking_filter, personal_filter, selected_tags, tx_filter, memoizeduser_id]);
 
   const renderContent = () => {
     if (isStats) {
@@ -379,6 +403,60 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                         {option.label}
                       </button>
                     ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Add Transaction ID Filter Dropdown */}
+              <div ref={txDropdownRef} className="relative">
+                <button
+                  onClick={() => {
+                    setTxDropdownOpen(!txDropdownOpen);
+                    setTimeDropdownOpen(false);
+                    setBlockDropdownOpen(false);
+                    setRankingDropdownOpen(false);
+                  }}
+                  className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-32 ${
+                    tx_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
+                  }`}
+                >
+                  <div className="flex items-center space-x-1.5">
+                    <FiLink size={12} />
+                    <span className="truncate">{tx_filter ? 'Transaction ID' : 'TX ID'}</span>
+                  </div>
+                  <FiChevronDown size={12} className={`transition-transform duration-200 ${txDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {txDropdownOpen && (
+                  <div className="absolute z-10 mt-1 w-64 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-2 px-3">
+                    {tx_filter && (
+                      <button
+                        onClick={() => handleTxFilter('')}
+                        className="flex w-full items-center mb-2 px-2 py-1 text-xs text-gray-300 hover:bg-white/5 rounded"
+                      >
+                        <FiX size={12} className="mr-1.5" />
+                        Clear Transaction ID
+                      </button>
+                    )}
+                    <div className="flex flex-col">
+                      <label className="text-xs text-gray-400 mb-1">Enter Transaction ID</label>
+                      <div className="flex">
+                        <input 
+                          type="text" 
+                          placeholder="Transaction ID..." 
+                          value={tx_filter}
+                          onChange={(e) => setTx_filter(e.target.value)}
+                          className="flex-grow bg-[#13141B] border border-gray-700/50 text-gray-200 text-xs px-2 py-1.5 rounded-l-md focus:outline-none focus:border-[#00ffa3]/30"
+                        />
+                        <button
+                          onClick={() => handleTxFilter(tx_filter)}
+                          className="bg-[#00ffa3]/10 text-[#00ffa3] px-2 py-1.5 rounded-r-md text-xs"
+                        >
+                          Search
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Search for posts by blockchain transaction ID</p>
+                    </div>
                   </div>
                 )}
               </div>

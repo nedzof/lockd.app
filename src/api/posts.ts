@@ -1176,7 +1176,7 @@ router.post('/posts/:id/publish-scheduled', async (req: Request, res: Response, 
   }
 });
 
-// Search posts by content, username, tags, vote options, block numbers, and other criteria
+// Search posts by content, username, tags, vote options, block numbers, transaction IDs, and other criteria
 export async function searchPosts(query: string, limit = 50, searchType = 'all'): Promise<any> {
   try {
     // Clean the query to prevent injection
@@ -1217,6 +1217,16 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all')
               mode: 'insensitive'
             }
           }
+        }
+      });
+    }
+    
+    // Search by transaction ID
+    if (searchType === 'all' || searchType === 'tx') {
+      whereConditions.OR.push({
+        tx_id: {
+          contains: cleanQuery,
+          mode: 'insensitive'
         }
       });
     }
