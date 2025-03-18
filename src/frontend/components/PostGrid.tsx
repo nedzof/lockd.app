@@ -9,6 +9,7 @@ import VoteOptionLockInteraction from './VoteOptionLockInteraction';
 import PostLockInteraction from './PostLockInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
 import { API_URL } from '../config';
+import LinkPreview from './LinkPreview';
 
 interface vote_option {
   id: string;
@@ -93,6 +94,25 @@ function calculatePercentage(amount: number, total: number): number {
   if (!total) return 0;
   return Math.round((amount / total) * 100);
 }
+
+// Add a function to extract URLs from content
+const extractFirstUrl = (text: string): string | null => {
+  if (!text) return null;
+  
+  // URL regex pattern that matches common URL formats
+  const urlRegex = /(https?:\/\/)?([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(\/[a-zA-Z0-9._~:/?#[\]@!$&'()*+,;=%-]*)?/gi;
+  
+  const matches = text.match(urlRegex);
+  if (!matches || matches.length === 0) return null;
+  
+  // Ensure the URL has a protocol
+  let url = matches[0];
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = 'https://' + url;
+  }
+  
+  return url;
+};
 
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
@@ -776,6 +796,13 @@ const PostGrid: React.FC<PostGridProps> = ({
                       <p className="text-xl font-semibold mb-2 text-white">{post.content.split('\n')[0]}</p>
                       {post.content.split('\n').slice(1).join('\n') && (
                         <p className="text-gray-200">{post.content.split('\n').slice(1).join('\n')}</p>
+                      )}
+                      
+                      {/* Add link preview if URL is detected in content */}
+                      {extractFirstUrl(post.content) && (
+                        <div className="transition-all duration-300 opacity-100 mt-3">
+                          <LinkPreview url={extractFirstUrl(post.content)!} />
+                        </div>
                       )}
                     </div>
                   )}

@@ -7,6 +7,7 @@ import { useTags } from '../hooks/useTags';
 import { FiX, FiPlus, FiCheck, FiRefreshCw, FiImage, FiFile, FiPlusCircle, FiTrash2, FiBarChart2, FiLink, FiHash, FiClock, FiCalendar } from 'react-icons/fi';
 import { createPost } from '../services/post.service';
 import { isWalletConnected, ensureWalletConnection, getBsvAddress, getWalletStatus } from '../utils/walletConnectionHelpers';
+import LinkPreview from './LinkPreview';
 
 
 interface CreatePostProps {
@@ -49,6 +50,8 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     // Get user's local timezone
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
   });
+  // Add state for link preview
+  const [detectedUrl, setDetectedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTags();
@@ -501,6 +504,31 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     }
   };
 
+  // Add a function to extract URLs from content
+  const extractFirstUrl = (text: string): string | null => {
+    if (!text) return null;
+    
+    // URL regex pattern that matches common URL formats
+    const urlRegex = /(https?:\/\/)?([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(\/[a-zA-Z0-9._~:/?#[\]@!$&'()*+,;=%-]*)?/gi;
+    
+    const matches = text.match(urlRegex);
+    if (!matches || matches.length === 0) return null;
+    
+    // Ensure the URL has a protocol
+    let url = matches[0];
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+    
+    return url;
+  };
+
+  // Update link detection when content changes
+  useEffect(() => {
+    const url = extractFirstUrl(content);
+    setDetectedUrl(url);
+  }, [content]);
+
   if (!isOpen) return null;
 
   return (
@@ -692,6 +720,13 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               </div>
             </div>
           </div>
+          
+          {/* Show link preview if a URL is detected and no other panels are active */}
+          {detectedUrl && !showImagePanel && !showScheduleOptions && !showTagInput && !isVotePost && (
+            <div className="transition-all duration-300 opacity-100 mt-3">
+              <LinkPreview url={detectedUrl} />
+            </div>
+          )}
           
           {/* Schedule options - only shown when isScheduled is true */}
           {showScheduleOptions && (
