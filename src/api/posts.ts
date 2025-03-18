@@ -1192,7 +1192,7 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all')
         users.display_name, 
         users.username, 
         users.avatar_url,
-        (SELECT COUNT(*) FROM lock_like WHERE lock_like.post_id = posts.id) as lock_count,
+        COALESCE((SELECT COUNT(*)::integer FROM lock_like WHERE lock_like.post_id = posts.id), 0) as lock_count,
         (SELECT json_agg(vo.*) FROM vote_option vo WHERE vo.post_id = posts.id) as vote_options
       FROM posts
       LEFT JOIN users ON posts.author_address = users.address
@@ -1206,6 +1206,9 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all')
     
     // Process raw_image_data for each post
     const processedResults = Array.isArray(results) ? results.map(post => {
+      // Ensure lock_count is a number (and default to 0 if missing)
+      post.lock_count = parseInt(post.lock_count || '0', 10);
+      
       // Process raw_image_data to ensure it's in the correct format
       if (post.raw_image_data) {
         try {
@@ -1218,6 +1221,12 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all')
       }
       return post;
     }) : [];
+    
+    // Debug log for the first post's lock_count (if any)
+    if (processedResults.length > 0) {
+      console.log('First result lock_count:', processedResults[0].lock_count, 
+                  'type:', typeof processedResults[0].lock_count);
+    }
     
     return { 
       posts: processedResults, 

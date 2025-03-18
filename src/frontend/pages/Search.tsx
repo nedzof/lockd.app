@@ -77,6 +77,15 @@ export default function Search() {
       }
       
       const data = await response.json();
+      
+      // Debug log for search results
+      console.log('Search results:', data);
+      console.log('Posts with lock_count:', data.posts?.map((p: any) => ({ 
+        id: p.id, 
+        content: p.content?.substring(0, 30), 
+        lock_count: p.lock_count 
+      })));
+      
       setResults(data.posts || []);
     } catch (error) {
       console.error('Search error:', error);
@@ -232,11 +241,12 @@ export default function Search() {
                   </div>
                 )}
                 
-                {post.lock_count && (
-                  <div className="flex items-center">
-                    <span className="text-[#00ffa3]">{post.lock_count} locks</span>
-                  </div>
-                )}
+                {/* Lock count display */}
+                <div className="flex items-center">
+                  <span className={post.lock_count > 0 ? "text-[#00ffa3]" : "text-gray-500"}>
+                    {parseInt(post.lock_count || 0, 10)} {parseInt(post.lock_count || 0, 10) === 1 ? 'lock' : 'locks'}
+                  </span>
+                </div>
               </div>
             </div>
           ))}
