@@ -589,7 +589,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                   : 'border-t-gray-800/40 rounded-b-xl'
               }`}>
                 <div className="flex items-center">
-                  {/* Image upload button */}
+                  {/* Image upload or toggle button */}
                   <div className="relative">
                     <input
                       ref={fileInputRef}
@@ -599,18 +599,24 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                       className="sr-only"
                       id="image-upload"
                     />
-                    <label
-                      htmlFor={!imagePreview ? "image-upload" : undefined}
-                      onClick={imagePreview ? handleClickUpload : undefined}
-                      className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 focus:outline-none cursor-pointer ${
-                        imagePreview 
-                          ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
-                          : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
-                      }`}
-                      title={imagePreview ? "Show image" : "Upload image"}
-                    >
-                      <FiImage size={18} />
-                    </label>
+                    {imagePreview ? (
+                      <button
+                        type="button"
+                        onClick={handleClickUpload}
+                        className="flex items-center justify-center p-2 rounded-full transition-all duration-300 focus:outline-none cursor-pointer text-[#00ffa3] bg-[#00ffa3]/10"
+                        title="Show image"
+                      >
+                        <FiImage size={18} />
+                      </button>
+                    ) : (
+                      <label
+                        htmlFor="image-upload"
+                        className="flex items-center justify-center p-2 rounded-full transition-all duration-300 focus:outline-none cursor-pointer text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10"
+                        title="Upload image"
+                      >
+                        <FiImage size={18} />
+                      </label>
+                    )}
                   </div>
                   
                   {/* Vertical separator */}
