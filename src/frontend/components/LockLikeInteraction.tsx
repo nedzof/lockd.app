@@ -9,6 +9,13 @@ import { toast } from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
 import { createPortal } from 'react-dom';
 
+// Create a performance logging utility
+const logPerformance = (step: string, startTime?: number) => {
+  const now = performance.now();
+  const elapsed = startTime ? `${Math.round(now - startTime)}ms` : 'start';
+  console.log(`[LockLike Performance] ${step}: ${elapsed}`);
+  return now;
+};
 
 interface LockLikeInteractionProps {
   posttx_id?: string;
@@ -32,6 +39,9 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   const [showInput, setShowInput] = React.useState(false);
   const [amount, setAmount] = React.useState(DEFAULT_LOCKLIKE_AMOUNT.toString());
   const [lockDuration, setLockDuration] = React.useState(DEFAULT_LOCKLIKE_BLOCKS.toString());
+  
+  // Add a ref to track the operation sequence
+  const operationIdRef = React.useRef(0);
 
   // Handle escape key press and body scroll lock
   React.useEffect(() => {
@@ -57,7 +67,10 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   // Fetch wallet balance when showing input
   React.useEffect(() => {
     if (showInput && isConnected) {
-      refreshBalance();
+      const startTime = logPerformance('Begin refreshBalance');
+      refreshBalance().finally(() => {
+        logPerformance('End refreshBalance', startTime);
+      });
     }
   }, [showInput, isConnected, refreshBalance]);
 
@@ -112,19 +125,28 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   };
 
   const handleLockClick = async () => {
+    const operationId = ++operationIdRef.current;
+    const startTime = logPerformance(`[${operationId}] Lock button clicked`);
+    
     try {
+      console.log(`[LockLike] Wallet status: detected=${isWalletDetected}, connected=${isConnected}`);
+      
       if (!isWalletDetected) {
+        console.log(`[LockLike] Wallet not detected, redirecting to yours.org`);
         window.open('https://yours.org', '_blank');
         return;
       }
 
       if (!isConnected) {
+        const connectStartTime = logPerformance(`[${operationId}] Starting wallet connection`);
         const loadingToastId = toast.loading('Connecting wallet...');
         try {
           await connect();
+          logPerformance(`[${operationId}] Wallet connection completed`, connectStartTime);
           toast.dismiss(loadingToastId);
           toast.success('Wallet connected successfully!');
         } catch (error) {
+          logPerformance(`[${operationId}] Wallet connection failed`, connectStartTime);
           toast.dismiss(loadingToastId);
           console.error('Error connecting wallet:', error);
           toast.error(error instanceof Error ? error.message : 'Failed to connect wallet');
@@ -133,15 +155,21 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
       }
 
       // Only show input after confirming wallet is connected
+      logPerformance(`[${operationId}] Showing lock input modal`, startTime);
       setShowInput(true);
     } catch (error) {
+      logPerformance(`[${operationId}] Error in lock click handler`, startTime);
       console.error('Error handling lock click:', error);
       toast.error(error instanceof Error ? error.message : 'An error occurred');
     }
   };
 
   const handleLockLike = async () => {
+    const operationId = ++operationIdRef.current;
+    const startTime = logPerformance(`[${operationId}] Lock BSV button clicked`);
+    
     if (!wallet || !isConnected) {
+      logPerformance(`[${operationId}] Wallet not connected, aborting`, startTime);
       toast.error('Please connect your wallet first');
       setShowInput(false);
       return;
@@ -151,6 +179,8 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
     try {
       const parsedAmount = parseFloat(amount);
       const parsedDuration = parseInt(lockDuration, 10);
+
+      logPerformance(`[${operationId}] Input validation: amount=${parsedAmount}, duration=${parsedDuration}`, startTime);
 
       if (isNaN(parsedAmount) || parsedAmount <= 0) {
         throw new Error('Invalid amount');
@@ -165,57 +195,74 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
       }
 
       // Get the user's identity address
+      const addressStartTime = logPerformance(`[${operationId}] Getting user identity address`);
       const addresses = await wallet.getAddresses();
+      logPerformance(`[${operationId}] Got user identity address`, addressStartTime);
+      
       if (!addresses?.identityAddress) {
         throw new Error('Could not get identity address');
       }
 
       // Get current block height from the network
+      const blockHeightStartTime = logPerformance(`[${operationId}] Fetching current block height`);
       const currentblock_height = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info')
         .then(res => res.json())
         .then(data => data.blocks);
+      logPerformance(`[${operationId}] Got current block height: ${currentblock_height}`, blockHeightStartTime);
 
       if (!currentblock_height) {
         throw new Error('Could not get current block height');
       }
 
-      const nLockTime = currentblock_height + parsedDuration; // Lock for specified blocks
+      const nLockTime = currentblock_height + parsedDuration;
+      console.log(`[LockLike] Calculated nLockTime: ${nLockTime}`);
 
       // Create the lock transaction using the wallet's lockBsv function
+      const lockStartTime = logPerformance(`[${operationId}] Creating lock transaction`);
+      const satoshiAmount = Math.floor(parsedAmount * SATS_PER_BSV);
+      console.log(`[LockLike] Locking ${satoshiAmount} sats to address ${addresses.identityAddress} until block ${nLockTime}`);
+      
       const lockResponse = await wallet.lockBsv([{
         address: addresses.identityAddress,
         blockHeight: nLockTime,
-        sats: Math.floor(parsedAmount * SATS_PER_BSV),
+        sats: satoshiAmount,
       }]);
+      logPerformance(`[${operationId}] Lock transaction created`, lockStartTime);
+
+      console.log(`[LockLike] Lock response:`, JSON.stringify(lockResponse, null, 2));
 
       if (!lockResponse || !lockResponse.txid) {
         throw new Error('Failed to create lock transaction');
       }
 
-      console.log('Lock transaction created:', lockResponse);
-
       // Create the lock like record
+      const apiStartTime = logPerformance(`[${operationId}] Creating lock like record via API`);
+      const apiRequestBody = {
+        post_id: posttx_id || replytx_id,
+        author_address: addresses.identityAddress,
+        amount: satoshiAmount,
+        lock_duration: parsedDuration,
+        tx_id: lockResponse.txid,
+      };
+      
+      console.log(`[LockLike] API request:`, JSON.stringify(apiRequestBody, null, 2));
+      
       const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          post_id: posttx_id || replytx_id,
-          author_address: addresses.identityAddress,
-          amount: Math.floor(parsedAmount * SATS_PER_BSV),
-          lock_duration: parsedDuration,
-          tx_id: lockResponse.txid,
-        }),
+        body: JSON.stringify(apiRequestBody),
       });
+      
+      const responseStatus = apiResponse.status;
+      const responseBody = await apiResponse.json();
+      logPerformance(`[${operationId}] API response status: ${responseStatus}`, apiStartTime);
+      console.log(`[LockLike] API response:`, JSON.stringify(responseBody, null, 2));
 
       if (!apiResponse.ok) {
-        const error = await apiResponse.json();
-        throw new Error(error.message || 'Error creating lock like');
+        throw new Error(responseBody.message || responseBody.error || 'Error creating lock like');
       }
-
-      const responseData = await apiResponse.json();
-      console.log('Lock like created:', responseData);
 
       toast.success(`Successfully locked ${parsedAmount} BSV for ${parsedDuration} blocks!`);
       setShowInput(false);
@@ -223,8 +270,13 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
       setLockDuration(DEFAULT_LOCKLIKE_BLOCKS.toString());
       
       // Refresh balance after successful lock
-      refreshBalance();
+      const refreshStartTime = logPerformance(`[${operationId}] Refreshing balance after lock`);
+      await refreshBalance();
+      logPerformance(`[${operationId}] Balance refreshed`, refreshStartTime);
+      
+      logPerformance(`[${operationId}] Lock operation completed successfully`, startTime);
     } catch (error) {
+      logPerformance(`[${operationId}] Error in lock operation`, startTime);
       console.error('Error locking:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to lock BSV');
     } finally {
