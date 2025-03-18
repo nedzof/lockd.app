@@ -2,7 +2,6 @@ import * as React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { FiLock, FiLogOut, FiExternalLink, FiBarChart2 } from 'react-icons/fi';
 import { formatBSV, formatAddress } from '../../utils/formatBSV';
-import SearchBar from '../SearchBar';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -97,18 +96,6 @@ export default function Layout({
             {/* Navigation */}
             <nav className="flex items-center space-x-1">
               <Link
-                to="/posts"
-                className={`px-3 py-2 rounded-lg flex items-center space-x-1 transition-all duration-300 ${
-                  isActive('/posts') 
-                    ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
-                    : 'text-gray-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <FiLock className={`${isActive('/posts') ? 'text-[#00ffa3]' : ''}`} />
-                <span className="hidden sm:inline text-sm font-medium">Posts</span>
-              </Link>
-              
-              <Link
                 to="/stats"
                 className={`px-3 py-2 rounded-lg flex items-center space-x-1 transition-all duration-300 ${
                   isActive('/stats') 
@@ -119,11 +106,6 @@ export default function Layout({
                 <FiBarChart2 className={`${isActive('/stats') ? 'text-[#00ffa3]' : ''}`} />
                 <span className="hidden sm:inline text-sm font-medium">Stats</span>
               </Link>
-              
-              {/* Search button */}
-              <div className="px-3 py-2 rounded-lg">
-                <SearchBar />
-              </div>
             </nav>
 
             {/* Wallet Section */}

@@ -7,6 +7,7 @@ import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
 import TagFilter from '../components/TagFilter';
 import ThresholdSettings from '../components/ThresholdSettings';
+import SearchBar from '../components/SearchBar';
 
 interface HomeProps {
   connected: boolean;
@@ -139,62 +140,74 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
     return (
       <div className="relative min-h-screen pb-20">
-        {/* Filter bar */}
-        <div className="mb-8 space-y-4">
-          <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg">
-            <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800/10">
-              {/* Time Filters */}
-              <div className="flex items-center space-x-1">
-                {[
-                  { id: '1d', label: '24H' },
-                  { id: '7d', label: '7D' },
-                  { id: '30d', label: '30D' }
-                ].map(({ id, label }) => (
-                  <button
-                    key={id}
-                    onClick={() => handletime_filter(id)}
-                    className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                      time_filter === id
-                        ? 'bg-white/10 text-white'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
-                    title={`Show posts from the last ${label === '24H' ? 'day' : label === '7D' ? '7 days' : '30 days'}`}
-                  >
-                    {label}
-                  </button>
-                ))}
+        {/* Filter bar - more compact version */}
+        <div className="mb-4">
+          <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg shadow-inner shadow-black/10 border border-white/5">
+            <div className="flex flex-wrap items-center px-3 py-2 gap-2">
+              {/* Group 1: Time & Block Filters + Search */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Time Filters */}
+                <div className="flex items-center space-x-0.5">
+                  {[
+                    { id: '1d', label: '24H' },
+                    { id: '7d', label: '7D' },
+                    { id: '30d', label: '30D' }
+                  ].map(({ id, label }) => (
+                    <button
+                      key={id}
+                      onClick={() => handletime_filter(id)}
+                      className={`px-2 py-1 text-xs rounded-md transition-colors duration-200 ${
+                        time_filter === id
+                          ? 'bg-white/10 text-white'
+                          : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
+                      title={`Show posts from the last ${label === '24H' ? 'day' : label === '7D' ? '7 days' : '30 days'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Small vertical divider */}
+                <div className="h-4 w-px bg-gray-800/30" />
+
+                {/* Block Filters */}
+                <div className="flex items-center space-x-0.5">
+                  {[
+                    { id: 'last-block', label: 'Last Block' },
+                    { id: 'last-5-blocks', label: 'Last 5 Blocks' },
+                    { id: 'last-10-blocks', label: 'Last 10 Blocks' }
+                  ].map(({ id, label }) => (
+                    <button
+                      key={id}
+                      onClick={() => handleblock_filter(id)}
+                      className={`px-2 py-1 text-xs rounded-md transition-colors duration-200 ${
+                        block_filter === id
+                          ? 'bg-white/10 text-white'
+                          : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
+                      title={`Show posts from ${label.toLowerCase()}`}
+                    >
+                      {id === 'last-block' ? 'Last Block' : 
+                       id === 'last-5-blocks' ? 'Last 5' : 'Last 10'}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Divider */}
-              <div className="h-4 w-px bg-gray-800/30 mx-4" />
+              {/* Small vertical divider */}
+              <div className="h-4 w-px bg-gray-800/30" />
 
-              {/* Block Filters */}
-              <div className="flex items-center space-x-1">
-                {[
-                  { id: 'last-block', label: 'Last Block' },
-                  { id: 'last-5-blocks', label: 'Last 5 Blocks' },
-                  { id: 'last-10-blocks', label: 'Last 10 Blocks' }
-                ].map(({ id, label }) => (
-                  <button
-                    key={id}
-                    onClick={() => handleblock_filter(id)}
-                    className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 ${
-                      block_filter === id
-                        ? 'bg-white/10 text-white'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
-                    title={`Show posts from ${label.toLowerCase()}`}
-                  >
-                    {label}
-                  </button>
-                ))}
+              {/* Group 2: Search Bar */}
+              <div>
+                <SearchBar />
               </div>
 
-              {/* Divider */}
-              <div className="h-4 w-px bg-gray-800/30 mx-4" />
+              {/* Small vertical divider */}
+              <div className="h-4 w-px bg-gray-800/30" />
 
-              {/* Ranking Filters */}
-              <div className="flex items-center space-x-1">
+              {/* Group 3: Ranking Filters */}
+              <div className="flex items-center space-x-0.5">
                 {[
                   { id: 'top-1', label: 'Top 1' },
                   { id: 'top-3', label: 'Top 3' },
@@ -203,7 +216,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                   <button
                     key={id}
                     onClick={() => handleranking_filter(id)}
-                    className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 relative ${
+                    className={`px-2 py-1 text-xs rounded-md transition-colors duration-200 relative ${
                       ranking_filter === id
                         ? 'bg-white/10 text-white'
                         : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -212,9 +225,9 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                   >
                     {label}
                     {ranking_filter === id && (
-                      <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
                         <span className="absolute inline-flex h-full w-full rounded-full bg-[#00ffa3] opacity-75 animate-ping"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-[#00ffa3]"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00ffa3]"></span>
                       </span>
                     )}
                   </button>
@@ -224,11 +237,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
               {/* Only show Personal Filters and Threshold Settings when connected */}
               {connected && (
                 <>
-                  {/* Divider */}
-                  <div className="h-4 w-px bg-gray-800/30 mx-4" />
+                  {/* Small vertical divider */}
+                  <div className="h-4 w-px bg-gray-800/30" />
                   
                   {/* Personal Filters */}
-                  <div className="flex items-center space-x-1">
+                  <div className="flex items-center space-x-0.5">
                     {[
                       { id: 'mylocks', label: 'My Posts', icon: 'user', title: 'Show posts you created' },
                       { id: 'locked', label: 'My Locks', icon: 'lock', title: 'Show posts where you locked BSV' }
@@ -236,7 +249,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                       <button
                         key={id}
                         onClick={() => handlepersonal_filter(id)}
-                        className={`px-3 py-1 text-xs rounded-md transition-colors duration-200 relative ${
+                        className={`px-2 py-1 text-xs rounded-md transition-colors duration-200 relative ${
                           personal_filter === id
                             ? 'bg-white/10 text-white'
                             : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -245,27 +258,27 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                       >
                         {icon === 'user' ? (
                           <span className="inline-flex items-center">
-                            <FiUser className="mr-1" size={12} />
+                            <FiUser className="mr-1" size={10} />
                             {label}
                           </span>
                         ) : (
                           <span className="inline-flex items-center">
-                            <FiLock className="mr-1" size={12} />
+                            <FiLock className="mr-1" size={10} />
                             {label}
                           </span>
                         )}
                         {personal_filter === id && (
-                          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                          <span className="absolute -top-1 -right-1 flex h-2 w-2">
                             <span className="absolute inline-flex h-full w-full rounded-full bg-[#00ffa3] opacity-75 animate-ping"></span>
-                            <span className="relative inline-flex rounded-full h-3 w-3 bg-[#00ffa3]"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00ffa3]"></span>
                           </span>
                         )}
                       </button>
                     ))}
                   </div>
                   
-                  {/* Divider */}
-                  <div className="h-4 w-px bg-gray-800/30 mx-4" />
+                  {/* Small vertical divider */}
+                  <div className="h-4 w-px bg-gray-800/30" />
                   
                   {/* Threshold Settings */}
                   <ThresholdSettings connected={connected} walletAddress={bsvAddress || undefined} />
@@ -274,11 +287,13 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
             </div>
           </div>
 
-          {/* Tag Filter */}
-          <TagFilter
-            selected_tags={selected_tags}
-            onTagSelect={setselected_tags}
-          />
+          {/* Tag Filter - with reduced margin */}
+          <div className="mt-2">
+            <TagFilter
+              selected_tags={selected_tags}
+              onTagSelect={setselected_tags}
+            />
+          </div>
         </div>
 
         {memoizedPostGrid}

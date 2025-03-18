@@ -44,7 +44,7 @@ const SearchBar: React.FC = () => {
       {isExpanded ? (
         <form 
           onSubmit={handleSearch}
-          className="flex items-center bg-[#13141B] border border-gray-800/60 rounded-full overflow-hidden transition-all duration-300 w-48 md:w-64"
+          className="flex items-center bg-[#13141B] border border-gray-800/60 rounded-full overflow-hidden transition-all duration-300 w-36 md:w-48"
         >
           <input
             id="search-input"
@@ -53,31 +53,32 @@ const SearchBar: React.FC = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search posts..."
-            className="w-full bg-transparent text-gray-200 text-sm px-3 py-2 focus:outline-none"
+            className="w-full bg-transparent text-gray-200 text-xs px-3 py-1 focus:outline-none"
           />
           <button
             type="button"
             onClick={() => setIsExpanded(false)}
-            className="p-2 text-gray-400 hover:text-white focus:outline-none"
+            className="p-1 text-gray-400 hover:text-white focus:outline-none"
             aria-label="Close search"
           >
-            <FiX size={16} />
+            <FiX size={12} />
           </button>
           <button
             type="submit"
-            className="p-2 text-[#00ffa3] hover:bg-[#00ffa3]/10 focus:outline-none rounded-r-full"
+            className="p-1 text-[#00ffa3] hover:bg-[#00ffa3]/10 focus:outline-none rounded-r-full"
             aria-label="Search"
           >
-            <FiSearch size={16} />
+            <FiSearch size={12} />
           </button>
         </form>
       ) : (
         <button
           onClick={toggleExpand}
-          className="p-2 rounded-full text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10 focus:outline-none transition-all duration-300"
+          className="flex items-center space-x-1 px-2 py-1 rounded-md text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors duration-200"
           aria-label="Open search"
         >
-          <FiSearch size={18} />
+          <FiSearch size={12} />
+          <span>Search</span>
         </button>
       )}
     </div>
