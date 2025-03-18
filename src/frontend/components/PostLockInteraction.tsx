@@ -277,43 +277,72 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
           // Check specifically for lock methods
           directLog('Lock method check:', { 
             hasLock: typeof (walletToUse as any)?.lock === 'function',
-            hasLockBsv: typeof walletToUse?.lockBsv === 'function'
+            hasLockBsv: typeof walletToUse?.lockBsv === 'function',
+            hasSendBsv: typeof walletToUse?.sendBsv === 'function'
           });
           
-          // Try exact code from documentation
-          if (typeof (walletToUse as any)?.lock === 'function') {
-            directLog('⏳ Calling wallet.lock() as shown in documentation...');
-            lockResponse = await (walletToUse as any).lock(locks);
-          } else if (typeof walletToUse?.lockBsv === 'function') {
-            directLog('⏳ Calling wallet.lockBsv() as shown in type definitions...');
-            lockResponse = await walletToUse.lockBsv(locks);
-          } else {
-            // Last resort - try calling directly on window.yours
-            directLog('⏳ Trying global window.yours.lock...');
-            if (typeof (window as any).yours?.lock === 'function') {
-              lockResponse = await (window as any).yours.lock(locks);
-            } else if (typeof (window as any).yours?.lockBsv === 'function') {
-              lockResponse = await (window as any).yours.lockBsv(locks);
+          // First try with lockBsv but with a shorter timeout
+          const lockBsvPromise = new Promise<any>((resolve, reject) => {
+            // Set a shorter timeout specifically for lockBsv
+            const lockBsvTimeoutMs = 5000; // Only wait 5 seconds for lockBsv before trying sendBsv
+            const lockBsvTimeoutId = setTimeout(() => {
+              reject(new Error('lockBsv method timed out'));
+            }, lockBsvTimeoutMs);
+            
+            directLog('⏳ Attempting lockBsv with 5 second timeout...');
+            walletToUse.lockBsv(locks)
+              .then((result: any) => {
+                clearTimeout(lockBsvTimeoutId);
+                resolve(result);
+              })
+              .catch((err: any) => {
+                clearTimeout(lockBsvTimeoutId);
+                reject(err);
+              });
+          });
+          
+          try {
+            // Try lockBsv with short timeout
+            lockResponse = await lockBsvPromise;
+            directLog('✅ lockBsv succeeded:', lockResponse);
+          } catch (lockBsvError) {
+            // If lockBsv fails or times out, try sendBsv as fallback
+            directLog('⚠️ lockBsv failed or timed out, trying sendBsv instead:', lockBsvError);
+            
+            if (typeof walletToUse?.sendBsv === 'function') {
+              directLog('⏳ Attempting fallback with sendBsv...');
+              
+              // Format params for sendBsv
+              const sendBsvParams = [{
+                satoshis: satoshiAmount,
+                address: addresses.identityAddress,
+                // Optional: add data to identify this as a lock transaction
+                data: [`Lock until block ${unlockHeight}`]
+              }];
+              
+              directLog('Using sendBsv params:', sendBsvParams);
+              lockResponse = await walletToUse.sendBsv(sendBsvParams);
+              directLog('✅ sendBsv fallback succeeded:', lockResponse);
             } else {
-              throw new Error('No lock method found on wallet');
+              throw new Error('Both lockBsv and sendBsv methods failed');
             }
           }
           
           clearTimeout(timeoutId);
           
           if (isTimedOut) {
-            directLog('Wallet lock call completed after timeout');
+            directLog('Operation completed after global timeout');
           }
           
-          directLog('✅ Lock call succeeded:', lockResponse);
+          directLog('✅ Lock/send operation succeeded:', lockResponse);
         } catch (err) {
           clearTimeout(timeoutId);
-          directLog('❌ Lock call failed with error:', err);
+          directLog('❌ All locking methods failed with error:', err);
           throw new Error(`Failed to lock BSV: ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
         
         if (!lockResponse || !lockResponse.txid) {
-          directLog('lockResponse missing txid:', lockResponse);
+          directLog('Response missing txid:', lockResponse);
           throw new Error('Missing transaction ID in response');
         }
         
