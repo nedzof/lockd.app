@@ -43,7 +43,7 @@ model post {
   metadata       Json?         @map("metadata")
   is_locked      Boolean       @default(false) @map("is_locked")
   image_metadata Json?         @map("image_metadata")
-  schedule_at    DateTime?     @map("schedule_at")
+  scheduled_at   DateTime?     @map("scheduled_at")
   lock_likes     lock_like[]
   vote_options   vote_option[]
 
@@ -52,7 +52,7 @@ model post {
   @@index([created_at])
   @@index([tags])
   @@index([tx_id])
-  @@index([schedule_at])
+  @@index([scheduled_at], map: "post_schedule_at_idx")
 }
 
 model processed_transaction {
@@ -129,16 +129,16 @@ model stats {
 }
 
 model notification_subscription {
-  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @map("id")
-  wallet_address      String   @map("wallet_address")
-  session_id          String?  @map("session_id")
-  threshold_value     Float    @default(1.0) @map("threshold_value")
-  notifications_enabled Boolean  @default(false) @map("notifications_enabled")
-  subscription_data   Json?    @map("subscription_data")
-  endpoint            String?  @map("endpoint")
-  created_at          DateTime @default(now()) @map("created_at")
-  updated_at          DateTime @default(now()) @updatedAt @map("updated_at")
-  last_notified_at    DateTime? @map("last_notified_at")
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @map("id")
+  wallet_address        String    @map("wallet_address")
+  session_id            String?   @map("session_id")
+  threshold_value       Float     @default(1.0) @map("threshold_value")
+  notifications_enabled Boolean   @default(false) @map("notifications_enabled")
+  subscription_data     Json?     @map("subscription_data")
+  endpoint              String?   @map("endpoint")
+  created_at            DateTime  @default(now()) @map("created_at")
+  updated_at            DateTime  @default(now()) @updatedAt @map("updated_at")
+  last_notified_at      DateTime? @map("last_notified_at")
 
   @@unique([wallet_address, endpoint])
   @@index([wallet_address])

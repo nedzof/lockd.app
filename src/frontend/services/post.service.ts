@@ -66,6 +66,7 @@ export interface DbPost {
     image_source?: string;
     is_vote: boolean;
     vote_options?: Dbvote_option[];
+    scheduled_at?: Date;
 }
 
 export interface Dbvote_option {
@@ -166,7 +167,9 @@ export function createDbPost(metadata: PostMetadata, tx_id: string): DbPost {
     // Ensure scheduled metadata is properly copied to the database post metadata
     if (metadata.scheduled) {
         post.metadata.scheduled = metadata.scheduled;
+        post.scheduled_at = new Date(metadata.scheduled.scheduledAt);
         console.log('Added scheduled metadata to post:', post.metadata.scheduled);
+        console.log('Added scheduled_at field:', post.scheduled_at);
     }
 
     if (metadata.block_height) {
