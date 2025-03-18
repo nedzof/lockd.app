@@ -27,11 +27,28 @@ export async function processScheduledPosts() {
     let processed = 0;
     for (const post of scheduledPosts) {
       try {
-        // Update the post to remove the scheduled_at date
+        // Get the current metadata
+        const metadata = post.metadata as Record<string, any> | null;
+        
+        // Create updated metadata with published flag
+        let updatedMetadata = { ...metadata } || {};
+        
+        // If there's scheduled info in the metadata, move it to published_scheduled_info
+        if (metadata?.scheduled) {
+          updatedMetadata.published_scheduled_info = metadata.scheduled;
+          updatedMetadata.scheduled = {
+            ...metadata.scheduled,
+            published: true,
+            published_at: new Date().toISOString()
+          };
+        }
+        
+        // Update the post to remove the scheduled_at date and update metadata
         await prisma.post.update({
           where: { id: post.id },
           data: {
-            scheduled_at: null
+            scheduled_at: null,
+            metadata: updatedMetadata
           }
         });
         

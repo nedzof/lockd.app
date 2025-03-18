@@ -6,6 +6,75 @@ import type { DirectPostBody } from '../types';
 import { NextApiRequest, NextApiResponse } from 'next';
 import { logger } from '../utils/logger';
 
+/**
+ * Helper function to determine if a scheduled post should be shown
+ * Only shows posts if:
+ * 1. They have no scheduled info, or
+ * 2. They have scheduled_at=null and metadata.scheduled.published=true, or
+ * 3. For backwards compatibility: They have scheduled_at=null and metadata.scheduled time in the past
+ */
+function shouldShowScheduledPost(post: any, now: Date): boolean {
+  try {
+    // If the post has a scheduled_at date in the future, filter it out
+    if (post.scheduled_at && post.scheduled_at > now) {
+      logger.debug(`Filtering out scheduled post ${post.id} - scheduled_at date is in the future`);
+      return false;
+    }
+    
+    const metadata = post.metadata as Record<string, any> | null;
+    
+    // If no scheduled metadata, show the post
+    if (!metadata || !metadata.scheduled) {
+      return true;
+    }
+    
+    // If post has been published by the scheduled job, show it
+    if (metadata.scheduled.published === true) {
+      logger.debug(`Including post ${post.id} - it has been published by the scheduled job`);
+      return true;
+    }
+    
+    // For backwards compatibility - check scheduled time
+    if (metadata.scheduled.scheduledAt) {
+      const scheduledAt = new Date(metadata.scheduled.scheduledAt);
+      
+      // Convert to user's timezone if provided
+      let adjustedScheduledAt = scheduledAt;
+      if (metadata.scheduled.timezone) {
+        try {
+          adjustedScheduledAt = new Date(scheduledAt.toLocaleString('en-US', { timeZone: metadata.scheduled.timezone }));
+        } catch (tzError) {
+          logger.error(`Error adjusting timezone for post ${post.id}:`, tzError);
+        }
+      }
+      
+      const isReady = adjustedScheduledAt <= now;
+      
+      if (!isReady) {
+        // Scheduled time is in the future
+        logger.debug(`Filtering out scheduled post ${post.id} - scheduled for ${scheduledAt.toISOString()}`);
+        return false;
+      } else if (post.scheduled_at === null) {
+        // Scheduled time is in the past and scheduled_at is null
+        // This means the post has been processed by the scheduled posts job
+        logger.debug(`Including scheduled post ${post.id} - published by scheduled job`);
+        return true;
+      } else {
+        // Scheduled time is in the past but scheduled_at is not null
+        // The post is ready to be published but the job hasn't run yet
+        logger.debug(`Filtering out scheduled post ${post.id} - awaiting scheduled job processing`);
+        return false;
+      }
+    }
+    
+    // Default to showing the post if we can't determine
+    return true;
+  } catch (error) {
+    logger.error(`Error checking scheduled post ${post.id}:`, error);
+    return true; // Include the post if there's an error processing it
+  }
+}
+
 // Define request parameter types
 interface PostParams {
   id: string;
@@ -376,43 +445,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
     // Log the current time for reference
     logger.debug('Current time for scheduled posts filtering:', now.toISOString());
     
-    postsToReturn = postsToReturn.filter(post => {
-      try {
-        const metadata = post.metadata as Record<string, any> | null;
-        // If the post has scheduled metadata and the scheduled time is in the future, filter it out
-        if (metadata && metadata.scheduled && metadata.scheduled.scheduledAt) {
-          const scheduledAt = new Date(metadata.scheduled.scheduledAt);
-          
-          // Convert to user's timezone if provided
-          let adjustedScheduledAt = scheduledAt;
-          if (metadata.scheduled.timezone) {
-            try {
-              // This is a simple approach to timezone handling
-              // For more accurate timezone support, use a library like date-fns-tz or moment-timezone
-              adjustedScheduledAt = new Date(scheduledAt.toLocaleString('en-US', { timeZone: metadata.scheduled.timezone }));
-            } catch (tzError) {
-              logger.error(`Error adjusting timezone for post ${post.id}:`, tzError);
-              // Fall back to UTC if timezone adjustment fails
-            }
-          }
-          
-          const isReady = adjustedScheduledAt <= now;
-          
-          if (!isReady) {
-            logger.debug(`Filtering out scheduled post ${post.id} - scheduled for ${scheduledAt.toISOString()} (in timezone: ${metadata.scheduled.timezone || 'UTC'})`);
-          } else {
-            logger.debug(`Including scheduled post ${post.id} - scheduled time has passed (${scheduledAt.toISOString()})`);
-          }
-          
-          return isReady; // Only include posts whose scheduled time has passed
-        }
-        // Include posts without scheduled metadata
-        return true;
-      } catch (error) {
-        logger.error(`Error filtering scheduled post ${post.id}:`, error);
-        return true; // Include the post if there's an error processing it
-      }
-    });
+    postsToReturn = postsToReturn.filter(post => shouldShowScheduledPost(post, now));
 
     logger.debug('Posts after filtering scheduled posts', {
       count: postsToReturn.length,
@@ -970,7 +1003,7 @@ const createDirectPost: CreateDirectPostHandler = async (req, res) => {
       stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
     });
   }
-};
+});
 
 // Register routes
 const router: Router = express.Router();
