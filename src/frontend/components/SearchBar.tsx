@@ -44,7 +44,7 @@ const SearchBar: React.FC = () => {
       {isExpanded ? (
         <form 
           onSubmit={handleSearch}
-          className="flex items-center bg-[#13141B] border border-gray-800/60 rounded-full overflow-hidden transition-all duration-300 w-36 md:w-48"
+          className="flex items-center bg-[#13141B] border border-gray-700/30 rounded-md overflow-hidden transition-all duration-300 w-44 md:w-56"
         >
           <input
             id="search-input"
@@ -52,8 +52,8 @@ const SearchBar: React.FC = () => {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search posts..."
-            className="w-full bg-transparent text-gray-200 text-xs px-3 py-1 focus:outline-none"
+            placeholder="Search..."
+            className="w-full bg-transparent text-gray-200 text-xs px-2 py-1.5 focus:outline-none"
           />
           <button
             type="button"
@@ -65,7 +65,7 @@ const SearchBar: React.FC = () => {
           </button>
           <button
             type="submit"
-            className="p-1 text-[#00ffa3] hover:bg-[#00ffa3]/10 focus:outline-none rounded-r-full"
+            className="p-1 text-[#00ffa3] hover:bg-[#00ffa3]/10 focus:outline-none rounded-r-md"
             aria-label="Search"
           >
             <FiSearch size={12} />
@@ -74,7 +74,7 @@ const SearchBar: React.FC = () => {
       ) : (
         <button
           onClick={toggleExpand}
-          className="flex items-center space-x-1 px-2 py-1 rounded-md text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors duration-200"
+          className="flex items-center space-x-1.5 px-3 py-1.5 text-xs rounded-md bg-white/5 border border-gray-700/30 hover:border-gray-600 text-gray-300 transition-all duration-200"
           aria-label="Open search"
         >
           <FiSearch size={12} />

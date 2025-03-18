@@ -1,7 +1,7 @@
 import * as React from 'react';
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock } from 'react-icons/fi';
+import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
@@ -23,6 +23,64 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const [personal_filter, setpersonal_filter] = useState('');
   const [block_filter, setblock_filter] = useState('');
   const [selected_tags, setselected_tags] = useState<string[]>([]);
+  
+  // Add refs for dropdown menus
+  const timeDropdownRef = useRef<HTMLDivElement>(null);
+  const blockDropdownRef = useRef<HTMLDivElement>(null);
+  const rankingDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Add state for dropdown visibility
+  const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
+  const [blockDropdownOpen, setBlockDropdownOpen] = useState(false);
+  const [rankingDropdownOpen, setRankingDropdownOpen] = useState(false);
+  
+  // Add predefined options for dropdowns
+  const timeOptions = [
+    { id: '1d', label: '24 Hours' },
+    { id: '3d', label: '3 Days' },
+    { id: '7d', label: '7 Days' },
+    { id: '14d', label: '2 Weeks' },
+    { id: '30d', label: '30 Days' },
+    { id: '90d', label: '90 Days' }
+  ];
+  
+  const blockOptions = [
+    { id: 'last-block', label: 'Last Block' },
+    { id: 'last-5-blocks', label: 'Last 5 Blocks' },
+    { id: 'last-10-blocks', label: 'Last 10 Blocks' },
+    { id: 'last-20-blocks', label: 'Last 20 Blocks' },
+    { id: 'last-50-blocks', label: 'Last 50 Blocks' },
+    { id: 'last-100-blocks', label: 'Last 100 Blocks' }
+  ];
+  
+  const rankingOptions = [
+    { id: 'top-1', label: 'Top 1' },
+    { id: 'top-3', label: 'Top 3' },
+    { id: 'top-5', label: 'Top 5' },
+    { id: 'top-10', label: 'Top 10' },
+    { id: 'top-25', label: 'Top 25' },
+    { id: 'top-50', label: 'Top 50' }
+  ];
+
+  // Function to close dropdowns when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (timeDropdownRef.current && !timeDropdownRef.current.contains(event.target as Node)) {
+        setTimeDropdownOpen(false);
+      }
+      if (blockDropdownRef.current && !blockDropdownRef.current.contains(event.target as Node)) {
+        setBlockDropdownOpen(false);
+      }
+      if (rankingDropdownRef.current && !rankingDropdownRef.current.contains(event.target as Node)) {
+        setRankingDropdownOpen(false);
+      }
+    }
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   const handletime_filter = (filter: string) => {
     // If the same filter is clicked again, clear it
@@ -33,6 +91,9 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       settime_filter(filter);
       setblock_filter(''); // Clear block filter when time filter is set
     }
+    
+    // Close dropdown
+    setTimeDropdownOpen(false);
     
     // Log the filter change
     console.log(`Set time filter to: ${filter || 'none'}, cleared block filter`);
@@ -47,6 +108,10 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       setblock_filter(filter);
       settime_filter(''); // Clear time filter when block filter is set
     }
+    
+    // Close dropdown
+    setBlockDropdownOpen(false);
+    
     console.log(`Set block filter to: ${filter || 'none'}`);
   };
 
@@ -58,6 +123,10 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       // Otherwise, set the new filter
       setranking_filter(filter);
     }
+    
+    // Close dropdown
+    setRankingDropdownOpen(false);
+    
     console.log(`Set ranking filter to: ${filter || 'none'}`);
   };
 
@@ -100,6 +169,36 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     console.log(`Added tag from post: ${tag}`);
   }, [selected_tags]);
 
+  // Get the current time filter label
+  const getCurrentTimeFilterLabel = () => {
+    const option = timeOptions.find(option => option.id === time_filter);
+    return option ? option.label : 'Time';
+  };
+  
+  // Get the current block filter label
+  const getCurrentBlockFilterLabel = () => {
+    const option = blockOptions.find(option => option.id === block_filter);
+    return option ? option.label : 'Blocks';
+  };
+  
+  // Get the current ranking filter label
+  const getCurrentRankingFilterLabel = () => {
+    const option = rankingOptions.find(option => option.id === ranking_filter);
+    return option ? option.label : 'Ranking';
+  };
+
+  // Function to clear all filters
+  const clearAllFilters = () => {
+    settime_filter('');
+    setblock_filter('');
+    setranking_filter('');
+    setpersonal_filter('');
+    setselected_tags([]);
+  };
+
+  // Check if any filter is active
+  const isAnyFilterActive = time_filter || block_filter || ranking_filter || personal_filter || selected_tags.length > 0;
+
   // Memoize the user_id to prevent unnecessary re-renders
   const memoizeduser_id = useMemo(() => {
     return connected && bsvAddress ? bsvAddress : 'anon';
@@ -140,160 +239,204 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
 
     return (
       <div className="relative min-h-screen pb-20">
-        {/* Filter bar - more compact version */}
-        <div className="mb-4">
-          <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg shadow-inner shadow-black/10 border border-white/5">
-            <div className="flex flex-wrap items-center px-3 py-2 gap-2">
-              {/* Group 1: Time & Block Filters + Search */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* Time Filters */}
-                <div className="flex items-center space-x-0.5">
-                  {[
-                    { id: '1d', label: '24H' },
-                    { id: '7d', label: '7D' },
-                    { id: '30d', label: '30D' }
-                  ].map(({ id, label }) => (
-                    <button
-                      key={id}
-                      onClick={() => handletime_filter(id)}
-                      className={`px-2 py-1 text-xs rounded-md transition-colors duration-200 ${
-                        time_filter === id
-                          ? 'bg-white/10 text-white'
-                          : 'text-gray-400 hover:text-white hover:bg-white/5'
-                      }`}
-                      title={`Show posts from the last ${label === '24H' ? 'day' : label === '7D' ? '7 days' : '30 days'}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Small vertical divider */}
-                <div className="h-4 w-px bg-gray-800/30" />
-
-                {/* Block Filters */}
-                <div className="flex items-center space-x-0.5">
-                  {[
-                    { id: 'last-block', label: 'Last Block' },
-                    { id: 'last-5-blocks', label: 'Last 5 Blocks' },
-                    { id: 'last-10-blocks', label: 'Last 10 Blocks' }
-                  ].map(({ id, label }) => (
-                    <button
-                      key={id}
-                      onClick={() => handleblock_filter(id)}
-                      className={`px-2 py-1 text-xs rounded-md transition-colors duration-200 ${
-                        block_filter === id
-                          ? 'bg-white/10 text-white'
-                          : 'text-gray-400 hover:text-white hover:bg-white/5'
-                      }`}
-                      title={`Show posts from ${label.toLowerCase()}`}
-                    >
-                      {id === 'last-block' ? 'Last Block' : 
-                       id === 'last-5-blocks' ? 'Last 5' : 'Last 10'}
-                    </button>
-                  ))}
-                </div>
+        {/* Filter bar */}
+        <div className="mb-6">
+          <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg">
+            <div className="flex items-center px-4 py-2 space-x-2">
+              {/* Filter icon */}
+              <div className="text-gray-400">
+                <FiFilter size={16} />
+              </div>
+              
+              {/* Time Filter Dropdown */}
+              <div ref={timeDropdownRef} className="relative">
+                <button
+                  onClick={() => {
+                    setTimeDropdownOpen(!timeDropdownOpen);
+                    setBlockDropdownOpen(false);
+                    setRankingDropdownOpen(false);
+                  }}
+                  className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-28 ${
+                    time_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
+                  }`}
+                >
+                  <div className="flex items-center space-x-1.5">
+                    <FiClock size={12} />
+                    <span className="truncate">{getCurrentTimeFilterLabel()}</span>
+                  </div>
+                  <FiChevronDown size={12} className={`transition-transform duration-200 ${timeDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {timeDropdownOpen && (
+                  <div className="absolute z-10 mt-1 w-36 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
+                    {time_filter && (
+                      <button
+                        onClick={() => handletime_filter('')}
+                        className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
+                      >
+                        <FiX size={12} className="mr-1.5" />
+                        Clear Time Filter
+                      </button>
+                    )}
+                    {timeOptions.map(option => (
+                      <button
+                        key={option.id}
+                        onClick={() => handletime_filter(option.id)}
+                        className={`flex items-center w-full px-3 py-1.5 text-xs ${
+                          time_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              {/* Block Filter Dropdown */}
+              <div ref={blockDropdownRef} className="relative">
+                <button
+                  onClick={() => {
+                    setBlockDropdownOpen(!blockDropdownOpen);
+                    setTimeDropdownOpen(false);
+                    setRankingDropdownOpen(false);
+                  }}
+                  className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-32 ${
+                    block_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
+                  }`}
+                >
+                  <div className="flex items-center space-x-1.5">
+                    <FiTrendingUp size={12} />
+                    <span className="truncate">{getCurrentBlockFilterLabel()}</span>
+                  </div>
+                  <FiChevronDown size={12} className={`transition-transform duration-200 ${blockDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {blockDropdownOpen && (
+                  <div className="absolute z-10 mt-1 w-40 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
+                    {block_filter && (
+                      <button
+                        onClick={() => handleblock_filter('')}
+                        className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
+                      >
+                        <FiX size={12} className="mr-1.5" />
+                        Clear Block Filter
+                      </button>
+                    )}
+                    {blockOptions.map(option => (
+                      <button
+                        key={option.id}
+                        onClick={() => handleblock_filter(option.id)}
+                        className={`flex items-center w-full px-3 py-1.5 text-xs ${
+                          block_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              {/* Ranking Filter Dropdown */}
+              <div ref={rankingDropdownRef} className="relative">
+                <button
+                  onClick={() => {
+                    setRankingDropdownOpen(!rankingDropdownOpen);
+                    setTimeDropdownOpen(false);
+                    setBlockDropdownOpen(false);
+                  }}
+                  className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-28 ${
+                    ranking_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
+                  }`}
+                >
+                  <div className="flex items-center space-x-1.5">
+                    <FiStar size={12} />
+                    <span className="truncate">{getCurrentRankingFilterLabel()}</span>
+                  </div>
+                  <FiChevronDown size={12} className={`transition-transform duration-200 ${rankingDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {rankingDropdownOpen && (
+                  <div className="absolute z-10 mt-1 w-32 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
+                    {ranking_filter && (
+                      <button
+                        onClick={() => handleranking_filter('')}
+                        className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
+                      >
+                        <FiX size={12} className="mr-1.5" />
+                        Clear Ranking
+                      </button>
+                    )}
+                    {rankingOptions.map(option => (
+                      <button
+                        key={option.id}
+                        onClick={() => handleranking_filter(option.id)}
+                        className={`flex items-center w-full px-3 py-1.5 text-xs ${
+                          ranking_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Small vertical divider */}
-              <div className="h-4 w-px bg-gray-800/30" />
-
-              {/* Group 2: Search Bar */}
-              <div>
+              {/* Search */}
+              <div className="flex-grow flex justify-end">
                 <SearchBar />
               </div>
-
-              {/* Small vertical divider */}
-              <div className="h-4 w-px bg-gray-800/30" />
-
-              {/* Group 3: Ranking Filters */}
-              <div className="flex items-center space-x-0.5">
-                {[
-                  { id: 'top-1', label: 'Top 1' },
-                  { id: 'top-3', label: 'Top 3' },
-                  { id: 'top-10', label: 'Top 10' }
-                ].map(({ id, label }) => (
-                  <button
-                    key={id}
-                    onClick={() => handleranking_filter(id)}
-                    className={`px-2 py-1 text-xs rounded-md transition-colors duration-200 relative ${
-                      ranking_filter === id
-                        ? 'bg-white/10 text-white'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
-                    title={`Show ${label.toLowerCase()} posts by popularity`}
-                  >
-                    {label}
-                    {ranking_filter === id && (
-                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                        <span className="absolute inline-flex h-full w-full rounded-full bg-[#00ffa3] opacity-75 animate-ping"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00ffa3]"></span>
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-
+              
               {/* Only show Personal Filters and Threshold Settings when connected */}
               {connected && (
-                <>
-                  {/* Small vertical divider */}
-                  <div className="h-4 w-px bg-gray-800/30" />
-                  
+                <div className="flex items-center space-x-2">
                   {/* Personal Filters */}
-                  <div className="flex items-center space-x-0.5">
+                  <div className="flex items-center space-x-1">
                     {[
-                      { id: 'mylocks', label: 'My Posts', icon: 'user', title: 'Show posts you created' },
-                      { id: 'locked', label: 'My Locks', icon: 'lock', title: 'Show posts where you locked BSV' }
+                      { id: 'mylocks', label: 'My Posts', icon: <FiUser size={12} />, title: 'Show posts you created' },
+                      { id: 'locked', label: 'My Locks', icon: <FiLock size={12} />, title: 'Show posts where you locked BSV' }
                     ].map(({ id, label, icon, title }) => (
                       <button
                         key={id}
                         onClick={() => handlepersonal_filter(id)}
-                        className={`px-2 py-1 text-xs rounded-md transition-colors duration-200 relative ${
+                        className={`flex items-center px-3 py-1.5 text-xs rounded-md transition-all duration-200 ${
                           personal_filter === id
-                            ? 'bg-white/10 text-white'
-                            : 'text-gray-400 hover:text-white hover:bg-white/5'
+                            ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20'
+                            : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
                         }`}
                         title={title}
                       >
-                        {icon === 'user' ? (
-                          <span className="inline-flex items-center">
-                            <FiUser className="mr-1" size={10} />
-                            {label}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center">
-                            <FiLock className="mr-1" size={10} />
-                            {label}
-                          </span>
-                        )}
-                        {personal_filter === id && (
-                          <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                            <span className="absolute inline-flex h-full w-full rounded-full bg-[#00ffa3] opacity-75 animate-ping"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00ffa3]"></span>
-                          </span>
-                        )}
+                        <span className="mr-1.5">{icon}</span>
+                        <span className="whitespace-nowrap">{label}</span>
                       </button>
                     ))}
                   </div>
                   
-                  {/* Small vertical divider */}
-                  <div className="h-4 w-px bg-gray-800/30" />
-                  
                   {/* Threshold Settings */}
                   <ThresholdSettings connected={connected} walletAddress={bsvAddress || undefined} />
-                </>
+                </div>
+              )}
+              
+              {/* Clear All Filters button (only shows when filters are active) */}
+              {isAnyFilterActive && (
+                <button
+                  onClick={clearAllFilters}
+                  className="text-xs px-2 py-1 text-gray-400 hover:text-white rounded flex items-center"
+                  title="Clear all filters"
+                >
+                  <FiX size={12} className="mr-1" />
+                  <span>Clear</span>
+                </button>
               )}
             </div>
           </div>
 
-          {/* Tag Filter - with reduced margin */}
-          <div className="mt-2">
-            <TagFilter
-              selected_tags={selected_tags}
-              onTagSelect={setselected_tags}
-            />
-          </div>
+          {/* Tag Filter */}
+          <TagFilter
+            selected_tags={selected_tags}
+            onTagSelect={setselected_tags}
+          />
         </div>
 
         {memoizedPostGrid}
