@@ -60,19 +60,32 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   // Function to close dropdowns when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (periodDropdownRef.current && !periodDropdownRef.current.contains(event.target as Node)) {
+      // For period dropdown
+      if (periodDropdownOpen && 
+          periodDropdownRef.current && 
+          !periodDropdownRef.current.contains(event.target as Node) &&
+          !(event.target as Element).closest('.period-dropdown-content')) {
         setPeriodDropdownOpen(false);
       }
-      if (rankingDropdownRef.current && !rankingDropdownRef.current.contains(event.target as Node)) {
+      
+      // For ranking dropdown
+      if (rankingDropdownOpen && 
+          rankingDropdownRef.current && 
+          !rankingDropdownRef.current.contains(event.target as Node) &&
+          !(event.target as Element).closest('.ranking-dropdown-content')) {
         setRankingDropdownOpen(false);
       }
     }
     
-    document.addEventListener('mousedown', handleClickOutside);
+    // Only add the event listener if at least one dropdown is open
+    if (periodDropdownOpen || rankingDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, []);
+  }, [periodDropdownOpen, rankingDropdownOpen]);
 
   const handlePeriodFilter = (filter: string) => {
     // If the same filter is clicked again, clear it
@@ -273,15 +286,19 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 {periodDropdownOpen && (
                   createPortal(
                     <div 
-                      className="fixed z-50 mt-1 w-40 rounded-md bg-[#1A1B23] border border-gray-800 shadow-xl py-1"
+                      className="fixed z-50 mt-1 w-40 rounded-md bg-[#1A1B23] border border-gray-800 shadow-xl py-1 overflow-hidden period-dropdown-content"
                       style={{
                         top: `${(periodDropdownRef.current?.getBoundingClientRect()?.bottom || 0) + window.scrollY + 5}px`,
                         left: `${(periodDropdownRef.current?.getBoundingClientRect()?.left || 0) + window.scrollX}px`
                       }}
+                      onClick={(e) => e.stopPropagation()}
                     >
                       {period_filter && (
                         <button
-                          onClick={() => handlePeriodFilter('')}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePeriodFilter('');
+                          }}
                           className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
                         >
                           <FiX size={12} className="mr-1.5" />
@@ -294,8 +311,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                       {timePeriodOptions.filter(option => option.type === 'time').map(option => (
                         <button
                           key={option.id}
-                          onClick={() => handlePeriodFilter(option.id)}
-                          className={`flex items-center w-full px-3 py-1.5 text-xs ${
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePeriodFilter(option.id);
+                          }}
+                          className={`flex items-center w-full px-3 py-1.5 text-xs cursor-pointer ${
                             period_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
                           }`}
                         >
@@ -309,8 +329,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                       {timePeriodOptions.filter(option => option.type === 'block').map(option => (
                         <button
                           key={option.id}
-                          onClick={() => handlePeriodFilter(option.id)}
-                          className={`flex items-center w-full px-3 py-1.5 text-xs ${
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePeriodFilter(option.id);
+                          }}
+                          className={`flex items-center w-full px-3 py-1.5 text-xs cursor-pointer ${
                             period_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
                           }`}
                         >
@@ -346,15 +369,19 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 {rankingDropdownOpen && (
                   createPortal(
                     <div 
-                      className="fixed z-50 mt-1 w-32 rounded-md bg-[#1A1B23] border border-gray-800 shadow-xl py-1"
+                      className="fixed z-50 mt-1 w-32 rounded-md bg-[#1A1B23] border border-gray-800 shadow-xl py-1 overflow-hidden ranking-dropdown-content"
                       style={{
                         top: `${(rankingDropdownRef.current?.getBoundingClientRect()?.bottom || 0) + window.scrollY + 5}px`,
                         left: `${(rankingDropdownRef.current?.getBoundingClientRect()?.left || 0) + window.scrollX}px`
                       }}
+                      onClick={(e) => e.stopPropagation()}
                     >
                       {ranking_filter && (
                         <button
-                          onClick={() => handleRankingFilter('')}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRankingFilter('');
+                          }}
                           className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
                         >
                           <FiX size={12} className="mr-1.5" />
@@ -364,8 +391,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                       {rankingOptions.map(option => (
                         <button
                           key={option.id}
-                          onClick={() => handleRankingFilter(option.id)}
-                          className={`flex items-center w-full px-3 py-1.5 text-xs ${
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRankingFilter(option.id);
+                          }}
+                          className={`flex items-center w-full px-3 py-1.5 text-xs cursor-pointer ${
                             ranking_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
                           }`}
                         >
