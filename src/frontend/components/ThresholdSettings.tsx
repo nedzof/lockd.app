@@ -90,13 +90,24 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
   
   // Handle slider change
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseFloat(e.target.value);
-    setMilestoneThreshold(Number(value.toFixed(2))); // Round to 2 decimal places
+    const sliderValue = parseFloat(e.target.value);
+    // Convert slider value (0-100) to exponential BSV value (0.01-1000)
+    const exponentialValue = Math.pow(10, (sliderValue / 100) * 5 - 2); // Maps 0-100 to 0.01-1000
+    const roundedValue = Number(exponentialValue.toFixed(2)); // Round to 2 decimal places
+    
+    setMilestoneThreshold(roundedValue);
     
     // If notifications are enabled, update the subscription
     if (notificationsEnabled) {
-      updateNotificationSubscription(value);
+      updateNotificationSubscription(roundedValue);
     }
+  };
+  
+  // Convert BSV value back to slider position
+  const getSliderPosition = () => {
+    // Convert BSV value (0.01-1000) back to slider value (0-100)
+    const position = ((Math.log10(milestoneThreshold) + 2) / 5) * 100;
+    return Math.max(0, Math.min(100, position)); // Ensure within 0-100 range
   };
   
   // Helper function to convert the VAPID key from base64 to Uint8Array
@@ -595,19 +606,22 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
               <div className="relative mb-6 px-1 pt-1">
                 <input
                   type="range"
-                  min="0.01"
-                  max="10"
-                  step="0.01"
-                  value={milestoneThreshold}
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={getSliderPosition()}
                   onChange={handleSliderChange}
                   className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[#00ffa3]"
                   style={{
-                    background: `linear-gradient(to right, #00ffa3 0%, #00ffa3 ${(milestoneThreshold / 10) * 100}%, #374151 ${(milestoneThreshold / 10) * 100}%, #374151 100%)`
+                    background: `linear-gradient(to right, #00ffa3 0%, #00ffa3 ${getSliderPosition()}%, #374151 ${getSliderPosition()}%, #374151 100%)`
                   }}
                 />
                 <div className="flex justify-between text-xs text-gray-500 mt-1">
                   <span>0.01</span>
+                  <span>1</span>
                   <span>10</span>
+                  <span>100</span>
+                  <span>1000</span>
                 </div>
               </div>
               
