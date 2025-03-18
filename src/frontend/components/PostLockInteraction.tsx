@@ -234,24 +234,22 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         const unlockHeight = currentBlockHeight + duration;
         const satoshiAmount = Math.floor(amount * SATS_PER_BSV);
         
-        directLog('Preparing lock with parameters:', {
+        directLog('Preparing lock with EXACT parameters from documentation example:', {
           address: addresses.identityAddress,
           blockHeight: unlockHeight,
           sats: satoshiAmount
         });
         
-        // Create the params object exactly matching the type definition
-        const lockParams: Array<{
-          address: string;
-          blockHeight: number;
-          sats: number;
-        }> = [{
-          address: addresses.identityAddress,
-          blockHeight: unlockHeight,
-          sats: satoshiAmount
-        }];
+        // Create a direct copy of the example from documentation
+        const locks = [
+          { 
+            address: addresses.identityAddress,
+            blockHeight: unlockHeight,
+            sats: satoshiAmount
+          }
+        ];
         
-        directLog('Attempting lock operation with the following parameters:', lockParams);
+        directLog('Attempting lock with EXACT documentation example format:', locks);
         
         // Set a timer to detect if the wallet call is hanging
         const timeoutMs = 15000; // 15 seconds timeout
@@ -264,18 +262,41 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         // Warn about potential wallet UI prompt
         directLog('The wallet may show a confirmation prompt - check for popups or extensions');
         
-        // Call wallet lock with exact types
+        // Call wallet lock with exact types - EXACT copy from documentation
         let lockResponse;
         try {
-          // Try both potential function names since documentation and types differ
-          if (typeof (wallet as any)['lock'] === 'function') {
-            // Documentation indicates the function is called "lock"
-            directLog('⏳ wallet.lock call started...');
-            lockResponse = await (wallet as any)['lock'](lockParams);
+          // Use the window.yours global if available as a fallback
+          const walletToUse = wallet || (window as any).yours;
+          
+          directLog('⏳ Using exact syntax from documentation...');
+          // Capture available methods to check what's actually on the wallet
+          const availableMethods = Object.keys(walletToUse || {})
+            .filter(key => typeof (walletToUse as any)[key] === 'function');
+          directLog('Available wallet methods:', availableMethods);
+          
+          // Check specifically for lock methods
+          directLog('Lock method check:', { 
+            hasLock: typeof (walletToUse as any)?.lock === 'function',
+            hasLockBsv: typeof walletToUse?.lockBsv === 'function'
+          });
+          
+          // Try exact code from documentation
+          if (typeof (walletToUse as any)?.lock === 'function') {
+            directLog('⏳ Calling wallet.lock() as shown in documentation...');
+            lockResponse = await (walletToUse as any).lock(locks);
+          } else if (typeof walletToUse?.lockBsv === 'function') {
+            directLog('⏳ Calling wallet.lockBsv() as shown in type definitions...');
+            lockResponse = await walletToUse.lockBsv(locks);
           } else {
-            // Type definitions show "lockBsv"
-            directLog('⏳ wallet.lockBsv call started...');
-            lockResponse = await wallet.lockBsv(lockParams);
+            // Last resort - try calling directly on window.yours
+            directLog('⏳ Trying global window.yours.lock...');
+            if (typeof (window as any).yours?.lock === 'function') {
+              lockResponse = await (window as any).yours.lock(locks);
+            } else if (typeof (window as any).yours?.lockBsv === 'function') {
+              lockResponse = await (window as any).yours.lockBsv(locks);
+            } else {
+              throw new Error('No lock method found on wallet');
+            }
           }
           
           clearTimeout(timeoutId);
@@ -284,29 +305,11 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
             directLog('Wallet lock call completed after timeout');
           }
           
-          directLog('✅ Wallet lock call succeeded:', lockResponse);
+          directLog('✅ Lock call succeeded:', lockResponse);
         } catch (err) {
           clearTimeout(timeoutId);
-          directLog('❌ Wallet lock call failed with error:', err);
-          
-          // Try the alternative method if the first one failed
-          try {
-            directLog('Trying alternative wallet function name...');
-            if (typeof (wallet as any)['lock'] === 'function') {
-              // If lockBsv failed, try lock
-              directLog('⏳ Trying wallet.lockBsv as fallback...');
-              lockResponse = await wallet.lockBsv(lockParams);
-            } else {
-              // If lock failed, try lockBsv
-              directLog('⏳ Trying wallet.lock as fallback...');
-              lockResponse = await (wallet as any)['lock'](lockParams);
-            }
-            
-            directLog('✅ Fallback wallet lock method succeeded:', lockResponse);
-          } catch (fallbackErr) {
-            directLog('❌ All wallet lock methods failed:', fallbackErr);
-            throw fallbackErr;
-          }
+          directLog('❌ Lock call failed with error:', err);
+          throw new Error(`Failed to lock BSV: ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
         
         if (!lockResponse || !lockResponse.txid) {
