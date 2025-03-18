@@ -426,7 +426,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
               </button>
 
               {/* Search */}
-              <div className="flex-grow flex justify-end">
+              <div className="relative flex items-center ml-auto">
                 <SearchBar />
               </div>
               
