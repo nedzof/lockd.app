@@ -1143,94 +1143,143 @@ router.post('/posts/:id/publish-scheduled', async (req: Request, res: Response, 
 // Search posts by content, username, tags, vote options, block numbers, and other criteria
 export async function searchPosts(query: string, limit = 50, searchType = 'all'): Promise<any> {
   try {
-    const whereConditions = [];
+    // Clean the query to prevent injection
+    const cleanQuery = query.trim();
     
-    // Clean the query to prevent SQL injection
-    const cleanQuery = query.replace(/(['%_])/g, '\\$1');
-    const likePattern = `%${cleanQuery}%`;
+    // Build where condition for the main Prisma query
+    const whereConditions: Prisma.postWhereInput = {
+      OR: []
+    };
     
     // Apply filters based on search type
     if (searchType === 'all' || searchType === 'content') {
       // Search in content (case insensitive)
-      whereConditions.push(`LOWER(posts.content) LIKE LOWER('${likePattern}')`);
+      whereConditions.OR.push({
+        content: {
+          contains: cleanQuery,
+          mode: 'insensitive'
+        }
+      });
     }
     
     if (searchType === 'all' || searchType === 'tags') {
-      // Search in tags (using array contains)
-      whereConditions.push(`posts.tags ?| array['${cleanQuery}']`);
+      // Search in tags array
+      whereConditions.OR.push({
+        tags: {
+          hasSome: [cleanQuery]
+        }
+      });
     }
     
     if (searchType === 'all' || searchType === 'votes') {
-      // Search in vote options content
-      whereConditions.push(`EXISTS (
-        SELECT 1 FROM vote_option 
-        WHERE vote_option.post_id = posts.id AND 
-        LOWER(vote_option.content) LIKE LOWER('${likePattern}')
-      )`);
-    }
-    
-    if (searchType === 'all') {
-      // Search by username or display name
-      whereConditions.push(`LOWER(users.username) LIKE LOWER('${likePattern}')`);
-      whereConditions.push(`LOWER(users.display_name) LIKE LOWER('${likePattern}')`);
+      // Search in vote options
+      whereConditions.OR.push({
+        vote_options: {
+          some: {
+            content: {
+              contains: cleanQuery,
+              mode: 'insensitive'
+            }
+          }
+        }
+      });
     }
     
     // Search by block number if query is numeric
-    if ((searchType === 'all' || searchType === 'blocks') && /^\d+$/.test(query)) {
-      whereConditions.push(`posts.block_height = ${query}`);
+    if ((searchType === 'all' || searchType === 'blocks') && /^\d+$/.test(cleanQuery)) {
+      whereConditions.OR.push({
+        block_height: parseInt(cleanQuery, 10)
+      });
     }
     
-    // If no conditions were added (unlikely), add a default to prevent SQL error
-    if (whereConditions.length === 0) {
-      whereConditions.push(`1=0`); // No results
-    }
+    console.log('Search query with conditions:', JSON.stringify(whereConditions, null, 2));
     
-    // Build the SQL query with proper pagination
-    let sql = `
-      SELECT 
-        posts.*,
-        users.display_name, 
-        users.username, 
-        users.avatar_url,
-        COALESCE((SELECT COUNT(*)::integer FROM lock_like WHERE lock_like.post_id = posts.id), 0) as lock_count,
-        (SELECT json_agg(vo.*) FROM vote_option vo WHERE vo.post_id = posts.id) as vote_options
-      FROM posts
-      LEFT JOIN users ON posts.author_address = users.address
-      WHERE ${whereConditions.join(' OR ')}
-      ORDER BY posts.created_at DESC
-      LIMIT ${limit}
-    `;
+    // Find posts matching the criteria
+    const posts = await prisma.post.findMany({
+      where: whereConditions,
+      include: {
+        vote_options: true,
+        lock_likes: {
+          select: {
+            id: true
+          }
+        }
+      },
+      orderBy: {
+        created_at: 'desc'
+      },
+      take: limit
+    });
     
-    console.log('Search query:', sql);
-    const results = await prisma.$queryRawUnsafe(sql);
+    // Get user data for posts
+    const userAddresses = posts.map(post => post.author_address).filter(Boolean) as string[];
+    let users: Record<string, any> = {};
     
-    // Process raw_image_data for each post
-    const processedResults = Array.isArray(results) ? results.map(post => {
-      // Ensure lock_count is a number (and default to 0 if missing)
-      post.lock_count = parseInt(post.lock_count || '0', 10);
+    if (userAddresses.length > 0) {
+      const userData = await prisma.user.findMany({
+        where: {
+          address: {
+            in: userAddresses
+          }
+        },
+        select: {
+          address: true,
+          username: true,
+          display_name: true,
+          avatar_url: true
+        }
+      });
       
-      // Process raw_image_data to ensure it's in the correct format
+      // Create a lookup object for quick access
+      users = userData.reduce((acc, user) => {
+        if (user.address) {
+          acc[user.address] = user;
+        }
+        return acc;
+      }, {} as Record<string, any>);
+    }
+    
+    // Process posts to include necessary data
+    const processedPosts = posts.map(post => {
+      // Add user data to post
+      const user = post.author_address ? users[post.author_address] : null;
+      
+      // Calculate lock count
+      const lock_count = post.lock_likes.length;
+      
+      // Process raw_image_data for frontend
+      let processedImageData = null;
       if (post.raw_image_data) {
         try {
-          // Convert Buffer to base64 string for frontend use
-          post.raw_image_data = Buffer.from(post.raw_image_data).toString('base64');
+          processedImageData = Buffer.from(post.raw_image_data).toString('base64');
         } catch (e) {
           console.error('Error processing raw_image_data:', e);
-          post.raw_image_data = null;
         }
       }
-      return post;
-    }) : [];
+      
+      // Return processed post with all necessary data
+      return {
+        ...post,
+        raw_image_data: processedImageData,
+        lock_count,
+        // Add user data if available
+        display_name: user?.display_name || null,
+        username: user?.username || null,
+        avatar_url: user?.avatar_url || null,
+        // Remove lock_likes array since we just need the count
+        lock_likes: undefined
+      };
+    });
     
-    // Debug log for the first post's lock_count (if any)
-    if (processedResults.length > 0) {
-      console.log('First result lock_count:', processedResults[0].lock_count, 
-                  'type:', typeof processedResults[0].lock_count);
+    // Debug log first result's lock count if available
+    if (processedPosts.length > 0) {
+      console.log('First result lock_count:', processedPosts[0].lock_count, 
+                  'type:', typeof processedPosts[0].lock_count);
     }
     
     return { 
-      posts: processedResults, 
-      count: processedResults.length 
+      posts: processedPosts, 
+      count: processedPosts.length 
     };
   } catch (error) {
     console.error('Error searching posts:', error);
