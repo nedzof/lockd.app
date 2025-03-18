@@ -687,7 +687,7 @@ const PostGrid: React.FC<PostGridProps> = ({
 
   // Render the component
   return (
-    <div className="w-full">
+    <div className="w-full relative z-10">
       {/* Main post grid */}
       <div className="w-full">
         {/* Active filters indicators */}

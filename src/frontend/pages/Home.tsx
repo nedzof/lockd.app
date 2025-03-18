@@ -239,7 +239,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     return (
       <div className="relative min-h-screen pb-20">
         {/* Filter bar */}
-        <div className="mb-6">
+        <div className="mb-6 relative z-20">
           <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg">
             <div className="flex items-center px-4 py-2 space-x-2">
               {/* Filter icon */}
@@ -266,7 +266,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 </button>
                 
                 {periodDropdownOpen && (
-                  <div className="absolute z-10 mt-1 w-40 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
+                  <div className="absolute z-30 mt-1 w-40 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
                     {period_filter && (
                       <button
                         onClick={() => handlePeriodFilter('')}
@@ -329,7 +329,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 </button>
                 
                 {rankingDropdownOpen && (
-                  <div className="absolute z-10 mt-1 w-32 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
+                  <div className="absolute z-30 mt-1 w-32 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
                     {ranking_filter && (
                       <button
                         onClick={() => handleranking_filter('')}

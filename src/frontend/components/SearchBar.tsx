@@ -62,11 +62,11 @@ const SearchBar: React.FC = () => {
   };
   
   return (
-    <div className="relative">
+    <div className="relative z-30">
       {isExpanded ? (
         <form 
           onSubmit={handleSearch}
-          className="flex items-center bg-[#13141B] border border-gray-700/30 rounded-md overflow-hidden transition-all duration-300 w-44 md:w-56"
+          className="flex items-center bg-[#13141B] border border-gray-700/30 rounded-md overflow-hidden transition-all duration-300 w-44 md:w-56 shadow-lg"
         >
           <input
             id="search-input"

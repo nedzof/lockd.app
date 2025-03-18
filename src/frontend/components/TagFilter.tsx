@@ -173,7 +173,7 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
   }
 
   return (
-    <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg mb-6">
+    <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg mb-6 relative z-20">
       <div className="px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
