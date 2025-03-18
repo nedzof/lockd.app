@@ -1222,7 +1222,16 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all')
     }
     
     // Search by transaction ID
-    if (searchType === 'all' || searchType === 'tx') {
+    if (searchType === 'tx') {
+      // Use exact match for direct transaction ID searches
+      whereConditions.OR.push({
+        tx_id: {
+          equals: cleanQuery,
+          mode: 'insensitive'
+        }
+      });
+    } else if (searchType === 'all') {
+      // Use contains for general searches
       whereConditions.OR.push({
         tx_id: {
           contains: cleanQuery,
