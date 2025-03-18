@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, createRoutesFromEleme
 import { Toaster } from 'react-hot-toast';
 import Layout from '../components/layout/Layout';
 import Home from './Home';
-import WTF from './WTF';
+import Search from './Search';
 import Stats from './Stats';
 import { useWallet } from '../providers/WalletProvider';
 
@@ -15,7 +15,7 @@ export default function App() {
       <Layout
         connected={isConnected}
         bsvAddress={bsvAddress}
-        balance={balance || 0}
+        balance={balance.bsv}
         onConnect={connect}
         onDisconnect={disconnect}
         isWalletDetected={isWalletDetected}
@@ -27,7 +27,7 @@ export default function App() {
           {/* Main routes */}
           <Route path="/posts" element={<Home connected={isConnected} bsvAddress={bsvAddress} />} />
           <Route path="/stats" element={<Stats />} />
-          <Route path="/wtf" element={<WTF />} />
+          <Route path="/search" element={<Search />} />
           
           {/* Catch all route - redirect to /posts */}
           <Route path="*" element={<Navigate to="/posts" replace />} />

@@ -1140,4 +1140,45 @@ router.post('/posts/:id/publish-scheduled', async (req: Request, res: Response, 
   }
 });
 
+// Search posts by content, username, or tags
+export async function searchPosts(query: string, limit = 50): Promise<any> {
+  try {
+    const whereConditions = [];
+    
+    // Search in content (case insensitive)
+    if (query) {
+      whereConditions.push(`LOWER(content) LIKE LOWER('%${query}%')`);
+    }
+    
+    // Build the SQL query with proper pagination
+    let sql = `
+      SELECT posts.*, 
+             users.display_name, 
+             users.username, 
+             users.avatar_url
+      FROM posts
+      LEFT JOIN users ON posts.author_address = users.address
+      WHERE ${whereConditions.length > 0 ? whereConditions.join(' OR ') : '1=1'}
+      ORDER BY posts.created_at DESC
+      LIMIT ${limit}
+    `;
+    
+    console.log('Search query:', sql);
+    const { data, error } = await prisma.$queryRawUnsafe(sql);
+    
+    if (error) {
+      console.error('Error searching posts:', error);
+      throw new Error('Failed to search posts');
+    }
+    
+    return { 
+      posts: data || [], 
+      count: data?.length || 0 
+    };
+  } catch (error) {
+    console.error('Error searching posts:', error);
+    throw error;
+  }
+}
+
 export default router; 
