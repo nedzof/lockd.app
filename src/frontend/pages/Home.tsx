@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX, FiLink, FiCalendar } from 'react-icons/fi';
+import { FiTrendingUp, FiClock, FiHeart, FiStar, FiUser, FiLock, FiChevronDown, FiFilter, FiX, FiLink, FiCalendar, FiSearch } from 'react-icons/fi';
 import PostGrid from '../components/PostGrid';
 import { BSVStats } from '../components/charts/BSVStats';
 import CreatePostButton from '../components/CreatePostButton';
@@ -23,17 +23,19 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const [ranking_filter, setranking_filter] = useState('top-1');
   const [personal_filter, setpersonal_filter] = useState('');
   const [selected_tags, setselected_tags] = useState<string[]>([]);
-  const [tx_filter, setTx_filter] = useState('');
+  
+  // Read search params from URL
+  const searchParams = new URLSearchParams(location.search);
+  const searchTerm = searchParams.get('q') || '';
+  const searchType = searchParams.get('type') || '';
   
   // Add refs for dropdown menus
   const periodDropdownRef = useRef<HTMLDivElement>(null);
   const rankingDropdownRef = useRef<HTMLDivElement>(null);
-  const txDropdownRef = useRef<HTMLDivElement>(null);
   
   // Add state for dropdown visibility
   const [periodDropdownOpen, setPeriodDropdownOpen] = useState(false);
   const [rankingDropdownOpen, setRankingDropdownOpen] = useState(false);
-  const [txDropdownOpen, setTxDropdownOpen] = useState(false);
   
   // Add combined time period options
   const timePeriodOptions = [
@@ -62,9 +64,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       }
       if (rankingDropdownRef.current && !rankingDropdownRef.current.contains(event.target as Node)) {
         setRankingDropdownOpen(false);
-      }
-      if (txDropdownRef.current && !txDropdownRef.current.contains(event.target as Node)) {
-        setTxDropdownOpen(false);
       }
     }
     
@@ -126,7 +125,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     setranking_filter('top-1');
     setpersonal_filter('');
     setselected_tags([]);
-    setTx_filter('');
     
     console.log('Refreshing posts with reset filters...');
   }, []);
@@ -162,32 +160,21 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     return option ? option.label : 'Ranking';
   };
 
-  // Function to handle transaction ID filter
-  const handleTxFilter = (txId: string) => {
-    // If there's an input but not a full search
-    if (txId && txId !== tx_filter) {
-      setTx_filter(txId);
-      // Navigate to search page with transaction ID type search
-      navigate(`/search?q=${encodeURIComponent(txId)}&type=tx`);
-    } else {
-      setTx_filter('');
-    }
-    
-    // Close dropdown
-    setTxDropdownOpen(false);
-  };
-
   // Function to clear all filters
   const clearAllFilters = () => {
     setPeriod_filter('');
     setranking_filter('');
     setpersonal_filter('');
     setselected_tags([]);
-    setTx_filter('');
+    
+    // If we have search params, clear them by navigating to home
+    if (searchTerm) {
+      navigate('/');
+    }
   };
 
   // Check if any filter is active
-  const isAnyFilterActive = period_filter || ranking_filter || personal_filter || selected_tags.length > 0 || tx_filter;
+  const isAnyFilterActive = period_filter || ranking_filter || personal_filter || selected_tags.length > 0 || searchTerm;
 
   // Determine time_filter and block_filter values for PostGrid based on period_filter
   const getFiltersForPostGrid = () => {
@@ -221,10 +208,10 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       ranking_filter,
       personal_filter,
       selected_tags,
-      tx_filter,
+      searchTerm,
       user_id: memoizeduser_id
     });
-  }, [period_filter, ranking_filter, personal_filter, selected_tags, tx_filter, memoizeduser_id, time_filter, block_filter]);
+  }, [period_filter, ranking_filter, personal_filter, selected_tags, searchTerm, memoizeduser_id, time_filter, block_filter]);
 
   const renderContent = () => {
     if (isStats) {
@@ -243,9 +230,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           selected_tags={selected_tags}
           user_id={memoizeduser_id}
           onTagSelect={handleTagSelectFromPost}
+          searchTerm={searchTerm}
+          searchType={searchType}
         />
       );
-    }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, memoizeduser_id, handleStatsUpdate, handleTagSelectFromPost]);
+    }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, memoizeduser_id, handleStatsUpdate, handleTagSelectFromPost, searchTerm, searchType]);
 
     return (
       <div className="relative min-h-screen pb-20">
@@ -264,7 +253,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                   onClick={() => {
                     setPeriodDropdownOpen(!periodDropdownOpen);
                     setRankingDropdownOpen(false);
-                    setTxDropdownOpen(false);
                   }}
                   className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-32 ${
                     period_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
@@ -328,7 +316,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                   onClick={() => {
                     setRankingDropdownOpen(!rankingDropdownOpen);
                     setPeriodDropdownOpen(false);
-                    setTxDropdownOpen(false);
                   }}
                   className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-28 ${
                     ranking_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
@@ -363,59 +350,6 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                         {option.label}
                       </button>
                     ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Add Transaction ID Filter Dropdown */}
-              <div ref={txDropdownRef} className="relative">
-                <button
-                  onClick={() => {
-                    setTxDropdownOpen(!txDropdownOpen);
-                    setPeriodDropdownOpen(false);
-                    setRankingDropdownOpen(false);
-                  }}
-                  className={`flex items-center justify-between px-3 py-1.5 text-xs rounded-md transition-all duration-200 w-32 ${
-                    tx_filter ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
-                  }`}
-                >
-                  <div className="flex items-center space-x-1.5">
-                    <FiLink size={12} />
-                    <span className="truncate">{tx_filter ? 'Transaction ID' : 'TX ID'}</span>
-                  </div>
-                  <FiChevronDown size={12} className={`transition-transform duration-200 ${txDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
-                
-                {txDropdownOpen && (
-                  <div className="absolute z-10 mt-1 w-64 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-2 px-3">
-                    {tx_filter && (
-                      <button
-                        onClick={() => handleTxFilter('')}
-                        className="flex w-full items-center mb-2 px-2 py-1 text-xs text-gray-300 hover:bg-white/5 rounded"
-                      >
-                        <FiX size={12} className="mr-1.5" />
-                        Clear Transaction ID
-                      </button>
-                    )}
-                    <div className="flex flex-col">
-                      <label className="text-xs text-gray-400 mb-1">Enter Transaction ID</label>
-                      <div className="flex">
-                        <input 
-                          type="text" 
-                          placeholder="Transaction ID..." 
-                          value={tx_filter}
-                          onChange={(e) => setTx_filter(e.target.value)}
-                          className="flex-grow bg-[#13141B] border border-gray-700/50 text-gray-200 text-xs px-2 py-1.5 rounded-l-md focus:outline-none focus:border-[#00ffa3]/30"
-                        />
-                        <button
-                          onClick={() => handleTxFilter(tx_filter)}
-                          className="bg-[#00ffa3]/10 text-[#00ffa3] px-2 py-1.5 rounded-r-md text-xs"
-                        >
-                          Search
-                        </button>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">Search for posts by blockchain transaction ID</p>
-                    </div>
                   </div>
                 )}
               </div>
@@ -475,6 +409,26 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
             onTagSelect={setselected_tags}
           />
         </div>
+
+        {/* Display search info if searching */}
+        {searchTerm && (
+          <div className="mb-4 px-2">
+            <div className="flex items-center text-gray-300">
+              <FiSearch className="mr-2 text-[#00ffa3]" size={16} />
+              <h2 className="text-lg font-medium">
+                Search results for "{searchTerm}"
+                {searchType === 'tx' && <span className="ml-1 text-sm text-gray-400">(Transaction ID)</span>}
+              </h2>
+              <button 
+                onClick={() => navigate('/')} 
+                className="ml-3 text-xs text-gray-400 hover:text-white flex items-center"
+              >
+                <FiX size={12} className="mr-1" />
+                Clear search
+              </button>
+            </div>
+          </div>
+        )}
 
         {memoizedPostGrid}
 
