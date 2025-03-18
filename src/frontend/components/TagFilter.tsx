@@ -1,6 +1,6 @@
 import { API_URL } from "../config";
 import React, { useState, useEffect, useCallback } from 'react';
-import { FiX } from 'react-icons/fi';
+import { FiX, FiTag, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 
 interface TagCount {
   tag: string;
@@ -64,6 +64,7 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
   const [tags, setTags] = useState<string[]>(POPULAR_TAGS);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isTagsVisible, setIsTagsVisible] = useState(false);
 
   // Optional: Fetch additional tags if server is available
   const fetchAdditionalTags = useCallback(async () => {
@@ -120,6 +121,13 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
     fetchAdditionalTags();
   }, [fetchAdditionalTags]);
 
+  // Show tags if any are selected
+  useEffect(() => {
+    if (selected_tags.length > 0 && !isTagsVisible) {
+      setIsTagsVisible(true);
+    }
+  }, [selected_tags, isTagsVisible]);
+
   const handleTagClick = (tag: string) => {
     const newselected_tags = selected_tags.includes(tag)
       ? selected_tags.filter(t => t !== tag)
@@ -127,25 +135,31 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
     onTagSelect(newselected_tags);
   };
 
+  const toggleTagsVisibility = () => {
+    setIsTagsVisible(!isTagsVisible);
+  };
+
   // Render only the first row of tags
   const renderTagGroups = () => {
     return (
-      <div className="flex flex-wrap gap-2 p-4">
-        {tags.map((tag) => (
-          <button
-            key={tag}
-            onClick={() => handleTagClick(tag)}
-            className={`
-              px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-300
-              ${selected_tags.includes(tag)
-                ? 'bg-[#00ffa3] text-black hover:bg-[#00ff9d]'
-                : 'bg-[#2A2B33] text-gray-300 hover:bg-[#3A3B43]'
-              }
-            `}
-          >
-            {tag}
-          </button>
-        ))}
+      <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isTagsVisible ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div className="flex flex-wrap gap-2 p-4">
+          {tags.map((tag) => (
+            <button
+              key={tag}
+              onClick={() => handleTagClick(tag)}
+              className={`
+                px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-300
+                ${selected_tags.includes(tag)
+                  ? 'bg-[#00ffa3] text-black hover:bg-[#00ff9d]'
+                  : 'bg-[#2A2B33] text-gray-300 hover:bg-[#3A3B43]'
+                }
+              `}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
       </div>
     );
   };
@@ -158,7 +172,42 @@ const TagFilter: React.FC<TagFilterProps> = ({ onTagSelect, selected_tags }) => 
     );
   }
 
-  return renderTagGroups();
+  return (
+    <div className="bg-[#2A2A40]/20 backdrop-blur-sm rounded-lg mb-6">
+      <div className="px-4 py-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <FiTag size={14} className="text-gray-400" />
+            <span className="text-sm font-medium text-gray-300">Tags</span>
+            {selected_tags.length > 0 && (
+              <div className="flex items-center space-x-1 ml-2">
+                <span className="text-xs bg-[#00ffa3]/10 text-[#00ffa3] px-2 py-0.5 rounded-full">
+                  {selected_tags.length} selected
+                </span>
+                <button
+                  onClick={() => onTagSelect([])}
+                  className="text-gray-400 hover:text-gray-300 focus:outline-none"
+                  title="Clear all tags"
+                >
+                  <FiX size={14} />
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={toggleTagsVisibility}
+            className="flex items-center space-x-1 text-xs text-gray-400 hover:text-gray-300 focus:outline-none px-2 py-1 rounded-md hover:bg-white/5"
+          >
+            <span>{isTagsVisible ? 'Hide Tags' : 'Show Tags'}</span>
+            {isTagsVisible ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
+          </button>
+        </div>
+      </div>
+      
+      {/* Tag Chips */}
+      {renderTagGroups()}
+    </div>
+  );
 };
 
 export default TagFilter;
