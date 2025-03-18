@@ -200,6 +200,14 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   };
   
   const handleClickUpload = () => {
+    // If there's already an image, don't show the file dialog again
+    if (imagePreview) {
+      // Close other panels and show the image
+      setShowTagInput(false);
+      setIsVotePost(false);
+      setShowScheduleOptions(false);
+      return;
+    }
     fileInputRef.current?.click();
   };
 
@@ -592,13 +600,14 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                       id="image-upload"
                     />
                     <label
-                      htmlFor="image-upload"
+                      htmlFor={!imagePreview ? "image-upload" : undefined}
+                      onClick={imagePreview ? handleClickUpload : undefined}
                       className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 focus:outline-none cursor-pointer ${
                         imagePreview 
                           ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
                           : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
                       }`}
-                      title="Upload image"
+                      title={imagePreview ? "Show image" : "Upload image"}
                     >
                       <FiImage size={18} />
                     </label>
