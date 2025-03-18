@@ -186,13 +186,17 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
     try {
       // Direct log first to ensure we see it
       directLog('🔵 CONFIRM LOCK BUTTON CLICKED 🔵');
-      directLog('Lock confirmation state:', { 
+      
+      // Log state at start of function
+      directLog('Starting lock process with state:', { 
         postId, 
         amount, 
         duration,
         connected,
         isLocking,
-        hasWallet: !!wallet
+        hasWallet: !!wallet,
+        walletIsReady: wallet?.isReady,
+        walletHasLockBsv: !!wallet?.lockBsv,
       });
       
       const startTime = logPerformance('Confirm lock button clicked');
@@ -213,10 +217,12 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
       
       try {
         // Get current block height
+        directLog('Getting block height...');
         const currentBlockHeight = await getBlockHeight();
         directLog(`Current block height: ${currentBlockHeight}`);
         
         // Get user's identity address
+        directLog('Getting addresses...');
         const addresses = await wallet.getAddresses();
         directLog('Got addresses:', addresses);
         
@@ -228,43 +234,63 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         const unlockHeight = currentBlockHeight + duration;
         const satoshiAmount = Math.floor(amount * SATS_PER_BSV);
         
-        directLog('Lock parameters:', {
+        directLog('Preparing lock with parameters:', {
           address: addresses.identityAddress,
           blockHeight: unlockHeight,
           sats: satoshiAmount
         });
         
-        // Simplest possible call to lockBsv
+        // Create the params object exactly matching the type definition
+        const lockParams: Array<{
+          address: string;
+          blockHeight: number;
+          sats: number;
+        }> = [{
+          address: addresses.identityAddress,
+          blockHeight: unlockHeight,
+          sats: satoshiAmount
+        }];
+        
+        directLog('Calling wallet.lockBsv with params:', lockParams);
+        
+        // Set a timer to detect if the wallet call is hanging
+        const timeoutMs = 15000; // 15 seconds timeout
+        let isTimedOut = false;
+        const timeoutId = setTimeout(() => {
+          isTimedOut = true;
+          directLog(`⚠️ lockBsv call timed out after ${timeoutMs}ms`);
+        }, timeoutMs);
+        
+        // Warn about potential wallet UI prompt
+        directLog('The wallet may show a confirmation prompt - check for popups or extensions');
+        
+        // Call wallet lockBsv with exact types
         let lockResponse;
         try {
-          // First try with the array of objects approach
-          directLog('Attempting lockBsv with array of objects');
-          lockResponse = await wallet.lockBsv([
-            {
-              address: addresses.identityAddress,
-              blockHeight: unlockHeight,
-              sats: satoshiAmount
-            }
-          ]);
-        } catch (err) {
-          directLog('First approach failed:', err);
+          directLog('⏳ wallet.lockBsv call started...');
+          lockResponse = await wallet.lockBsv(lockParams);
+          clearTimeout(timeoutId);
           
-          // Last resort - try as a direct object not in array
-          directLog('Trying as direct object');
-          lockResponse = await wallet.lockBsv({
-            address: addresses.identityAddress,
-            blockHeight: unlockHeight,
-            sats: satoshiAmount
-          } as any); // Use type assertion to bypass type checking
+          if (isTimedOut) {
+            directLog('lockBsv call completed after timeout');
+          }
+          
+          directLog('✅ wallet.lockBsv call succeeded:', lockResponse);
+        } catch (err) {
+          clearTimeout(timeoutId);
+          directLog('❌ wallet.lockBsv call failed with error:', err);
+          throw err;
         }
-        
-        directLog('Wallet response:', lockResponse);
         
         if (!lockResponse || !lockResponse.txid) {
-          throw new Error('Failed to create lock transaction');
+          directLog('lockResponse missing txid:', lockResponse);
+          throw new Error('Missing transaction ID in response');
         }
         
+        directLog('Lock transaction created with txid:', lockResponse.txid);
+        
         // Call the API with the transaction ID
+        directLog('Submitting lock to API...');
         const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
           method: 'POST',
           headers: {
@@ -280,8 +306,12 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         });
         
         if (!apiResponse.ok) {
-          throw new Error('API error when creating lock');
+          const errorText = await apiResponse.text();
+          directLog('API error:', errorText);
+          throw new Error(`API error: ${apiResponse.status} ${errorText}`);
         }
+        
+        directLog('API call successful');
         
         // Success! Hide options and show toast
         toast.success(`Successfully locked ${amount} BSV for ${duration} blocks!`);
@@ -289,6 +319,8 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         
         // Refresh UI
         await onLock(postId, amount, duration);
+        
+        directLog('Lock process completed successfully');
         
       } catch (error) {
         directLog('Error during lock process:', error);
