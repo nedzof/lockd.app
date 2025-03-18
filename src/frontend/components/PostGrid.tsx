@@ -662,39 +662,89 @@ const PostGrid: React.FC<PostGridProps> = ({
   };
 
   const handlePostLock = async (postId: string, amount: number, duration: number) => {
+    // Simple direct logging function for this specific function
+    const logLock = (msg: string, data?: any) => {
+      const now = new Date().toISOString();
+      const message = `[${now}] [PostGrid Lock] ${msg}`;
+      console.log(message, data || '');
+    };
+    
+    // Performance logging
+    const startTime = performance.now();
+    logLock(`Starting lock operation for post ${postId}`, {amount, duration});
+    
     // Check if wallet is connected
     if (!wallet) {
+      logLock('Wallet not connected, aborting');
       toast.error('Please connect your wallet first');
       return;
     }
-
+    
+    logLock('Wallet connected, proceeding');
+    
     try {
-      toast.loading('Checking wallet balance...');
+      // Show loading toast, but don't wait for it
+      const toastId = toast.loading('Checking wallet balance...');
+      logLock('Checking wallet balance...');
       
+      // Set locking state for UI feedback
       setIsLocking(true);
+      logLock('Set isLocking to true');
+      
+      // Start API call timing
+      const apiStartTime = performance.now();
+      logLock('Starting API call to lock-likes');
+      
+      // Prepare request payload
+      const requestPayload = {
+        post_id: postId,
+        amount,
+        lock_duration: duration,
+        author_address: user_id, // Use the user_id from props which should be the wallet address
+      };
+      
+      logLock('API request payload', requestPayload);
+      
+      // Make API call
       const response = await fetch(`${API_URL}/api/lock-likes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          post_id: postId,
-          amount,
-          lock_duration: duration,
-          author_address: user_id, // Use the user_id from props which should be the wallet address
-        }),
+        body: JSON.stringify(requestPayload),
       });
-
+      
+      const apiEndTime = performance.now();
+      logLock(`API call completed in ${Math.round(apiEndTime - apiStartTime)}ms`);
+      
+      // Process response
       if (!response.ok) {
-        throw new Error('Failed to lock BSV on post');
+        const errorText = await response.text();
+        logLock(`API error: ${response.status}`, errorText);
+        throw new Error(`Failed to lock BSV on post: ${response.status} ${errorText}`);
       }
-
+      
+      const responseData = await response.json();
+      logLock('API response data', responseData);
+      
+      // Dismiss loading toast and show success
+      toast.dismiss(toastId);
       toast.success('Successfully locked BSV on post');
-      fetchPosts(); // Refresh posts to show updated lock amounts
+      
+      // Refresh posts to show updated lock amounts
+      logLock('Refreshing posts to show updated lock amounts');
+      fetchPosts();
+      
+      // Log total operation time
+      const endTime = performance.now();
+      logLock(`Complete lock operation took ${Math.round(endTime - startTime)}ms`);
+      
     } catch (error) {
-      toast.error('Failed to lock BSV on post');
+      logLock('Error during lock operation', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to lock BSV on post');
     } finally {
       setIsLocking(false);
+      logLock('Set isLocking back to false, operation complete');
     }
   };
 
