@@ -8,6 +8,7 @@ import CreatePostButton from '../components/CreatePostButton';
 import TagFilter from '../components/TagFilter';
 import ThresholdSettings from '../components/ThresholdSettings';
 import SearchBar from '../components/SearchBar';
+import { createPortal } from 'react-dom';
 
 interface HomeProps {
   connected: boolean;
@@ -266,47 +267,56 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 </button>
                 
                 {periodDropdownOpen && (
-                  <div className="absolute z-30 mt-1 w-40 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
-                    {period_filter && (
-                      <button
-                        onClick={() => handlePeriodFilter('')}
-                        className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
-                      >
-                        <FiX size={12} className="mr-1.5" />
-                        Clear Period Filter
-                      </button>
-                    )}
-                    
-                    {/* Time-based options */}
-                    <div className="px-3 py-1 text-xs text-gray-500">Time-based</div>
-                    {timePeriodOptions.filter(option => option.type === 'time').map(option => (
-                      <button
-                        key={option.id}
-                        onClick={() => handlePeriodFilter(option.id)}
-                        className={`flex items-center w-full px-3 py-1.5 text-xs ${
-                          period_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
-                        }`}
-                      >
-                        <FiClock size={10} className="mr-1.5" />
-                        {option.label}
-                      </button>
-                    ))}
-                    
-                    {/* Block-based options */}
-                    <div className="px-3 py-1 text-xs text-gray-500 mt-1">Block-based</div>
-                    {timePeriodOptions.filter(option => option.type === 'block').map(option => (
-                      <button
-                        key={option.id}
-                        onClick={() => handlePeriodFilter(option.id)}
-                        className={`flex items-center w-full px-3 py-1.5 text-xs ${
-                          period_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
-                        }`}
-                      >
-                        <FiTrendingUp size={10} className="mr-1.5" />
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
+                  createPortal(
+                    <div 
+                      className="fixed z-50 mt-1 w-40 rounded-md bg-[#1A1B23] border border-gray-800 shadow-xl py-1"
+                      style={{
+                        top: `${(periodDropdownRef.current?.getBoundingClientRect()?.bottom || 0) + window.scrollY + 5}px`,
+                        left: `${(periodDropdownRef.current?.getBoundingClientRect()?.left || 0) + window.scrollX}px`
+                      }}
+                    >
+                      {period_filter && (
+                        <button
+                          onClick={() => handlePeriodFilter('')}
+                          className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
+                        >
+                          <FiX size={12} className="mr-1.5" />
+                          Clear Period Filter
+                        </button>
+                      )}
+                      
+                      {/* Time-based options */}
+                      <div className="px-3 py-1 text-xs text-gray-500">Time-based</div>
+                      {timePeriodOptions.filter(option => option.type === 'time').map(option => (
+                        <button
+                          key={option.id}
+                          onClick={() => handlePeriodFilter(option.id)}
+                          className={`flex items-center w-full px-3 py-1.5 text-xs ${
+                            period_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
+                          }`}
+                        >
+                          <FiClock size={10} className="mr-1.5" />
+                          {option.label}
+                        </button>
+                      ))}
+                      
+                      {/* Block-based options */}
+                      <div className="px-3 py-1 text-xs text-gray-500 mt-1">Block-based</div>
+                      {timePeriodOptions.filter(option => option.type === 'block').map(option => (
+                        <button
+                          key={option.id}
+                          onClick={() => handlePeriodFilter(option.id)}
+                          className={`flex items-center w-full px-3 py-1.5 text-xs ${
+                            period_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
+                          }`}
+                        >
+                          <FiTrendingUp size={10} className="mr-1.5" />
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>,
+                    document.body
+                  )
                 )}
               </div>
               
@@ -329,28 +339,37 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 </button>
                 
                 {rankingDropdownOpen && (
-                  <div className="absolute z-30 mt-1 w-32 rounded-md bg-[#1A1B23] border border-gray-800 shadow-lg py-1">
-                    {ranking_filter && (
-                      <button
-                        onClick={() => handleranking_filter('')}
-                        className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
-                      >
-                        <FiX size={12} className="mr-1.5" />
-                        Clear Ranking
-                      </button>
-                    )}
-                    {rankingOptions.map(option => (
-                      <button
-                        key={option.id}
-                        onClick={() => handleranking_filter(option.id)}
-                        className={`flex items-center w-full px-3 py-1.5 text-xs ${
-                          ranking_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
+                  createPortal(
+                    <div 
+                      className="fixed z-50 mt-1 w-32 rounded-md bg-[#1A1B23] border border-gray-800 shadow-xl py-1"
+                      style={{
+                        top: `${(rankingDropdownRef.current?.getBoundingClientRect()?.bottom || 0) + window.scrollY + 5}px`,
+                        left: `${(rankingDropdownRef.current?.getBoundingClientRect()?.left || 0) + window.scrollX}px`
+                      }}
+                    >
+                      {ranking_filter && (
+                        <button
+                          onClick={() => handleranking_filter('')}
+                          className="flex w-full items-center px-3 py-1.5 text-xs text-gray-300 hover:bg-white/5"
+                        >
+                          <FiX size={12} className="mr-1.5" />
+                          Clear Ranking
+                        </button>
+                      )}
+                      {rankingOptions.map(option => (
+                        <button
+                          key={option.id}
+                          onClick={() => handleranking_filter(option.id)}
+                          className={`flex items-center w-full px-3 py-1.5 text-xs ${
+                            ranking_filter === option.id ? 'text-[#00ffa3] bg-[#00ffa3]/5' : 'text-gray-300 hover:bg-white/5'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>,
+                    document.body
+                  )
                 )}
               </div>
 
