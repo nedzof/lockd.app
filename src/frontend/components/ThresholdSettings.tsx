@@ -91,22 +91,22 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
   // Handle slider change
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const sliderValue = parseFloat(e.target.value);
-    // Convert slider value (0-100) to exponential BSV value (0.01-1000)
-    const exponentialValue = Math.pow(10, (sliderValue / 100) * 5 - 2); // Maps 0-100 to 0.01-1000
-    const roundedValue = Number(exponentialValue.toFixed(2)); // Round to 2 decimal places
+    // Convert slider value (0-100) to exponential BSV value (1-1000)
+    const exponentialValue = Math.pow(10, (sliderValue / 100) * 3); // Maps 0-100 to 1-1000
+    const wholeNumberValue = Math.max(1, Math.round(exponentialValue)); // Ensure minimum of 1 and round to whole number
     
-    setMilestoneThreshold(roundedValue);
+    setMilestoneThreshold(wholeNumberValue);
     
     // If notifications are enabled, update the subscription
     if (notificationsEnabled) {
-      updateNotificationSubscription(roundedValue);
+      updateNotificationSubscription(wholeNumberValue);
     }
   };
   
   // Convert BSV value back to slider position
   const getSliderPosition = () => {
-    // Convert BSV value (0.01-1000) back to slider value (0-100)
-    const position = ((Math.log10(milestoneThreshold) + 2) / 5) * 100;
+    // Convert BSV value (1-1000) back to slider value (0-100)
+    const position = (Math.log10(Math.max(1, milestoneThreshold)) / 3) * 100;
     return Math.max(0, Math.min(100, position)); // Ensure within 0-100 range
   };
   
@@ -600,7 +600,7 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
             <div className="mb-6">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-gray-300">Threshold:</span>
-                <span className="text-[#00ffa3] font-medium">{milestoneThreshold.toFixed(2)} BSV</span>
+                <span className="text-[#00ffa3] font-medium">{Math.round(milestoneThreshold)} BSV</span>
               </div>
               
               <div className="relative mb-6 px-1 pt-1">
@@ -617,7 +617,6 @@ const ThresholdSettings: React.FC<ThresholdSettingsProps> = ({ connected, wallet
                   }}
                 />
                 <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>0.01</span>
                   <span>1</span>
                   <span>10</span>
                   <span>100</span>
