@@ -81,7 +81,12 @@ interface PostLockInteractionProps {
   onLock: (postId: string, amount: number, duration: number) => Promise<void>;
 }
 
+// Constants for locking
 const SATS_PER_BSV = 100000000;
+const MIN_BSV_AMOUNT = 0.001; // Minimum amount in BSV (100,000 satoshis)
+const DEFAULT_BSV_AMOUNT = 0.001; // Default amount
+const DEFAULT_LOCK_DURATION = 10; // Default lock duration in blocks
+const MIN_LOCK_DURATION = 1; // Minimum lock duration
 
 const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
   postId,
@@ -89,8 +94,8 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
   isLocking = false,
   onLock,
 }) => {
-  const [amount, setAmount] = useState(0.00001);
-  const [duration, setDuration] = useState(1000);
+  const [amount, setAmount] = useState(DEFAULT_BSV_AMOUNT);
+  const [duration, setDuration] = useState(DEFAULT_LOCK_DURATION);
   const [showOptions, setShowOptions] = useState(false);
   const [buttonClickCount, setButtonClickCount] = useState(0);
   const [internalLoading, setInternalLoading] = useState(false);
@@ -140,6 +145,43 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
     logPerformance('Showing options completed', startTime);
   };
 
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    directLog(`Amount input changed: ${e.target.value}`);
+    const newValue = parseFloat(e.target.value);
+    
+    // Don't allow negative numbers
+    if (newValue < 0 || isNaN(newValue)) {
+      directLog('Amount negative or invalid, setting to minimum');
+      setAmount(MIN_BSV_AMOUNT);
+      return;
+    }
+
+    // Make sure minimum amount is met
+    if (newValue < MIN_BSV_AMOUNT) {
+      directLog(`Amount below minimum (${MIN_BSV_AMOUNT}), setting to minimum`);
+      setAmount(MIN_BSV_AMOUNT);
+      return;
+    }
+
+    directLog(`Setting amount to: ${newValue}`);
+    setAmount(newValue);
+  };
+
+  const handleDurationChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    directLog(`Duration input changed: ${e.target.value}`);
+    const newValue = parseInt(e.target.value, 10);
+    
+    // Don't allow negative numbers or invalid values
+    if (newValue < MIN_LOCK_DURATION || isNaN(newValue)) {
+      directLog(`Duration invalid, setting to minimum (${MIN_LOCK_DURATION})`);
+      setDuration(MIN_LOCK_DURATION);
+      return;
+    }
+
+    directLog(`Setting duration to: ${newValue}`);
+    setDuration(newValue);
+  };
+
   const handleLock = async () => {
     try {
       // Direct log first to ensure we see it
@@ -163,6 +205,19 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
       
       if (isLocking || internalLoading) {
         directLog('Already locking, ignoring duplicate click');
+        return;
+      }
+      
+      // Validate amount and duration
+      if (amount < MIN_BSV_AMOUNT) {
+        directLog(`Amount (${amount}) below minimum (${MIN_BSV_AMOUNT}), aborting`);
+        toast.error(`Minimum amount is ${MIN_BSV_AMOUNT} BSV`);
+        return;
+      }
+      
+      if (duration < MIN_LOCK_DURATION) {
+        directLog(`Duration (${duration}) below minimum (${MIN_LOCK_DURATION}), aborting`);
+        toast.error(`Minimum duration is ${MIN_LOCK_DURATION} blocks`);
         return;
       }
       
@@ -198,6 +253,11 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         // 4. Convert BSV to satoshis
         const satoshiAmount = Math.floor(amount * SATS_PER_BSV);
         directLog(`Converting ${amount} BSV to ${satoshiAmount} satoshis`);
+        
+        // Ensure minimum satoshi amount (extra safety check)
+        if (satoshiAmount < MIN_BSV_AMOUNT * SATS_PER_BSV) {
+          throw new Error(`Lock amount too small. Minimum is ${MIN_BSV_AMOUNT} BSV`);
+        }
         
         // 5. Create lock parameters for wallet.lockBsv
         const lockParams = [{
@@ -340,14 +400,12 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
                   <input
                     type="number"
                     value={amount}
-                    onChange={(e) => {
-                      directLog(`Amount changed: ${e.target.value}`);
-                      setAmount(Number(e.target.value))
-                    }}
-                    min="0.00001"
-                    step="0.00001"
+                    onChange={handleAmountChange}
+                    min={MIN_BSV_AMOUNT}
+                    step="0.001"
                     className="w-full bg-white/5 border border-gray-800/20 rounded-md py-1.5 px-2 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
                   />
+                  <div className="text-xs text-gray-400 mt-1">Minimum: {MIN_BSV_AMOUNT} BSV</div>
                 </div>
               </div>
               <div>
@@ -355,11 +413,8 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
                 <input
                   type="number"
                   value={duration}
-                  onChange={(e) => {
-                    directLog(`Duration changed: ${e.target.value}`);
-                    setDuration(Number(e.target.value))
-                  }}
-                  min="1"
+                  onChange={handleDurationChange}
+                  min={MIN_LOCK_DURATION}
                   className="w-full bg-white/5 border border-gray-800/20 rounded-md py-1.5 px-2 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
                 />
                 <div className="text-xs text-gray-400 mt-1">≈ {Math.round(duration / 144)} days</div>
@@ -367,7 +422,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
               <div className="flex space-x-2 pt-2">
                 <button
                   onClick={handleLock}
-                  disabled={!connected || isCurrentlyLocking || amount <= 0 || duration <= 0}
+                  disabled={!connected || isCurrentlyLocking || amount < MIN_BSV_AMOUNT || duration < MIN_LOCK_DURATION}
                   className="flex-1 inline-flex items-center justify-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-1 focus:ring-[#00ffa3] transition-all duration-300 disabled:opacity-50"
                 >
                   {isCurrentlyLocking ? (
