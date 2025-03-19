@@ -16,12 +16,8 @@ interface NotificationSubscription {
   updated_at: Date;
 }
 
-// Add type definitions for prisma client
-const prismaWithTypes = prisma as PrismaClient & {
-  notification_subscription: {
-    findMany: (args: any) => Promise<NotificationSubscription[]>;
-  }
-};
+// We'll use prisma directly without type casting
+// const prismaWithTypes = prisma as PrismaClient;
 
 /**
  * Check for posts that have reached user-defined thresholds and send notifications
@@ -30,32 +26,32 @@ async function checkThresholds() {
   try {
     logger.info('Running threshold check');
     
-    // Find all active subscriptions with their threshold values
+    // Find all unique threshold values from active subscriptions
     const thresholds = await findUniqueThresholds();
+    logger.info(`Found ${thresholds.length} unique thresholds`);
     
-    if (thresholds.length === 0) {
-      return;
-    }
-    
-    // For each threshold value, find posts that have reached it
+    // For each threshold, find posts that have reached it in the last minute
     for (const threshold of thresholds) {
-      const subscriptions = await notificationSubscriptionService.findSubscriptionsByThreshold(threshold);
+      const posts = await findPostsAboveThreshold(threshold);
       
-      if (subscriptions.length === 0) {
-        continue;
-      }
-      
-      // Find posts that have reached the threshold since the last check
-      const recentPosts = await findPostsAboveThreshold(threshold);
-      
-      if (recentPosts.length > 0) {
-        logger.info(`Found ${recentPosts.length} posts that reached ${threshold} BSV threshold`);
+      if (posts.length > 0) {
+        logger.info(`Found ${posts.length} posts above threshold ${threshold}`);
         
-        // For each post, notify all subscribers for this threshold
-        for (const post of recentPosts) {
-          const title = 'Threshold Alert';
-          const body = `A post has reached ${post.total_locked} BSV: "${post.content.substring(0, 50)}${post.content.length > 50 ? '...' : ''}"`;
-          const url = `/posts/${post.id}`;
+        // For each post, notify users who have subscribed to this threshold
+        for (const post of posts) {
+          const subscriptions = await notificationSubscriptionService.findSubscriptionsByThreshold(threshold);
+          
+          if (subscriptions.length === 0) {
+            continue;
+          }
+          
+          logger.info(`Sending notifications to ${subscriptions.length} users for post ${post.id}`);
+          
+          // Create notification content
+          const postContent = post.content.length > 100 ? `${post.content.substring(0, 97)}...` : post.content;
+          const title = `Post reached ${post.total_locked} BSV locked`;
+          const body = `A post with content "${postContent}" has reached ${post.total_locked} BSV locked!`;
+          const url = `/post/${post.id}`;
           
           // Notify each subscriber for this threshold
           for (const subscription of subscriptions) {
@@ -74,19 +70,13 @@ async function checkThresholds() {
  */
 async function findUniqueThresholds(): Promise<number[]> {
   try {
-    // Get all active subscriptions
-    const allActiveSubscriptions = await prismaWithTypes.notification_subscription.findMany({
-      where: {
-        notifications_enabled: true
-      },
-      select: {
-        threshold_value: true
-      },
-      distinct: ['threshold_value']
-    });
+    // Get all active subscriptions with threshold values
+    const subscriptions = await notificationSubscriptionService.findSubscriptionsByThreshold(Number.MAX_VALUE);
     
-    // Extract and return unique threshold values
-    return allActiveSubscriptions.map((sub: { threshold_value: number }) => sub.threshold_value);
+    // Extract and deduplicate threshold values
+    const uniqueThresholds = [...new Set(subscriptions.map(sub => sub.threshold_value))];
+    
+    return uniqueThresholds;
   } catch (error) {
     logger.error('Error finding unique thresholds:', error);
     return [];
