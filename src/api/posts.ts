@@ -472,9 +472,7 @@ const listPosts: PostListHandler = async (req, res, next) => {
       ...queryParams,
       include: {
         vote_options: true,
-        lock_likes: {
-          orderBy: { created_at: 'desc' }
-        }
+        lock_likes: true  // Include all lock_likes data for ranking
       }
     });
 
@@ -1061,18 +1059,44 @@ router.get('/', listPosts);
 // Add the search endpoint BEFORE the /:id route to prevent it from being caught
 router.get('/search', async (req, res) => {
   try {
-    const { q, limit, type } = req.query;
+    const { 
+      q, limit, type, 
+      time_filter, ranking_filter, personal_filter, block_filter, tags, user_id 
+    } = req.query;
     
     if (!q) {
       return res.status(400).json({ error: 'Search query is required' });
     }
     
-    console.log('Search request:', { query: q, limit, type });
+    console.log('Search request:', { 
+      query: q, 
+      limit, 
+      type,
+      time_filter,
+      ranking_filter,
+      personal_filter,
+      block_filter,
+      tags: tags ? (Array.isArray(tags) ? tags : [tags]) : [],
+      user_id
+    });
     
     const searchType = type as string || 'all';
     const limitValue = parseInt(limit as string) || 50;
     
-    const results = await searchPosts(q as string, limitValue, searchType);
+    // Pass all filter parameters to searchPosts
+    const results = await searchPosts(
+      q as string, 
+      limitValue, 
+      searchType,
+      {
+        time_filter: time_filter as string,
+        ranking_filter: ranking_filter as string,
+        personal_filter: personal_filter as string,
+        block_filter: block_filter as string,
+        tags: tags ? (Array.isArray(tags) ? tags as string[] : [tags as string]) : [],
+        user_id: user_id as string,
+      }
+    );
     
     // Debug log first few results
     if (results.posts && results.posts.length > 0) {
@@ -1264,7 +1288,7 @@ router.post('/posts/:id/publish-scheduled', async (req: Request, res: Response, 
 });
 
 // Search posts by content, username, tags, vote options, block numbers, transaction IDs, and other criteria
-export async function searchPosts(query: string, limit = 50, searchType = 'all'): Promise<any> {
+export async function searchPosts(query: string, limit = 50, searchType = 'all', filters: any = {}): Promise<any> {
   try {
     // Clean the query to prevent injection
     const cleanQuery = query.trim();
@@ -1334,6 +1358,73 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all')
       });
     }
     
+    // Now apply additional filters from the filters object
+    let andConditions: Prisma.postWhereInput[] = [];
+    
+    // Time filter
+    if (filters.time_filter) {
+      let timeThreshold = new Date();
+      
+      if (filters.time_filter === '1d') {
+        timeThreshold.setDate(timeThreshold.getDate() - 1);
+        andConditions.push({ created_at: { gte: timeThreshold } });
+      } else if (filters.time_filter === '7d') {
+        timeThreshold.setDate(timeThreshold.getDate() - 7);
+        andConditions.push({ created_at: { gte: timeThreshold } });
+      } else if (filters.time_filter === '30d') {
+        timeThreshold.setDate(timeThreshold.getDate() - 30);
+        andConditions.push({ created_at: { gte: timeThreshold } });
+      }
+    }
+    
+    // Block filter
+    if (filters.block_filter) {
+      // Get current block height from somewhere
+      const currentBlockHeight = 800000; // Placeholder value, should be fetched from DB or API
+      
+      if (filters.block_filter === 'last-block') {
+        andConditions.push({ block_height: { gte: currentBlockHeight - 1 } });
+      } else if (filters.block_filter === 'last-10-blocks') {
+        andConditions.push({ block_height: { gte: currentBlockHeight - 10 } });
+      } else if (filters.block_filter === 'last-50-blocks') {
+        andConditions.push({ block_height: { gte: currentBlockHeight - 50 } });
+      }
+    }
+    
+    // Tags filter
+    if (filters.tags && filters.tags.length > 0) {
+      andConditions.push({
+        tags: {
+          hasSome: filters.tags
+        }
+      });
+    }
+    
+    // User filter
+    if (filters.user_id && filters.user_id !== 'anon') {
+      // For 'my-locks', we need to find posts that the user has locked
+      if (filters.personal_filter === 'my-locks') {
+        andConditions.push({
+          lock_likes: {
+            some: {
+              author_address: filters.user_id
+            }
+          }
+        });
+      }
+      // For 'my-posts', we find posts authored by the user
+      else if (filters.personal_filter === 'my-posts') {
+        andConditions.push({
+          author_address: filters.user_id
+        });
+      }
+    }
+    
+    // If we have additional filters, add them to the where conditions
+    if (andConditions.length > 0) {
+      whereConditions.AND = andConditions;
+    }
+    
     console.log('Search query with conditions:', JSON.stringify(whereConditions, null, 2));
     
     // Find posts matching the criteria
@@ -1341,16 +1432,15 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all')
       where: whereConditions,
       include: {
         vote_options: true,
-        lock_likes: {
-          select: {
-            id: true
-          }
-        }
+        lock_likes: true  // Include all lock_likes data for ranking
       },
-      orderBy: {
-        created_at: 'desc'
-      },
-      take: limit
+      orderBy: filters.ranking_filter && 
+              ['top-1', 'top-3', 'top-5', 'top-10', 'top-25', 'top-50'].includes(filters.ranking_filter) 
+                ? { lock_likes: { _count: 'desc' } } // Order by lock count for ranking filters
+                : { created_at: 'desc' },           // Default to newest first
+      take: filters.ranking_filter 
+            ? parseInt(filters.ranking_filter.split('-')[1], 10) || limit // Take specified number for top-N filters
+            : limit                                                       // Otherwise use standard limit
     });
     
     // Get user data for posts

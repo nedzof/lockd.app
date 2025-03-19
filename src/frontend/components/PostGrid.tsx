@@ -375,52 +375,52 @@ const PostGrid: React.FC<PostGridProps> = ({
         queryParams.append('q', searchTerm);
         queryParams.append('type', searchType || 'all');
         console.log(`SEARCH: Using search endpoint with query: "${searchTerm}", type: ${searchType || 'all'}`);
+      }
+      
+      // Add pagination for both regular posts and search (if not resetting)
+      if (nextCursor && !reset) {
+        queryParams.append('cursor', nextCursor);
+        console.log(`Adding cursor: ${nextCursor}`);
+      }
+      
+      // Apply all filters regardless of whether it's a search or regular fetch
+      // Filters
+      if (time_filter) {
+        queryParams.append('time_filter', time_filter);
+        console.log(`Adding time_filter: ${time_filter}`);
+      }
+      
+      if (ranking_filter) {
+        queryParams.append('ranking_filter', ranking_filter);
+        console.log(`Adding ranking_filter: ${ranking_filter}`);
+      }
+      
+      if (personal_filter) {
+        queryParams.append('personal_filter', personal_filter);
+        console.log(`Adding personal_filter: ${personal_filter}`);
       } else {
-        // Only add these filters for the regular posts endpoint, not for search
-        // Pagination
-        if (nextCursor && !reset) {
-          queryParams.append('cursor', nextCursor);
-          console.log(`Adding cursor: ${nextCursor}`);
-        }
-        
-        // Filters
-        if (time_filter) {
-          queryParams.append('time_filter', time_filter);
-          console.log(`Adding time_filter: ${time_filter}`);
-        }
-        
-        if (ranking_filter) {
-          queryParams.append('ranking_filter', ranking_filter);
-          console.log(`Adding ranking_filter: ${ranking_filter}`);
-        }
-        
-        if (personal_filter) {
-          queryParams.append('personal_filter', personal_filter);
-          console.log(`Adding personal_filter: ${personal_filter}`);
-        } else {
-          // NEW: Check if we need to explicitly request lock data when no filter is applied
-          // This is a diagnostic log to help understand why lock data might be missing
-          console.log('No personal_filter applied - verify server includes complete lock_likes data');
-        }
-        
-        if (block_filter) {
-          queryParams.append('block_filter', block_filter);
-          console.log(`Adding block_filter: ${block_filter}`);
-        }
-        
-        // Add tags if selected
-        if (selected_tags.length > 0) {
-          selected_tags.forEach(tag => {
-            queryParams.append('tags', tag);
-          });
-          console.log(`Adding tags: ${selected_tags.join(', ')}`);
-        }
-        
-        // Add user_id if available
-        if (user_id) {
-          queryParams.append('user_id', user_id);
-          console.log(`Adding user_id: ${user_id}`);
-        }
+        // NEW: Check if we need to explicitly request lock data when no filter is applied
+        // This is a diagnostic log to help understand why lock data might be missing
+        console.log('No personal_filter applied - verify server includes complete lock_likes data');
+      }
+      
+      if (block_filter) {
+        queryParams.append('block_filter', block_filter);
+        console.log(`Adding block_filter: ${block_filter}`);
+      }
+      
+      // Add tags if selected
+      if (selected_tags.length > 0) {
+        selected_tags.forEach(tag => {
+          queryParams.append('tags', tag);
+        });
+        console.log(`Adding tags: ${selected_tags.join(', ')}`);
+      }
+      
+      // Add user_id if available
+      if (user_id) {
+        queryParams.append('user_id', user_id);
+        console.log(`Adding user_id: ${user_id}`);
       }
       
       console.log(`Fetching posts with endpoint: ${endpoint} and params: ${queryParams.toString()}`);
