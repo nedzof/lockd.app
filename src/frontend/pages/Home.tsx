@@ -28,8 +28,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   
   // Read search params from URL
   const searchParams = new URLSearchParams(location.search);
-  const searchTerm = searchParams.get('q') || '';
-  const searchType = searchParams.get('type') || '';
+  const searchParamTerm = searchParams.get('q') || '';
+  const searchParamType = searchParams.get('type') || '';
+  
+  // Use the search state hook at the top level
+  const { searchTerm, searchType, searchResults, isLoading } = useSearchState();
   
   // Add refs for dropdown menus
   const periodDropdownRef = useRef<HTMLDivElement>(null);
@@ -236,19 +239,19 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
     setIsTagsVisible(!isTagsVisible);
   };
 
+  // Log when search results change
+  useEffect(() => {
+    console.log('Recreating PostGrid with searchTerm:', searchTerm, 'and has results:', searchResults.length > 0);
+  }, [searchTerm, searchResults]);
+
   const renderContent = () => {
     if (isStats) {
       return <BSVStats />;
     }
 
     // Memoize the PostGrid component to prevent unnecessary re-renders
-    // BUT important: we need to make sure it updates when searchTerm changes
+    // Using variables from the hook that was called at the top level
     const memoizedPostGrid = useMemo(() => {
-      // Use the search state from our custom hook
-      const { searchTerm, searchType, searchResults, isLoading } = useSearchState();
-      
-      console.log('Recreating PostGrid with searchTerm:', searchTerm, 'and has results:', searchResults.length > 0);
-      
       return (
         <PostGrid 
           onStatsUpdate={handleStatsUpdate}
@@ -264,7 +267,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           forceUpdate={Date.now()} // This forces a re-render on every search change
         />
       );
-    }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, memoizeduser_id, handleStatsUpdate, handleTagSelectFromPost]);
+    }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, memoizeduser_id, handleStatsUpdate, handleTagSelectFromPost, searchTerm, searchType]);
 
     return (
       <div className="relative min-h-screen pb-20">
