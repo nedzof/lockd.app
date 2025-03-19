@@ -142,7 +142,7 @@ export function createDbPost(metadata: PostMetadata, tx_id: string): DbPost {
     const post: DbPost = {
         id: tx_id,
         tx_id,
-        post_id: tx_id,
+        post_id: metadata.post_id || tx_id,
         content: metadata.content,
         author_address: '', // This will be set by the caller
         created_at: new Date(metadata.timestamp),
@@ -184,6 +184,30 @@ export function createDbPost(metadata: PostMetadata, tx_id: string): DbPost {
         post.unlock_height = metadata.unlock_height;
     }
 
+    // Handle vote data
+    if (metadata.is_vote && metadata.vote) {
+        post.metadata.vote = {
+            is_vote_question: metadata.vote.is_vote_question,
+            question: metadata.vote.question || metadata.content,
+            total_options: metadata.vote.total_options || (metadata.vote.options?.length || 0)
+        };
+
+        // Store vote options in the post metadata
+        if (metadata.vote.options && metadata.vote.options.length > 0) {
+            post.metadata.vote.options = metadata.vote.options.map(option => ({
+                text: option.text,
+                lock_amount: option.lock_amount,
+                lock_duration: option.lock_duration,
+                optionIndex: option.optionIndex
+            }));
+        }
+
+        if (metadata.vote.options_hash) {
+            post.metadata.vote.options_hash = metadata.vote.options_hash;
+        }
+    }
+
+    // Handle image data
     if (metadata.image) {
         post.media_type = metadata.image.content_type;
         post.image_format = metadata.image.format;
@@ -191,6 +215,16 @@ export function createDbPost(metadata: PostMetadata, tx_id: string): DbPost {
         post.description = metadata.image.description;
         if (metadata.image.base64Data) {
             post.raw_image_data = metadata.image.base64Data;
+        }
+
+        // Add image metadata
+        if (metadata.image.metadata) {
+            post.metadata.image = {
+                width: metadata.image.metadata.width,
+                height: metadata.image.metadata.height,
+                format: metadata.image.metadata.format,
+                size: metadata.image.metadata.size
+            };
         }
     }
 
@@ -205,7 +239,7 @@ export function createDbvote_options(metadata: PostMetadata, post_tx_id: string)
 
     return metadata.vote.options.map((option, index) => ({
         id: `${post_tx_id}-option-${index}`,
-        tx_id: '', // This will be set when the transaction is created
+        tx_id: `${post_tx_id}-option-${option.optionIndex}`, // Generate unique tx_id
         content: option.text,
         author_address: '', // This will be set by the caller
         created_at: new Date(metadata.timestamp),
@@ -217,44 +251,33 @@ export function createDbvote_options(metadata: PostMetadata, post_tx_id: string)
 
 // Create MAP data from metadata
 function createMapData(metadata: PostMetadata): MAP {
-    // Check if this is a vote based on metadata
-    const isVote = metadata.is_vote || 
-                  metadata.vote?.is_vote_question || 
-                  (metadata.vote?.options && metadata.vote.options.length > 0);
-
-    console.log(`[DEBUG] Creating MAP data for type: ${metadata.type}`);
-    console.log(`[DEBUG] - Is vote: ${isVote}`);
-    console.log(`[DEBUG] - Has tags: ${metadata.tags?.length > 0}`);
-    console.log(`[DEBUG] - Tags: ${JSON.stringify(metadata.tags || [])}`);
-    
-    if (metadata.vote) {
-        console.log(`[DEBUG] - Vote details: is_question=${metadata.vote.is_vote_question}, optionIndex=${metadata.vote.optionIndex}`);
-    }
-
+    // Create a flat metadata structure for easier parsing
     const mapData: Record<string, string> = {
-        app: metadata.app || 'lockd.app',
+        app: 'lockd.app',
         type: metadata.type || 'content',
         content: metadata.content || '',
         timestamp: metadata.timestamp || new Date().toISOString(),
         version: metadata.version || '1.0.0',
         tags: JSON.stringify(metadata.tags || []),
-        sequence: (metadata.sequence || 0).toString(),
-        is_vote: (isVote !== undefined ? isVote : false).toString()
+        is_locked: (metadata.is_locked !== undefined ? metadata.is_locked : false).toString(),
+        is_vote: (metadata.is_vote !== undefined ? metadata.is_vote : false).toString()
     };
 
-    // Only include is_locked for non-vote options
-    if (metadata.type !== 'vote_option' && metadata.is_locked !== undefined) {
-        mapData.is_locked = metadata.is_locked.toString();
-    }
-
-    if (metadata.parentSequence !== undefined) {
-        mapData.parentSequence = metadata.parentSequence.toString();
-    }
-
+    // Add post_id if available
     if (metadata.post_id) {
         mapData.post_id = metadata.post_id;
     }
 
+    // Add sequence information
+    if (metadata.sequence !== undefined) {
+        mapData.sequence = metadata.sequence.toString();
+    }
+    
+    if (metadata.parentSequence !== undefined) {
+        mapData.parent_sequence = metadata.parentSequence.toString();
+    }
+
+    // Add block and lock information if available
     if (metadata.block_height !== undefined) {
         mapData.block_height = metadata.block_height.toString();
     }
@@ -267,8 +290,7 @@ function createMapData(metadata: PostMetadata): MAP {
         mapData.unlock_height = metadata.unlock_height.toString();
     }
 
-    // Only include lock_duration for non-vote options
-    if (metadata.type !== 'vote_option' && metadata.lock_duration !== undefined) {
+    if (metadata.lock_duration !== undefined) {
         mapData.lock_duration = metadata.lock_duration.toString();
     }
 
@@ -278,51 +300,83 @@ function createMapData(metadata: PostMetadata): MAP {
         mapData.timezone = metadata.scheduled.timezone;
     }
 
-    if (metadata.vote) {
-        // Always set type to vote_question if we have vote options
-        if (metadata.vote.is_vote_question || (metadata.vote.options && metadata.vote.options.length > 0)) {
+    // Handle vote data - consolidate into a single field for easier parsing
+    if (metadata.is_vote === true && metadata.vote) {
+        // For vote questions
+        if (metadata.vote.is_vote_question || metadata.vote.options) {
+            // Pack all vote data in a serialized format
+            const voteData = {
+                question: metadata.vote.question || metadata.content,
+                options: metadata.vote.options?.map(opt => ({
+                    text: opt.text,
+                    lock_amount: opt.lock_amount,
+                    lock_duration: opt.lock_duration,
+                    optionIndex: opt.optionIndex
+                })) || [],
+                total_options: metadata.vote.options?.length || metadata.vote.total_options || 0
+            };
+            
+            // Include vote options directly in the map data to avoid having to create separate transactions
+            mapData.vote_data = JSON.stringify(voteData);
+            
+            // Add these as direct fields too for backward compatibility and scanner optimization
             mapData.type = 'vote_question';
-            mapData.total_options = ((metadata.vote.options?.length || metadata.vote.total_options || 0)).toString();
+            mapData.is_vote = 'true';
+            mapData.content_type = 'vote';
+            
+            if (metadata.vote.question) {
+                mapData.vote_question = metadata.vote.question;
+            }
+            
+            if (metadata.vote.total_options !== undefined) {
+                mapData.total_options = metadata.vote.total_options.toString();
+            }
+            
             if (metadata.vote.options_hash) {
                 mapData.options_hash = metadata.vote.options_hash;
             }
             
-            // Include the complete vote data in a serialized format
+            // Add each option directly in the map data for easier parsing by scanner
             if (metadata.vote.options && metadata.vote.options.length > 0) {
-                // Pack complete vote data including options in a single field
-                mapData.vote = JSON.stringify({
-                    question: metadata.vote.question || metadata.content,
-                    options: metadata.vote.options,
-                    total_options: metadata.vote.options.length,
-                    options_hash: metadata.vote.options_hash
+                metadata.vote.options.forEach((option, index) => {
+                    mapData[`option${index}`] = option.text;
+                    mapData[`option${index}_lock_amount`] = option.lock_amount.toString();
+                    mapData[`option${index}_lock_duration`] = option.lock_duration.toString();
                 });
             }
-        } else if (metadata.vote.optionIndex !== undefined) {
-            // For vote options, only include essential fields
-            mapData.type = 'vote_option';
+        }
+        // For vote option selections
+        else if (metadata.vote.optionIndex !== undefined) {
             mapData.optionIndex = metadata.vote.optionIndex.toString();
+            
+            if (metadata.vote.optionText) {
+                mapData.optionText = metadata.vote.optionText;
+            }
         }
     }
 
+    // Handle image data
     if (metadata.image) {
         mapData.content_type = metadata.image.content_type || '';
-        mapData.format = metadata.image.format || '';
+        mapData.image_format = metadata.image.format || '';
+        
         if (metadata.image.source) {
-            mapData.imageSource = metadata.image.source;
+            mapData.image_source = metadata.image.source;
         }
-        if (metadata.image.metadata) {
-            if (metadata.image.metadata.width !== undefined) {
-                mapData.imageWidth = metadata.image.metadata.width.toString();
-            }
-            if (metadata.image.metadata.height !== undefined) {
-                mapData.imageHeight = metadata.image.metadata.height.toString();
-            }
-            if (metadata.image.metadata.size !== undefined) {
-                mapData.imageSize = metadata.image.metadata.size.toString();
-            }
-        }
+        
         if (metadata.image.description) {
             mapData.description = metadata.image.description;
+        }
+        
+        // Include image metadata in a consistent format
+        if (metadata.image.metadata) {
+            const imageMetadata = {
+                width: metadata.image.metadata.width,
+                height: metadata.image.metadata.height,
+                size: metadata.image.metadata.size,
+                format: metadata.image.metadata.format
+            };
+            mapData.image_metadata = JSON.stringify(imageMetadata);
         }
     }
 
@@ -405,113 +459,6 @@ async function createImageComponent(
         satoshis,
         imageData.content_type
     );
-}
-
-// Create vote question component
-async function createVoteQuestionComponent(
-    question: string,
-    options: vote_option[],
-    post_id: string,
-    sequence: number,
-    parentSequence: number,
-    address: string,
-    tags: string[] = []
-): Promise<InscribeRequest> {
-    const options_hash = await hashContent(JSON.stringify(options));
-    
-    const metadata: PostMetadata = {
-        app: 'lockd.app',
-        type: 'vote_question',
-        content: question,
-        timestamp: new Date().toISOString(),
-        version: '1.0.0',
-        tags: tags,
-        sequence,
-        parentSequence,
-        post_id,
-        is_locked: false,
-        is_vote: true,
-        vote: {
-            is_vote_question: true,
-            question,
-            options,
-            total_options: options.length,
-            options_hash
-        }
-    };
-
-    const map = createMapData(metadata);
-    const satoshis = await calculateOutputSatoshis(question.length, true);
-    
-    // Log the vote question details for debugging
-    console.log(`Creating vote question with ${options.length} options and tags:`, tags);
-    console.log(`Vote question output satoshis: ${satoshis}`);
-
-    return createInscriptionRequest(address, question, map, satoshis);
-}
-
-// Create vote option component
-async function createvote_optionComponent(
-    option: vote_option,
-    post_id: string,
-    sequence: number,
-    parentSequence: number,
-    address: string,
-    tags: string[] = []
-): Promise<InscribeRequest> {
-    // Create minimal metadata for vote options with a unique timestamp for each option
-    // This helps ensure each option is treated as a separate entity
-    const metadata: PostMetadata = {
-        app: 'lockd.app',
-        type: 'vote_option',
-        content: option.text,
-        // Add a small delay to the timestamp to ensure uniqueness
-        timestamp: new Date(Date.now() + option.optionIndex * 100).toISOString(),
-        version: '1.0.0',
-        tags: tags,
-        sequence,
-        parentSequence,
-        post_id,
-        is_locked: false,
-        is_vote: true,
-        vote: {
-            is_vote_question: false,
-            optionIndex: option.optionIndex
-        }
-    };
-
-    const map = createMapData(metadata);
-    
-    // Ensure each vote option has a unique satoshi value by adding the option index
-    // This helps prevent the wallet from merging outputs
-    const baseSatoshis = option.feeSatoshis || await calculateOutputSatoshis(option.text.length, true);
-    const satoshis = baseSatoshis + option.optionIndex + 1; // Add index to ensure uniqueness
-    
-    // Enhanced logging for debugging
-    console.log(`[DEBUG] Vote Option #${option.optionIndex} Details:`);
-    console.log(`[DEBUG] - Text: "${option.text}"`);
-    console.log(`[DEBUG] - Tags: ${JSON.stringify(tags)}`);
-    console.log(`[DEBUG] - Sequence: ${sequence}`);
-    console.log(`[DEBUG] - Parent Sequence: ${parentSequence}`);
-    console.log(`[DEBUG] - Base Satoshis: ${baseSatoshis}`);
-    console.log(`[DEBUG] - Final Satoshis: ${satoshis}`);
-    console.log(`[DEBUG] - Timestamp: ${metadata.timestamp}`);
-    console.log(`[DEBUG] - MAP data:`, map);
-    
-    // Add a unique identifier to the content for debugging
-    // This will help us track if the wallet is merging outputs
-    const debugContent = `${option.text} [DEBUG_ID:${option.optionIndex}]`;
-    
-    const request = createInscriptionRequest(address, debugContent, map, satoshis);
-    console.log(`[DEBUG] - Final inscription request:`, {
-        address,
-        contentPreview: debugContent.substring(0, 30) + (debugContent.length > 30 ? '...' : ''),
-        mapKeys: Object.keys(map),
-        satoshis,
-        mimeType: 'text/plain'
-    });
-    
-    return request;
 }
 
 // Helper function to calculate output satoshis
@@ -728,15 +675,6 @@ export const createPost = async (
     console.log('[DEBUG] - Schedule info:', scheduleInfo);
     console.log('[DEBUG] - Tags:', tags);
     
-    // Add more detailed logging for vote post parameters
-    console.log('[DEBUG] - isVotePost type:', typeof isVotePost);
-    console.log('[DEBUG] - vote_options type:', typeof vote_options);
-    console.log('[DEBUG] - vote_options length:', vote_options?.length || 0);
-    console.log('[DEBUG] - vote_options is array:', Array.isArray(vote_options));
-    
-    // Log the call stack to see where createPost is being called from
-    console.log('[DEBUG] Call stack:', new Error().stack);
-  
     if (!wallet) {
         console.error('No wallet provided to createPost');
         throw new Error('Wallet is required to create a post');
@@ -809,13 +747,6 @@ export const createPost = async (
             };
         }
 
-        console.log('[DEBUG] Created post metadata:', { 
-            ...metadata, 
-            content: content.substring(0, 50) + (content.length > 50 ? '...' : ''),
-            type: metadata.type,
-            is_vote: metadata.is_vote
-        });
-
         // Handle image upload
         if (imageData) {
             try {
@@ -861,7 +792,7 @@ export const createPost = async (
                 }
                 
                 // Process the image file to get base64 and metadata
-                const { base64Data, metadata } = await processImage(imageFile);
+                const { base64Data, metadata: imageMetadata } = await processImage(imageFile);
                 
                 // Create an image data object
                 const imageDataObj: ImageData = {
@@ -872,24 +803,24 @@ export const createPost = async (
                 };
                 
                 // Add the image metadata
-                imageDataObj.metadata = metadata;
+                imageDataObj.metadata = imageMetadata;
                 
                 // Log successful image processing without the actual data
                 console.log('Image processed successfully', {
                     size: Math.round(base64Data.length / 1024) + 'KB',
                     type: imageDataObj.content_type,
-                    dimensions: `${metadata.width}x${metadata.height}`
+                    dimensions: `${imageMetadata?.width || 0}x${imageMetadata?.height || 0}`
                 });
                 
                 metadata.image = {
                     ...imageDataObj,
-                    format: metadata.format || 'png'
+                    format: imageMetadata?.format || 'png'
                 };
 
                 console.log('Added image to metadata:', { 
                     content_type: imageDataObj.content_type,
-                    format: metadata.format || 'png',
-                    dimensions: `${metadata.width}x${metadata.height}`
+                    format: imageMetadata?.format || 'png',
+                    dimensions: `${imageMetadata?.width || 0}x${imageMetadata?.height || 0}`
                 });
 
                 // Create image component
@@ -928,9 +859,6 @@ export const createPost = async (
             // Filter out empty options
             const validOptions = vote_options.filter(opt => opt.trim() !== '');
             
-            console.log('[DEBUG] Valid options after filtering:', validOptions);
-            console.log('[DEBUG] Valid options length:', validOptions.length);
-            
             if (validOptions.length < 2) {
                 console.error('Vote post requires at least 2 valid options, but only found:', validOptions.length);
                 throw new Error('Vote posts require at least 2 valid options');
@@ -943,17 +871,11 @@ export const createPost = async (
             // Create vote options objects
             const vote_optionObjects: vote_option[] = await Promise.all(
                 validOptions.map(async (text, index) => {
-                    // Calculate a unique fee for each option
-                    const baseFee = await calculateOutputSatoshis(text.length, true);
-                    // Add index to ensure uniqueness
-                    const uniqueFee = baseFee + index + 1;
-                    
                     return {
                         text,
                         lock_amount: 1000, // Base lock amount in satoshis
                         lock_duration: 144, // Default to 1 day (144 blocks)
-                        optionIndex: index,
-                        feeSatoshis: uniqueFee
+                        optionIndex: index
                     };
                 })
             );
@@ -969,31 +891,17 @@ export const createPost = async (
             
             // Create main vote question component with all options packed inside
             console.log('[DEBUG] Creating vote component with all options in a single output...');
-            const voteComponent = await createVoteQuestionComponent(
-                content,
-                vote_optionObjects,
-                post_id,
-                sequence.next(),
-                metadata.sequence,
+            const voteComponent = createInscriptionRequest(
                 bsvAddress,
-                tags
+                content,
+                createMapData(metadata),
+                await calculateOutputSatoshis(content.length, true)
             );
             components.push(voteComponent);
             
             console.log(`[DEBUG] Created vote component with ${vote_optionObjects.length} options in a single output`);
-            console.log(`[DEBUG] Component summary:`, {
-                address: voteComponent.address,
-                mimeType: voteComponent.mimeType,
-                satoshis: voteComponent.satoshis,
-                mapType: voteComponent.map.type,
-                mapTags: voteComponent.map.tags,
-                contentPreview: voteComponent.base64Data.substring(0, 30) + '...'
-            });
         } else {
-            console.log('[DEBUG] Not creating vote post because:');
-            console.log('[DEBUG] - isVotePost:', isVotePost);
-            console.log('[DEBUG] - vote_options.length:', vote_options?.length || 0);
-            console.log('[DEBUG] - vote_options:', vote_options);
+            console.log('[DEBUG] Creating regular content component');
             
             // Create regular content component
             console.log('Creating main content inscription request...');
@@ -1017,33 +925,8 @@ export const createPost = async (
             satoshis: comp.satoshis,
             mapType: comp.map.type,
             mapTags: comp.map.tags,
-            mapKeys: Object.keys(comp.map),
-            // Add base64 content preview to see if we can identify components in wallet response
-            contentPreview: comp.mimeType === 'text/plain' 
-                ? atob(comp.base64Data).substring(0, 30) + '...' 
-                : `[Binary data, length: ${comp.base64Data.length}]`
+            mapKeys: Object.keys(comp.map)
         })));
-
-        // Add a pre-wallet hook to check if wallet has a custom inscribe method
-        console.log('[DEBUG] Wallet object inspection:');
-        console.log('[DEBUG] - Wallet type:', typeof wallet);
-        console.log('[DEBUG] - Has inscribe method:', typeof wallet.inscribe === 'function');
-        
-        // Check if wallet has any custom methods for handling multiple components
-        const walletMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(wallet))
-            .filter(method => typeof wallet[method] === 'function');
-        console.log('[DEBUG] - Available wallet methods:', walletMethods);
-
-        // Add a final check to ensure we have the right number of components
-        if (isVotePost) {
-            const expectedComponents = 1 + (imageData ? 1 : 0); // Now just 1 component for the vote (plus image if any)
-            console.log(`[DEBUG] Expected components for vote post: ${expectedComponents}`);
-            console.log(`[DEBUG] Actual components: ${components.length}`);
-            
-            if (components.length !== expectedComponents) {
-                console.error(`[DEBUG] Component count mismatch! Expected ${expectedComponents} but got ${components.length}`);
-            }
-        }
 
         const response = await wallet.inscribe(components);
         console.log('[DEBUG] Wallet inscription response:', response);
@@ -1071,11 +954,16 @@ export const createPost = async (
         // Add vote options if this is a vote post
         if (isVotePost && metadata.vote?.options) {
             dbPost.is_vote = true;
-            dbPost.vote_options = metadata.vote.options.map(option => ({
+            dbPost.vote_options = metadata.vote.options.map((option, idx) => ({
+                id: `${tx_id}-option-${option.optionIndex}`,
+                tx_id: `${tx_id}-option-${option.optionIndex}`,
                 content: option.text,
+                author_address: bsvAddress,
+                created_at: new Date(metadata.timestamp),
+                post_id: tx_id,
                 option_index: option.optionIndex,
-                post_id: tx_id
-            })) as any; // Type assertion to bypass TypeScript error
+                tags: metadata.tags || []
+            }));
         }
         
         console.log('Created database post object:', { 
@@ -1087,18 +975,33 @@ export const createPost = async (
         // Function to attempt the database post creation with retry logic
         const attemptDatabasePost = async (retries = 2): Promise<any> => {
             try {
-                console.log(`Attempting to create post in database (retries left: ${retries})`, dbPost);
+                console.log(`Attempting to create post in database (retries left: ${retries})`);
                 
-                // Add more detailed logging to see the exact structure being sent
-                console.log('Database post structure:', JSON.stringify(dbPost, null, 2));
-                console.log('Keys in dbPost:', Object.keys(dbPost));
+                // Create a copy of the dbPost object without vote_options for the API request
+                const { vote_options, ...postData } = dbPost;
+                
+                // Format vote options properly for the API
+                const formattedVoteOptions = vote_options?.map(option => ({
+                    text: option.content,
+                    tx_id: option.tx_id,
+                    index: option.option_index
+                })) || [];
+                
+                // Prepare the final payload for the API
+                const apiPayload = {
+                    ...postData,
+                    vote_options: formattedVoteOptions
+                };
+                
+                console.log('Database post structure:', JSON.stringify(apiPayload, null, 2));
+                console.log('Keys in API payload:', Object.keys(apiPayload));
                 
                 const dbResponse = await fetch(`${API_BASE_URL}/api/posts`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(dbPost)
+                    body: JSON.stringify(apiPayload)
                 });
 
                 if (!dbResponse.ok) {
