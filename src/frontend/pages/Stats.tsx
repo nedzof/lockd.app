@@ -1,6 +1,6 @@
 import { API_URL } from "../config";
 import React, { useState, useEffect } from 'react';
-import { FiBarChart2, FiLock, FiTrendingUp, FiClock, FiDollarSign, FiUsers } from 'react-icons/fi';
+import { FiBarChart2, FiLock, FiTrendingUp, FiClock, FiDollarSign, FiUsers, FiPieChart } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -314,6 +314,19 @@ const Stats: React.FC = () => {
     ];
   };
 
+  // Generate sample data for lock size distribution
+  const getLockSizeDistributionData = () => {
+    // In a real app, you would get this data from the API
+    // For now, we'll create sample data
+    return [
+      { name: "<0.0001 BSV", value: 52 },
+      { name: "0.0001-0.001 BSV", value: 87 },
+      { name: "0.001-0.01 BSV", value: 45 },
+      { name: "0.01-0.1 BSV", value: 22 },
+      { name: ">0.1 BSV", value: 8 }
+    ];
+  };
+
   return (
     <div className="min-h-screen">
       <div className="container mx-auto px-4 py-6">
@@ -403,92 +416,18 @@ const Stats: React.FC = () => {
           </div>
         ) : (
           <>
-            {/* BSV Price History Chart */}
-            <div className="border border-gray-700 rounded-lg mb-8">
-              <div className="p-5">
-                <h2 className="text-xl font-bold mb-1">BSV Price History</h2>
-                <p className="text-sm opacity-70 mb-4">Historical price trends in USD</p>
-                
-                <div className="h-[400px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={addSampleData()}
-                      margin={{
-                        top: 20,
-                        right: 20,
-                        left: 20,
-                        bottom: 20,
-                      }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#444" opacity={0.3} />
-                      <XAxis 
-                        dataKey="name" 
-                        tick={{ fill: '#ccc' }} 
-                        tickLine={{ stroke: '#666' }}
-                        axisLine={{ stroke: '#666' }}
-                        reversed={true}
-                      />
-                      <YAxis 
-                        yAxisId="price" 
-                        orientation="left" 
-                        stroke={CHART_COLORS.price}
-                        tick={{ fontSize: 12, fill: '#ccc' }}
-                        tickFormatter={(value) => `$${value}`}
-                        domain={['dataMin - 1', 'dataMax + 1']}
-                        axisLine={{ stroke: '#666' }}
-                        tickLine={{ stroke: '#666' }}
-                        allowDataOverflow={false}
-                      />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: 'rgba(20, 20, 20, 0.95)', 
-                          border: '1px solid #444',
-                          borderRadius: '4px',
-                          boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
-                          padding: '8px'
-                        }}
-                        labelStyle={{ color: '#fff', fontWeight: 'bold', marginBottom: '4px' }}
-                        formatter={(value, name) => {
-                          return [`$${value}`, 'BSV Price'];
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="price"
-                        name="BSV Price"
-                        stroke={CHART_COLORS.price}
-                        strokeWidth={2}
-                        yAxisId="price"
-                        dot={{ r: 3, fill: CHART_COLORS.price, strokeWidth: 1 }}
-                        activeDot={{ r: 5, fill: CHART_COLORS.price, stroke: '#fff', strokeWidth: 1 }}
-                        isAnimationActive={true}
-                        animationDuration={1000}
-                      />
-                      <Brush 
-                        dataKey="name" 
-                        height={30} 
-                        stroke="#666"
-                        fill="#222"
-                        tickFormatter={(tick) => ''}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-
-            {/* Two-column charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-              {/* Lock Count Over Time */}
+            {/* Three-column charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
+              {/* Lock Activity Trend */}
               <div className="border border-gray-700 rounded-lg p-5">
                 <h3 className="text-xl font-bold mb-1">Lock Activity Trend</h3>
                 <p className="text-sm opacity-70 mb-4">Number of new locks over time</p>
                 
-                <div className="h-[300px]">
+                <div className="h-[280px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={addSampleData()}
-                      margin={{ top: 10, right: 10, left: 10, bottom: 20 }}
+                      margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#444" opacity={0.3} />
                       <XAxis dataKey="name" tick={{ fill: '#ccc' }} reversed={true} />
@@ -518,11 +457,11 @@ const Stats: React.FC = () => {
                 <h3 className="text-xl font-bold mb-1">Value Locked Trend</h3>
                 <p className="text-sm opacity-70 mb-4">BSV locked over time periods</p>
                 
-                <div className="h-[300px]">
+                <div className="h-[280px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
                       data={addSampleData()}
-                      margin={{ top: 10, right: 10, left: 10, bottom: 20 }}
+                      margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
                     >
                       <defs>
                         <linearGradient id="bsvGradient" x1="0" y1="0" x2="0" y2="1">
@@ -554,15 +493,13 @@ const Stats: React.FC = () => {
                   </ResponsiveContainer>
                 </div>
               </div>
-            </div>
 
-            {/* Platform Activity Breakdown */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+              {/* Platform Activity */}
               <div className="border border-gray-700 rounded-lg p-5">
                 <h3 className="text-xl font-bold mb-1">Platform Activity</h3>
-                <p className="text-sm opacity-70 mb-4">Distribution of platform interactions</p>
+                <p className="text-sm opacity-70 mb-4">Distribution of interactions</p>
                 
-                <div className="h-[240px]">
+                <div className="h-[280px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -595,28 +532,84 @@ const Stats: React.FC = () => {
                   </ResponsiveContainer>
                 </div>
               </div>
+            </div>
 
-              <div className="border border-gray-700 rounded-lg p-5 col-span-1 lg:col-span-2">
-                <div className="flex flex-col h-full justify-between">
-                  <div>
-                    <h3 className="text-xl font-bold mb-3">Average Lock Duration</h3>
-                    <div className="flex items-center mt-4">
-                      <FiClock className="h-6 w-6 text-[#00E6CC] mr-2" />
-                      <span className="text-3xl font-bold">
-                        {Math.round(stats?.avg_lock_duration || 0).toLocaleString()} blocks
-                      </span>
-                    </div>
-                    <p className="text-sm opacity-70 mt-2">Average time before locks can be unlocked</p>
+            {/* Lock Sizes Distribution */}
+            <div className="border border-gray-700 rounded-lg p-5 mb-8">
+              <div className="flex items-center mb-1">
+                <FiPieChart className="h-5 w-5 text-[#00E6CC] mr-2" />
+                <h3 className="text-xl font-bold">Lock Size Distribution</h3>
+              </div>
+              <p className="text-sm opacity-70 mb-4">Breakdown of locks by BSV amount</p>
+              
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={getLockSizeDistributionData()}
+                    margin={{ top: 10, right: 30, left: 20, bottom: 20 }}
+                    layout="vertical"
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#444" opacity={0.3} />
+                    <XAxis type="number" tick={{ fill: '#ccc' }} />
+                    <YAxis 
+                      dataKey="name" 
+                      type="category" 
+                      tick={{ fill: '#ccc' }} 
+                      width={100}
+                    />
+                    <Tooltip
+                      contentStyle={{ 
+                        backgroundColor: 'rgba(20, 20, 20, 0.95)', 
+                        border: '1px solid #444',
+                        borderRadius: '4px'
+                      }}
+                      formatter={(value, name, props) => [value, 'Locks']}
+                    />
+                    <Bar 
+                      dataKey="value" 
+                      fill={CHART_COLORS.bsv}
+                      radius={[0, 2, 2, 0]} 
+                      isAnimationActive={true}
+                      animationDuration={1200}
+                    >
+                      {getLockSizeDistributionData().map((entry, index) => (
+                        <Cell 
+                          key={`cell-${index}`}
+                          fill={`rgba(255, 105, 180, ${0.5 + index * 0.1})`}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              
+              <div className="text-sm opacity-70 text-center mt-2">
+                Total BSV locked: {formatBSV(stats?.total_bsv_locked || 0)}
+              </div>
+            </div>
+
+            {/* Lock Duration & User Info */}
+            <div className="border border-gray-700 rounded-lg p-5 mb-8">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
+                <div className="mb-6 md:mb-0">
+                  <h3 className="text-xl font-bold mb-3">Average Lock Duration</h3>
+                  <div className="flex items-center">
+                    <FiClock className="h-6 w-6 text-[#00E6CC] mr-2" />
+                    <span className="text-3xl font-bold">
+                      {Math.round(stats?.avg_lock_duration || 0).toLocaleString()} blocks
+                    </span>
                   </div>
-                  
-                  <div className="mt-6">
-                    <h3 className="text-lg font-bold mb-2">Most Active User</h3>
-                    <div className="bg-gray-800/50 rounded-md p-2 inline-block">
-                      <span className="text-[#00E6CC] font-mono">
-                        {stats?.most_active_user ? `${stats.most_active_user.substring(0, 6)}...${stats.most_active_user.substring(stats.most_active_user.length - 4)}` : 'N/A'}
-                      </span>
-                    </div>
+                  <p className="text-sm opacity-70 mt-2">Average time before locks can be unlocked</p>
+                </div>
+                
+                <div className="md:ml-8">
+                  <h3 className="text-xl font-bold mb-3">Most Active User</h3>
+                  <div className="bg-gray-800/50 rounded-md p-2 inline-block">
+                    <span className="text-[#00E6CC] font-mono">
+                      {stats?.most_active_user ? `${stats.most_active_user.substring(0, 6)}...${stats.most_active_user.substring(stats.most_active_user.length - 4)}` : 'N/A'}
+                    </span>
                   </div>
+                  <p className="text-sm opacity-70 mt-2">User with the most locked content</p>
                 </div>
               </div>
             </div>
