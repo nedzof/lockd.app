@@ -52,20 +52,50 @@ export class TxParser {
   is_valid_output(output: any): boolean {
     if (!output) return false;
     
-    // Get the hex script
-    const outputHex = typeof output === 'string' ? output : output.s || output.script || '';
-    
-    if (!outputHex || outputHex.length < 10) return false;
-    
-    const lowerOutput = outputHex.toLowerCase();
-    
-    // Skip standard P2PKH payment outputs without additional data
-    if (lowerOutput.startsWith('76a914') && lowerOutput.endsWith('88ac') && lowerOutput.length < 50) {
-      return false;
+    // Check if we have a string (hex) or an object
+    if (typeof output === 'string') {
+      // Get the hex script
+      const outputHex = output;
+      
+      if (!outputHex || outputHex.length < 10) return false;
+      
+      const lowerOutput = outputHex.toLowerCase();
+      
+      // Skip standard P2PKH payment outputs without additional data
+      if (lowerOutput.startsWith('76a914') && lowerOutput.endsWith('88ac') && lowerOutput.length < 50) {
+        return false;
+      }
+      
+      // Check specifically for lockd.app pattern in hex
+      return lowerOutput.includes('6c6f636b642e617070'); // 'lockd.app' in hex
+    } 
+    // For object type output (from JungleBus)
+    else if (typeof output === 'object') {
+      // If we have the 'data' property (JungleBus format), check it directly
+      if (output.data && Array.isArray(output.data)) {
+        // Look for app=lockd.app in the data array
+        return output.data.some((item: string) => 
+          typeof item === 'string' && item.toLowerCase().includes('app=lockd.app')
+        );
+      }
+      
+      // Try to extract script hex
+      const outputHex = output.s || output.script || '';
+      
+      if (!outputHex || outputHex.length < 10) return false;
+      
+      const lowerOutput = outputHex.toLowerCase();
+      
+      // Skip standard P2PKH payment outputs without additional data
+      if (lowerOutput.startsWith('76a914') && lowerOutput.endsWith('88ac') && lowerOutput.length < 50) {
+        return false;
+      }
+      
+      // Check specifically for lockd.app pattern in hex
+      return lowerOutput.includes('6c6f636b642e617070'); // 'lockd.app' in hex
     }
     
-    // Check specifically for lockd.app pattern
-    return lowerOutput.includes('6c6f636b642e617070'); // 'lockd.app' in hex
+    return false;
   }
   
   /**

@@ -14,7 +14,8 @@ export class TxFetcher {
   
   constructor() {
     this.baseUrl = CONFIG.JUNGLEBUS_URL;
-    this.apiKey = CONFIG.JUNGLEBUS_API_KEY;
+    // Use JB_API_KEY if it exists in CONFIG, otherwise undefined
+    this.apiKey = (CONFIG as any).JB_API_KEY;
   }
   
   /**
@@ -44,26 +45,65 @@ export class TxFetcher {
   
   /**
    * Extracts outputs from raw transaction data
+   * This function is crucial for processing JungleBus transaction data
    */
-  extract_outputs_from_tx_data(txData: any): string[] {
-    const outputs: string[] = [];
+  extract_outputs_from_tx_data(txData: any): any[] {
+    const outputs: any[] = [];
     
-    if (txData?.tx?.out && Array.isArray(txData.tx.out)) {
-      txData.tx.out.forEach((out: any) => {
-        if (out.s) outputs.push(out.s);
-        else if (out.script) outputs.push(out.script);
-      });
-    } else if (txData?.outputs && Array.isArray(txData.outputs)) {
-      outputs.push(...txData.outputs);
-    } else if (txData?.out && Array.isArray(txData.out)) {
-      txData.out.forEach((out: any) => {
-        if (typeof out === 'string') outputs.push(out);
-        else if (out.s) outputs.push(out.s);
-        else if (out.script) outputs.push(out.script);
-      });
+    try {
+      // First check if we have a JungleBus transaction format with data array
+      if (txData?.data && Array.isArray(txData.data)) {
+        // This is a JungleBus transaction, return the whole transaction as an output
+        // to process its data array in the parser
+        outputs.push(txData);
+        logger.debug(`Found JungleBus transaction with data array of ${txData.data.length} items`);
+        return outputs;
+      }
+      
+      // Try different known transaction formats
+      if (txData?.tx?.out && Array.isArray(txData.tx.out)) {
+        // bsv-js tx format
+        txData.tx.out.forEach((out: any) => {
+          if (out.s) outputs.push(out.s);
+          else if (out.script) outputs.push(out.script);
+        });
+      } else if (txData?.outputs && Array.isArray(txData.outputs)) {
+        // If outputs is an array of strings
+        if (typeof txData.outputs[0] === 'string') {
+          outputs.push(...txData.outputs);
+        } 
+        // If outputs is an array of objects (like in JungleBus)
+        else if (typeof txData.outputs[0] === 'object') {
+          txData.outputs.forEach((output: any) => {
+            if (output.script) outputs.push(output.script);
+            else if (output.s) outputs.push(output.s);
+          });
+        }
+      } else if (txData?.out && Array.isArray(txData.out)) {
+        txData.out.forEach((out: any) => {
+          if (typeof out === 'string') outputs.push(out);
+          else if (out.s) outputs.push(out.s);
+          else if (out.script) outputs.push(out.script);
+        });
+      }
+      
+      // If no outputs found but we have data array (different format)
+      if (outputs.length === 0 && txData?.output_types && txData?.data) {
+        logger.debug(`Found alternative JungleBus format with output_types array`);
+        // Return the whole transaction to handle in the parser
+        outputs.push(txData);
+      }
+      
+      // Log a warning if we couldn't extract any outputs
+      if (outputs.length === 0) {
+        logger.warn(`Could not extract outputs from transaction data: ${JSON.stringify(txData).substring(0, 200)}...`);
+      }
+      
+      return outputs;
+    } catch (error) {
+      logger.error(`Error extracting outputs: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
     }
-    
-    return outputs;
   }
 }
 
