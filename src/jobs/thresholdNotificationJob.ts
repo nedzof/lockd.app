@@ -57,8 +57,14 @@ async function checkThresholds() {
           const body = `A post has reached ${post.total_locked} BSV: "${post.content.substring(0, 50)}${post.content.length > 50 ? '...' : ''}"`;
           const url = `/posts/${post.id}`;
           
-          // Notify each subscriber for this threshold
+          // Notify each subscriber for this threshold, excluding the post author
           for (const subscription of subscriptions) {
+            // Skip notification if the subscriber is the post author
+            if (subscription.wallet_address === post.author_address) {
+              logger.debug(`Skipping notification for post author ${post.author_address}`);
+              continue;
+            }
+            
             await sendNotification(subscription.wallet_address, title, body, url);
           }
         }
@@ -134,7 +140,8 @@ async function findPostsAboveThreshold(threshold: number) {
     },
     select: {
       id: true,
-      content: true
+      content: true,
+      author_address: true
     }
   });
   
