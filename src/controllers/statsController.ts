@@ -142,6 +142,7 @@ export const getStats = async (req: Request, res: Response) => {
           COUNT(*) as locks
         FROM "LockLike"
         WHERE created_at >= ${startDate}
+        AND amount > 0
         GROUP BY DATE_TRUNC('month', created_at), name
         ORDER BY DATE_TRUNC('month', created_at)
       `;
@@ -153,6 +154,7 @@ export const getStats = async (req: Request, res: Response) => {
           SUM(amount) as bsv
         FROM "LockLike"
         WHERE created_at >= ${startDate}
+        AND amount > 0
         GROUP BY DATE_TRUNC('month', created_at), name
         ORDER BY DATE_TRUNC('month', created_at)
       `;
@@ -378,20 +380,149 @@ export const getStats = async (req: Request, res: Response) => {
 export const updateStats = async (req: Request, res: Response) => {
   try {
     logger.info('Starting stats update process');
+
+    // Calculate statistics from real data
+    const [
+      total_posts,
+      total_votes,
+      total_lock_likes,
+      total_users,
+      total_bsv_lockedResult,
+      avg_lock_durationResult,
+      most_used_tag,
+      mostActiveUser,
+      currentBsvPrice
+    ] = await Promise.all([
+      // Total posts
+      prisma.post.count(),
+      
+      // Total votes
+      prisma.post.count({
+        where: {
+          is_vote: true
+        }
+      }),
+      
+      // Total lock likes
+      prisma.lock_like.count({
+        where: {
+          amount: {
+            gt: 0  // Only count locks with amount greater than 0
+          }
+        }
+      }),
+      
+      // Total unique users
+      prisma.post.findMany({
+        where: {
+          author_address: {
+            not: null
+          }
+        },
+        select: {
+          author_address: true
+        },
+        distinct: ['author_address']
+      }).then(users => users.length),
+      
+      // Total BSV locked
+      prisma.lock_like.aggregate({
+        _sum: {
+          amount: true
+        }
+      }),
+      
+      // Average lock duration
+      prisma.lock_like.aggregate({
+        _avg: {
+          unlock_height: true
+        }
+      }),
+      
+      // Most used tag
+      prisma.tag.findMany({
+        orderBy: {
+          usage_count: 'desc'
+        },
+        take: 1
+      }),
+      
+      // Most active user
+      prisma.post.groupBy({
+        by: ['author_address'],
+        where: {
+          author_address: {
+            not: null
+          }
+        },
+        _count: {
+          id: true
+        },
+        orderBy: {
+          _count: {
+            id: 'desc'
+          }
+        },
+        take: 1
+      }),
+      
+      // Current BSV price
+      fetchBsvPrice()
+    ]);
     
-    // Create sample data for our charts
-    const sampleData = {
+    // Log results for debugging
+    logger.info(`Stats update results: 
+      - Total posts: ${total_posts}
+      - Total votes: ${total_votes}
+      - Total lock likes: ${total_lock_likes}
+      - Total users: ${total_users}
+      - Total BSV locked: ${total_bsv_lockedResult._sum?.amount || 0}
+      - Avg unlock height: ${avg_lock_durationResult._avg?.unlock_height || 0}
+    `);
+
+    // Additional debugging for lock amounts
+    try {
+      // Count locks with zero amount
+      const zeroAmountLocks = await prisma.lock_like.count({
+        where: {
+          amount: 0
+        }
+      });
+      
+      // Count locks with positive amount 
+      const positiveAmountLocks = await prisma.lock_like.count({
+        where: {
+          amount: {
+            gt: 0
+          }
+        }
+      });
+      
+      // Get total locks
+      const totalLocks = await prisma.lock_like.count();
+      
+      logger.info(`Lock amount distribution:
+        - Total locks: ${totalLocks}
+        - Locks with zero amount: ${zeroAmountLocks}
+        - Locks with positive amount: ${positiveAmountLocks}
+      `);
+    } catch (error) {
+      logger.error('Error getting lock amount distribution', error);
+    }
+
+    // Create stats data object with real data
+    const statsData: any = {
       id: 'current-stats',
-      total_posts: 125,
-      total_votes: 350,
-      total_lock_likes: 280,
-      total_users: 75,
-      total_bsv_locked: 1250.5,
-      avg_lock_duration: 30,
-      most_used_tag: 'bitcoin',
-      mostActiveUser: '1PkQ63EaZ1SJibu1fVHQULZVsU99LoKJh1',
-      currentBsvPrice: 45.75,
-      lastUpdated: new Date()
+      total_posts,
+      total_votes,
+      total_lock_likes,
+      total_users,
+      total_bsv_locked: Number(total_bsv_lockedResult._sum?.amount || 0),
+      avg_lock_duration: Number(avg_lock_durationResult._avg?.unlock_height || 0),
+      most_used_tag: most_used_tag.length > 0 ? most_used_tag[0].name : null,
+      most_active_user: mostActiveUser.length > 0 ? mostActiveUser[0].author_address : null,
+      current_bsv_price: Number(currentBsvPrice || 0),
+      last_updated: new Date()
     };
     
     // Create or update the stats record
@@ -399,49 +530,15 @@ export const updateStats = async (req: Request, res: Response) => {
       where: {
         id: 'current-stats'
       },
-      update: sampleData,
-      create: sampleData
+      update: statsData,
+      create: statsData
     });
     
-    // Create sample data for charts
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+    // Get lock time data for chart
+    const lockTimeData = await getLockTimeData('all');
     
-    // Generate sample lock time data
-    const lockTimeData = months.map((month, index) => ({
-      month: new Date(2025, index, 1),
-      count: 40 + Math.floor(Math.random() * 70)
-    }));
-    
-    // Generate sample BSV locked over time data
-    const bsvLockedOverTime = months.map((month, index) => ({
-      month: new Date(2025, index, 1),
-      bsv: 200 + Math.floor(Math.random() * 450)
-    }));
-    
-    // Generate sample post distribution data
-    const postDistributionData = [
-      { range: '0-10 BSV', value: 45 },
-      { range: '10-50 BSV', value: 30 },
-      { range: '50-100 BSV', value: 15 },
-      { range: '100+ BSV', value: 10 }
-    ];
-    
-    // Generate sample tag usage data
-    const tagUsageData = [
-      { name: 'bitcoin', count: 65 },
-      { name: 'bsv', count: 50 },
-      { name: 'crypto', count: 35 },
-      { name: 'blockchain', count: 30 },
-      { name: 'nft', count: 25 }
-    ];
-    
-    // Generate sample user activity data
-    const userActivityData = [
-      { name: 'Posts', users: 45 },
-      { name: 'Votes', users: 78 },
-      { name: 'Locks', users: 35 },
-      { name: 'Comments', users: 60 }
-    ];
+    // Get BSV locked over time data for chart
+    const bsvLockedOverTime = await getBsvLockedOverTimeData('all');
     
     logger.info('Stats update completed successfully');
     
@@ -449,10 +546,7 @@ export const updateStats = async (req: Request, res: Response) => {
       message: 'Statistics updated successfully',
       stats,
       lockTimeData,
-      bsvLockedOverTime,
-      postDistributionData,
-      tagUsageData,
-      userActivityData
+      bsvLockedOverTime
     });
   } catch (error) {
     logger.error('Error updating statistics:', error);
@@ -462,6 +556,62 @@ export const updateStats = async (req: Request, res: Response) => {
     });
   }
 };
+
+// Helper function to get lock time data
+async function getLockTimeData(timeRange: string) {
+  try {
+    const startDate = getDateRange(timeRange);
+    
+    // Get real data from the database
+    const lockTimeData = await prisma.$queryRaw<Array<{ name: string; locks: number }>>`
+      SELECT 
+        TO_CHAR(DATE_TRUNC('month', created_at), 'Mon') as name,
+        COUNT(*) as locks
+      FROM "LockLike"
+      WHERE created_at >= ${startDate}
+      AND amount > 0
+      GROUP BY DATE_TRUNC('month', created_at), name
+      ORDER BY DATE_TRUNC('month', created_at)
+    `;
+    
+    // Convert any BigInt values to numbers
+    return lockTimeData.map(item => ({
+      name: item.name,
+      locks: Number(item.locks)
+    }));
+  } catch (error) {
+    logger.error('Error getting lock time data', error);
+    return [];
+  }
+}
+
+// Helper function to get BSV locked over time data
+async function getBsvLockedOverTimeData(timeRange: string) {
+  try {
+    const startDate = getDateRange(timeRange);
+    
+    // Get real data from the database
+    const bsvLockedOverTime = await prisma.$queryRaw<Array<{ name: string; bsv: number }>>`
+      SELECT 
+        TO_CHAR(DATE_TRUNC('month', created_at), 'Mon') as name,
+        SUM(amount) as bsv
+      FROM "LockLike"
+      WHERE created_at >= ${startDate}
+      AND amount > 0
+      GROUP BY DATE_TRUNC('month', created_at), name
+      ORDER BY DATE_TRUNC('month', created_at)
+    `;
+    
+    // Convert any BigInt values to numbers
+    return bsvLockedOverTime.map(item => ({
+      name: item.name,
+      bsv: Number(item.bsv)
+    }));
+  } catch (error) {
+    logger.error('Error getting BSV locked over time data', error);
+    return [];
+  }
+}
 
 // Helper function to generate sample price data
 function generateSamplePriceData(stats: any) {

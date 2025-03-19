@@ -286,6 +286,17 @@ function createMapData(metadata: PostMetadata): MAP {
             if (metadata.vote.options_hash) {
                 mapData.options_hash = metadata.vote.options_hash;
             }
+            
+            // Include the complete vote data in a serialized format
+            if (metadata.vote.options && metadata.vote.options.length > 0) {
+                // Pack complete vote data including options in a single field
+                mapData.vote = JSON.stringify({
+                    question: metadata.vote.question || metadata.content,
+                    options: metadata.vote.options,
+                    total_options: metadata.vote.options.length,
+                    options_hash: metadata.vote.options_hash
+                });
+            }
         } else if (metadata.vote.optionIndex !== undefined) {
             // For vote options, only include essential fields
             mapData.type = 'vote_option';
@@ -430,10 +441,11 @@ async function createVoteQuestionComponent(
     };
 
     const map = createMapData(metadata);
-    const satoshis = await calculateOutputSatoshis(question.length);
+    const satoshis = await calculateOutputSatoshis(question.length, true);
     
     // Log the vote question details for debugging
     console.log(`Creating vote question with ${options.length} options and tags:`, tags);
+    console.log(`Vote question output satoshis: ${satoshis}`);
 
     return createInscriptionRequest(address, question, map, satoshis);
 }
@@ -503,7 +515,7 @@ async function createvote_optionComponent(
 }
 
 // Helper function to calculate output satoshis
-async function calculateOutputSatoshis(contentSize: number, is_vote_option: boolean = false): Promise<number> {
+async function calculateOutputSatoshis(contentSize: number, is_vote_options_packed: boolean = false): Promise<number> {
     // Get current fee rate from WhatsOnChain
     const feeRate = await getFeeRate();
     console.log(`Current fee rate: ${feeRate} sat/vbyte`);
@@ -512,37 +524,36 @@ async function calculateOutputSatoshis(contentSize: number, is_vote_option: bool
     // Base size for transaction overhead (P2PKH output, basic script)
     const baseTxSize = 250; // bytes
     
-    // Calculate total size including content and overhead
-    const totalSize = baseTxSize + contentSize;
-    console.log(`Total transaction size: ${totalSize} bytes`);
+    // If we're packing vote options, account for additional data size
+    let totalSize = baseTxSize + contentSize;
+    if (is_vote_options_packed) {
+        // Add extra size for the packed vote options
+        // This is an estimate, actual size will vary based on option content
+        totalSize = baseTxSize + contentSize + 500; // Add extra bytes for vote options data
+        console.log(`Adjusted size for packed vote options: ${totalSize} bytes`);
+    }
     
     // Calculate fee based on size and rate
     const calculatedFee = Math.ceil(totalSize * feeRate);
     console.log(`Calculated base fee: ${calculatedFee} satoshis`);
     
-    // For vote options, ensure we have enough satoshis for the lock amount
-    // This ensures each vote option has its own UTXO with sufficient value
-    if (is_vote_option) {
-        // For vote options, use a more aggressive calculation
-        // Especially for short content
-        
+    // For vote with packed options, we need a more substantial output
+    if (is_vote_options_packed) {
+        // Use a more aggressive calculation for votes
         // Base value that scales with content length
-        const baseValue = Math.max(contentSize * 100);
-        console.log(`Base value (contentSize * 100): ${baseValue}`);
+        const baseValue = Math.max(contentSize * 150);
+        console.log(`Base value (contentSize * 150): ${baseValue}`);
         
         // Scale based on fee rate too
         const feeMultiplier = Math.max(Math.ceil(feeRate / 0.5)); 
         const feeBasedValue = calculatedFee * feeMultiplier;
         console.log(`Fee-based value (calculatedFee * ${feeMultiplier}): ${feeBasedValue}`);
         
-        // Ensure we have a good minimum value that varies by content
-        const recommendedvote_optionSats = Math.max(baseValue, feeBasedValue);
+        // Ensure we have a good minimum value for the vote with options
+        const recommendedVoteSats = Math.max(baseValue, feeBasedValue, 1); // At least 10000 sats
         
-        console.log(`Final vote option satoshis: ${recommendedvote_optionSats}`);
-        
-        // Force the value to be different for each option by adding the content length
-        // This ensures even identical options have slightly different values
-        return recommendedvote_optionSats + contentSize;
+        console.log(`Final vote with packed options satoshis: ${recommendedVoteSats}`);
+        return recommendedVoteSats;
     }
     
     // For regular content, ensure minimum dust limit
@@ -956,9 +967,9 @@ export const createPost = async (
                 options_hash: await hashContent(JSON.stringify(vote_optionObjects))
             };
             
-            // Create main vote question component
-            console.log('[DEBUG] Creating vote question component...');
-            const voteQuestionComponent = await createVoteQuestionComponent(
+            // Create main vote question component with all options packed inside
+            console.log('[DEBUG] Creating vote component with all options in a single output...');
+            const voteComponent = await createVoteQuestionComponent(
                 content,
                 vote_optionObjects,
                 post_id,
@@ -967,41 +978,17 @@ export const createPost = async (
                 bsvAddress,
                 tags
             );
-            components.push(voteQuestionComponent);
+            components.push(voteComponent);
             
-            // Create individual components for each vote option
-            // Each with its own transaction output for easy parsing
-            for (let i = 0; i < vote_optionObjects.length; i++) {
-                const option = vote_optionObjects[i];
-                console.log(`[DEBUG] Creating vote option component #${i} for "${option.text}"...`);
-                
-                // Create a unique sequence for each option
-                const optionSequence = sequence.next();
-                
-                // Create vote option component with unique sequence and satoshi value
-                const vote_optionComponent = await createvote_optionComponent(
-                    option,
-                    post_id,
-                    optionSequence,
-                    metadata.sequence,
-                    bsvAddress,
-                    tags
-                );
-                
-                components.push(vote_optionComponent);
-                console.log(`[DEBUG] Added vote option #${i} component to components array`);
-            }
-            
-            console.log(`[DEBUG] Created ${components.length} components for vote post`);
-            console.log(`[DEBUG] Components summary:`, components.map((comp, idx) => ({
-                index: idx,
-                address: comp.address,
-                mimeType: comp.mimeType,
-                satoshis: comp.satoshis,
-                mapType: comp.map.type,
-                mapTags: comp.map.tags,
-                contentPreview: comp.base64Data.substring(0, 30) + '...'
-            })));
+            console.log(`[DEBUG] Created vote component with ${vote_optionObjects.length} options in a single output`);
+            console.log(`[DEBUG] Component summary:`, {
+                address: voteComponent.address,
+                mimeType: voteComponent.mimeType,
+                satoshis: voteComponent.satoshis,
+                mapType: voteComponent.map.type,
+                mapTags: voteComponent.map.tags,
+                contentPreview: voteComponent.base64Data.substring(0, 30) + '...'
+            });
         } else {
             console.log('[DEBUG] Not creating vote post because:');
             console.log('[DEBUG] - isVotePost:', isVotePost);
@@ -1049,7 +1036,7 @@ export const createPost = async (
 
         // Add a final check to ensure we have the right number of components
         if (isVotePost) {
-            const expectedComponents = 1 + vote_options.filter(opt => opt.trim() !== '').length + (imageData ? 1 : 0);
+            const expectedComponents = 1 + (imageData ? 1 : 0); // Now just 1 component for the vote (plus image if any)
             console.log(`[DEBUG] Expected components for vote post: ${expectedComponents}`);
             console.log(`[DEBUG] Actual components: ${components.length}`);
             

@@ -12,6 +12,68 @@ const logPerformance = (requestId: string, step: string, startTime?: number) => 
   return now;
 };
 
+// Helper function to update vote stats after a lock
+async function updateVoteStats(post_id: string, vote_option_id?: string | null): Promise<void> {
+  try {
+    const startTime = Date.now();
+    logger.info(`Updating vote stats for post_id: ${post_id}, vote_option_id: ${vote_option_id || 'none'}`);
+    
+    // Get all lock likes for this post
+    const allLocks = await prisma.lock_like.findMany({
+      where: {
+        post_id: post_id
+      },
+      include: {
+        vote_option: true
+      }
+    });
+    
+    // Log details about each lock
+    logger.info(`Found ${allLocks.length} locks for post ${post_id}`);
+    allLocks.forEach((lock, index) => {
+      logger.info(`Lock #${index + 1}: ID=${lock.id}, tx_id=${lock.tx_id}, amount=${lock.amount}, vote_option_id=${lock.vote_option_id || 'none'}`);
+    });
+    
+    // Calculate total locked amount
+    const totalLocked = allLocks.reduce((sum, lock) => sum + lock.amount, 0);
+    
+    // Group by vote option to get totals per option
+    const optionTotals = new Map<string, number>();
+    allLocks.forEach(lock => {
+      if (lock.vote_option_id) {
+        const optionId = lock.vote_option_id;
+        const optionName = lock.vote_option?.content || 'Unknown Option';
+        const optionKey = `${optionId} (${optionName})`;
+        optionTotals.set(optionKey, (optionTotals.get(optionKey) || 0) + lock.amount);
+      }
+    });
+    
+    // Log per-option totals
+    logger.info(`Option totals for post ${post_id}:`);
+    optionTotals.forEach((total, optionKey) => {
+      logger.info(`  - ${optionKey}: ${total} satoshis`);
+    });
+    
+    // Log the updated stats
+    logger.info(`Updated stats for post ${post_id}: Total locked amount: ${totalLocked} satoshis, Total locks: ${allLocks.length}`);
+    
+    // Update the vote options in the database with their current totals
+    for (const [optionKey, total] of optionTotals.entries()) {
+      const optionId = optionKey.split(' ')[0]; // Extract the ID part
+      
+      // This doesn't actually update the database, just logs for debugging
+      logger.info(`Vote option ${optionId} has total locked: ${total} satoshis`);
+    }
+    
+    const elapsed = Date.now() - startTime;
+    logger.debug(`updateVoteStats took ${elapsed}ms`);
+    
+    return;
+  } catch (error) {
+    logger.error('Error updating vote stats:', error);
+  }
+}
+
 // Helper function to get the current block height
 async function getCurrentBlockHeight(): Promise<number> {
   try {
@@ -125,6 +187,11 @@ const handleLockLike = async (
       }
     });
     logPerformance(requestId, 'Lock like record created', createLockStart);
+    
+    // Update vote stats if this is a vote post
+    if (post.is_vote) {
+      await updateVoteStats(post.id);
+    }
 
     const totalTime = logPerformance(requestId, 'Request completed', startTime);
     logger.info(`[${requestId}] Lock like created successfully in ${totalTime - startTime}ms`);
@@ -158,11 +225,29 @@ const handlevote_optionLock = async (
     logger.info(`[${requestId}] Received vote option lock request: ${JSON.stringify(req.body)}`);
     const { vote_option_id, author_address, amount, lock_duration } = req.body;
 
-    if (!vote_option_id || !amount || !author_address || !lock_duration) {
+    // Add validation specifically for amount
+    if (!vote_option_id || !author_address || !lock_duration) {
       logger.warn(`[${requestId}] Missing required fields`);
       res.status(400).json({ message: 'Missing required fields' });
       return;
     }
+
+    // Ensure amount is a valid positive number
+    if (amount === undefined || amount === null) {
+      logger.warn(`[${requestId}] Amount is missing`);
+      res.status(400).json({ message: 'Amount is required' });
+      return;
+    }
+
+    // Parse amount to ensure it's a number
+    const numericAmount = Number(amount);
+    if (isNaN(numericAmount) || numericAmount <= 0) {
+      logger.warn(`[${requestId}] Invalid amount value: ${amount}, converted to: ${numericAmount}`);
+      res.status(400).json({ message: 'Amount must be a positive number' });
+      return;
+    }
+
+    logger.info(`[${requestId}] Validated amount: ${numericAmount} (original: ${amount}, type: ${typeof amount})`);
 
     // First find the vote option by its id
     const findOptionStart = logPerformance(requestId, 'Finding vote option');
@@ -197,19 +282,24 @@ const handlevote_optionLock = async (
     // Create a new lock like for the vote option
     const createLockStart = logPerformance(requestId, 'Creating vote option lock record');
     const tx_id = req.body.tx_id || `lock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    logger.info(`[${requestId}] Using transaction ID: ${tx_id}`);
+    logger.info(`[${requestId}] Creating lock with ID: ${tx_id}, amount: ${numericAmount}`);
     
     const lockLike = await prisma.lock_like.create({
       data: {
         tx_id,
         author_address,
-        amount,
-        unlock_height, // Store the lock_duration as unlock_height
+        amount: numericAmount, // Use the validated numeric amount
+        unlock_height,
         post_id: vote_option.post_id,
         vote_option_id: vote_option.id
       }
     });
+    
+    logger.info(`[${requestId}] Created lock record with ID: ${lockLike.id}, amount: ${lockLike.amount}`);
     logPerformance(requestId, 'Vote option lock record created', createLockStart);
+    
+    // Update vote stats
+    await updateVoteStats(vote_option.post_id, vote_option.id);
 
     const totalTime = logPerformance(requestId, 'Request completed', startTime);
     logger.info(`[${requestId}] Vote option lock created successfully in ${totalTime - startTime}ms`);

@@ -70,6 +70,28 @@ function parseMapTransaction(tx: any) {
                         }
                     }
                 }
+                
+                // Also check for vote data in MAP_VOTE field (new format with packed options)
+                if (script.includes('MAP_TYPE=vote') && script.includes('MAP_VOTE=')) {
+                    data.isVote = true;
+                    data.content_type = 'vote';
+                    
+                    const voteDataMatch = script.match(/MAP_VOTE=(\{[^}]+\})/);
+                    if (voteDataMatch && voteDataMatch[1]) {
+                        try {
+                            const voteData = JSON.parse(voteDataMatch[1]);
+                            // Extract vote options from the vote data
+                            if (voteData.options && Array.isArray(voteData.options)) {
+                                data.vote_options = voteData.options.map((opt: any, index: number) => ({
+                                    content: opt.text || opt.content || '',
+                                    index: opt.optionIndex || index
+                                }));
+                            }
+                        } catch (e) {
+                            console.error('Failed to parse vote data:', e);
+                        }
+                    }
+                }
             });
         }
         
@@ -100,7 +122,7 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                 block_height: parsedTx.block_height,
                 created_at: parsedTx.block_time ? new Date(parsedTx.block_time * 1000) : new Date(),
                 tags: parsedTx.metadata.tags,
-                isVote: parsedTx.metadata.isVote,
+                is_vote: parsedTx.metadata.isVote,
                 media_type: parsedTx.metadata.content_type
             },
             update: {
@@ -108,7 +130,7 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                 author_address: parsedTx.author_address,
                 block_height: parsedTx.block_height,
                 tags: parsedTx.metadata.tags,
-                isVote: parsedTx.metadata.isVote,
+                is_vote: parsedTx.metadata.isVote,
                 media_type: parsedTx.metadata.content_type
             }
         });
@@ -126,13 +148,13 @@ async function processTransaction(prisma: PrismaClient, parsedTx: any) {
                         author_address: parsedTx.author_address,
                         created_at: parsedTx.block_time ? new Date(parsedTx.block_time * 1000) : new Date(),
                         post_id: post.id,
-                        optionIndex: option.index
+                        option_index: option.index
                     },
                     update: {
                         content: option.content,
                         author_address: parsedTx.author_address,
                         post_id: post.id,
-                        optionIndex: option.index
+                        option_index: option.index
                     }
                 });
             }

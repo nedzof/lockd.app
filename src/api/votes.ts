@@ -183,12 +183,40 @@ router.get('/:tx_id/options', async (req: Request, res: Response) => {
 
     // Calculate total locked amount for each option
     const vote_optionsWithTotals = vote_options.map(option => {
-      const totalLocked = option.lock_likes.reduce((sum, lock) => sum + lock.amount, 0);
+      const totalLocked = option.lock_likes.reduce((sum, lock) => {
+        // Log each lock amount for debugging
+        logger.debug(`Lock for option ${option.id}: amount=${lock.amount}, tx_id=${lock.tx_id}`);
+        
+        // Make sure the amount is treated as a number
+        const lockAmount = Number(lock.amount);
+        if (isNaN(lockAmount)) {
+          logger.warn(`Invalid lock amount for tx_id ${lock.tx_id}: ${lock.amount}`);
+          return sum;
+        }
+        
+        return sum + lockAmount;
+      }, 0);
+      
+      logger.info(`Vote option ${option.id} (${option.content}): total locked = ${totalLocked} satoshis from ${option.lock_likes.length} locks`);
+      
       return {
         ...option,
         total_locked: totalLocked,
         lock_likes: undefined // Don't expose the individual lock likes
       };
+    });
+
+    // Calculate and log the overall total locked for this vote
+    const overallTotalLocked = vote_optionsWithTotals.reduce((sum, option) => sum + option.total_locked, 0);
+    logger.info(`Total locked amount across all options for post ${post.id}: ${overallTotalLocked} satoshis`);
+
+    // Log a detailed breakdown
+    logger.info(`Detailed vote stats for post ${post.id}:`);
+    vote_optionsWithTotals.forEach(option => {
+      const percentage = overallTotalLocked > 0 
+        ? ((option.total_locked / overallTotalLocked) * 100).toFixed(2) 
+        : '0.00';
+      logger.info(`- Option "${option.content}": ${option.total_locked} satoshis (${percentage}%)`);
     });
 
     console.log(`[API] Vote options with totals for post ${post.id}:`, vote_optionsWithTotals);
@@ -208,6 +236,46 @@ router.get('/:tx_id/options', async (req: Request, res: Response) => {
 
     console.error('Error fetching vote options:', error);
     res.status(500).json({ error: 'Failed to fetch vote options' });
+  }
+});
+
+// Get total locked amount for a specific vote option
+router.get('/option/:option_id/total-locked', async (req: Request, res: Response) => {
+  try {
+    const option_id = req.params.option_id;
+    logger.info(`Fetching total locked amount for vote option: ${option_id}`);
+    
+    // Get the vote option with its lock likes
+    const vote_option = await prisma.vote_option.findUnique({
+      where: {
+        id: option_id
+      },
+      include: {
+        lock_likes: true
+      }
+    });
+
+    if (!vote_option) {
+      logger.warn(`Vote option not found: ${option_id}`);
+      return res.status(404).json({ error: 'Vote option not found' });
+    }
+
+    // Calculate total locked amount
+    const totalLocked = vote_option.lock_likes.reduce((sum, lock) => sum + lock.amount, 0);
+    
+    logger.info(`Total locked amount for vote option ${option_id}: ${totalLocked}`);
+    
+    res.json({ 
+      id: vote_option.id,
+      total_locked: totalLocked 
+    });
+  } catch (error: any) {
+    logger.error('Error fetching vote option total locked amount', {
+      error: error.message,
+      code: error.code
+    });
+
+    res.status(500).json({ error: 'Failed to fetch vote option total locked amount' });
   }
 });
 

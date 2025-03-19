@@ -17,6 +17,7 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
 }) => {
   const [vote_options, setvote_options] = useState<vote_option[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [isLocking, setIsLocking] = useState<Record<string, boolean>>({});
   const { address, connected, balance, refreshBalance } = useWallet();
 
@@ -33,6 +34,35 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
       onTotalLockedAmountChange(totalLocked);
     }
   }, [onTotalLockedAmountChange]);
+
+  // Function to fetch all vote options
+  const refreshVoteOptions = useCallback(async () => {
+    console.log(`[Frontend] Refreshing all vote options for tx_id: ${transaction.tx_id}`);
+    setRefreshing(true);
+    try {
+      const response = await fetch(`${API_URL}/api/votes/${transaction.tx_id}/options`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch vote options');
+      }
+      
+      const data = await response.json();
+      console.log('[Frontend] Refreshed vote options received:', JSON.stringify(data, null, 2));
+      
+      // Ensure each vote option has a total_locked property
+      const processedOptions = data.map((option: any) => ({
+        ...option,
+        total_locked: option.total_locked || option.lock_amount || 0
+      }));
+      
+      setvote_options(processedOptions);
+      updateTotalLocked(processedOptions);
+    } catch (error) {
+      console.error('Error refreshing vote options:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [transaction.tx_id, updateTotalLocked]);
 
   useEffect(() => {
     console.log('vote_optionsDisplay useEffect running for tx_id:', transaction.tx_id);
@@ -74,7 +104,7 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
         }
         
         // Ensure each vote option has a total_locked property
-        const processedOptions = data.map((option: vote_option) => ({
+        const processedOptions = data.map((option: any) => ({
           ...option,
           total_locked: option.total_locked || option.lock_amount || 0
         }));
@@ -91,8 +121,20 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
 
     if (transaction.tx_id) {
       fetchvote_options();
+      
+      // Set up auto-refresh every 30 seconds
+      const intervalId = setInterval(() => {
+        console.log('[Frontend] Auto-refreshing vote options');
+        refreshVoteOptions();
+      }, 30000); // 30 seconds
+      
+      // Clean up interval when component unmounts
+      return () => {
+        console.log('[Frontend] Clearing auto-refresh interval');
+        clearInterval(intervalId);
+      };
     }
-  }, [transaction.tx_id, transaction.vote_options, updateTotalLocked]);
+  }, [transaction.tx_id, transaction.vote_options, updateTotalLocked, refreshVoteOptions]);
 
   const handleLock = async (optionId: string, amount: number) => {
     console.log('Lock button clicked for option:', optionId, 'amount:', amount);
@@ -115,6 +157,10 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
     setIsLocking(prev => ({ ...prev, [optionId]: true }));
 
     try {
+      // Convert BSV amount to satoshis (1 BSV = 100,000,000 satoshis)
+      const amountInSatoshis = Math.round(amount * 100000000);
+      console.log('Converted amount to satoshis:', amountInSatoshis);
+      
       console.log('Sending lock request to API for option:', optionId);
       const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
         method: 'POST',
@@ -124,7 +170,7 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
         body: JSON.stringify({
           vote_option_id: optionId,
           author_address: address,
-          amount,
+          amount: amountInSatoshis, // Use the satoshi amount here
           lock_duration: 1000, // Default lock duration
         }),
       });
@@ -135,15 +181,38 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
 
       toast.success(`Successfully locked ${amount} BSV`);
       
-      // Update the vote option's locked amount locally
-      const updatedOptions = vote_options.map(opt => 
-        opt.id === optionId 
-          ? { ...opt, total_locked: (opt.total_locked || 0) + amount } 
-          : opt
-      );
+      // Fetch the latest data from the server for the updated option
+      console.log('Fetching updated lock data for option:', optionId);
+      const updatedOptionResponse = await fetch(`${API_URL}/api/votes/option/${optionId}/total-locked`);
       
-      setvote_options(updatedOptions);
-      updateTotalLocked(updatedOptions);
+      if (updatedOptionResponse.ok) {
+        const updatedOptionData = await updatedOptionResponse.json();
+        console.log('Updated option data:', updatedOptionData);
+        
+        // Update the vote option's locked amount with fresh data from the server
+        const updatedOptions = vote_options.map(opt => 
+          opt.id === optionId 
+            ? { ...opt, total_locked: updatedOptionData.total_locked } 
+            : opt
+        );
+        
+        setvote_options(updatedOptions);
+        updateTotalLocked(updatedOptions);
+        
+        // Refresh all vote options to ensure consistency
+        await refreshVoteOptions();
+      } else {
+        console.error('Failed to fetch updated lock data, using local estimate instead');
+        // Fall back to local estimate if server request fails
+        const updatedOptions = vote_options.map(opt => 
+          opt.id === optionId 
+            ? { ...opt, total_locked: (opt.total_locked || 0) + amount } 
+            : opt
+        );
+        
+        setvote_options(updatedOptions);
+        updateTotalLocked(updatedOptions);
+      }
       
       // Refresh wallet balance
       refreshBalance();
@@ -166,7 +235,13 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
   }
 
   // Calculate total locked amount across all options
-  const totalLockedAmount = vote_options.reduce((sum, option) => sum + (option.total_locked || 0), 0);
+  const totalLockedAmount = vote_options.reduce((sum, option) => {
+    // Ensure we're adding numbers, not strings
+    const optionLocked = typeof option.total_locked === 'number' ? option.total_locked : 0;
+    console.log(`Option ${option.id} (${option.content}) has total_locked: ${optionLocked}`);
+    return sum + optionLocked;
+  }, 0);
+  
   console.log('vote_optionsDisplay - Total locked amount:', totalLockedAmount);
 
   return (
@@ -176,11 +251,31 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
         {transaction.content || (transaction.metadata?.voteQuestion) || 'Vote Post'}
       </div>
       
+      {/* Add refreshing indicator */}
+      {refreshing && (
+        <div className="text-xs text-gray-400 animate-pulse mb-2">
+          Refreshing stats...
+        </div>
+      )}
+      
+      {/* Show total locked amount */}
+      {totalLockedAmount > 0 && (
+        <div className="text-xs text-gray-400 mb-2">
+          Total locked: {formatBSV(totalLockedAmount / 100000000)} BSV
+        </div>
+      )}
+      
       <div className="space-y-4">
         {vote_options.map((option) => {
           console.log('Rendering option:', option.content, 'with locked amount:', option.total_locked);
+          
+          // Ensure total_locked is a number
+          const optionLocked = typeof option.total_locked === 'number' ? option.total_locked : 0;
+          
           // Calculate percentage for this option
-          const percentage = totalLockedAmount > 0 ? ((option.total_locked || 0) / totalLockedAmount) * 100 : 0;
+          const percentage = totalLockedAmount > 0 ? ((optionLocked / totalLockedAmount) * 100) : 0;
+          
+          console.log(`Option ${option.id} (${option.content}): ${optionLocked} satoshis (${percentage.toFixed(2)}%)`);
           
           return (
             <div key={option.id} className="relative border-b border-gray-700/20 p-3 mb-2 overflow-hidden">
@@ -191,11 +286,18 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
               />
               
               <div className="flex items-center justify-between relative z-10">
-                <div className="font-medium text-white flex-grow">{option.content}</div>
+                <div className="flex-grow">
+                  <div className="font-medium text-white">{option.content}</div>
+                  {optionLocked > 0 && (
+                    <div className="text-xs text-gray-400 mt-1">
+                      {formatBSV(optionLocked / 100000000)} BSV ({percentage.toFixed(1)}%)
+                    </div>
+                  )}
+                </div>
                 
                 {connected && (
                   <button
-                    onClick={() => handleLock(option.id, 0.00001)}
+                    onClick={() => handleLock(option.id, 0.001)}
                     disabled={isLocking[option.id]}
                     className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-gray-800 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
                   >
