@@ -67,6 +67,11 @@ export class Scanner {
       // Extract transaction ID using robust method
       const txId = tx?.tx?.h || tx?.hash || tx?.id || tx?.tx_id;
       
+      // Add a debug log for each transaction received
+      logger.info(`🔥 DEBUG: Transaction received in handleTransaction: ${txId}`, {
+        tx_partial: JSON.stringify(tx).substring(0, 200) + '...'
+      });
+      
       if (!txId) {
         return; // Skip transactions without ID
       }
@@ -85,9 +90,15 @@ export class Scanner {
         return;
       }
 
+      // Log before parsing
+      logger.info(`🔥 DEBUG: About to parse transaction ${txId}`);
+
       // Let the parser handle the transaction - clear separation of concerns
       // The parser examines outputs and extracts metadata
       const parsedTx = await tx_parser.parse_transaction_data(tx);
+      
+      // Log after parsing
+      logger.info(`🔥 DEBUG: Finished parsing transaction ${txId}, has outputs: ${!!parsedTx?.outputs?.length}`);
       
       // Skip if no valid outputs
       if (!parsedTx?.outputs?.length) {
@@ -97,13 +108,23 @@ export class Scanner {
       
       // Filter for lockd.app outputs - our specific app concern
       const lockdOutputs = parsedTx.outputs.filter(output => output.isValid && output.type === 'lockd');
+      
+      // Log filtering results
+      logger.info(`🔥 DEBUG: Transaction ${txId} has ${lockdOutputs.length} lockd outputs out of ${parsedTx.outputs.length} total outputs`);
+      
       if (lockdOutputs.length === 0) {
         logger.debug(`⏭️ Transaction ${txId} has no lockd.app outputs, skipping`);
         return;
       }
       
+      // Log before saving
+      logger.info(`🔥 DEBUG: About to save transaction ${txId} to database`);
+      
       // Save the transaction to the database via repository
       await tx_repository.saveProcessedTransaction(parsedTx);
+      
+      // Log after saving
+      logger.info(`🔥 DEBUG: Finished saving transaction ${txId} to database`);
       
       // Process the transaction to create a post
       try {
@@ -114,6 +135,8 @@ export class Scanner {
         if (savedTx) {
           await post_repository.processTransaction(savedTx);
           logger.debug(`✅ Created post for transaction ${txId}`);
+        } else {
+          logger.info(`🔥 DEBUG: Failed to find saved transaction ${txId} after saving it!`);
         }
       } catch (error) {
         logger.error(`❌ Error creating post: ${(error as Error).message}`, {
