@@ -744,6 +744,28 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
   }, [currentFilters, nextCursor, onStatsUpdate, submissions]);
 
+  // Effect to debounce search term changes and trigger search
+  useEffect(() => {
+    if (searchTerm !== lastSearchTerm.current) {
+      console.log(`Search term changed from "${lastSearchTerm.current}" to "${searchTerm || ''}"`);
+      
+      // Set up a short debounce timer to prevent too many requests
+      const timer = setTimeout(() => {
+        // Update the last search term reference
+        lastSearchTerm.current = searchTerm || '';
+        
+        // Only perform search if component is mounted
+        if (isMounted.current) {
+          console.log('Explicitly triggering fetch due to search term change');
+          // Direct call to fetch posts
+          fetchPosts(true);
+        }
+      }, 100); // Just 100ms delay for typing
+      
+      return () => clearTimeout(timer);
+    }
+  }, [searchTerm, fetchPosts]);
+
   // Create a debounced version of fetchPosts
   const debouncedFetchPosts = useMemo(() => 
     debounce((reset: boolean) => fetchPosts(reset), 300), 
@@ -1053,20 +1075,6 @@ const PostGrid: React.FC<PostGridProps> = ({
       onStatsUpdate(stats);
     }
   }, [submissions, onStatsUpdate, current_block_height]);
-
-  // Add the effect after fetchPosts declaration
-  useEffect(() => {
-    if (searchTerm !== lastSearchTerm.current) {
-      console.log(`Search term changed from "${lastSearchTerm.current}" to "${searchTerm || ''}"`);
-      lastSearchTerm.current = searchTerm || '';
-      
-      // Explicitly trigger a fetch when search terms change
-      if (isMounted.current) {
-        console.log('Explicitly triggering fetch due to search term change');
-        fetchPosts(true);
-      }
-    }
-  }, [searchTerm, fetchPosts]);
 
   // Render the component
   return (
