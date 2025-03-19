@@ -49,7 +49,7 @@ export async function enhanceSearch(query: string, type: string = 'all'): Promis
       // Get enhanced results
       const results = fuse.search(query);
       
-      // Extract the items and sort by score
+      // Extract the items and sort by score (but don't add score to content)
       const enhancedResults = results
         .map(result => {
           // Create a new object by copying properties instead of using spread
@@ -58,15 +58,17 @@ export async function enhanceSearch(query: string, type: string = 'all'): Promis
           
           // Copy properties manually
           Object.keys(item).forEach(key => {
+            // Copy all properties except don't modify content
             enhancedItem[key] = item[key];
           });
           
-          // Add score property
-          enhancedItem.score = result.score;
+          // Store score as a separate property (but don't add to content)
+          // It's used for sorting only
+          enhancedItem._score = result.score;
           
           return enhancedItem as unknown as Post;
         })
-        .sort((a: any, b: any) => (a.score || 1) - (b.score || 1));
+        .sort((a: any, b: any) => (a._score || 1) - (b._score || 1));
       
       // Cache the results
       searchCache[cacheKey] = {

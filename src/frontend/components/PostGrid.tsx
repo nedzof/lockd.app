@@ -244,10 +244,14 @@ const PostGrid: React.FC<PostGridProps> = ({
             
             // Process search results
             const processedPosts = searchResults.map((post: any) => {
+              // Remove any score information from the post
+              if (post.content && typeof post.content === 'string') {
+                post.content = post.content.replace(/\s*\(Score:\s*\d+%\)\s*$/g, '');
+              }
+              
               // Add any additional processing specific to search results
               return {
-                ...post,
-                // Remove the score from the content display
+                ...post
               };
             });
             

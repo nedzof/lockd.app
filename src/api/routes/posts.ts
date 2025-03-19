@@ -17,6 +17,18 @@ router.get('/search', async (req, res) => {
     console.log(`Searching for "${searchTerm}" with type "${searchType}"`);
     const results = await searchPosts(searchTerm, limit, searchType);
     
+    // Clean up any score information in post content
+    if (results && results.posts && Array.isArray(results.posts)) {
+      results.posts = results.posts.map((post: any) => {
+        // Check if the content has a score pattern and remove it
+        if (post.content && typeof post.content === 'string') {
+          // Remove any (Score: X%) patterns from the content
+          post.content = post.content.replace(/\s*\(Score:\s*\d+%\)\s*$/g, '');
+        }
+        return post;
+      });
+    }
+    
     // Format response in the structure expected by PostGrid
     return res.json({
       posts: results.posts || [],
