@@ -1,144 +1,122 @@
 /**
  * JungleBusService
  * 
- * Handles interactions with the JungleBus API for fetching blockchain transactions.
+ * Simple service to interact with JungleBus API
  */
 
-import { JungleBusClient } from '@gorillapool/js-junglebus';
+import { JungleBusClient, ControlMessageStatusCode } from '@gorillapool/js-junglebus';
 import { CONFIG } from './config.js';
 import logger from './logger.js';
 
-interface TransactionCallback {
-  (transaction: any): Promise<void>;
-}
-
-interface StatusCallback {
-  (status: any): Promise<void>;
-}
-
-interface ErrorCallback {
-  (error: Error, transactionId?: string): Promise<void>;
-}
-
 export class JungleBusService {
-  private jungleBus: JungleBusClient;
+  private client: JungleBusClient;
   private subscriptionId: string;
-  private baseUrl: string;
   
   constructor() {
-    // Get configuration from environment variables via config
     this.subscriptionId = CONFIG.JB_SUBSCRIPTION_ID;
-    this.baseUrl = CONFIG.JUNGLEBUS_URL;
     
-    // Log a message if we're using the default subscription ID
-    if (this.subscriptionId === 'lockd-app') {
-      logger.warn('Using default subscription ID. Check your .env file for JB_SUBSCRIPTION_ID');
-    }
-    
-    // Log configuration details
-    logger.info('JungleBus Service initialized', {
-      subscription_id: this.subscriptionId,
-      base_url: this.baseUrl
-    });
-    
-    // Initialize JungleBus client
-    const baseUrlWithoutProtocol = this.baseUrl.replace(/^https?:\/\//, '');
-    this.jungleBus = new JungleBusClient(baseUrlWithoutProtocol, {
-      useSSL: this.baseUrl.startsWith('https'),
+    // Initialize client with simple configuration
+    const baseUrl = CONFIG.JUNGLEBUS_URL.replace(/^https?:\/\//, '');
+    this.client = new JungleBusClient(baseUrl, {
+      useSSL: CONFIG.JUNGLEBUS_URL.startsWith('https'),
       protocol: 'json',
       onConnected: (ctx) => {
-        logger.info("🔌 JungleBus CONNECTED", ctx);
+        logger.info('🔌 Connected to JungleBus', ctx);
       },
       onConnecting: (ctx) => {
-        logger.info("🔄 JungleBus CONNECTING", ctx);
+        logger.info('🔄 Connecting to JungleBus', ctx);
       },
       onDisconnected: (ctx) => {
-        logger.info("❌ JungleBus DISCONNECTED", ctx);
+        logger.info('🔌 Disconnected from JungleBus', ctx);
       },
       onError: (ctx) => {
-        logger.error("❌ JungleBus ERROR", ctx);
-      },
+        logger.error('❌ JungleBus error', ctx);
+      }
+    });
+    
+    logger.info('🛠️ JungleBus service initialized', {
+      subscription_id: this.subscriptionId,
+      url: CONFIG.JUNGLEBUS_URL
     });
   }
   
   /**
-   * Subscribe to JungleBus for transaction notifications
-   * @param fromBlock The block height to start from
-   * @param onTransaction Callback for transaction processing
-   * @param onStatus Callback for status updates
-   * @param onError Callback for error handling
-   * @returns The subscription ID
+   * Subscribe to blockchain events
    */
   async subscribe(
     fromBlock: number,
-    onTransaction: TransactionCallback,
-    onStatus: StatusCallback,
-    onError: ErrorCallback
+    onTransaction: (tx: any) => Promise<void>,
+    onStatus: (status: any) => Promise<void>,
+    onError: (error: any, txId?: string) => Promise<void>
   ): Promise<string> {
     try {
-      logger.info('Subscribing to JungleBus', { 
-        fromBlock,
+      logger.info('🔄 Subscribing to JungleBus', { 
+        from_block: fromBlock,
         subscription_id: this.subscriptionId 
       });
       
-      // Subscribe to JungleBus
-      await this.jungleBus.Subscribe(
+      await this.client.Subscribe(
         this.subscriptionId,
         fromBlock,
         async (tx: any) => {
           try {
-            // Don't log transaction IDs here - let the onTransaction handler decide if this is a transaction worth logging
-            // This way we only log transactions that are actually valid and processed
             await onTransaction(tx);
           } catch (error) {
-            const txId = tx?.tx?.h || tx?.hash || tx?.id || tx?.tx_id;
-            logger.error('Failed to process transaction', {
-              transaction_id: txId,
-              error: (error as Error).message
+            const txId = tx?.tx?.h || tx?.hash || tx?.id || tx?.tx_id || 'unknown';
+            logger.error('❌ Transaction handler error', {
+              tx_id: txId,
+              error: error instanceof Error ? error.message : String(error)
             });
-            await onError(error as Error, txId);
+            await onError(error, txId);
           }
         },
         async (status: any) => {
           try {
-            // Only log status updates if they're important or contain transactions
-            if ((status.statusCode === 200 && status.transactions > 0) || // Block done with transactions 
-                status.statusCode === 300 || // Reorg
-                status.statusCode === 400) { // Error
-              logger.info('Status update received', status);
+            // Log important status updates
+            if (status.statusCode === ControlMessageStatusCode.BLOCK_DONE && status.transactions > 0) {
+              logger.info('🧱 Block processed', { 
+                block: status.block, 
+                transactions: status.transactions 
+              });
+            } else if (status.statusCode === ControlMessageStatusCode.REORG) {
+              logger.warn('🔄 Blockchain reorg', { block: status.block });
             }
+            
             await onStatus(status);
           } catch (error) {
-            logger.error('Failed to process status update', {
-              status,
-              error: (error as Error).message
+            logger.error('❌ Status handler error', {
+              error: error instanceof Error ? error.message : String(error)
             });
           }
         },
         async (error: any) => {
-          logger.error('JungleBus subscription error', { 
-            error: error instanceof Error ? error.message : JSON.stringify(error) 
+          logger.error('❌ JungleBus subscription error', { 
+            error: error instanceof Error ? error.message : String(error) 
           });
-          await onError(error instanceof Error ? error : new Error(JSON.stringify(error)));
+          await onError(error);
         }
       );
       
       return this.subscriptionId;
     } catch (error) {
-      logger.error('Failed to subscribe to JungleBus', { error: (error as Error).message });
+      logger.error('❌ Failed to subscribe to JungleBus', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       throw error;
     }
   }
   
   /**
-   * Unsubscribe from the current JungleBus subscription
+   * Unsubscribe from JungleBus
    */
   async unsubscribe(): Promise<void> {
     try {
-      logger.info('Unsubscribing from JungleBus', { subscription_id: this.subscriptionId });
-      await this.jungleBus.Disconnect();
+      logger.info('🛑 Unsubscribing from JungleBus');
+      await this.client.Disconnect();
     } catch (error) {
-      logger.error('Failed to unsubscribe from JungleBus', { error: (error as Error).message });
+      logger.error('❌ Failed to unsubscribe from JungleBus', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       throw error;
     }
   }
