@@ -204,89 +204,91 @@ const PostGrid: React.FC<PostGridProps> = ({
 
   const fetchPosts = useCallback(async (reset = true) => {
     if (!isMounted.current) {
+      console.warn('Fetch posts called when component is not mounted');
       return;
-    }
-
-    // Prevent concurrent fetches
-    if (isFetchInProgress.current) {
-      console.log('Fetch already in progress, skipping this request');
-      return;
-    }
-
-    isFetchInProgress.current = true;
-
-    // Don't set loading state immediately to prevent UI flicker
-    // Only set loading state if we don't have any posts yet
-    if (reset && submissions.length === 0) {
-      setLoading(true);
     }
     
-    // Don't clear error state immediately
-    if (reset) {
-      setNextCursor(null); // Reset cursor when fetching from the beginning
-      // We'll clear the seen post IDs only after successful fetch
-    } else {
-      setIsFetchingMore(true);
+    if (isFetchInProgress.current) {
+      console.warn('Fetch already in progress, skipping');
+      return;
     }
+    
+    // Set the fetch in progress flag
+    isFetchInProgress.current = true;
     
     try {
+      // If this is a reset (new query), reset the pagination and state
+      if (reset) {
+        setLoading(true);
+        setNextCursor(null);
+        setSubmissions([]);
+        seenpost_ids.current = new Set();
+      } else {
+        setIsFetchingMore(true);
+      }
+      
+      // Build the query parameters
       const queryParams = new URLSearchParams();
       
-      // Add cursor if available
-      if (nextCursor && !reset) {
-        queryParams.append('cursor', nextCursor);
-      }
-      
-      // Add limit
-      queryParams.append('limit', '10');
-      
-      // Add filters - log each filter as it's added
-      if (time_filter) {
-        queryParams.append('time_filter', time_filter);
-        console.log(`Adding time_filter: ${time_filter}`);
-      }
-      
-      if (ranking_filter) {
-        queryParams.append('ranking_filter', ranking_filter);
-        console.log(`Adding ranking_filter: ${ranking_filter}`);
-      }
-      
-      if (personal_filter) {
-        queryParams.append('personal_filter', personal_filter);
-        console.log(`Adding personal_filter: ${personal_filter}`);
-      } else {
-        // NEW: Check if we need to explicitly request lock data when no filter is applied
-        // This is a diagnostic log to help understand why lock data might be missing
-        console.log('No personal_filter applied - verify server includes complete lock_likes data');
-      }
-      
-      if (block_filter) {
-        queryParams.append('block_filter', block_filter);
-        console.log(`Adding block_filter: ${block_filter}`);
-      }
+      // Determine which endpoint to use based on whether we're searching
+      let endpoint = `${API_URL}/api/posts`;
       
       // Add search parameters if provided
       if (searchTerm) {
+        // Use the dedicated search endpoint when search parameters are present
+        endpoint = `${API_URL}/api/posts/search`;
         queryParams.append('q', searchTerm);
         queryParams.append('type', searchType || 'all');
-        console.log(`Adding search query: ${searchTerm}, type: ${searchType || 'all'}`);
+        console.log(`Using search endpoint with query: ${searchTerm}, type: ${searchType || 'all'}`);
+      } else {
+        // Only add these filters for the regular posts endpoint, not for search
+        // Pagination
+        if (nextCursor && !reset) {
+          queryParams.append('cursor', nextCursor);
+          console.log(`Adding cursor: ${nextCursor}`);
+        }
+        
+        // Filters
+        if (time_filter) {
+          queryParams.append('time_filter', time_filter);
+          console.log(`Adding time_filter: ${time_filter}`);
+        }
+        
+        if (ranking_filter) {
+          queryParams.append('ranking_filter', ranking_filter);
+          console.log(`Adding ranking_filter: ${ranking_filter}`);
+        }
+        
+        if (personal_filter) {
+          queryParams.append('personal_filter', personal_filter);
+          console.log(`Adding personal_filter: ${personal_filter}`);
+        } else {
+          // NEW: Check if we need to explicitly request lock data when no filter is applied
+          // This is a diagnostic log to help understand why lock data might be missing
+          console.log('No personal_filter applied - verify server includes complete lock_likes data');
+        }
+        
+        if (block_filter) {
+          queryParams.append('block_filter', block_filter);
+          console.log(`Adding block_filter: ${block_filter}`);
+        }
+        
+        // Add tags if selected
+        if (selected_tags.length > 0) {
+          selected_tags.forEach(tag => {
+            queryParams.append('tags', tag);
+          });
+          console.log(`Adding tags: ${selected_tags.join(', ')}`);
+        }
+        
+        // Add user_id if available
+        if (user_id) {
+          queryParams.append('user_id', user_id);
+          console.log(`Adding user_id: ${user_id}`);
+        }
       }
       
-      // Add tags if selected
-      if (selected_tags.length > 0) {
-        selected_tags.forEach(tag => {
-          queryParams.append('tags', tag);
-        });
-        console.log(`Adding tags: ${selected_tags.join(', ')}`);
-      }
-      
-      // Add user_id if available
-      if (user_id) {
-        queryParams.append('user_id', user_id);
-        console.log(`Adding user_id: ${user_id}`);
-      }
-      
-      console.log(`Fetching posts with params: ${queryParams.toString()}`);
+      console.log(`Fetching posts with endpoint: ${endpoint} and params: ${queryParams.toString()}`);
       
       // Add timeout and retry logic for fetch
       let retryCount = 0;
@@ -298,7 +300,7 @@ const PostGrid: React.FC<PostGridProps> = ({
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
           
-          response = await fetch(`${API_URL}/api/posts?${queryParams.toString()}`, {
+          response = await fetch(`${endpoint}?${queryParams.toString()}`, {
             signal: controller.signal
           });
           
