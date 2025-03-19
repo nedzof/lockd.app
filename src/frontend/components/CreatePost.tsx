@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import { useWallet } from '../providers/WalletProvider';
 import { useTags } from '../hooks/useTags';
-import { FiX, FiPlus, FiCheck, FiRefreshCw, FiImage, FiFile, FiPlusCircle, FiTrash2, FiBarChart2, FiLink, FiHash, FiClock, FiCalendar } from 'react-icons/fi';
+import { FiX, FiPlus, FiCheck, FiRefreshCw, FiImage, FiFile, FiPlusCircle, FiTrash2, FiBarChart2, FiLink, FiHash, FiClock, FiCalendar, FiLock } from 'react-icons/fi';
 import { createPost } from '../services/post.service';
 import { isWalletConnected, ensureWalletConnection, getBsvAddress, getWalletStatus } from '../utils/walletConnectionHelpers';
 import LinkPreview from './LinkPreview';
@@ -52,6 +52,14 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   });
   // Add state for link preview
   const [detectedUrl, setDetectedUrl] = useState<string | null>(null);
+  // Add locking state
+  const [isLocked, setIsLocked] = useState(false);
+  const [showLockOptions, setShowLockOptions] = useState(false);
+  const [lockAmount, setLockAmount] = useState(0.001); // Default 0.001 BSV
+  const [lockDuration, setLockDuration] = useState(10); // Default 10 blocks
+
+  // Compute if any panel is currently active
+  const isPanelActive = showImagePanel || showTagInput || isVotePost || showScheduleOptions || showLockOptions;
 
   useEffect(() => {
     fetchTags();
@@ -215,94 +223,103 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   };
 
   const toggleImagePanel = () => {
-    // If we're opening the image panel
-    if (!showImagePanel) {
-      // Close other option panels
+    if (showImagePanel) {
+      setShowImagePanel(false);
+    } else {
+      // Close all other panels
       setShowTagInput(false);
       setIsVotePost(false);
       setShowScheduleOptions(false);
+      setShowLockOptions(false);
+      setShowImagePanel(true);
     }
-    
-    setShowImagePanel(!showImagePanel);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    if (!content.trim() || isSubmitting) return;
+
     setIsSubmitting(true);
+    setError('');
 
     try {
-      // Check if wallet is connected
-      const isConnected = await isWalletConnected();
-      if (!isConnected) {
+      console.log('Starting post submission process...');
+      
+      // Validate wallet connection
+      console.log('Checking wallet connection status...');
+      const walletStatus = await getWalletStatus(wallet);
+      if (!walletStatus.isReady) {
+        console.error('Wallet is not available or not ready');
+        throw new Error('Wallet is not available. Please refresh the page and try again.');
+      }
+
+      // Connect wallet if not already connected
+      if (!walletStatus.isConnected) {
         console.log('Wallet not connected, attempting to connect...');
-        if (wallet) {
-          const connectionResult = await ensureWalletConnection(wallet, connect);
-          if (!connectionResult.success) {
-            setError('Please connect your wallet to create a post');
-            setIsSubmitting(false);
-            return;
-          }
-        } else {
-          setError('Wallet not available. Please make sure you have a compatible wallet installed.');
-          setIsSubmitting(false);
-          return;
+        try {
+          await connect();
+        } catch (error) {
+          console.error('Failed to connect wallet:', error);
+          throw new Error('Failed to connect wallet. Please try again.');
         }
       }
 
-      // Get wallet status for debugging
-      const walletStatus = await getWalletStatus();
-      console.log('Wallet status before post creation:', walletStatus);
+      console.log('Wallet connected successfully');
 
-      if (!content.trim() && !image) {
-        setError('Please enter some content or select an image');
-        setIsSubmitting(false);
-        return;
+      // Check if wallet is available
+      if (!wallet) {
+        throw new Error('Wallet is not available for post creation');
       }
 
-      // Get the wallet instance
-      const walletInstance = window.yours || wallet;
-      if (!walletInstance) {
-        console.error('Wallet not available');
-        setError('Wallet not available. Please make sure you have the Yours wallet extension installed and connected.');
-        setIsSubmitting(false);
-        return;
+      // Get BSV address
+      const bsvAddress = await getBsvAddress(wallet);
+      if (!bsvAddress) {
+        console.error('Failed to get BSV address');
+        throw new Error('Could not get BSV address from wallet. Please reconnect and try again.');
       }
 
-      // Add debugging for vote post parameters
-      console.log('Creating post with content length:', content.length, 'and image:', image ? 'yes' : 'no');
-      console.log('Vote post parameters:');
-      console.log('- isVotePost:', isVotePost);
-      console.log('- vote_options:', vote_options);
-      console.log('- filtered vote_options:', vote_options.filter(option => option.trim() !== ''));
+      console.log('BSV address retrieved:', bsvAddress);
+
+      // Validate vote options if it's a vote post
+      let shouldBeVotePost = isVotePost;
+      let filteredVoteOptions: string[] = [];
       
-      // Validate vote options if this is a vote post
-      const filteredVoteOptions = vote_options.filter(option => option.trim() !== '');
-      
-      // Determine if this should be a vote post based on the toggle and valid options
-      let shouldBeVotePost = isVotePost || filteredVoteOptions.length >= 2;
-      
-      // No need for confirmation dialog - automatically treat as vote post if there are options
-      if (filteredVoteOptions.length >= 2 && !isVotePost) {
-        console.log('Auto-enabling vote post mode because valid options exist');
-        // Update the UI state to match
-        setIsVotePost(true);
+      if (isVotePost) {
+        console.log('Validating vote options:', vote_options);
+        
+        // Filter out empty options
+        filteredVoteOptions = vote_options.filter(option => option.trim() !== '');
+        console.log('Filtered vote options:', filteredVoteOptions);
+        
+        if (filteredVoteOptions.length < 2) {
+          console.error('A vote post requires at least 2 options');
+          throw new Error('A vote post requires at least 2 options');
+        }
+        
+        // Ensure isLocked is set to false for vote posts
+        if (isLocked) {
+          console.log('Auto-disabling lock for vote post (locking per option will be used instead)');
+          setIsLocked(false);
+        }
+      } else {
+        console.log('Not a vote post, clearing vote options');
+        shouldBeVotePost = false;
+        filteredVoteOptions = [];
       }
       
-      if (shouldBeVotePost && filteredVoteOptions.length < 2) {
-        console.warn('Vote post requested but fewer than 2 valid options provided');
-        setError('Vote posts require at least 2 valid options');
-        setIsSubmitting(false);
-        return;
-      }
-      
-      console.log('Final vote post decision:', shouldBeVotePost);
       console.log('Final filtered vote options:', filteredVoteOptions);
       
       try {
+        // Create the post with lock parameters
+        const lockParams = !shouldBeVotePost && isLocked ? {
+          is_locked: true, 
+          lock_amount: lockAmount * 100000000, // Convert to satoshis
+          lock_duration: lockDuration
+        } : undefined;
+
         // Create the post
         const newPost = await createPost(
-          walletInstance,
+          wallet,
           content,
           image || undefined, // Pass undefined instead of null
           image ? image.type : undefined,
@@ -312,7 +329,8 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
             scheduledAt: new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString(),
             timezone: scheduleTimezone
           } : undefined,
-          selected_tags // Pass the selected tags to the createPost function
+          selected_tags, // Pass the selected tags to the createPost function
+          lockParams
         );
         
         console.log('Post created successfully:', newPost);
@@ -326,6 +344,8 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         setselected_tags([]);
         setIsScheduled(false);
         setShowScheduleOptions(false);
+        setIsLocked(false);
+        setShowLockOptions(false);
         
         // Notify success
         toast.success(isScheduled ? 'Post scheduled successfully!' : 'Post created successfully!', {
@@ -358,8 +378,10 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
 
   // Toggle schedule options
   const toggleScheduleOptions = () => {
-    // If we're opening the schedule options
-    if (!showScheduleOptions) {
+    if (showScheduleOptions) {
+      setShowScheduleOptions(false);
+      setIsScheduled(false);
+    } else {
       // Set default date and time values
       const now = new Date();
       const tomorrow = new Date(now);
@@ -379,43 +401,68 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         setScheduleTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
       }
       
+      // Close all other panels
+      setShowTagInput(false);
+      setIsVotePost(false);
+      setShowImagePanel(false);
+      setShowLockOptions(false);
+      
       setIsScheduled(true);
-      // Close other option panels
+      setShowScheduleOptions(true);
+    }
+  };
+
+  // Toggle lock options
+  const toggleLockOptions = () => {
+    if (showLockOptions) {
+      setShowLockOptions(false);
+      setIsLocked(false);
+    } else {
+      // Close all other panels
+      setShowScheduleOptions(false);
       setShowTagInput(false);
       setIsVotePost(false);
       setShowImagePanel(false);
+      
+      setIsLocked(true);
+      setShowLockOptions(true);
     }
-    
-    setShowScheduleOptions(!showScheduleOptions);
   };
 
+  // Toggle tag input
   const toggleTagInput = () => {
-    // If we're opening the tag input
-    if (!showTagInput) {
-      // Close other option panels
+    if (showTagInput) {
+      setShowTagInput(false);
+    } else {
+      // Close all other panels
       setShowScheduleOptions(false);
       setIsVotePost(false);
       setShowImagePanel(false);
+      setShowLockOptions(false);
+      
+      setShowTagInput(true);
     }
-    
-    setShowTagInput(!showTagInput);
   };
 
+  // Toggle vote post
   const toggleVotePost = () => {
-    // If we're opening the vote options
-    if (!isVotePost) {
-      // Close other option panels
+    if (isVotePost) {
+      setIsVotePost(false);
+      setvote_options(['', '']);
+    } else {
+      // Close all other panels
       setShowScheduleOptions(false);
       setShowTagInput(false);
       setShowImagePanel(false);
+      setShowLockOptions(false);
       
       // Initialize with two empty options if none exist
       if (vote_options.length === 0 || (vote_options.length === 2 && vote_options.every(opt => opt === ''))) {
         setvote_options(['', '']);
       }
+      
+      setIsVotePost(true);
     }
-    
-    setIsVotePost(!isVotePost);
   };
 
   const handleAddTag = () => {
@@ -529,6 +576,15 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     setDetectedUrl(url);
   }, [content]);
 
+  // Add effect to disable locking for vote posts
+  useEffect(() => {
+    // If switching to vote post mode, disable any active lock settings
+    if (isVotePost && (isLocked || showLockOptions)) {
+      setIsLocked(false);
+      setShowLockOptions(false);
+    }
+  }, [isVotePost]);
+
   if (!isOpen) return null;
 
   return (
@@ -625,7 +681,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 rows={1}
               />
               
-              {/* Bottom toolbar with additional options - positioned at the bottom of the textarea */}
+              {/* Bottom toolbar with additional options */}
               <div className={`absolute bottom-0 left-0 right-0 flex items-center justify-between px-5 py-3 bg-[#13141B] border-t ${
                 imagePreview || showTagInput || isVotePost || showScheduleOptions
                   ? 'border-t-gray-800/40'
@@ -646,7 +702,11 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                       <button
                         type="button"
                         onClick={handleClickUpload}
-                        className="flex items-center justify-center p-2 rounded-full transition-all duration-300 focus:outline-none cursor-pointer text-[#00ffa3] bg-[#00ffa3]/10"
+                        className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
+                          showImagePanel
+                            ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
+                            : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
+                        }`}
                         title="Show image"
                       >
                         <FiImage size={18} />
@@ -704,7 +764,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                     type="button"
                     onClick={toggleScheduleOptions}
                     className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                      showScheduleOptions
+                      showScheduleOptions || isScheduled
                         ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
                         : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
                     }`}
@@ -712,6 +772,25 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                   >
                     <FiClock size={18} />
                   </button>
+
+                  {/* Divider */}
+                  <div className="h-5 w-px bg-gray-700/50 mx-2"></div>
+                  
+                  {/* Lock button - only show when not in vote post mode */}
+                  {!isVotePost && (
+                    <button
+                      type="button"
+                      onClick={toggleLockOptions}
+                      className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
+                        showLockOptions || isLocked
+                          ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
+                          : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
+                      }`}
+                      title={isLocked ? "Cancel locking" : "Lock post content"}
+                    >
+                      <FiLock size={18} />
+                    </button>
+                  )}
                 </div>
                 
                 <div className="text-xs text-gray-400">
@@ -721,19 +800,19 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
             </div>
           </div>
           
-          {/* Show link preview if a URL is detected and no other panels are active */}
-          {detectedUrl && !showImagePanel && !showScheduleOptions && !showTagInput && !isVotePost && (
+          {/* Now ensure only one panel shows at a time - Show link preview only if no other panel is active */}
+          {detectedUrl && !isPanelActive && (
             <div className="transition-all duration-300 opacity-100 mt-3">
               <LinkPreview url={detectedUrl} />
             </div>
           )}
           
-          {/* Schedule options - only shown when isScheduled is true */}
+          {/* Schedule options - only shown when showScheduleOptions is true */}
           {showScheduleOptions && (
             <div className="mt-2 p-3 bg-[#13141B] border border-gray-800/60 rounded-lg transition-all duration-300 animate-fadeIn">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center">
-                  <FiClock className="mr-1.5 text-[#00ffa3]" size={14} />
+                  <FiClock className="mr-1 text-[#00ffa3]" size={14} />
                   <span className="text-xs font-medium text-white">Schedule Post</span>
                 </div>
                 <button
@@ -745,66 +824,102 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 </button>
               </div>
               
-              <div className="flex items-center space-x-3 mt-2">
+              <div className="flex items-center gap-2 mt-1">
                 <div className="flex-1">
-                  <label htmlFor="schedule-date" className="block text-xs text-gray-400 mb-1 ml-1">Date</label>
-                  <div className="relative group">
+                  <label htmlFor="schedule-date" className="block text-xs text-gray-400 mb-1">Date</label>
+                  <div className="relative">
                     <input
                       id="schedule-date"
                       type="date"
                       value={scheduleDate}
                       onChange={(e) => setScheduleDate(e.target.value)}
-                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 hover:border-gray-700 cursor-pointer appearance-none"
+                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30"
                     />
-                    <div className="absolute right-0 top-0 bottom-0 flex items-center pr-2 pointer-events-none">
-                      <FiCalendar className="text-[#00ffa3] group-hover:scale-110 transition-transform duration-300" size={12} />
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <FiCalendar className="text-[#00ffa3]" size={12} />
                     </div>
                   </div>
                 </div>
                 <div className="flex-1">
-                  <label htmlFor="schedule-time" className="block text-xs text-gray-400 mb-1 ml-1">Time</label>
-                  <div className="relative group">
+                  <label htmlFor="schedule-time" className="block text-xs text-gray-400 mb-1">Time</label>
+                  <div className="relative">
                     <input
                       id="schedule-time"
                       type="time"
                       value={scheduleTime}
                       onChange={(e) => setScheduleTime(e.target.value)}
-                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 hover:border-gray-700 cursor-pointer appearance-none"
+                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30"
                     />
-                    <div className="absolute right-0 top-0 bottom-0 flex items-center pr-2 pointer-events-none">
-                      <FiClock className="text-[#00ffa3] group-hover:scale-110 transition-transform duration-300" size={12} />
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <FiClock className="text-[#00ffa3]" size={12} />
                     </div>
                   </div>
                 </div>
               </div>
               
-              <div className="mt-3 text-xs text-[#00ffa3]/80 flex items-center bg-[#00ffa3]/5 p-2 rounded-md">
-                <FiCheck className="mr-1.5 flex-shrink-0" size={10} /> 
-                <span>Will publish automatically in your local timezone. Scheduled posts won't appear until their scheduled time.</span>
+              <div className="mt-2 text-xs text-[#00ffa3]/80 flex items-center bg-[#00ffa3]/5 p-1.5 rounded-md">
+                <FiCheck className="mr-1 flex-shrink-0" size={10} /> 
+                <span>Will publish in your timezone. Won't appear until scheduled time.</span>
               </div>
             </div>
           )}
           
-          {/* Image preview overlay - shown when showImagePanel is true */}
-          {imagePreview && showImagePanel && (
-            <div className="mt-2 mb-3 relative rounded-lg overflow-hidden shadow-lg border border-gray-800/60 bg-[#13141B]/80">
-              <img 
-                src={imagePreview} 
-                alt="Upload preview" 
-                className="max-h-60 w-auto mx-auto rounded-lg"
-              />
-              <button
-                type="button"
-                onClick={handleRemoveImage}
-                className="absolute top-2 right-2 bg-red-500/80 backdrop-blur-sm text-white p-1.5 rounded-full hover:bg-red-600 transition-colors duration-300"
-              >
-                <FiTrash2 size={16} />
-              </button>
+          {/* Lock options - only shown when showLockOptions is true */}
+          {showLockOptions && (
+            <div className="mt-2 p-3 bg-[#13141B] border border-gray-800/60 rounded-lg transition-all duration-300 animate-fadeIn">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center">
+                  <FiLock className="mr-1 text-[#00ffa3]" size={14} />
+                  <span className="text-xs font-medium text-white">Lock Post</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleLockOptions}
+                  className="text-gray-400 hover:text-white p-1"
+                >
+                  <FiX size={12} />
+                </button>
+              </div>
+              
+              <div className="flex flex-col space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <label htmlFor="lock-amount" className="block text-xs text-gray-400 mb-1">Amount (₿)</label>
+                    <input
+                      id="lock-amount"
+                      type="number"
+                      value={lockAmount}
+                      onChange={(e) => setLockAmount(Math.max(0.001, parseFloat(e.target.value) || 0.001))}
+                      min={0.001}
+                      step="0.001"
+                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300"
+                    />
+                    <div className="text-xs text-gray-500 mt-0.5">Min: 0.001 BSV</div>
+                  </div>
+                  <div className="flex-1">
+                    <label htmlFor="lock-duration" className="block text-xs text-gray-400 mb-1">Duration (blocks)</label>
+                    <input
+                      id="lock-duration"
+                      type="number"
+                      value={lockDuration}
+                      onChange={(e) => setLockDuration(Math.max(1, parseInt(e.target.value) || 1))}
+                      min={1}
+                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300"
+                    />
+                    <div className="text-xs text-gray-500 mt-0.5">≈ {Math.round(lockDuration / 144)} days</div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-2 text-xs text-[#00ffa3]/80 flex items-center bg-[#00ffa3]/5 p-1.5 rounded-md">
+                <FiCheck className="mr-1 flex-shrink-0" size={10} /> 
+                <span>The specified BSV amount will be locked until the duration expires.</span>
+              </div>
             </div>
           )}
           
-          {/* Larger image preview when no other panels are active */}
-          {imagePreview && !showScheduleOptions && !showTagInput && !isVotePost && !showImagePanel && (
+          {/* Image preview - only show when no other panels are active or showImagePanel is true */}
+          {imagePreview && (showImagePanel || !isPanelActive) && (
             <div className="mt-2 relative rounded-lg overflow-hidden shadow-lg border border-gray-800/60 bg-[#13141B]/80">
               <img 
                 src={imagePreview} 
@@ -904,33 +1019,35 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                 </button>
               </div>
               
-              {vote_options.map((option, index) => (
-                <div key={index} className="flex items-center space-x-3">
-                  <input
-                    type="text"
-                    value={option}
-                    onChange={(e) => handlevote_optionChange(index, e.target.value)}
-                    placeholder={`Option ${index + 1}`}
-                    className="flex-grow px-3 py-2 bg-[#13141B] border border-gray-800/60 rounded-lg text-gray-200 focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30 transition-colors duration-300"
-                  />
+              <div className="space-y-2">
+                {vote_options.map((option, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={option}
+                      onChange={(e) => handlevote_optionChange(index, e.target.value)}
+                      placeholder={`Option ${index + 1}`}
+                      className="flex-grow px-2 py-1 bg-[#13141B] border border-gray-800/60 rounded-md text-xs text-gray-200 focus:outline-none focus:border-[#00ffa3] focus:ring-1 focus:ring-[#00ffa3]/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemovevote_option(index)}
+                      className="p-1 text-gray-400 hover:text-red-400 hover:bg-red-400/10 rounded-full transition-colors duration-300 focus:outline-none"
+                      disabled={vote_options.length <= 2}
+                    >
+                      <FiTrash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+                <div>
                   <button
                     type="button"
-                    onClick={() => handleRemovevote_option(index)}
-                    className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-400/10 rounded-full transition-colors duration-300 focus:outline-none"
-                    disabled={vote_options.length <= 2}
+                    onClick={handleAddvote_option}
+                    className="flex items-center px-2 py-1 text-xs text-[#00ffa3] hover:text-[#00ffa3]/80 hover:bg-[#00ffa3]/10 rounded-md transition-colors duration-300 focus:outline-none mt-1"
                   >
-                    <FiTrash2 size={16} />
+                    <FiPlus size={12} className="mr-1" /> Add Option
                   </button>
                 </div>
-              ))}
-              <div className="pl-4">
-                <button
-                  type="button"
-                  onClick={handleAddvote_option}
-                  className="flex items-center px-3 py-2 text-xs text-[#00ffa3] hover:text-[#00ffa3]/80 hover:bg-[#00ffa3]/10 rounded-md transition-colors duration-300 focus:outline-none"
-                >
-                  <FiPlus size={14} className="mr-1" /> Add Option
-                </button>
               </div>
             </div>
           )}

@@ -664,7 +664,8 @@ export const createPost = async (
     isVotePost: boolean = false,
     vote_options: string[] = [],
     scheduleInfo?: { scheduledAt: string; timezone: string },
-    tags: string[] = []
+    tags: string[] = [],
+    lockSettings?: { is_locked: boolean; lock_amount: number; lock_duration: number }
 ): Promise<Post> => {
     console.log('[DEBUG] Creating post with parameters:');
     console.log('[DEBUG] - Wallet provided:', !!wallet);
@@ -674,6 +675,7 @@ export const createPost = async (
     console.log('[DEBUG] - Has image:', !!imageData);
     console.log('[DEBUG] - Schedule info:', scheduleInfo);
     console.log('[DEBUG] - Tags:', tags);
+    console.log('[DEBUG] - Lock settings:', lockSettings);
     
     if (!wallet) {
         console.error('No wallet provided to createPost');
@@ -735,9 +737,16 @@ export const createPost = async (
             tags: tags || [],
             sequence: sequence.current,
             post_id,
-            is_locked: false,
+            is_locked: !!lockSettings?.is_locked,
+            lock_duration: lockSettings?.lock_duration,
             is_vote: isVotePost
         };
+
+        // Add locking parameters if provided
+        if (lockSettings?.is_locked && !isVotePost) {
+            console.log('[DEBUG] Setting up post with lock parameters:', lockSettings);
+            metadata.amount = lockSettings.lock_amount;
+        }
 
         // Add scheduling information if provided
         if (scheduleInfo) {
