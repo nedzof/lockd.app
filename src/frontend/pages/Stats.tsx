@@ -463,7 +463,7 @@ const Stats: React.FC = () => {
                         dataKey="name" 
                         type="category" 
                         tick={{ fill: '#ccc' }} 
-                        width={100}
+                        width={120}
                       />
                       <Tooltip
                         contentStyle={{ 

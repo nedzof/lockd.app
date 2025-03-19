@@ -961,11 +961,11 @@ async function getLockSizeDistribution() {
     
     // Calculate distribution based on lock amount
     const distribution = {
-      '0-1': 0,
-      '1-10': 0,
-      '10-100': 0,
-      '100-1000': 0,
-      '1000+': 0
+      '0-0.001 BSV': 0,
+      '0.001-0.01 BSV': 0,
+      '0.01-0.1 BSV': 0,
+      '0.1-1 BSV': 0,
+      '1+ BSV': 0
     };
     
     // Use all locks for distribution if there are no active locks
@@ -973,17 +973,18 @@ async function getLockSizeDistribution() {
     const locksToUse = activeLocks.length > 0 ? activeLocks : locks;
     
     locksToUse.forEach(lock => {
-      const amount = parseFloat(lock.amount.toString());
-      if (amount < 1) {
-        distribution['0-1']++;
-      } else if (amount < 10) {
-        distribution['1-10']++;
-      } else if (amount < 100) {
-        distribution['10-100']++;
-      } else if (amount < 1000) {
-        distribution['100-1000']++;
+      // Convert satoshis to BSV for categorization
+      const amount = parseFloat(lock.amount.toString()) / 100000000;
+      if (amount < 0.001) {
+        distribution['0-0.001 BSV']++;
+      } else if (amount < 0.01) {
+        distribution['0.001-0.01 BSV']++;
+      } else if (amount < 0.1) {
+        distribution['0.01-0.1 BSV']++;
+      } else if (amount < 1) {
+        distribution['0.1-1 BSV']++;
       } else {
-        distribution['1000+']++;
+        distribution['1+ BSV']++;
       }
     });
     
@@ -993,7 +994,7 @@ async function getLockSizeDistribution() {
       count
     }));
     
-    // Calculate the sum of amounts for active locks
+    // Calculate the sum of amounts for active locks (already in satoshis)
     const totalLockedAmount = activeLocks.reduce((sum, lock) => 
       sum + parseFloat(lock.amount.toString()), 0
     );
