@@ -3,8 +3,7 @@
 export const CONFIG = {
     // Jungle Bus configuration
     // Using explicit fallback value from .env if process.env isn't loading properly
-    JB_SUBSCRIPTION_ID: process.env.JB_SUBSCRIPTION_ID || '605c94f88595f065c364aab2253e36bf95bc2f4e8b4ee6b4fe7149484f7a8118',
-    JUNGLEBUS_API_KEY: process.env.JUNGLEBUS_API_KEY || '',
+    JB_SUBSCRIPTION_ID: process.env.JB_SUBSCRIPTION_ID || '2177e79197422e0d162a685bb6fcc77c67f55a1920869d7c7685b0642043eb9c',
     JUNGLEBUS_URL: process.env.JUNGLEBUS_URL || 'https://junglebus.gorillapool.io',
     
     // Default start block if none is specified

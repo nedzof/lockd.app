@@ -13,88 +13,73 @@ import { post_repository } from './db/post_repository.js';
 import prisma from '../db.js';
 import type { TransactionOutput } from './tx/tx_parser.js';
 import type { LockProtocolData } from '../shared/types.js';
-import chalk from 'chalk';
 
 export class Scanner {
   private isRunning: boolean = false;
   private isWaiting: boolean = false;
   
   /**
-   * Displays formatted transaction output in a clean, readable way
+   * Logs formatted transaction output information via Winston logger
    * @param output Transaction output object
    * @param index Output index
    */
-  private display_formatted_output(output: TransactionOutput, index: number): void {
+  private log_output_data(output: TransactionOutput, index: number): void {
     if (!output.isValid) {
       return; // Skip invalid outputs entirely
     }
     
-    console.log(chalk.cyan(`------- OUTPUT ${index + 1} -------`));
+    // Basic output data
+    const logData: Record<string, any> = {
+      output_index: index + 1
+    };
     
     // Check for vote-related content
     const isVoteQuestion = output.metadata?.is_vote === true && 
                           (output.metadata?.total_options || index === 0);
     const isVoteOption = output.metadata?.is_vote === true && 
-                         index > 0 && // Using index instead of option_index
+                         index > 0 && 
                          !isVoteQuestion;
     
-    // Extract content to display
-    const contentToDisplay = output.content || '';
+    // Extract content to log
+    const contentToLog = output.content || '';
     
-    // Display content based on its type
-    if (contentToDisplay) {
+    // Add content to log data based on its type
+    if (contentToLog) {
       if (isVoteQuestion) {
-        console.log(chalk.magenta('📊 VOTE QUESTION: ') + chalk.white(contentToDisplay));
+        logData.vote_question = contentToLog;
       } 
       else if (isVoteOption) {
-        // Using index + 1 instead of option_index
-        const optionIndex = index + 1;
-        console.log(chalk.magenta(`⚪ OPTION ${optionIndex}: `) + chalk.white(contentToDisplay));
+        logData.vote_option = contentToLog;
+        logData.option_index = index + 1;
       }
       else {
-        console.log(chalk.green('📝 CONTENT: ') + chalk.white(contentToDisplay));
+        logData.content = contentToLog;
       }
     }
     
-    // Display metadata excluding content fields that were already shown
-    if (output.metadata && Object.keys(output.metadata).length > 0) {
-      // Only show specific properties from metadata that we care about
-      const propertiesToShow: (keyof LockProtocolData)[] = [
+    // Add important metadata fields
+    if (output.metadata) {
+      // Only include specific properties from metadata that we care about
+      const propertiesToInclude: (keyof LockProtocolData)[] = [
         'is_vote', 'post_id', 'options_hash', 
         'total_options', 'lock_amount', 'lock_duration',
         'content_type', 'tags'
       ];
       
-      // Filter to only keys that exist in the metadata
-      const keysToDisplay = propertiesToShow.filter(key => 
-        output.metadata && 
-        output.metadata[key] !== undefined && 
-        output.metadata[key] !== null
-      );
-      
-      if (keysToDisplay.length > 0) {
-        console.log(chalk.yellow('Metadata:'));
-        
-        keysToDisplay.forEach(key => {
-          if (output.metadata) {
-            const value = output.metadata[key];
-            
-            // Format different value types
-            let displayValue = '';
-            if (typeof value === 'object' && value !== null) {
-              displayValue = JSON.stringify(value);
-            } else if (typeof value === 'boolean') {
-              displayValue = value ? 'true' : 'false';
-            } else if (value === null) {
-              displayValue = 'null';
-            } else {
-              displayValue = String(value);
-            }
-            
-            console.log(chalk.yellow(`  ${String(key)}: `) + chalk.white(displayValue));
-          }
-        });
-      }
+      propertiesToInclude.forEach(key => {
+        if (output.metadata && output.metadata[key] !== undefined && output.metadata[key] !== null) {
+          logData[key] = output.metadata[key];
+        }
+      });
+    }
+    
+    // Log at appropriate level
+    if (isVoteQuestion) {
+      logger.info(`Vote question in output ${index + 1}`, logData);
+    } else if (isVoteOption) {
+      logger.info(`Vote option in output ${index + 1}`, logData);
+    } else {
+      logger.info(`Found valid output ${index + 1}`, logData);
     }
   }
   
@@ -225,34 +210,30 @@ export class Scanner {
         logger.error(`Error creating post for transaction ${txId}: ${(postError as Error).message}`);
       }
 
-      // Display transaction information
-      console.log(`\n${chalk.green('='.repeat(50))}`);
-      console.log(chalk.green(`📄 TRANSACTION: ${txId}`));
+      // Log transaction information
+      const txInfo: Record<string, any> = {
+        tx_id: txId,
+        outputs_count: lockdOutputs.length
+      };
       
       if (parsedTx.timestamp) {
-        console.log(chalk.green(`📅 TIMESTAMP: ${parsedTx.timestamp}`));
+        txInfo.timestamp = parsedTx.timestamp;
       }
       
       if (parsedTx.blockHeight) {
-        console.log(chalk.green(`🧱 BLOCK: ${parsedTx.blockHeight}`));
+        txInfo.block_height = parsedTx.blockHeight;
       }
       
       // Determine if this is a vote transaction
       const isVote = lockdOutputs.some(output => output.metadata?.is_vote === true);
-      if (isVote) {
-        console.log(chalk.green(`📊 VOTE TRANSACTION with ${lockdOutputs.length} outputs`));
-      } else {
-        console.log(chalk.green(`⭐ Contains ${lockdOutputs.length} Lockd.app outputs`));
-      }
+      txInfo.transaction_type = isVote ? 'vote' : 'post';
       
-      console.log(chalk.green('='.repeat(50)));
+      logger.info(`Lockd transaction found in block ${parsedTx.blockHeight || 'unconfirmed'}`, txInfo);
       
-      // Display each lockd output
+      // Log details about each output
       lockdOutputs.forEach((output, index) => {
-        this.display_formatted_output(output, index);
+        this.log_output_data(output, index);
       });
-      
-      console.log(chalk.green('='.repeat(50)) + '\n');
     } catch (error) {
       logger.error(`Error processing transaction ${txId}: ${(error as Error).message}`);
     }
@@ -270,12 +251,11 @@ export class Scanner {
     try {
       await junglebus_service.unsubscribe();
       this.isRunning = false;
-      logger.info('Scanner stopped');
-        } catch (error) {
+      logger.info('Scanner stopped successfully');
+    } catch (error) {
       logger.error(`Failed to stop scanner: ${(error as Error).message}`);
-            throw error;
-        }
     }
+  }
 }
 
 // Export singleton instance
