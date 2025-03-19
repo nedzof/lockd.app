@@ -306,7 +306,11 @@ const Stats: React.FC = () => {
                 {/* Lock Activity Trend */}
                 <div className="border border-gray-700 rounded-lg p-5">
                   <h3 className="text-xl font-bold mb-1">Lock Activity Trend</h3>
-                  <p className="text-sm opacity-70 mb-4">Number of new locks over time</p>
+                  <p className="text-sm opacity-70 mb-1">Number of new locks over time</p>
+                  <p className="text-xs opacity-50 mb-4">
+                    <span className="text-[#00E6CC]">■</span> Total: All locks ever created / 
+                    <span className="text-[#FF69B4]">■</span> Active: Only locks that aren't unlockable yet
+                  </p>
                   
                   <div className="h-[280px]">
                     <ResponsiveContainer width="100%" height="100%">
@@ -323,10 +327,10 @@ const Stats: React.FC = () => {
                             border: '1px solid #444',
                             borderRadius: '4px',
                           }}
-                          formatter={(value, name) => [value, name === 'active_locks' ? 'Active Locks' : 'Total Locks']}
+                          formatter={(value, name) => [value, name === 'active_locks' ? 'Active Locks (not unlockable)' : 'Total Locks (all time)']}
                         />
                         <Legend
-                          formatter={(value) => value === 'active_locks' ? 'Active Locks' : 'Total Locks'}
+                          formatter={(value) => value === 'active_locks' ? 'Active Locks (not unlockable)' : 'Total Locks (all time)'}
                         />
                         <Bar 
                           name="Total Locks"
@@ -353,7 +357,11 @@ const Stats: React.FC = () => {
                 {/* BSV Value Locked by Time */}
                 <div className="border border-gray-700 rounded-lg p-5">
                   <h3 className="text-xl font-bold mb-1">Value Locked Trend</h3>
-                  <p className="text-sm opacity-70 mb-4">BSV locked over time periods</p>
+                  <p className="text-sm opacity-70 mb-1">BSV locked over time periods</p>
+                  <p className="text-xs opacity-50 mb-4">
+                    <span className="text-[#8884d8]">■</span> Total: All BSV ever locked / 
+                    <span className="text-[#FF69B4]">■</span> Active: Only BSV that's still locked (not unlockable)
+                  </p>
                   
                   <div className="h-[280px]">
                     <ResponsiveContainer width="100%" height="100%">
@@ -380,10 +388,10 @@ const Stats: React.FC = () => {
                             border: '1px solid #444',
                             borderRadius: '4px'
                           }}
-                          formatter={(value, name) => [formatBSV(Number(value)), name === 'bsv' ? 'Active BSV' : 'Total BSV']}
+                          formatter={(value, name) => [formatBSV(Number(value)), name === 'bsv' ? 'Active BSV (not unlockable)' : 'Total BSV (all time)']}
                         />
                         <Legend 
-                          formatter={(value) => value === 'bsv' ? 'Active BSV' : 'Total BSV'}
+                          formatter={(value) => value === 'bsv' ? 'Active BSV (not unlockable)' : 'Total BSV (all time)'}
                         />
                         <Area 
                           type="monotone" 
