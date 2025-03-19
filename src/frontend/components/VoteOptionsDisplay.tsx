@@ -1,31 +1,59 @@
 import { API_URL } from "../config";
-import React, { useState, useEffect, useCallback } from 'react';
-import { HODLTransaction, vote_option } from '../types';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useWallet } from '../providers/WalletProvider';
 import toast from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
+import { calculate_active_locked_amount } from '../utils/lockStatus';
 
-interface vote_optionsDisplayProps {
-  transaction: HODLTransaction;
+// Define needed types locally if they're not properly exported
+interface VoteOption {
+  id: string;
+  tx_id: string;
+  content: string;
+  author_address?: string;
+  created_at: string;
+  lock_amount: number;
+  lock_duration: number;
+  unlock_height?: number;
+  tags: string[];
+  total_locked?: number;
+  lock_likes?: Array<{
+    amount: number;
+    author_address?: string;
+    unlock_height?: number | null;
+  }>;
+}
+
+interface Transaction {
+  tx_id: string;
+  content: string;
+  vote_options?: VoteOption[];
+  [key: string]: any;
+}
+
+interface VoteOptionsDisplayProps {
+  transaction: Transaction;
   onTotalLockedAmountChange?: (amount: number) => void;
 }
 
-
-const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({ 
+const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ 
   transaction, 
   onTotalLockedAmountChange 
 }) => {
-  const [vote_options, setvote_options] = useState<vote_option[]>([]);
+  const [vote_options, setvote_options] = useState<VoteOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isLocking, setIsLocking] = useState<Record<string, boolean>>({});
-  const { address, connected, balance, refreshBalance } = useWallet();
+  const { isConnected, bsvAddress, balance, refreshBalance } = useWallet();
+
+  // Add current block height state
+  const [current_block_height, set_current_block_height] = useState<number | null>(null);
 
   console.log('vote_optionsDisplay rendering for tx_id:', transaction.tx_id);
 
   // Calculate and notify parent of total locked amount
-  const updateTotalLocked = useCallback((options: vote_option[]) => {
-    const totalLocked = options.reduce((sum: number, option: vote_option) => 
+  const updateTotalLocked = useCallback((options: VoteOption[]) => {
+    const totalLocked = options.reduce((sum: number, option: VoteOption) => 
       sum + (option.total_locked || 0), 0);
     
     console.log('Calculated total locked amount:', totalLocked);
@@ -136,10 +164,36 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
     }
   }, [transaction.tx_id, transaction.vote_options, updateTotalLocked, refreshVoteOptions]);
 
+  // Fetch current block height on component mount
+  useEffect(() => {
+    const fetch_block_height = async () => {
+      try {
+        const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+        const data = await response.json();
+        if (data.blocks) {
+          set_current_block_height(data.blocks);
+        }
+      } catch (error) {
+        console.error('Error fetching block height:', error);
+        // Fallback to approximate BSV block height
+        set_current_block_height(800000);
+      }
+    };
+
+    fetch_block_height();
+
+    // Refresh block height every 10 minutes
+    const block_height_interval = setInterval(fetch_block_height, 10 * 60 * 1000);
+    
+    return () => {
+      clearInterval(block_height_interval);
+    };
+  }, []);
+
   const handleLock = async (optionId: string, amount: number) => {
     console.log('Lock button clicked for option:', optionId, 'amount:', amount);
     
-    if (!connected) {
+    if (!isConnected) {
       toast.error('Please connect your wallet first');
       return;
     }
@@ -149,7 +203,7 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
       return;
     }
 
-    if (amount > (balance || 0)) {
+    if (amount > balance.bsv) {
       toast.error('Insufficient balance');
       return;
     }
@@ -169,7 +223,7 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
         },
         body: JSON.stringify({
           vote_option_id: optionId,
-          author_address: address,
+          author_address: bsvAddress,
           amount: amountInSatoshis, // Use the satoshi amount here
           lock_duration: 1000, // Default lock duration
         }),
@@ -224,6 +278,20 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
     }
   };
 
+  // Calculate total locked amount across all options
+  const totalLockedAmount = useMemo(() => {
+    return vote_options.reduce((sum, option) => {
+      // Use lock_likes array if available
+      if (option.lock_likes) {
+        return sum + calculate_active_locked_amount(option.lock_likes, current_block_height);
+      }
+      
+      // Otherwise fall back to total_locked property
+      const optionLocked = typeof option.total_locked === 'number' ? option.total_locked : 0;
+      return sum + optionLocked;
+    }, 0);
+  }, [vote_options, current_block_height]);
+  
   if (loading) {
     console.log('vote_optionsDisplay is loading...');
     return <div className="mt-4 p-4 text-gray-300">Loading vote options...</div>;
@@ -234,14 +302,6 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
     return null;
   }
 
-  // Calculate total locked amount across all options
-  const totalLockedAmount = vote_options.reduce((sum, option) => {
-    // Ensure we're adding numbers, not strings
-    const optionLocked = typeof option.total_locked === 'number' ? option.total_locked : 0;
-    console.log(`Option ${option.id} (${option.content}) has total_locked: ${optionLocked}`);
-    return sum + optionLocked;
-  }, 0);
-  
   console.log('vote_optionsDisplay - Total locked amount:', totalLockedAmount);
 
   return (
@@ -269,13 +329,16 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
         {vote_options.map((option) => {
           console.log('Rendering option:', option.content, 'with locked amount:', option.total_locked);
           
-          // Ensure total_locked is a number
-          const optionLocked = typeof option.total_locked === 'number' ? option.total_locked : 0;
+          // Calculate percentage based on active locked amount
+          const activeOptionLocked = option.lock_likes 
+            ? calculate_active_locked_amount(option.lock_likes, current_block_height)
+            : (option.total_locked || 0);
           
-          // Calculate percentage for this option
-          const percentage = totalLockedAmount > 0 ? ((optionLocked / totalLockedAmount) * 100) : 0;
+          const percentage = totalLockedAmount > 0 
+            ? Math.round((activeOptionLocked / totalLockedAmount) * 100) 
+            : 0;
           
-          console.log(`Option ${option.id} (${option.content}): ${optionLocked} satoshis (${percentage.toFixed(2)}%)`);
+          console.log(`Option ${option.id} (${option.content}): ${activeOptionLocked} satoshis (${percentage.toFixed(2)}%)`);
           
           return (
             <div key={option.id} className="relative border-b border-gray-700/20 p-3 mb-2 overflow-hidden">
@@ -288,14 +351,14 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
               <div className="flex items-center justify-between relative z-10">
                 <div className="flex-grow">
                   <div className="font-medium text-white">{option.content}</div>
-                  {optionLocked > 0 && (
+                  {activeOptionLocked > 0 && (
                     <div className="text-xs text-gray-400 mt-1">
-                      {formatBSV(optionLocked / 100000000)} BSV ({percentage.toFixed(1)}%)
+                      {formatBSV(activeOptionLocked / 100000000)} BSV ({percentage.toFixed(1)}%)
                     </div>
                   )}
                 </div>
                 
-                {connected && (
+                {isConnected && (
                   <button
                     onClick={() => handleLock(option.id, 0.001)}
                     disabled={isLocking[option.id]}
@@ -313,4 +376,4 @@ const vote_optionsDisplay: React.FC<vote_optionsDisplayProps> = ({
   );
 };
 
-export default vote_optionsDisplay;
+export default VoteOptionsDisplay;

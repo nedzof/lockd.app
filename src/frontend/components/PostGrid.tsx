@@ -10,6 +10,8 @@ import PostLockInteraction from './PostLockInteraction';
 import { useYoursWallet } from 'yours-wallet-provider';
 import { API_URL } from '../config';
 import LinkPreview from './LinkPreview';
+import { calculate_active_locked_amount } from '../utils/lockStatus';
+import { calculate_active_stats } from '../utils/stats';
 
 interface vote_option {
   id: string;
@@ -44,6 +46,7 @@ interface ExtendedPost {
   totalLocked?: number;
   media_url?: string;
   base64Image?: string;
+  lock_likes?: { amount: number; author_address?: string }[];
 }
 
 interface PostGridProps {
@@ -159,6 +162,9 @@ const PostGrid: React.FC<PostGridProps> = ({
   // Add a ref for the intersection observer loader element
   const loaderRef = useRef<HTMLDivElement>(null);
 
+  // Add current block height state
+  const [current_block_height, set_current_block_height] = useState<number | null>(null);
+
   // Memoize current filters to avoid unnecessary re-renders
   const currentFilters = useMemo(() => ({
     time_filter,
@@ -248,6 +254,10 @@ const PostGrid: React.FC<PostGridProps> = ({
       if (personal_filter) {
         queryParams.append('personal_filter', personal_filter);
         console.log(`Adding personal_filter: ${personal_filter}`);
+      } else {
+        // NEW: Check if we need to explicitly request lock data when no filter is applied
+        // This is a diagnostic log to help understand why lock data might be missing
+        console.log('No personal_filter applied - verify server includes complete lock_likes data');
       }
       
       if (block_filter) {
@@ -335,6 +345,53 @@ const PostGrid: React.FC<PostGridProps> = ({
       let data;
       try {
         data = await response.json();
+        
+        // Log the full API response to understand the data differences with/without filters
+        console.log(`API response data with params: ${queryParams.toString()}`, {
+          hasData: !!data,
+          hasPosts: data && data.posts && Array.isArray(data.posts),
+          postCount: data && data.posts ? data.posts.length : 0,
+          filters: {
+            hasRankingFilter: !!ranking_filter,
+            rankingFilter: ranking_filter,
+            hasTimeFilter: !!time_filter,
+            timeFilter: time_filter,
+            hasPersonalFilter: !!personal_filter,
+            hasBlockFilter: !!block_filter
+          },
+          firstPostSample: data && data.posts && data.posts.length > 0 ? 
+            {
+              hasLockLikes: !!data.posts[0].lock_likes,
+              lockLikesType: data.posts[0].lock_likes ? typeof data.posts[0].lock_likes : null,
+              isArray: data.posts[0].lock_likes ? Array.isArray(data.posts[0].lock_likes) : null,
+              firstLockLike: data.posts[0].lock_likes && Array.isArray(data.posts[0].lock_likes) && data.posts[0].lock_likes.length > 0 ?
+                JSON.stringify(data.posts[0].lock_likes[0]) : null
+            } : null
+        });
+        
+        // ADDED: Analyze all posts in the response to check for lock data differences between filtered and unfiltered requests
+        if (data && data.posts && Array.isArray(data.posts)) {
+          console.log("========== DETAILED LOCK DATA ANALYSIS ==========");
+          data.posts.forEach((post: any, index: number) => {
+            // Find posts with lock_likes
+            const hasLocks = post.lock_likes && Array.isArray(post.lock_likes) && post.lock_likes.length > 0;
+            if (hasLocks) {
+              console.log(`Post ${index} (${post.id}) has ${post.lock_likes.length} lock_likes:`);
+              
+              // Count how many locks have non-zero amounts
+              const nonZeroLocks = post.lock_likes.filter((lock: any) => typeof lock.amount === 'number' && lock.amount > 0);
+              console.log(`- ${nonZeroLocks.length} locks have non-zero amounts`);
+              
+              // Log the structure of the first few locks
+              post.lock_likes.slice(0, 3).forEach((lock: any, lockIndex: number) => {
+                console.log(`- Lock ${lockIndex}: amount=${lock.amount}, type=${typeof lock.amount}, unlockHeight=${lock.unlock_height}`);
+              });
+            } else {
+              console.log(`Post ${index} (${post.id}) has no lock_likes or they're empty`);
+            }
+          });
+          console.log("=================================================");
+        }
       } catch (parseError) {
         console.error('Error parsing response:', parseError);
         setError('Invalid response from server');
@@ -355,6 +412,38 @@ const PostGrid: React.FC<PostGridProps> = ({
       
       // Process posts to add image URLs and other derived data
       const processedPosts = data.posts.map((post: any) => {
+        // NEW: Additional check for lock_likes integrity
+        if (!post.lock_likes) {
+          console.warn(`Post ${post.id} missing lock_likes property completely`);
+        } else if (!Array.isArray(post.lock_likes)) {
+          console.warn(`Post ${post.id} has lock_likes but it's not an array:`, {
+            type: typeof post.lock_likes,
+            value: post.lock_likes
+          });
+        } else if (post.lock_likes.length > 0) {
+          console.log(`Post ${post.id} has ${post.lock_likes.length} lock_likes but may not be showing correct amount`);
+          // Deep inspect the lock_likes to find any structural issues
+          const validAmounts = post.lock_likes.filter((lock: any) => 
+            lock && typeof lock.amount === 'number' && !isNaN(lock.amount) && lock.amount > 0);
+          
+          if (validAmounts.length > 0) {
+            console.log(`Post ${post.id} has ${validAmounts.length} valid non-zero amounts that should be displayed`);
+          } else {
+            console.log(`Post ${post.id} has no valid amounts - all zeros or invalid`);
+          }
+        }
+        
+        // Debug lock_likes data structure - more detailed version
+        console.log(`Processing post ${post.id} - Lock likes:`, {
+          hasLockLikes: !!post.lock_likes,
+          isArray: post.lock_likes ? Array.isArray(post.lock_likes) : false,
+          count: post.lock_likes ? (Array.isArray(post.lock_likes) ? post.lock_likes.length : 'not an array') : 0,
+          sample: post.lock_likes ? (Array.isArray(post.lock_likes) && post.lock_likes.length > 0 ? 
+            JSON.stringify(post.lock_likes[0]) : 'empty or not an array') : null,
+          fullData: post.lock_likes ? JSON.stringify(post.lock_likes) : null,
+          rawData: post.lock_likes
+        });
+        
         // Process image data if available
         if (post.raw_image_data) {
           try {
@@ -382,6 +471,96 @@ const PostGrid: React.FC<PostGridProps> = ({
           // Store the URL in our map for future reference
           imageUrlMap.current.set(post.id, post.media_url);
         }
+        
+        // Ensure lock_likes is always a properly formatted array
+        if (!post.lock_likes) {
+          console.log(`Post ${post.id} has no lock_likes, initializing empty array`);
+          post.lock_likes = [];
+        } else if (!Array.isArray(post.lock_likes)) {
+          console.warn(`Post ${post.id} has lock_likes but it's not an array:`, post.lock_likes);
+          // Try to convert to array if it's an object with numeric keys
+          if (typeof post.lock_likes === 'object' && post.lock_likes !== null) {
+            try {
+              const values = Object.values(post.lock_likes);
+              if (values.length > 0) {
+                console.log(`Converting object to array with ${values.length} items`);
+                post.lock_likes = values;
+              } else {
+                post.lock_likes = [];
+              }
+            } catch (e) {
+              console.error(`Failed to convert lock_likes object to array:`, e);
+              post.lock_likes = [];
+            }
+          } else {
+            post.lock_likes = [];
+          }
+        }
+        
+        // Fix the data structure to ensure each lock includes a proper amount value
+        if (Array.isArray(post.lock_likes)) {
+          post.lock_likes.forEach((lock: any, index: number) => {
+            // Check if this lock has a proper amount property
+            if (lock) {
+              console.log(`Examining lock ${index} for post ${post.id}:`, {
+                hasAmount: 'amount' in lock,
+                amountType: typeof lock.amount,
+                amountValue: lock.amount,
+                fullLock: JSON.stringify(lock)
+              });
+              
+              // Handle amounts coming in as strings from the server
+              if (typeof lock.amount === 'string') {
+                const parsedAmount = parseInt(lock.amount, 10);
+                if (!isNaN(parsedAmount)) {
+                  console.log(`Converting string amount "${lock.amount}" to number ${parsedAmount}`);
+                  lock.amount = parsedAmount;
+                } else {
+                  console.warn(`Invalid amount string: "${lock.amount}", setting to 0`);
+                  lock.amount = 0;
+                }
+              } else if (typeof lock.amount !== 'number') {
+                // If it's not a string or number, set to 0
+                console.warn(`Invalid amount type: ${typeof lock.amount}, setting to 0`);
+                lock.amount = 0;
+              }
+              
+              // Verify lock amount is a number and not NaN after conversion
+              if (isNaN(lock.amount)) {
+                console.warn(`Amount is NaN after processing, setting to 0`);
+                lock.amount = 0;
+              }
+            }
+          });
+        }
+        
+        // Ensure each lock_like has the required properties
+        post.lock_likes = post.lock_likes.map((lock: any) => {
+          // If amount is missing or not a number, try to parse it or set to 0
+          if (typeof lock.amount !== 'number') {
+            console.warn(`Lock ${lock.id} has non-number amount: ${lock.amount} (type: ${typeof lock.amount})`);
+            
+            // If it's a string, try to parse it
+            if (typeof lock.amount === 'string') {
+              try {
+                const parsedAmount = parseInt(lock.amount, 10);
+                if (!isNaN(parsedAmount)) {
+                  console.log(`Successfully parsed string amount "${lock.amount}" to number: ${parsedAmount}`);
+                  lock.amount = parsedAmount;
+                } else {
+                  console.warn(`Failed to parse string amount "${lock.amount}" to number`);
+                  lock.amount = 0;
+                }
+              } catch (e) {
+                console.error(`Error parsing amount "${lock.amount}":`, e);
+                lock.amount = 0;
+              }
+            } else {
+              lock.amount = 0;
+            }
+          }
+          return lock;
+        });
         
         // Calculate total locked amount for the post
         let totalLocked = 0;
@@ -755,6 +934,40 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
   }, [onTagSelect]);
 
+  // Fetch current block height on component mount
+  useEffect(() => {
+    const fetch_block_height = async () => {
+      try {
+        const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+        const data = await response.json();
+        if (data.blocks) {
+          set_current_block_height(data.blocks);
+        }
+      } catch (error) {
+        console.error('Error fetching block height:', error);
+        // Fallback to approximate BSV block height
+        set_current_block_height(800000);
+      }
+    };
+
+    fetch_block_height();
+
+    // Refresh block height every 10 minutes
+    const block_height_interval = setInterval(fetch_block_height, 10 * 60 * 1000);
+    
+    return () => {
+      clearInterval(block_height_interval);
+    };
+  }, []);
+
+  // Update effect to use the imported calculate_active_stats function
+  useEffect(() => {
+    if (submissions.length > 0) {
+      const stats = calculate_active_stats(submissions, current_block_height);
+      onStatsUpdate(stats);
+    }
+  }, [submissions, onStatsUpdate, current_block_height]);
+
   // Render the component
   return (
     <div className="w-full relative z-10">
@@ -1040,7 +1253,40 @@ const PostGrid: React.FC<PostGridProps> = ({
                     {/* Display locked BSV amount for all posts */}
                     <div className="text-[#00ffa3] font-medium flex items-center text-sm">
                       <FiLock className="mr-1" size={14} />
-                      {formatBSV(post.totalLocked || 0)} ₿
+                      {(() => {
+                        // Add debug logging for this specific post's lock data
+                        const locksExist = !!post.lock_likes;
+                        const isArray = locksExist && Array.isArray(post.lock_likes);
+                        const locksCount = isArray && post.lock_likes ? post.lock_likes.length : 0;
+                        console.log(`Rendering locks for post ${post.id}:`, {
+                          locksExist,
+                          isArray,
+                          locksCount,
+                          firstLock: locksCount > 0 && post.lock_likes ? JSON.stringify(post.lock_likes[0]) : null,
+                          current_block_height,
+                          rawData: post.lock_likes,
+                          fullLockData: post.lock_likes ? JSON.stringify(post.lock_likes) : null
+                        });
+                        
+                        // Calculate locked amount with better error handling
+                        let lockedAmount = 0;
+                        try {
+                          lockedAmount = calculate_active_locked_amount(post.lock_likes || [], current_block_height);
+                          console.log(`Calculated locked amount for post ${post.id}: ${lockedAmount}`);
+                        } catch (error) {
+                          console.error(`Error calculating locked amount for post ${post.id}:`, error);
+                          // Fall back to manually calculating
+                          if (isArray && post.lock_likes) {
+                            lockedAmount = post.lock_likes.reduce((sum: number, lock: any) => {
+                              console.log(`Lock amount type: ${typeof lock.amount}, value: ${lock.amount}`);
+                              return sum + (typeof lock.amount === 'number' ? lock.amount : 0);
+                            }, 0);
+                            console.log(`Manually calculated locked amount for post ${post.id}: ${lockedAmount}`);
+                          }
+                        }
+                        
+                        return formatBSV(lockedAmount) + ' ₿';
+                      })()}
                     </div>
                   </div>
                 </div>

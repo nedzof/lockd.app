@@ -33,7 +33,7 @@ async function main() {
     
     if (latestBlockHeight > 0) {
       // Set the scanner to start at a more recent block height
-      const targetBlock = Math.max(888400, latestBlockHeight - 5000)
+      const targetBlock = Math.max(888600, latestBlockHeight - 5000)
       console.log(`Setting scanner to start from block ${targetBlock} (going back 5000 blocks from latest post)`)
       
       // Note: Since CONFIG might be read-only, we need to use the scanner.start() method

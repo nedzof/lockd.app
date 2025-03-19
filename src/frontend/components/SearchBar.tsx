@@ -81,7 +81,7 @@ const SearchBar: React.FC = () => {
       {isExpanded ? (
         <form 
           onSubmit={handleSearch}
-          className="flex items-center bg-[#13141B] border border-gray-700/30 rounded-md overflow-hidden transition-all duration-300 w-44 md:w-56 shadow-xl fixed md:absolute right-3 md:right-0 top-3 md:top-0"
+          className="flex items-center bg-[#13141B] border border-gray-700/30 rounded-md overflow-hidden transition-all duration-300 w-44 md:w-56 shadow-xl absolute right-0 top-0"
           onClick={(e) => e.stopPropagation()}
         >
           <input
