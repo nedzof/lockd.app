@@ -135,29 +135,9 @@ export const getStats = async (req: Request, res: Response) => {
       // Get date range for filtering
       const startDate = getDateRange(timeRange);
       
-      // Get lock time data
-      const lockTimeData = await prisma.$queryRaw<Array<{ name: string; locks: number }>>`
-        SELECT 
-          TO_CHAR(DATE_TRUNC('month', created_at), 'Mon') as name,
-          COUNT(*) as locks
-        FROM "LockLike"
-        WHERE created_at >= ${startDate}
-        AND amount > 0
-        GROUP BY DATE_TRUNC('month', created_at), name
-        ORDER BY DATE_TRUNC('month', created_at)
-      `;
-      
-      // Get BSV locked over time
-      const bsvLockedOverTime = await prisma.$queryRaw<Array<{ name: string; bsv: number }>>`
-        SELECT 
-          TO_CHAR(DATE_TRUNC('month', created_at), 'Mon') as name,
-          SUM(amount) as bsv
-        FROM "LockLike"
-        WHERE created_at >= ${startDate}
-        AND amount > 0
-        GROUP BY DATE_TRUNC('month', created_at), name
-        ORDER BY DATE_TRUNC('month', created_at)
-      `;
+      // Replace raw SQL queries with Prisma queries
+      const lockTimeData = await getLockTimeDataPrisma(timeRange);
+      const bsvLockedOverTime = await getBsvLockedOverTimePrisma(timeRange);
       
       // Get post distribution data
       const postDistributionData = [
@@ -535,10 +515,10 @@ export const updateStats = async (req: Request, res: Response) => {
     });
     
     // Get lock time data for chart
-    const lockTimeData = await getLockTimeData('all');
+    const lockTimeData = await getLockTimeDataPrisma('all');
     
     // Get BSV locked over time data for chart
-    const bsvLockedOverTime = await getBsvLockedOverTimeData('all');
+    const bsvLockedOverTime = await getBsvLockedOverTimePrisma('all');
     
     logger.info('Stats update completed successfully');
     
@@ -557,60 +537,140 @@ export const updateStats = async (req: Request, res: Response) => {
   }
 };
 
-// Helper function to get lock time data
-async function getLockTimeData(timeRange: string) {
+// Helper function to get lock time data using Prisma instead of raw SQL
+async function getLockTimeDataPrisma(timeRange: string) {
   try {
     const startDate = getDateRange(timeRange);
     
-    // Get real data from the database
-    const lockTimeData = await prisma.$queryRaw<Array<{ name: string; locks: number }>>`
-      SELECT 
-        TO_CHAR(DATE_TRUNC('month', created_at), 'Mon') as name,
-        COUNT(*) as locks
-      FROM "LockLike"
-      WHERE created_at >= ${startDate}
-      AND amount > 0
-      GROUP BY DATE_TRUNC('month', created_at), name
-      ORDER BY DATE_TRUNC('month', created_at)
-    `;
+    // Get the appropriate time grouping based on the time range
+    const timeGrouping = getTimeGroupingFormat(timeRange);
     
-    // Convert any BigInt values to numbers
-    return lockTimeData.map(item => ({
-      name: item.name,
-      locks: Number(item.locks)
+    // Get all lock_like entries within the time range
+    const locks = await prisma.lock_like.findMany({
+      where: {
+        created_at: {
+          gte: startDate
+        },
+        amount: {
+          gt: 0 // Only include locks with positive amounts
+        }
+      },
+      select: {
+        created_at: true
+      },
+      orderBy: {
+        created_at: 'asc'
+      }
+    });
+    
+    // Group the locks by the appropriate time period
+    const grouped = groupByTimePeriod(locks, timeRange);
+    
+    // Format the data for the chart
+    return Object.entries(grouped).map(([name, locks]) => ({
+      name,
+      locks: locks.length
     }));
   } catch (error) {
-    logger.error('Error getting lock time data', error);
+    logger.error('Error getting lock time data with Prisma', error);
     return [];
   }
 }
 
-// Helper function to get BSV locked over time data
-async function getBsvLockedOverTimeData(timeRange: string) {
+// Helper function to get BSV locked over time data using Prisma instead of raw SQL
+async function getBsvLockedOverTimePrisma(timeRange: string) {
   try {
     const startDate = getDateRange(timeRange);
     
-    // Get real data from the database
-    const bsvLockedOverTime = await prisma.$queryRaw<Array<{ name: string; bsv: number }>>`
-      SELECT 
-        TO_CHAR(DATE_TRUNC('month', created_at), 'Mon') as name,
-        SUM(amount) as bsv
-      FROM "LockLike"
-      WHERE created_at >= ${startDate}
-      AND amount > 0
-      GROUP BY DATE_TRUNC('month', created_at), name
-      ORDER BY DATE_TRUNC('month', created_at)
-    `;
+    // Get all lock_like entries within the time range
+    const locks = await prisma.lock_like.findMany({
+      where: {
+        created_at: {
+          gte: startDate
+        },
+        amount: {
+          gt: 0 // Only include locks with positive amounts
+        }
+      },
+      select: {
+        created_at: true,
+        amount: true
+      },
+      orderBy: {
+        created_at: 'asc'
+      }
+    });
     
-    // Convert any BigInt values to numbers
-    return bsvLockedOverTime.map(item => ({
-      name: item.name,
-      bsv: Number(item.bsv)
+    // Group the locks by the appropriate time period
+    const grouped = groupByTimePeriod(locks, timeRange);
+    
+    // Calculate the sum of amounts for each time period
+    return Object.entries(grouped).map(([name, locks]) => ({
+      name,
+      bsv: locks.reduce((sum, lock) => sum + Number(lock.amount || 0), 0)
     }));
   } catch (error) {
-    logger.error('Error getting BSV locked over time data', error);
+    logger.error('Error getting BSV locked over time data with Prisma', error);
     return [];
   }
+}
+
+// Helper function to get appropriate time format based on time range
+function getTimeGroupingFormat(timeRange: string) {
+  switch (timeRange) {
+    case 'day':
+      return 'hour'; // Group by hour for 24-hour view
+    case 'week':
+      return 'day'; // Group by day for week view
+    case 'month':
+      return 'day'; // Group by day for month view
+    default:
+      return 'month'; // Group by month for all-time view
+  }
+}
+
+// Helper function to group data by time period
+function groupByTimePeriod(data: any[], timeRange: string) {
+  const grouped: { [key: string]: any[] } = {};
+  
+  data.forEach(item => {
+    const date = new Date(item.created_at);
+    let key = '';
+    
+    switch (timeRange) {
+      case 'day':
+        // Format: "1 AM", "2 PM", etc.
+        key = date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+        break;
+      case 'week':
+      case 'month':
+        // Format: "Jan 1", "Jan 2", etc.
+        key = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        break;
+      default:
+        // Format: "Jan", "Feb", etc.
+        key = date.toLocaleDateString('en-US', { month: 'short' });
+        break;
+    }
+    
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    
+    grouped[key].push(item);
+  });
+  
+  return grouped;
+}
+
+// Helper function to get lock time data (keeping for backward compatibility)
+async function getLockTimeData(timeRange: string) {
+  return getLockTimeDataPrisma(timeRange);
+}
+
+// Helper function to get BSV locked over time data (keeping for backward compatibility)
+async function getBsvLockedOverTimeData(timeRange: string) {
+  return getBsvLockedOverTimePrisma(timeRange);
 }
 
 // Helper function to generate sample price data
