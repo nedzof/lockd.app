@@ -305,12 +305,7 @@ const Stats: React.FC = () => {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
                 {/* Lock Activity Trend */}
                 <div className="border border-gray-700 rounded-lg p-5">
-                  <h3 className="text-xl font-bold mb-1">Lock Activity Trend</h3>
-                  <p className="text-sm opacity-70 mb-1">Number of new locks over time</p>
-                  <p className="text-xs opacity-50 mb-4">
-                    <span className="text-[#00E6CC]">■</span> Total: All locks ever created / 
-                    <span className="text-[#FF69B4]">■</span> Active: Only locks that aren't unlockable yet
-                  </p>
+                  <h3 className="text-xl font-bold mb-4">Lock Activity Trend</h3>
                   
                   <div className="h-[280px]">
                     <ResponsiveContainer width="100%" height="100%">
@@ -327,13 +322,14 @@ const Stats: React.FC = () => {
                             border: '1px solid #444',
                             borderRadius: '4px',
                           }}
-                          formatter={(value, name) => [value, name === 'active_locks' ? 'Active Locks (not unlockable)' : 'Total Locks (all time)']}
+                          formatter={(value, name) => [value, name === 'active_locks' ? 'Active Locks (not yet unlockable)' : 'Total Locks (all time)']}
                         />
                         <Legend
-                          formatter={(value) => value === 'active_locks' ? 'Active Locks (not unlockable)' : 'Total Locks (all time)'}
+                          formatter={(value) => value === 'active_locks' ? 'Active Locks (unlock height > current block)' : 'Total Locks (all time)'}
+                          wrapperStyle={{ paddingTop: 10 }}
                         />
                         <Bar 
-                          name="Total Locks"
+                          name="locks"
                           dataKey="locks" 
                           fill={CHART_COLORS.locks} 
                           radius={[2, 2, 0, 0]}
@@ -342,7 +338,7 @@ const Stats: React.FC = () => {
                           opacity={0.7}
                         />
                         <Bar 
-                          name="Active Locks"
+                          name="active_locks"
                           dataKey="active_locks" 
                           fill="#FF69B4"
                           radius={[2, 2, 0, 0]}
@@ -354,67 +350,54 @@ const Stats: React.FC = () => {
                   </div>
                 </div>
 
-                {/* BSV Value Locked by Time */}
+                {/* Value Locked Trend */}
                 <div className="border border-gray-700 rounded-lg p-5">
-                  <h3 className="text-xl font-bold mb-1">Value Locked Trend</h3>
-                  <p className="text-sm opacity-70 mb-1">BSV locked over time periods</p>
-                  <p className="text-xs opacity-50 mb-4">
-                    <span className="text-[#8884d8]">■</span> Total: All BSV ever locked / 
-                    <span className="text-[#FF69B4]">■</span> Active: Only BSV that's still locked (not unlockable)
-                  </p>
+                  <h3 className="text-xl font-bold mb-4">Value Locked Trend</h3>
                   
                   <div className="h-[280px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart
+                      <LineChart
                         data={getChartData()}
                         margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
                       >
-                        <defs>
-                          <linearGradient id="bsvGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={CHART_COLORS.bsv} stopOpacity={0.6}/>
-                            <stop offset="95%" stopColor={CHART_COLORS.bsv} stopOpacity={0.1}/>
-                          </linearGradient>
-                          <linearGradient id="totalBsvGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#8884d8" stopOpacity={0.4}/>
-                            <stop offset="95%" stopColor="#8884d8" stopOpacity={0.1}/>
-                          </linearGradient>
-                        </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#444" opacity={0.3} />
                         <XAxis dataKey="name" tick={{ fill: '#ccc' }} reversed={true} />
-                        <YAxis tick={{ fill: '#ccc' }} tickFormatter={(value) => formatBSV(value)} />
+                        <YAxis tick={{ fill: '#ccc' }} tickFormatter={(value) => formatBSV(Number(value))} />
                         <Tooltip
                           contentStyle={{ 
                             backgroundColor: 'rgba(20, 20, 20, 0.95)', 
                             border: '1px solid #444',
-                            borderRadius: '4px'
+                            borderRadius: '4px',
                           }}
-                          formatter={(value, name) => [formatBSV(Number(value)), name === 'bsv' ? 'Active BSV (not unlockable)' : 'Total BSV (all time)']}
+                          formatter={(value, name) => [
+                            formatBSV(Number(value)), 
+                            name === 'bsv' ? 'Active BSV (not yet unlockable)' : 'Total BSV (all time)'
+                          ]}
                         />
                         <Legend 
-                          formatter={(value) => value === 'bsv' ? 'Active BSV (not unlockable)' : 'Total BSV (all time)'}
+                          formatter={(value) => value === 'bsv' ? 'Active BSV (unlock height > current block)' : 'Total BSV (all time)'}
+                          wrapperStyle={{ paddingTop: 10 }}
                         />
-                        <Area 
-                          type="monotone" 
-                          name="Total BSV"
-                          dataKey="total_bsv" 
-                          stroke="#8884d8" 
-                          fillOpacity={1} 
-                          fill="url(#totalBsvGradient)"
-                          isAnimationActive={true}
-                          animationDuration={1200}
-                          strokeDasharray="3 3"
+                        <Line
+                          name="total_bsv"
+                          type="monotone"
+                          dataKey="total_bsv"
+                          stroke={CHART_COLORS.bsv}
+                          strokeWidth={2}
+                          dot={false}
+                          activeDot={{ r: 6 }}
+                          opacity={0.7}
                         />
-                        <Area 
-                          type="monotone" 
-                          name="Active BSV"
-                          dataKey="bsv" 
-                          stroke={CHART_COLORS.bsv} 
-                          fillOpacity={1} 
-                          fill="url(#bsvGradient)"
-                          isAnimationActive={true}
-                          animationDuration={1200}
+                        <Line
+                          name="bsv"
+                          type="monotone"
+                          dataKey="bsv"
+                          stroke="#FF69B4"
+                          strokeWidth={2}
+                          dot={false}
+                          activeDot={{ r: 6 }}
                         />
-                      </AreaChart>
+                      </LineChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
