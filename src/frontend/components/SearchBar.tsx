@@ -34,7 +34,16 @@ const SearchBar: React.FC = () => {
       return;
     }
     
-    // If we're on the home page, use query params to filter the existing PostGrid
+    // Special handling for transaction IDs
+    if (TX_ID_REGEX.test(searchTerm.trim())) {
+      // Redirect to WhatsonChain for transaction details
+      window.open(`https://whatsonchain.com/tx/${searchTerm.trim()}`, '_blank');
+      toast.success('Opening transaction details in a new tab');
+      setIsExpanded(false);
+      return;
+    }
+    
+    // For regular searches, continue with the normal flow
     const searchParams = new URLSearchParams();
     searchParams.set('q', searchTerm.trim());
     searchParams.set('type', searchType);
