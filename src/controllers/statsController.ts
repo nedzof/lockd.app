@@ -959,42 +959,110 @@ async function getLockSizeDistribution() {
     
     logger.info(`Of those, ${activeLocks.length} are still active (non-null unlock_height and unlock_height > current_block_height)`);
     
-    // Calculate distribution based on lock amount
-    const distribution = {
-      '0-0.001 BSV': 0,
-      '0.001-0.01 BSV': 0,
-      '0.01-0.1 BSV': 0,
-      '0.1-1 BSV': 0,
-      '1+ BSV': 0
-    };
-    
     // Use all locks for distribution if there are no active locks
     // This ensures we always have data to display
     const locksToUse = activeLocks.length > 0 ? activeLocks : locks;
     
-    locksToUse.forEach(lock => {
-      // Convert satoshis to BSV for categorization
-      const amount = parseFloat(lock.amount.toString()) / 100000000;
-      if (amount < 0.001) {
-        distribution['0-0.001 BSV']++;
-      } else if (amount < 0.01) {
-        distribution['0.001-0.01 BSV']++;
-      } else if (amount < 0.1) {
-        distribution['0.01-0.1 BSV']++;
-      } else if (amount < 1) {
-        distribution['0.1-1 BSV']++;
+    // Convert all amounts to BSV
+    const bsvAmounts = locksToUse.map(lock => 
+      parseFloat(lock.amount.toString()) / 100000000
+    );
+    
+    // If no locks exist, return empty data
+    if (bsvAmounts.length === 0) {
+      return {
+        distribution: [],
+        totalLockedAmount: 0
+      };
+    }
+    
+    // Sort the amounts to find min, max, and make distribution calculation
+    const sortedAmounts = [...bsvAmounts].sort((a, b) => a - b);
+    const minAmount = sortedAmounts[0];
+    const maxAmount = sortedAmounts[sortedAmounts.length - 1];
+    
+    // If all amounts are the same, create just one bucket
+    if (minAmount === maxAmount) {
+      const distribution = [{
+        name: `${minAmount.toFixed(8)} BSV`,
+        count: bsvAmounts.length
+      }];
+      
+      // Calculate the total locked amount (in satoshis)
+      const totalLockedAmount = activeLocks.reduce((sum, lock) => 
+        sum + parseFloat(lock.amount.toString()), 0
+      );
+      
+      return {
+        distribution,
+        totalLockedAmount
+      };
+    }
+    
+    // Create 5 buckets based on data distribution
+    const numBuckets = 5;
+    const buckets: {[key: string]: number} = {};
+    
+    // Determine bucket boundaries using quantiles
+    for (let i = 0; i < numBuckets; i++) {
+      // Use percentiles to create even distribution
+      const percentile = i / numBuckets;
+      const nextPercentile = (i + 1) / numBuckets;
+      
+      const lowerIdx = Math.floor(percentile * sortedAmounts.length);
+      const upperIdx = Math.floor(nextPercentile * sortedAmounts.length) - 1;
+      
+      const lowerValue = sortedAmounts[lowerIdx];
+      let upperValue = i === numBuckets - 1 ? 
+        sortedAmounts[sortedAmounts.length - 1] : 
+        sortedAmounts[upperIdx];
+      
+      // Format bucket name based on range
+      let bucketName: string;
+      
+      if (i === numBuckets - 1) {
+        // For the last bucket, use a "+" format
+        bucketName = `${lowerValue.toFixed(lowerValue < 0.01 ? 6 : 4)}+ BSV`;
       } else {
-        distribution['1+ BSV']++;
+        // For other buckets, use a range format
+        bucketName = `${lowerValue.toFixed(lowerValue < 0.01 ? 6 : 4)}-${upperValue.toFixed(upperValue < 0.01 ? 6 : 4)} BSV`;
+      }
+      
+      buckets[bucketName] = 0;
+    }
+    
+    // Now assign locks to buckets
+    bsvAmounts.forEach((amount, index) => {
+      // Find the right bucket for this amount
+      for (const bucketName of Object.keys(buckets)) {
+        // Special case for the last bucket with '+'
+        if (bucketName.includes('+')) {
+          const lowerBound = parseFloat(bucketName.split('-')[0].split(' ')[0]);
+          if (amount >= lowerBound) {
+            buckets[bucketName]++;
+            break;
+          }
+        } else {
+          // Handle normal range buckets
+          const [lowerBoundStr, upperBoundStr] = bucketName.split('-');
+          const lowerBound = parseFloat(lowerBoundStr);
+          const upperBound = parseFloat(upperBoundStr.split(' ')[0]);
+          
+          if (amount >= lowerBound && amount <= upperBound) {
+            buckets[bucketName]++;
+            break;
+          }
+        }
       }
     });
     
     // Format the data for the chart
-    const formattedData = Object.entries(distribution).map(([range, count]) => ({
+    const formattedData = Object.entries(buckets).map(([range, count]) => ({
       name: range,
       count
     }));
     
-    // Calculate the sum of amounts for active locks (already in satoshis)
+    // Calculate the sum of amounts for active locks (in satoshis)
     const totalLockedAmount = activeLocks.reduce((sum, lock) => 
       sum + parseFloat(lock.amount.toString()), 0
     );
