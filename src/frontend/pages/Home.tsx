@@ -9,6 +9,7 @@ import TagFilter from '../components/TagFilter';
 import ThresholdSettings from '../components/ThresholdSettings';
 import SearchBar from '../components/SearchBar';
 import { createPortal } from 'react-dom';
+import { useSearchState } from '../services/useSearchState';
 
 interface HomeProps {
   connected: boolean;
@@ -240,8 +241,14 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
       return <BSVStats />;
     }
 
-    // Memoize the entire PostGrid component to prevent unnecessary re-renders
+    // Memoize the PostGrid component to prevent unnecessary re-renders
+    // BUT important: we need to make sure it updates when searchTerm changes
     const memoizedPostGrid = useMemo(() => {
+      // Use the search state from our custom hook
+      const { searchTerm, searchType, searchResults, isLoading } = useSearchState();
+      
+      console.log('Recreating PostGrid with searchTerm:', searchTerm, 'and has results:', searchResults.length > 0);
+      
       return (
         <PostGrid 
           onStatsUpdate={handleStatsUpdate}
@@ -254,9 +261,10 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
           onTagSelect={handleTagSelectFromPost}
           searchTerm={searchTerm}
           searchType={searchType}
+          forceUpdate={Date.now()} // This forces a re-render on every search change
         />
       );
-    }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, memoizeduser_id, handleStatsUpdate, handleTagSelectFromPost, searchTerm, searchType]);
+    }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, memoizeduser_id, handleStatsUpdate, handleTagSelectFromPost]);
 
     return (
       <div className="relative min-h-screen pb-20">

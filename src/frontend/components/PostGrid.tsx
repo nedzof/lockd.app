@@ -13,6 +13,7 @@ import LinkPreview from './LinkPreview';
 import { calculate_active_locked_amount } from '../utils/lockStatus';
 import { calculate_active_stats } from '../utils/stats';
 import { enhanceSearch } from '../services/SearchService';
+import { useSearchState } from '../services/useSearchState';
 
 interface vote_option {
   id: string;
@@ -75,6 +76,7 @@ interface PostGridProps {
   onTagSelect?: (tag: string) => void;
   searchTerm?: string;
   searchType?: string;
+  forceUpdate?: number;
 }
 
 // Add debounce utility
@@ -164,7 +166,8 @@ const PostGrid: React.FC<PostGridProps> = ({
   user_id,
   onTagSelect,
   searchTerm,
-  searchType = 'all'
+  searchType = 'all',
+  forceUpdate
 }) => {
   const [submissions, setSubmissions] = useState<ExtendedPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -214,6 +217,11 @@ const PostGrid: React.FC<PostGridProps> = ({
     searchType
   }), [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, searchTerm, searchType]);
 
+  // Add a ref to track last search term
+  const lastSearchTerm = useRef<string>('');
+  // Add a ref to track the last search request timestamp
+  const lastSearchRequestTime = useRef<number>(0);
+
   // Function to check if filters have changed
   const haveFiltersChanged = useCallback(() => {
     // Deep comparison for arrays
@@ -226,6 +234,12 @@ const PostGrid: React.FC<PostGridProps> = ({
       return selected_tags.every(tag => prevTagsSet.has(tag));
     };
     
+    // Check if search term has changed
+    const hasSearchTermChanged = prevFilters.current.searchTerm !== searchTerm;
+    if (hasSearchTermChanged) {
+      console.log('Search term changed from', prevFilters.current.searchTerm, 'to', searchTerm || '');
+    }
+    
     // Compare each filter value
     return (
       prevFilters.current.time_filter !== time_filter ||
@@ -233,128 +247,235 @@ const PostGrid: React.FC<PostGridProps> = ({
       prevFilters.current.personal_filter !== personal_filter ||
       prevFilters.current.block_filter !== block_filter ||
       prevFilters.current.user_id !== user_id ||
-      prevFilters.current.searchTerm !== searchTerm ||
+      hasSearchTermChanged ||
       prevFilters.current.searchType !== searchType ||
       !areTagsEqual()
     );
   }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, searchTerm, searchType]);
 
-  // Add a ref to track last search term
-  const lastSearchTerm = useRef<string>('');
+  // Use the shared search state
+  const {
+    searchTerm: globalSearchTerm,
+    searchType: globalSearchType,
+    searchResults: globalSearchResults,
+    isLoading: isSearching,
+    performSearch
+  } = useSearchState();
+  
+  // Keep track of whether we're using local or global search results
+  const usingGlobalSearch = useRef(false);
+  
+  // Use effect to synchronize with global search if needed
+  useEffect(() => {
+    if (globalSearchTerm && globalSearchResults.length > 0) {
+      console.log('Using global search results:', globalSearchResults.length);
+      usingGlobalSearch.current = true;
+      
+      // Process the global search results to match ExtendedPost format
+      const processedPosts = globalSearchResults.map(post => {
+        // Start with the post's properties and override/add required properties
+        const postAny = post as any; // Use any type for flexible access to properties
+        const extendedPost = {
+          ...post, // Spread the post first
+          id: postAny.id || postAny.tx_id || '',
+          is_locked: Boolean(postAny.is_locked),
+          is_vote: Boolean(postAny.is_vote),
+          vote_options: Array.isArray(postAny.vote_options) ? postAny.vote_options : [],
+          isSearchResult: true
+        } as unknown as ExtendedPost;
+        
+        // Handle image URLs
+        if (postAny.has_image && postAny.media_url) {
+          extendedPost.imageUrl = postAny.media_url;
+          imageUrlMap.current.set(postAny.id, postAny.media_url);
+        } else if (postAny.raw_image_data) {
+          try {
+            if (imageUrlMap.current.has(postAny.id)) {
+              extendedPost.imageUrl = imageUrlMap.current.get(postAny.id);
+            } else if (typeof postAny.raw_image_data === 'string') {
+              extendedPost.imageUrl = `data:${postAny.media_type || 'image/jpeg'};base64,${postAny.raw_image_data}`;
+              imageUrlMap.current.set(postAny.id, extendedPost.imageUrl);
+            }
+          } catch (imageError) {
+            console.error(`Error processing image for search result ${postAny.id}:`, imageError);
+          }
+        }
+        
+        return extendedPost;
+      });
+      
+      setSubmissions(processedPosts);
+      setHasMore(false);
+      setNextCursor(null);
+      setLoading(false);
+      
+      // Update previous filters
+      prevFilters.current = {
+        time_filter,
+        ranking_filter,
+        personal_filter,
+        block_filter,
+        selected_tags: [...selected_tags],
+        user_id,
+        searchTerm: globalSearchTerm || '',
+        searchType: globalSearchType || ''
+      };
+    } else if (!globalSearchTerm && usingGlobalSearch.current) {
+      // If we were using global search but now it's cleared, fetch regular posts
+      usingGlobalSearch.current = false;
+      fetchPosts(true);
+    }
+  }, [globalSearchTerm, globalSearchResults, time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
+  
+  // Also respond to forceUpdate changes
+  useEffect(() => {
+    if (forceUpdate && globalSearchTerm) {
+      console.log('Force update triggered with searchTerm:', globalSearchTerm);
+      const filters: Record<string, any> = {};
+      
+      // Add all active filters
+      if (time_filter) filters.time_filter = time_filter;
+      if (ranking_filter) filters.ranking_filter = ranking_filter;
+      if (personal_filter) filters.personal_filter = personal_filter;
+      if (block_filter) filters.block_filter = block_filter;
+      if (selected_tags.length > 0) filters.tags = selected_tags;
+      if (user_id) filters.user_id = user_id;
+      
+      performSearch(filters, true);
+    }
+  }, [forceUpdate, globalSearchTerm, time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, performSearch]);
 
   const fetchPosts = useCallback(async (reset = true) => {
     if (!isMounted.current) {
       console.warn('Fetch posts called when component is not mounted');
       return;
     }
-    
+
     if (isFetchInProgress.current) {
       console.warn('Fetch already in progress, skipping');
       return;
     }
-    
+
     // Set the fetch in progress flag
     isFetchInProgress.current = true;
-    
+
     try {
       // If this is a reset (new query), reset the pagination and state
-      if (reset) {
+    if (reset) {
         setLoading(true);
         setNextCursor(null);
         setSubmissions([]);
         seenpost_ids.current = new Set();
-      } else {
-        setIsFetchingMore(true);
-      }
+    } else {
+      setIsFetchingMore(true);
+    }
       
-      // If we're doing a search, use the enhanced search service
+      // Call the enhanced search service if we're searching
       if (searchTerm) {
-        console.log(`SEARCH: Using enhanced search with query: "${searchTerm}", type: ${searchType || 'all'}`);
+        console.log(`Using enhanced search with query: "${searchTerm}", type: ${searchType || 'all'}`);
         
         try {
-          // Use the enhanced search service
-          const searchResults = await enhanceSearch(searchTerm, searchType);
+          // Create a filters object to pass to the enhanceSearch function
+          const searchFilters: Record<string, any> = {};
           
-          if (searchResults && searchResults.length > 0) {
-            console.log(`Found ${searchResults.length} results with enhanced search`);
-            
-            // Process search results
-            const processedPosts = searchResults.map((post: any) => {
-              // Remove any score information from the post
-              if (post.content && typeof post.content === 'string') {
-                post.content = post.content.replace(/\s*\(Score:\s*\d+%\)\s*$/g, '');
+          // Add all active filters
+          if (time_filter) searchFilters.time_filter = time_filter;
+          if (ranking_filter) searchFilters.ranking_filter = ranking_filter;
+          if (personal_filter) searchFilters.personal_filter = personal_filter;
+          if (block_filter) searchFilters.block_filter = block_filter;
+          if (selected_tags.length > 0) searchFilters.tags = selected_tags;
+          if (user_id) searchFilters.user_id = user_id;
+          
+          console.log('Searching with filters:', searchFilters);
+          
+          // Pass filters to enhanceSearch function with forceRefresh set to true on reset
+          const enhancedResults = await enhanceSearch(searchTerm, searchType || 'all', searchFilters, reset);
+          
+          if (enhancedResults && enhancedResults.length > 0) {
+            // Convert the search results to ExtendedPost format
+            const processedPosts = enhancedResults.map(post => {
+              // Start with the post's properties and override/add required properties
+              const postAny = post as any; // Use any type for flexible access to properties
+              const extendedPost = {
+                ...post, // Spread the post first
+                id: postAny.id || postAny.tx_id || '',
+                is_locked: Boolean(postAny.is_locked),
+                is_vote: Boolean(postAny.is_vote),
+                vote_options: Array.isArray(postAny.vote_options) ? postAny.vote_options : []
+              } as unknown as ExtendedPost;
+              
+              // Handle image URLs based on has_image and media_url flags
+              if (postAny.has_image && postAny.media_url) {
+                console.log(`Post ${postAny.id} has image at ${postAny.media_url}`);
+                extendedPost.imageUrl = postAny.media_url;
+                // Store in our ref map
+                imageUrlMap.current.set(postAny.id, postAny.media_url);
               }
-              
-              // Add search match information
-              if (post._searchInfo) {
-                console.log(`Post ${post.id} matched search in fields:`, post._matchedFields);
-                
-                // Create a special field to indicate this is a search result
-                post.isSearchResult = true;
-                post.matchInfo = {
-                  fields: post._matchedFields || [],
-                  query: post._searchInfo.query || searchTerm,
-                  score: post._score || 0
-                };
-                
-                // Highlight search term in content if it matched there
-                if (post.content && post._matchedFields?.includes('content')) {
-                  // Add a marker for later highlighting
-                  post._highlightContent = true;
-                }
-              }
-              
-              // Process image data if available - ensures images appear in search results
-              let imageUrl = post.imageUrl || post.media_url || null;
-              
-              // Convert raw_image_data to URL if available
-              if (post.raw_image_data && !imageUrl) {
-                // Check if we already have a blob URL for this image
-                if (imageUrlMap.current.has(post.id)) {
-                  imageUrl = imageUrlMap.current.get(post.id);
-                } else {
-                  try {
+              // Fallback to raw_image_data for backward compatibility
+              else if (postAny.raw_image_data) {
+                try {
+                  if (imageUrlMap.current.has(postAny.id)) {
+                    extendedPost.imageUrl = imageUrlMap.current.get(postAny.id);
+                  } else {
                     // Create a data URL from the base64 string
-                    imageUrl = `data:${post.media_type || 'image/jpeg'};base64,${post.raw_image_data}`;
-                    // Store in our map for future reference
-                    imageUrlMap.current.set(post.id, imageUrl);
-                  } catch (error) {
-                    console.error(`Error processing image for search result ${post.id}:`, error);
+                    if (typeof postAny.raw_image_data === 'string') {
+                      extendedPost.imageUrl = `data:${postAny.media_type || 'image/jpeg'};base64,${postAny.raw_image_data}`;
+                      imageUrlMap.current.set(postAny.id, extendedPost.imageUrl);
+                    }
                   }
+                } catch (imageError) {
+                  console.error(`Error processing image for search result ${postAny.id}:`, imageError);
                 }
               }
               
-              // Add any additional processing specific to search results
-              return {
-                ...post,
-                imageUrl: imageUrl
-              };
+              return extendedPost;
             });
             
-            // Update submissions with the search results
             setSubmissions(processedPosts);
-            
-            // Keep track of the post IDs we've seen
-            processedPosts.forEach((post: any) => {
-              seenpost_ids.current.add(post.id);
-            });
-            
-            // Update pagination state for search results
-            setHasMore(false); // Search doesn't support pagination yet
+            setHasMore(false); // Enhanced search doesn't support pagination yet
             setNextCursor(null);
-            
-            // Finally, set loading to false
             setLoading(false);
-            setIsFetchingMore(false);
-            isFetchInProgress.current = false;
+            console.log(`Found ${enhancedResults.length} results with enhanced search`);
             
-            return; // Exit early since we've handled the search
+            // Call onStatsUpdate if available
+            if (onStatsUpdate && enhancedResults.length > 0) {
+              onStatsUpdate({
+                totalLocked: enhancedResults.length,
+                participantCount: 0,
+                roundNumber: 0
+              });
+            }
+            
+            // Update previous filters
+            prevFilters.current = {
+              time_filter,
+              ranking_filter,
+              personal_filter,
+              block_filter,
+              selected_tags: [...selected_tags],
+              user_id,
+              searchTerm: searchTerm || '',
+              searchType: searchType || ''
+            };
+            
+            // Reset fetch flag and return
+            isFetchInProgress.current = false;
+            return;
           } else {
             console.log('No results found with enhanced search');
-            // If no results, still continue with the regular API approach as fallback
+            // Continue with the regular API approach as fallback
           }
         } catch (error) {
           console.error('Error with enhanced search:', error);
+          
+          // Show error message to user but continue with API fallback
+          if (error instanceof Error) {
+            // Only set error state if reset was true (new search)
+            if (reset) {
+              setError(error.message);
+            }
+          }
+          
           // Continue with regular API approach as fallback
         }
       }
@@ -549,40 +670,15 @@ const PostGrid: React.FC<PostGridProps> = ({
       
       // Process posts to add image URLs and other derived data
       const processedPosts = data.posts.map((post: any) => {
-        // NEW: Additional check for lock_likes integrity
-        if (!post.lock_likes) {
-          console.warn(`Post ${post.id} missing lock_likes property completely`);
-        } else if (!Array.isArray(post.lock_likes)) {
-          console.warn(`Post ${post.id} has lock_likes but it's not an array:`, {
-            type: typeof post.lock_likes,
-            value: post.lock_likes
-          });
-        } else if (post.lock_likes.length > 0) {
-          console.log(`Post ${post.id} has ${post.lock_likes.length} lock_likes but may not be showing correct amount`);
-          // Deep inspect the lock_likes to find any structural issues
-          const validAmounts = post.lock_likes.filter((lock: any) => 
-            lock && typeof lock.amount === 'number' && !isNaN(lock.amount) && lock.amount > 0);
-          
-          if (validAmounts.length > 0) {
-            console.log(`Post ${post.id} has ${validAmounts.length} valid non-zero amounts that should be displayed`);
-          } else {
-            console.log(`Post ${post.id} has no valid amounts - all zeros or invalid`);
-          }
+        // NEW: Check for the has_image flag and media_url from updated API
+        if (post.has_image && post.media_url) {
+          console.log(`Post ${post.id} has image available at ${post.media_url}`);
+          post.imageUrl = post.media_url;
+          // Store the URL in our map for future reference
+          imageUrlMap.current.set(post.id, post.media_url);
         }
-        
-        // Debug lock_likes data structure - more detailed version
-        console.log(`Processing post ${post.id} - Lock likes:`, {
-          hasLockLikes: !!post.lock_likes,
-          isArray: post.lock_likes ? Array.isArray(post.lock_likes) : false,
-          count: post.lock_likes ? (Array.isArray(post.lock_likes) ? post.lock_likes.length : 'not an array') : 0,
-          sample: post.lock_likes ? (Array.isArray(post.lock_likes) && post.lock_likes.length > 0 ? 
-            JSON.stringify(post.lock_likes[0]) : 'empty or not an array') : null,
-          fullData: post.lock_likes ? JSON.stringify(post.lock_likes) : null,
-          rawData: post.lock_likes
-        });
-        
-        // Process image data if available
-        if (post.raw_image_data) {
+        // For backward compatibility, still handle raw_image_data if present
+        else if (post.raw_image_data) {
           try {
             // Check if we already have a blob URL for this image
             if (imageUrlMap.current.has(post.id)) {
@@ -799,34 +895,6 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
   }, [currentFilters, nextCursor, onStatsUpdate, submissions]);
 
-  // Effect to debounce search term changes and trigger search
-  useEffect(() => {
-    if (searchTerm !== lastSearchTerm.current) {
-      console.log(`Search term changed from "${lastSearchTerm.current}" to "${searchTerm || ''}"`);
-      
-      // Set up a short debounce timer to prevent too many requests
-      const timer = setTimeout(() => {
-        // Update the last search term reference
-        lastSearchTerm.current = searchTerm || '';
-        
-        // Only perform search if component is mounted
-        if (isMounted.current) {
-          console.log('Explicitly triggering fetch due to search term change');
-          // Direct call to fetch posts
-          fetchPosts(true);
-        }
-      }, 100); // Just 100ms delay for typing
-      
-      return () => clearTimeout(timer);
-    }
-  }, [searchTerm, fetchPosts]);
-
-  // Create a debounced version of fetchPosts
-  const debouncedFetchPosts = useMemo(() => 
-    debounce((reset: boolean) => fetchPosts(reset), 300), 
-    [fetchPosts]
-  );
-
   const fetchvote_optionsForPost = useCallback(async (post: any) => {
     try {
       const response = await fetch(`${API_URL}/api/vote-options/${post.tx_id}`);
@@ -906,7 +974,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         searchTerm,
         searchType
       });
-      debouncedFetchPosts(true);
+      fetchPosts(true);
     } else {
       console.log('Filters did not change, skipping fetch');
     }
@@ -915,7 +983,7 @@ const PostGrid: React.FC<PostGridProps> = ({
     return () => {
       isMounted.current = false;
     };
-  }, [debouncedFetchPosts, haveFiltersChanged, time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, searchTerm, searchType]);
+  }, [haveFiltersChanged, time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, searchTerm, searchType]);
 
   // Cleanup blob URLs when component unmounts
   useEffect(() => {
@@ -1131,6 +1199,24 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
   }, [submissions, onStatsUpdate, current_block_height]);
 
+  // Force immediate update when searchTerm changes 
+  useEffect(() => {
+    if (!isMounted.current) return;
+
+    if (searchTerm !== lastSearchTerm.current) {
+      console.log(`Search term changed from "${lastSearchTerm.current}" to "${searchTerm || ''}" - triggering immediate search`);
+      lastSearchTerm.current = searchTerm || '';
+      
+      // Prevent rapid fire requests by enforcing minimum interval (150ms)
+      const now = Date.now();
+      if (now - lastSearchRequestTime.current > 150) {
+        lastSearchRequestTime.current = now;
+        // Reset the search and fetch new results
+        fetchPosts(true);
+      }
+    }
+  }, [searchTerm, fetchPosts]);
+
   // Render the component
   return (
     <div className="w-full relative z-10">
@@ -1193,9 +1279,9 @@ const PostGrid: React.FC<PostGridProps> = ({
                                 {post.author_address.substring(0, 6)}...{post.author_address.substring(post.author_address.length - 4)}
                               </span>
                             ) : (
-                              <span className="bg-[#00ffa3]/10 text-[#00ffa3] px-2 py-0.5 rounded text-xs mr-1.5">
-                                {post.author_address.substring(0, 6)}...{post.author_address.substring(post.author_address.length - 4)}
-                              </span>
+                            <span className="bg-[#00ffa3]/10 text-[#00ffa3] px-2 py-0.5 rounded text-xs mr-1.5">
+                              {post.author_address.substring(0, 6)}...{post.author_address.substring(post.author_address.length - 4)}
+                            </span>
                             )}
                           </> : 
                           <span className="text-gray-400">Anonymous</span>
@@ -1240,9 +1326,9 @@ const PostGrid: React.FC<PostGridProps> = ({
                         </>
                       ) : (
                         <>
-                          <p className="text-xl font-semibold mb-2 text-white">{post.content.split('\n')[0]}</p>
-                          {post.content.split('\n').slice(1).join('\n') && (
-                            <p className="text-gray-200">{post.content.split('\n').slice(1).join('\n')}</p>
+                      <p className="text-xl font-semibold mb-2 text-white">{post.content.split('\n')[0]}</p>
+                      {post.content.split('\n').slice(1).join('\n') && (
+                        <p className="text-gray-200">{post.content.split('\n').slice(1).join('\n')}</p>
                           )}
                         </>
                       )}

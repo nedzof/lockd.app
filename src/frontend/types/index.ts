@@ -27,6 +27,10 @@ export interface Post {
     handle: string;
   };
   lock_likes: LockLike[];
+  has_image?: boolean;
+  is_locked?: boolean;
+  is_vote?: boolean;
+  id?: string;
 }
 
 export interface PostExtended {
