@@ -1,41 +1,26 @@
-/**
- * Format a satoshi amount into BSV with appropriate formatting
- * Note: 1 BSV = 100,000,000 satoshis
- */
 export const formatBSV = (sats: number | undefined | null): string => {
   if (sats === undefined || sats === null) return '0';
   
-  // Convert satoshis to BSV
   const bsvValue = sats / 100000000;
   
-  // For very small values, show more precision
-  if (bsvValue < 0.001) {
-    // For extremely small values, use scientific notation
-    if (bsvValue < 0.000001) {
-      return bsvValue.toExponential(6);
-    }
-    // For small but displayable values, show appropriate precision
-    return bsvValue.toFixed(6).replace(/\.?0+$/, '');
+  // For integer values, return as integers without decimals
+  if (Number.isInteger(bsvValue)) {
+    return bsvValue.toString();
   }
   
-  // For small values (like on y-axis), use a simpler format without trailing zeros
-  if (bsvValue < 0.01) {
-    return bsvValue.toFixed(4).replace(/\.?0+$/, '');
+  // For small values (like in the stats cards), preserve just the necessary decimals
+  if (bsvValue < 1) {
+    // Remove trailing zeros but keep necessary precision
+    return bsvValue.toString().replace(/\.?0+$/, '');
   }
   
   // For regular amounts, use the normal format with commas for thousands
-  // Use fixed precision based on size to ensure readable numbers
-  let formattedValue: string;
-  if (bsvValue < 1) {
-    formattedValue = bsvValue.toFixed(3);
-  } else if (bsvValue < 10) {
-    formattedValue = bsvValue.toFixed(2);
-  } else {
-    formattedValue = bsvValue.toFixed(2);
-  }
+  const bsv = bsvValue.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 8
+  }).replace(/\.?0+$/, ''); // Remove trailing zeros
   
-  // Add thousands separators and remove trailing zeros
-  return formattedValue.replace(/\B(?=(\d{3})+(?!\d))/g, ",").replace(/\.?0+$/, '');
+  return bsv;
 };
 
 // For axis labels specifically, we want simple integers when possible
@@ -44,7 +29,7 @@ export const formatAxisValue = (value: number): string => {
   
   // If it's a small decimal, display as a clean number without trailing zeros
   if (value < 0.01) {
-    return value.toFixed(6).replace(/\.?0+$/, '');
+    return value.toString().replace(/\.?0+$/, '');
   }
   
   // If it's an integer, return it as is
