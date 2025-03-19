@@ -1,337 +1,146 @@
 import { PrismaClient } from '@prisma/client';
-import { logger } from '../utils/logger.js';
-import { LockProtocolParser } from '../parser/lock_protocol_parser.js';
-import { VoteParser } from '../parser/vote_parser.js';
+import logger from './logger.js';
 
 /**
- * Service for handling BSV vote transactions
+ * Vote Transaction Service
+ * Handles processing of vote transactions with embedded options
  */
 export class VoteTransactionService {
   private prisma: PrismaClient;
-  private lockParser: LockProtocolParser;
-  private voteParser: VoteParser;
 
-  constructor(prisma: PrismaClient) {
-    this.prisma = prisma;
-    this.lockParser = new LockProtocolParser();
-    this.voteParser = new VoteParser();
+  constructor(prisma?: PrismaClient) {
+    this.prisma = prisma || new PrismaClient();
   }
 
   /**
-   * Process a BSV vote transaction and insert it into the database
-   * 
-   * @param tx - The transaction object containing data array and metadata
-   * @returns The created post and vote options
+   * Process a transaction that contains vote data
    */
   async processVoteTransaction(tx: any) {
     try {
-      if (!tx || !tx.id) {
-        logger.warn('Invalid transaction', { tx: JSON.stringify(tx).substring(0, 100) });
+      logger.info(`Processing vote transaction ${tx.id || tx.tx_id}`);
+      // Extract basic data
+      const txId = tx.id || tx.tx_id || tx.hash;
+      const authorAddress = tx.author_address || tx.addresses?.[0] || '';
+      
+      // Check if this transaction has already been processed
+      const existingTx = await this.prisma.processed_transaction.findUnique({
+        where: { tx_id: txId }
+      });
+      
+      if (existingTx) {
+        logger.info(`Transaction ${txId} already processed, skipping`);
         return null;
       }
       
-      // Log the transaction data for debugging
-      logger.debug('Processing transaction data', {
-        tx_id: tx.id,
-        data_type: Array.isArray(tx.data) ? 'array' : typeof tx.data,
-        data_sample: Array.isArray(tx.data) ? 
-          tx.data.slice(0, 3).map((d: any) => typeof d === 'string' ? d : JSON.stringify(d)) : 
-          'not an array'
-      });
-      
-      // Extract the lock protocol data
-      let lockData: any = null;
+      // Initialize vote data structure
       let voteData: any = null;
       
-      // Process data based on format
-      if (Array.isArray(tx.data)) {
-        // Check if it's an array of strings or an array of objects
-        const firstItem = tx.data.length > 0 ? tx.data[0] : null;
-        
-        if (typeof firstItem === 'string') {
-          // It's an array of strings like ["key=value", ...]
-          logger.debug('Processing string array data format', { tx_id: tx.id });
-          lockData = this.lockParser.extract_lock_protocol_data(tx);
+      // Process direct vote_data field if present
+      if (tx.vote_data || tx.data?.vote_data) {
+        const rawVoteData = tx.vote_data || tx.data?.vote_data;
+        try {
+          const voteDataObj = typeof rawVoteData === 'string' ? JSON.parse(rawVoteData) : rawVoteData;
+          logger.debug('Found vote_data field in transaction', voteDataObj);
           
-          // Check for vote-specific data in the array
-          const isVote = tx.data.some((item: string) => 
-            item === 'is_vote=true' || 
-            item === 'vote=true' || 
-            item.includes('vote_question') || 
-            item.includes('vote_option')
-          );
-          
-          if (isVote && !lockData) {
-            // Create a basic lockData object for vote transactions
-            lockData = {
-              is_vote: true,
-              vote_options: [],
-              author_address: tx.author_address || ''
-            };
-            
-            // Extract vote question and options
-            let voteQuestion = '';
-            const voteOptions: string[] = [];
-            
-            for (const item of tx.data) {
-              if (item.startsWith('content=') && !voteQuestion) {
-                voteQuestion = item.substring('content='.length);
-              } else if (item.startsWith('content=') && voteOptions.length < 10) {
-                voteOptions.push(item.substring('content='.length));
-              }
-            }
-            
-            if (voteQuestion) {
-              lockData.vote_question = voteQuestion;
-              lockData.content = voteQuestion;
-            }
-            
-            if (voteOptions.length > 0) {
-              lockData.vote_options = voteOptions;
-              lockData.total_options = voteOptions.length;
-            }
-          }
-        } else if (firstItem && typeof firstItem === 'object') {
-          // It's an array of objects like [{ key: "key", value: "value" }, ...]
-          logger.debug('Processing object array data format', { tx_id: tx.id });
-          
-          // Extract vote data from the object format
           voteData = {
-            is_vote: false,
-            question: '',
-            options: [],
-            total_options: 0
-          };
-          
-          // Check if this is a vote
-          const voteItem = tx.data.find((item: any) => 
-            (item.key === 'vote' && item.value === 'true') || 
-            (item.key === 'is_vote' && item.value === 'true')
-          );
-          
-          if (voteItem) {
-            voteData.is_vote = true;
-            
-            // Extract question
-            const questionItem = tx.data.find((item: any) => 
-              item.key === 'question' || item.key === 'vote_question'
-            );
-            
-            if (questionItem) {
-              voteData.question = questionItem.value;
-            }
-            
-            // Extract options
-            const optionItems = tx.data.filter((item: any) => 
-              item.key === 'option' || item.key === 'vote_option'
-            );
-            
-            if (optionItems.length > 0) {
-              voteData.options = optionItems.map((item: any) => item.value);
-              voteData.total_options = optionItems.length;
-            }
-            
-            // Create lockData from voteData
-            lockData = {
-              is_vote: true,
-              vote_question: voteData.question,
-              vote_options: voteData.options,
-              total_options: voteData.total_options,
-              content: voteData.question,
-              author_address: tx.author_address || ''
-            };
-          }
-        }
-      } else {
-        // It's in the old format or some other format
-        logger.debug('Processing non-array data format', { tx_id: tx.id });
-        lockData = this.lockParser.extract_lock_protocol_data(tx);
-      }
-      
-      // If we still don't have valid lock data, try one more approach
-      if (!lockData || !lockData.is_vote) {
-        logger.debug('Attempting alternative vote data extraction', { tx_id: tx.id });
-        
-        // Check if this is explicitly marked as a vote in the transaction
-        const isExplicitVote = tx.type === 'vote' || 
-                              (tx.metadata && tx.metadata.is_vote === true) ||
-                              (tx.data && typeof tx.data === 'object' && tx.data.is_vote === true);
-        
-        if (isExplicitVote) {
-          // Create a basic vote structure
-          lockData = {
             is_vote: true,
-            vote_question: tx.metadata?.vote_question || tx.data?.question || '',
-            vote_options: tx.metadata?.vote_options || tx.data?.options || [],
-            total_options: tx.metadata?.total_options || (tx.data?.options?.length || 0),
-            content: tx.metadata?.vote_question || tx.data?.question || '',
-            author_address: tx.author_address || ''
+            vote_question: voteDataObj.question || '',
+            content: voteDataObj.question || '',
+            author_address: authorAddress,
+            vote_options: voteDataObj.options?.map((o: any) => o.text || '') || [],
+            total_options: voteDataObj.options?.length || 0
           };
+          
+          logger.info(`Processed vote_data with ${voteData.vote_options.length} options`);
+          return voteData;
+        } catch (e) {
+          logger.error('Error parsing vote_data', e);
         }
       }
       
-      // Final check if we have valid vote data
-      if (!lockData || !lockData.is_vote) {
-        logger.warn('Not a valid vote transaction', { tx_id: tx.id });
-        return null;
-      }
-      
-      // Log the extracted vote data
-      logger.info('Found vote transaction', { 
-        tx_id: tx.id,
-        question: lockData.vote_question || 'No question found',
-        options_count: lockData.vote_options?.length || 0
-      });
-      
-      // Check if transaction already exists
-      const existingTx = await this.prisma.processed_transaction.findUnique({
-        where: { tx_id: tx.id }
-      });
-      
-      if (existingTx && existingTx.type === 'vote') {
-        logger.info('Transaction already processed as vote', { tx_id: tx.id });
-        
-        // Check if post exists
-        const existingPost = await this.prisma.post.findUnique({
-          where: { tx_id: tx.id },
-          include: { vote_options: true }
+      // Check for option fields directly in the data
+      if (tx.data && Array.isArray(tx.data)) {
+        const optionEntries = tx.data.filter((item: any) => {
+          if (typeof item === 'string') {
+            return item.startsWith('option') && !item.includes('_lock_');
+          }
+          return false;
         });
         
-        if (existingPost) {
-          logger.info('Post already exists for vote', { 
-            tx_id: tx.id, 
-            post_id: existingPost.id,
-            options_count: existingPost.vote_options.length
-          });
+        if (optionEntries.length > 0) {
+          logger.debug(`Found ${optionEntries.length} direct option entries in transaction data`);
           
-          return {
-            post: existingPost,
-            voteOptions: existingPost.vote_options
-          };
+          // Extract options
+          const options: string[] = [];
+          
+          for (const entry of optionEntries) {
+            if (typeof entry === 'string') {
+              const parts = entry.split('=');
+              if (parts.length === 2) {
+                options.push(parts[1]);
+              }
+            }
+          }
+          
+          if (options.length > 0) {
+            // Find the vote question
+            let question = '';
+            const questionEntry = tx.data.find((item: any) => 
+              typeof item === 'string' && (
+                item.startsWith('vote_question=') || 
+                item.startsWith('content=')
+              )
+            );
+            
+            if (questionEntry && typeof questionEntry === 'string') {
+              const parts = questionEntry.split('=');
+              if (parts.length >= 2) {
+                question = parts.slice(1).join('=');
+              }
+            }
+            
+            voteData = {
+              is_vote: true,
+              vote_question: question,
+              content: question,
+              author_address: authorAddress,
+              vote_options: options,
+              total_options: options.length
+            };
+            
+            logger.info(`Processed direct option fields with ${options.length} options`);
+            return voteData;
+          }
         }
       }
       
-      // Determine author address
-      const authorAddress = tx.author_address || 
-                           (lockData && lockData.author_address) || 
-                           (existingTx && existingTx.metadata && existingTx.metadata.author_address) ||
-                           '1DefaultVoteAddress';
-      
-      if (!authorAddress) {
-        logger.warn('No author address found for transaction', { tx_id: tx.id });
-      }
-      
-      // Start a transaction to ensure all database operations succeed or fail together
-      return await this.prisma.$transaction(async (prisma) => {
-        // Create or update the post record
-        const postData = {
-          tx_id: tx.id,
-          content: lockData.vote_question || lockData.content || '',
-          author_address: authorAddress,
-          created_at: new Date((tx.block_time || Math.floor(Date.now() / 1000)) * 1000),
+      // Check for vote flag in metadata
+      if (tx.is_vote === true || (tx.metadata && tx.metadata.is_vote === true)) {
+        logger.debug('Found vote flag in transaction metadata');
+        
+        // Extract question and options from metadata
+        const question = tx.content || (tx.metadata && tx.metadata.content) || '';
+        const options = tx.metadata?.vote_options || [];
+        
+        voteData = {
           is_vote: true,
-          is_locked: !!lockData.is_locked,
-          tags: lockData.tags || [],
-          block_height: tx.block_height || 0,
-          metadata: {
-            options_hash: lockData.options_hash,
-            total_options: lockData.total_options,
-            post_txid: tx.id,
-            vote_question: lockData.vote_question,
-            vote_options: lockData.vote_options
-          }
+          vote_question: question,
+          content: question,
+          author_address: authorAddress,
+          vote_options: options,
+          total_options: options.length
         };
         
-        // Upsert the post (create or update)
-        const post = await prisma.post.upsert({
-          where: { tx_id: tx.id },
-          update: postData,
-          create: postData
-        });
-        
-        logger.info('Upserted post record', { post_id: post.id, tx_id: tx.id });
-        
-        // Delete any existing vote options for this post
-        await prisma.vote_option.deleteMany({
-          where: { post_id: post.id }
-        });
-        
-        // Create vote option records
-        const voteOptions = [];
-        
-        if (lockData.vote_options && lockData.vote_options.length > 0) {
-          for (let i = 0; i < lockData.vote_options.length; i++) {
-            const option = lockData.vote_options[i];
-            
-            const voteOption = await prisma.vote_option.create({
-              data: {
-                content: option || `Option ${i + 1}`,
-                post_id: post.id,
-                author_address: authorAddress,
-                created_at: new Date((tx.block_time || Math.floor(Date.now() / 1000)) * 1000),
-                tx_id: `${tx.id}_option_${i}`, // Generate a unique tx_id for each option
-                option_index: i,
-                tags: []
-              }
-            });
-            
-            voteOptions.push(voteOption);
-          }
-          
-          logger.info('Created vote option records', { 
-            count: voteOptions.length, 
-            post_id: post.id 
-          });
-        }
-        
-        // Upsert the processed_transaction record
-        if (existingTx) {
-          await prisma.processed_transaction.update({
-            where: { tx_id: tx.id },
-            data: {
-              type: 'vote',
-              metadata: {
-                ...existingTx.metadata,
-                vote_question: lockData.vote_question,
-                total_options: lockData.total_options,
-                is_vote: true
-              }
-            }
-          });
-          
-          logger.info('Updated processed_transaction record', { tx_id: tx.id });
-        } else {
-          // Create a new processed_transaction record
-          await prisma.processed_transaction.create({
-            data: {
-              tx_id: tx.id,
-              block_height: tx.block_height || 0,
-              block_time: BigInt(tx.block_time || Math.floor(Date.now() / 1000)),
-              protocol: 'LOCK',
-              type: 'vote',
-              metadata: {
-                vote_question: lockData.vote_question,
-                total_options: lockData.total_options,
-                is_vote: true,
-                author_address: authorAddress
-              }
-            }
-          });
-          
-          logger.info('Created processed_transaction record', { tx_id: tx.id });
-        }
-        
-        return {
-          post,
-          voteOptions
-        };
-      });
-    } catch (error) {
-      logger.error('Error processing vote transaction', {
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        tx_id: tx?.id || 'unknown'
-      });
+        logger.info(`Processed vote from metadata with ${options.length} options`);
+        return voteData;
+      }
+      
+      // If we couldn't extract vote data, return null
+      logger.warn('Not a valid vote transaction', { tx_id: txId });
+      return null;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Error processing vote transaction: ${errorMessage}`);
       return null;
     }
   }

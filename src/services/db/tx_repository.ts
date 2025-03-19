@@ -141,28 +141,44 @@ export class TxRepository {
       let combinedMetadata: Record<string, any> = {};
       
       if (isVote) {
-        // For votes, handle question and options separately
-        // Find question output (typically the first or the one with total_options)
-        const questionOutput = validOutputs.find(o => o.metadata?.total_options) || validOutputs[0];
-        const optionOutputs = validOutputs.filter(o => o !== questionOutput && o.metadata?.is_vote === true);
+        // We now exclusively use single-output votes with embedded options
+        const output = validOutputs[0];
+        const customMeta = (output.metadata as any)._custom_metadata || {};
         
-        // Start with question metadata
-        combinedMetadata = { ...questionOutput.metadata };
+        logger.debug('Processing vote with embedded options');
         
-        // Use question content as the primary content
-        combinedMetadata.content = questionOutput.content || '';
+        // Start with output metadata
+        combinedMetadata = { ...output.metadata };
         
-        // Add all contents to an array
-        combinedMetadata.contents = validOutputs
-          .filter(output => output.content)
-          .map(output => output.content || '');
+        // Use content as the primary content (vote question)
+        combinedMetadata.content = output.content || '';
         
         // Make sure vote-specific fields are set correctly
         combinedMetadata.is_vote = true;
-        combinedMetadata.options = optionOutputs.map((option, index) => ({
-          content: option.content,
-          index: option._optionIndex || index + 1
-        }));
+        
+        // Extract vote options from custom metadata if available
+        if (customMeta.vote_option_objects && Array.isArray(customMeta.vote_option_objects)) {
+          combinedMetadata.options = customMeta.vote_option_objects.map((option: any, index: number) => ({
+            content: option.text || '',
+            index: option.optionIndex || index
+          }));
+          
+          logger.debug(`Processed vote with ${combinedMetadata.options.length} embedded options`);
+        } 
+        // Otherwise, check for direct vote_options array
+        else if (output.metadata.vote_options && Array.isArray(output.metadata.vote_options)) {
+          combinedMetadata.options = output.metadata.vote_options.map((text: string, index: number) => ({
+            content: text,
+            index
+          }));
+          
+          logger.debug(`Processed vote with ${combinedMetadata.options.length} options from vote_options array`);
+        }
+        // Fallback - create an empty options array
+        else {
+          combinedMetadata.options = [];
+          logger.debug('Vote without options detected');
+        }
         
         // Add author address if available
         if (parsedTx.authorAddress) {
