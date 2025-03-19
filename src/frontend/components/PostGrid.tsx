@@ -247,10 +247,7 @@ const PostGrid: React.FC<PostGridProps> = ({
               // Add any additional processing specific to search results
               return {
                 ...post,
-                // If the post has a search score, show it for debugging
-                ...(post.score !== undefined && { 
-                  content: `${post.content} ${process.env.NODE_ENV === 'development' ? `(Score: ${Math.round((1 - (post.score || 0)) * 100)}%)` : ''}`
-                })
+                // Remove the score from the content display
               };
             });
             
