@@ -16,21 +16,25 @@ const prisma = new PrismaClient();
 // Helper function to get date range based on timeRange parameter
 const getDateRange = (timeRange: string) => {
   const now = new Date();
+  now.setHours(23, 59, 59, 999); // Set to end of day to include today's data
   
   switch (timeRange) {
     case 'day':
       const oneDayAgo = new Date(now);
       oneDayAgo.setDate(now.getDate() - 1);
+      oneDayAgo.setHours(0, 0, 0, 0); // Set to start of day
       return oneDayAgo;
     
     case 'week':
       const oneWeekAgo = new Date(now);
       oneWeekAgo.setDate(now.getDate() - 7);
+      oneWeekAgo.setHours(0, 0, 0, 0); // Set to start of day
       return oneWeekAgo;
     
     case 'month':
       const oneMonthAgo = new Date(now);
       oneMonthAgo.setMonth(now.getMonth() - 1);
+      oneMonthAgo.setHours(0, 0, 0, 0); // Set to start of day
       return oneMonthAgo;
     
     default:
@@ -541,9 +545,7 @@ export const updateStats = async (req: Request, res: Response) => {
 async function getLockTimeDataPrisma(timeRange: string) {
   try {
     const startDate = getDateRange(timeRange);
-    
-    // Get the appropriate time grouping based on the time range
-    const timeGrouping = getTimeGroupingFormat(timeRange);
+    logger.info(`Getting lock time data for range ${timeRange}, startDate: ${startDate.toISOString()}`);
     
     // Get all lock_like entries within the time range
     const locks = await prisma.lock_like.findMany({
@@ -563,14 +565,19 @@ async function getLockTimeDataPrisma(timeRange: string) {
       }
     });
     
+    logger.info(`Found ${locks.length} locks for time range ${timeRange}`);
+    
     // Group the locks by the appropriate time period
     const grouped = groupByTimePeriod(locks, timeRange);
     
-    // Format the data for the chart
-    return Object.entries(grouped).map(([name, locks]) => ({
+    // Format the data for the chart and ensure sequential order
+    const formattedData = Object.entries(grouped).map(([name, locks]) => ({
       name,
       locks: locks.length
     }));
+    
+    logger.info(`Formatted lock time data: ${JSON.stringify(formattedData)}`);
+    return formattedData;
   } catch (error) {
     logger.error('Error getting lock time data with Prisma', error);
     return [];
@@ -581,6 +588,7 @@ async function getLockTimeDataPrisma(timeRange: string) {
 async function getBsvLockedOverTimePrisma(timeRange: string) {
   try {
     const startDate = getDateRange(timeRange);
+    logger.info(`Getting BSV locked data for range ${timeRange}, startDate: ${startDate.toISOString()}`);
     
     // Get all lock_like entries within the time range
     const locks = await prisma.lock_like.findMany({
@@ -601,31 +609,22 @@ async function getBsvLockedOverTimePrisma(timeRange: string) {
       }
     });
     
+    logger.info(`Found ${locks.length} locks with amounts for time range ${timeRange}`);
+    
     // Group the locks by the appropriate time period
     const grouped = groupByTimePeriod(locks, timeRange);
     
     // Calculate the sum of amounts for each time period
-    return Object.entries(grouped).map(([name, locks]) => ({
+    const formattedData = Object.entries(grouped).map(([name, locks]) => ({
       name,
       bsv: locks.reduce((sum, lock) => sum + Number(lock.amount || 0), 0)
     }));
+    
+    logger.info(`Formatted BSV locked data: ${JSON.stringify(formattedData)}`);
+    return formattedData;
   } catch (error) {
     logger.error('Error getting BSV locked over time data with Prisma', error);
     return [];
-  }
-}
-
-// Helper function to get appropriate time format based on time range
-function getTimeGroupingFormat(timeRange: string) {
-  switch (timeRange) {
-    case 'day':
-      return 'hour'; // Group by hour for 24-hour view
-    case 'week':
-      return 'day'; // Group by day for week view
-    case 'month':
-      return 'day'; // Group by day for month view
-    default:
-      return 'month'; // Group by month for all-time view
   }
 }
 
@@ -633,34 +632,106 @@ function getTimeGroupingFormat(timeRange: string) {
 function groupByTimePeriod(data: any[], timeRange: string) {
   const grouped: { [key: string]: any[] } = {};
   
+  // Create a complete set of time slots for the selected range
+  const timeSlots = generateTimeSlots(timeRange);
+  
+  // Initialize all time slots with empty arrays
+  timeSlots.forEach(slot => {
+    grouped[slot] = [];
+  });
+  
+  // Now add actual data to the appropriate slots
   data.forEach(item => {
     const date = new Date(item.created_at);
-    let key = '';
+    let key = formatDateForTimeRange(date, timeRange);
     
-    switch (timeRange) {
-      case 'day':
-        // Format: "1 AM", "2 PM", etc.
-        key = date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
-        break;
-      case 'week':
-      case 'month':
-        // Format: "Jan 1", "Jan 2", etc.
-        key = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        break;
-      default:
-        // Format: "Jan", "Feb", etc.
-        key = date.toLocaleDateString('en-US', { month: 'short' });
-        break;
+    if (grouped[key]) {
+      grouped[key].push(item);
+    } else {
+      // In case there's any key not in our predefined slots
+      grouped[key] = [item];
     }
-    
-    if (!grouped[key]) {
-      grouped[key] = [];
-    }
-    
-    grouped[key].push(item);
   });
   
   return grouped;
+}
+
+// Helper function to generate time slots for chart
+function generateTimeSlots(timeRange: string): string[] {
+  const slots: string[] = [];
+  const now = new Date();
+  now.setHours(23, 59, 59, 999); // End of today
+  
+  switch (timeRange) {
+    case 'day': {
+      // For 24h view, generate 24 hourly slots
+      const startOfDay = new Date(now);
+      startOfDay.setDate(now.getDate() - 1);
+      startOfDay.setHours(0, 0, 0, 0);
+      
+      for (let i = 0; i < 24; i++) {
+        const hourSlot = new Date(startOfDay);
+        hourSlot.setHours(hourSlot.getHours() + i);
+        slots.push(formatDateForTimeRange(hourSlot, 'day'));
+      }
+      break;
+    }
+    
+    case 'week': {
+      // For week view, generate 7 daily slots
+      const startDate = new Date(now);
+      startDate.setDate(now.getDate() - 7);
+      startDate.setHours(0, 0, 0, 0);
+      
+      for (let i = 0; i <= 7; i++) {
+        const daySlot = new Date(startDate);
+        daySlot.setDate(daySlot.getDate() + i);
+        slots.push(formatDateForTimeRange(daySlot, 'week'));
+      }
+      break;
+    }
+    
+    case 'month': {
+      // For month view, generate daily slots for the past month
+      const startDate = new Date(now);
+      startDate.setMonth(now.getMonth() - 1);
+      startDate.setHours(0, 0, 0, 0);
+      
+      for (let d = new Date(startDate); d <= now; d.setDate(d.getDate() + 1)) {
+        slots.push(formatDateForTimeRange(new Date(d), 'month'));
+      }
+      break;
+    }
+    
+    default: {
+      // For all-time view, get all months from the first post to now
+      const sixMonthsAgo = new Date(now);
+      sixMonthsAgo.setMonth(now.getMonth() - 6);
+      
+      for (let m = new Date(sixMonthsAgo); m <= now; m.setMonth(m.getMonth() + 1)) {
+        slots.push(formatDateForTimeRange(new Date(m), 'all'));
+      }
+      break;
+    }
+  }
+  
+  return slots;
+}
+
+// Helper function to format date based on time range
+function formatDateForTimeRange(date: Date, timeRange: string): string {
+  switch (timeRange) {
+    case 'day':
+      // Format: "1 AM", "2 PM", etc.
+      return date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+    case 'week':
+    case 'month':
+      // Format: "Mar 19", etc.
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    default:
+      // Format: "Mar", "Apr", etc.
+      return date.toLocaleDateString('en-US', { month: 'short' });
+  }
 }
 
 // Helper function to get lock time data (keeping for backward compatibility)
