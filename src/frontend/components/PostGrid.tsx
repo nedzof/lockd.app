@@ -202,6 +202,9 @@ const PostGrid: React.FC<PostGridProps> = ({
     );
   }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, searchTerm, searchType]);
 
+  // Add a ref to track last search term
+  const lastSearchTerm = useRef<string>('');
+
   const fetchPosts = useCallback(async (reset = true) => {
     if (!isMounted.current) {
       console.warn('Fetch posts called when component is not mounted');
@@ -239,7 +242,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         endpoint = `${API_URL}/api/posts/search`;
         queryParams.append('q', searchTerm);
         queryParams.append('type', searchType || 'all');
-        console.log(`Using search endpoint with query: ${searchTerm}, type: ${searchType || 'all'}`);
+        console.log(`SEARCH: Using search endpoint with query: "${searchTerm}", type: ${searchType || 'all'}`);
       } else {
         // Only add these filters for the regular posts endpoint, not for search
         // Pagination
@@ -711,6 +714,20 @@ const PostGrid: React.FC<PostGridProps> = ({
     });
   }, []);
 
+  // Add a debug effect to log when props change
+  useEffect(() => {
+    console.log('PostGrid props changed:', {
+      time_filter,
+      ranking_filter,
+      personal_filter,
+      block_filter,
+      selected_tags: selected_tags.length > 0 ? selected_tags : 'none',
+      user_id,
+      searchTerm: searchTerm || 'none',
+      searchType: searchType || 'all'
+    });
+  }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, searchTerm, searchType]);
+
   // Effect to handle initial mount and filter changes
   useEffect(() => {
     // Set mounted flag
@@ -731,7 +748,9 @@ const PostGrid: React.FC<PostGridProps> = ({
         personal_filter,
         block_filter,
         selected_tags,
-        user_id
+        user_id,
+        searchTerm,
+        searchType
       });
       debouncedFetchPosts(true);
     } else {
@@ -742,19 +761,7 @@ const PostGrid: React.FC<PostGridProps> = ({
     return () => {
       isMounted.current = false;
     };
-  }, [debouncedFetchPosts, haveFiltersChanged, time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
-
-  // Add a debug effect to log when props change
-  useEffect(() => {
-    console.log('PostGrid props changed:', {
-      time_filter,
-      ranking_filter,
-      personal_filter,
-      block_filter,
-      selected_tags: selected_tags.length > 0 ? selected_tags : 'none',
-      user_id
-    });
-  }, [time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id]);
+  }, [debouncedFetchPosts, haveFiltersChanged, time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, searchTerm, searchType]);
 
   // Cleanup blob URLs when component unmounts
   useEffect(() => {
@@ -969,6 +976,20 @@ const PostGrid: React.FC<PostGridProps> = ({
       onStatsUpdate(stats);
     }
   }, [submissions, onStatsUpdate, current_block_height]);
+
+  // Add the effect after fetchPosts declaration
+  useEffect(() => {
+    if (searchTerm !== lastSearchTerm.current) {
+      console.log(`Search term changed from "${lastSearchTerm.current}" to "${searchTerm || ''}"`);
+      lastSearchTerm.current = searchTerm || '';
+      
+      // Explicitly trigger a fetch when search terms change
+      if (isMounted.current) {
+        console.log('Explicitly triggering fetch due to search term change');
+        fetchPosts(true);
+      }
+    }
+  }, [searchTerm, fetchPosts]);
 
   // Render the component
   return (
