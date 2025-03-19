@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { FiBarChart2, FiLock, FiTrendingUp, FiClock, FiDollarSign, FiUsers } from 'react-icons/fi';
 import { formatBSV } from '../utils/formatBSV';
 import {
-  LineChart, Line, AreaChart, Area, BarChart, Bar,
+  LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush
 } from 'recharts';
 
@@ -23,11 +23,11 @@ interface StatsData {
   priceData: Array<{ name: string; price: number }>;
 }
 
-// Custom Tailwind gradient backgrounds
-const gradients = {
-  primary: "bg-gradient-to-r from-purple-600 to-indigo-600",
-  secondary: "bg-gradient-to-r from-teal-500 to-cyan-500",
-  tertiary: "bg-gradient-to-r from-pink-500 to-rose-500",
+// Chart colors - using the app's color scheme
+const CHART_COLORS = {
+  locks: "#00E6CC",
+  bsv: "#FF69B4",
+  price: "#FFCA28"
 };
 
 const Stats: React.FC = () => {
@@ -303,88 +303,98 @@ const Stats: React.FC = () => {
     return num.toString();
   };
 
-  return (
-    <div className="min-h-screen bg-[#1A1B23] text-white">
-      {/* Hero section with key metrics */}
-      <div className="bg-gradient-to-r from-indigo-900/30 to-purple-900/30 border-b border-gray-800">
-        <div className="container mx-auto px-4 py-10">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
-            <div>
-              <h1 className="text-4xl font-bold text-white mb-2">Lockd Analytics</h1>
-              <p className="text-[#00E6CC] text-sm flex items-center">
-                <FiLock className="mr-1" /> 
-                100% Onchain Data Secured by Bitcoin SV
-              </p>
-            </div>
-            
-            <div className="flex flex-col items-end mt-4 md:mt-0">
-              <div className="flex space-x-1 bg-[#2A2A40] p-1 rounded-lg">
-                {['day', 'week', 'month', 'all'].map((range) => (
-                  <button
-                    key={range}
-                    onClick={() => setTimeRange(range as any)}
-                    className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                      timeRange === range
-                        ? 'bg-[#00E6CC] text-[#1A1B23]'
-                        : 'text-white hover:bg-[#3A3A50]'
-                    }`}
-                  >
-                    {range === 'day' ? '24h' : 
-                     range === 'all' ? 'All Time' : 
-                     range.charAt(0).toUpperCase() + range.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+  // Calculate platform activity distribution
+  const getPlatformActivityData = () => {
+    if (!stats) return [];
+    
+    return [
+      { name: 'Posts', value: stats.total_posts },
+      { name: 'Votes', value: stats.total_votes },
+      { name: 'Locks', value: stats.total_lock_likes },
+    ];
+  };
 
-          {/* Key metrics cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div className="bg-gradient-to-r from-purple-900/40 to-indigo-900/40 rounded-xl border border-purple-800/30 p-6 transform transition-all duration-300 hover:scale-105">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-300">Onchain Locks</h3>
-                <FiLock className="h-6 w-6 text-purple-400" />
-              </div>
-              <p className="text-3xl font-bold text-white">{stats?.total_lock_likes || 0}</p>
-              <p className="text-purple-400 text-sm mt-2">Secured on BSV blockchain</p>
-            </div>
-            
-            <div className="bg-gradient-to-r from-teal-900/40 to-cyan-900/40 rounded-xl border border-teal-800/30 p-6 transform transition-all duration-300 hover:scale-105">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-300">BSV Locked</h3>
-                <FiTrendingUp className="h-6 w-6 text-teal-400" />
-              </div>
-              <p className="text-3xl font-bold text-white">{formatBSV(stats?.total_bsv_locked || 0)}</p>
-              <p className="text-teal-400 text-sm mt-2">Total value locked</p>
-            </div>
-            
-            <div className="bg-gradient-to-r from-pink-900/40 to-rose-900/40 rounded-xl border border-pink-800/30 p-6 transform transition-all duration-300 hover:scale-105">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-300">BSV Price</h3>
-                <FiDollarSign className="h-6 w-6 text-pink-400" />
-              </div>
-              <p className="text-3xl font-bold text-white">
-                ${stats?.current_bsv_price ? stats.current_bsv_price.toFixed(2) : 'N/A'}
-              </p>
-              <p className="text-pink-400 text-sm mt-2">Current market price</p>
-            </div>
-            
-            <div className="bg-gradient-to-r from-amber-900/40 to-orange-900/40 rounded-xl border border-amber-800/30 p-6 transform transition-all duration-300 hover:scale-105">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-300">Users</h3>
-                <FiUsers className="h-6 w-6 text-amber-400" />
-              </div>
-              <p className="text-3xl font-bold text-white">{stats?.total_users || 0}</p>
-              <p className="text-amber-400 text-sm mt-2">Active participants</p>
+  return (
+    <div className="min-h-screen">
+      <div className="container mx-auto px-4 py-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+          <div>
+            <h1 className="text-3xl font-bold mb-2">Platform Analytics</h1>
+            <p className="text-sm flex items-center opacity-80">
+              <FiLock className="mr-1" /> 
+              100% Onchain Data Secured by Bitcoin SV
+            </p>
+          </div>
+          
+          <div className="flex flex-col items-end mt-4 md:mt-0">
+            <div className="flex space-x-1 p-1 rounded-lg border border-gray-700">
+              {['day', 'week', 'month', 'all'].map((range) => (
+                <button
+                  key={range}
+                  onClick={() => setTimeRange(range as any)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    timeRange === range
+                      ? 'bg-[#00E6CC] text-black'
+                      : 'hover:bg-gray-800'
+                  }`}
+                >
+                  {range === 'day' ? '24h' : 
+                   range === 'all' ? 'All Time' : 
+                   range.charAt(0).toUpperCase() + range.slice(1)}
+                </button>
+              ))}
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="container mx-auto px-4 py-10">
+        {/* Key metrics cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          {/* Lock Count */}
+          <div className="border border-gray-700 rounded-lg p-5">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-medium opacity-80">Onchain Locks</h3>
+              <FiLock className="h-5 w-5 text-[#00E6CC]" />
+            </div>
+            <p className="text-2xl font-bold">{stats?.total_lock_likes || 0}</p>
+            <p className="text-[#00E6CC] text-xs mt-1">Secured on BSV blockchain</p>
+          </div>
+          
+          {/* BSV Locked */}
+          <div className="border border-gray-700 rounded-lg p-5">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-medium opacity-80">BSV Locked</h3>
+              <FiTrendingUp className="h-5 w-5 text-[#00E6CC]" />
+            </div>
+            <p className="text-2xl font-bold">{formatBSV(stats?.total_bsv_locked || 0)}</p>
+            <p className="text-[#00E6CC] text-xs mt-1">Total value locked</p>
+          </div>
+          
+          {/* BSV Price */}
+          <div className="border border-gray-700 rounded-lg p-5">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-medium opacity-80">BSV Price</h3>
+              <FiDollarSign className="h-5 w-5 text-[#00E6CC]" />
+            </div>
+            <p className="text-2xl font-bold">
+              ${stats?.current_bsv_price ? stats.current_bsv_price.toFixed(2) : 'N/A'}
+            </p>
+            <p className="text-[#00E6CC] text-xs mt-1">Current market price</p>
+          </div>
+          
+          {/* User Count */}
+          <div className="border border-gray-700 rounded-lg p-5">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-medium opacity-80">Active Users</h3>
+              <FiUsers className="h-5 w-5 text-[#00E6CC]" />
+            </div>
+            <p className="text-2xl font-bold">{stats?.total_users || 0}</p>
+            <p className="text-[#00E6CC] text-xs mt-1">Unique participants</p>
+          </div>
+        </div>
+
         {isLoading ? (
           <div className="flex justify-center items-center h-64">
-            <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-[#00E6CC]"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#00E6CC]"></div>
           </div>
         ) : error ? (
           <div className="bg-red-900/30 border border-red-700 text-red-300 px-6 py-4 rounded-lg mb-6">
@@ -393,19 +403,19 @@ const Stats: React.FC = () => {
           </div>
         ) : (
           <>
-            {/* Main chart section */}
-            <div className="bg-[#24253B] rounded-xl shadow-xl border border-gray-800/30 mb-10 overflow-hidden">
-              <div className="p-6">
-                <h2 className="text-2xl font-bold text-white mb-1">Historical Metrics</h2>
-                <p className="text-gray-400 text-sm mb-6">Time series data showing platform activity</p>
+            {/* BSV Price History Chart */}
+            <div className="border border-gray-700 rounded-lg mb-8">
+              <div className="p-5">
+                <h2 className="text-xl font-bold mb-1">BSV Price History</h2>
+                <p className="text-sm opacity-70 mb-4">Historical price trends in USD</p>
                 
-                <div className="h-[480px]">
+                <div className="h-[400px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
                       data={addSampleData()}
                       margin={{
                         top: 20,
-                        right: 50,
+                        right: 20,
                         left: 20,
                         bottom: 20,
                       }}
@@ -419,105 +429,38 @@ const Stats: React.FC = () => {
                         reversed={true}
                       />
                       <YAxis 
-                        yAxisId="left" 
-                        orientation="left" 
-                        stroke="#9c7aff"
-                        tick={{ fill: '#ccc' }}
-                        tickLine={{ stroke: '#666' }}
-                        axisLine={{ stroke: '#666' }}
-                        domain={['auto', 'auto']}
-                        allowDataOverflow={false}
-                        label={{ value: 'Locks', angle: -90, position: 'insideLeft', fill: '#9c7aff', dy: 60 }}
-                      />
-                      <YAxis 
-                        yAxisId="right" 
-                        orientation="right" 
-                        stroke="#00E6CC"
-                        tick={{ fill: '#ccc' }}
-                        tickLine={{ stroke: '#666' }}
-                        axisLine={{ stroke: '#666' }}
-                        tickFormatter={(value) => `${formatBSV(value)}`}
-                        domain={['auto', 'auto']}
-                        allowDataOverflow={false}
-                        label={{ value: 'BSV Locked', angle: 90, position: 'insideRight', fill: '#00E6CC', dy: 60 }}
-                      />
-                      <YAxis 
                         yAxisId="price" 
-                        orientation="right" 
-                        stroke="#FF69B4"
+                        orientation="left" 
+                        stroke={CHART_COLORS.price}
                         tick={{ fontSize: 12, fill: '#ccc' }}
                         tickFormatter={(value) => `$${value}`}
                         domain={['dataMin - 1', 'dataMax + 1']}
                         axisLine={{ stroke: '#666' }}
                         tickLine={{ stroke: '#666' }}
-                        width={50}
                         allowDataOverflow={false}
-                        label={{ value: 'BSV Price', angle: 90, position: 'insideRight', fill: '#FF69B4', dy: 140 }}
                       />
                       <Tooltip 
                         contentStyle={{ 
-                          backgroundColor: 'rgba(28, 29, 49, 0.95)', 
-                          border: '1px solid #666',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-                          padding: '12px'
+                          backgroundColor: 'rgba(20, 20, 20, 0.95)', 
+                          border: '1px solid #444',
+                          borderRadius: '4px',
+                          boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
+                          padding: '8px'
                         }}
-                        labelStyle={{ color: '#fff', fontWeight: 'bold', marginBottom: '8px' }}
-                        formatter={(value, name, props) => {
-                          if (name === 'price') {
-                            return [`$${value}`, 'BSV Price'];
-                          } else if (name === 'locks') {
-                            return [value, 'Total Locks'];
-                          } else if (name === 'bsv') {
-                            return [formatBSV(Number(value)), 'BSV Locked'];
-                          }
-                          return [value, name];
+                        labelStyle={{ color: '#fff', fontWeight: 'bold', marginBottom: '4px' }}
+                        formatter={(value, name) => {
+                          return [`$${value}`, 'BSV Price'];
                         }}
-                      />
-                      <Legend 
-                        wrapperStyle={{ color: '#ccc', paddingTop: '10px' }}
-                        iconType="circle"
-                        iconSize={10}
-                        formatter={(value) => {
-                          if (value === 'price') return 'BSV Price';
-                          if (value === 'locks') return 'Total Locks';
-                          if (value === 'bsv') return 'BSV Locked';
-                          return value;
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="locks"
-                        name="locks"
-                        stroke="#9c7aff"
-                        strokeWidth={3}
-                        yAxisId="left"
-                        dot={{ r: 4, fill: '#9c7aff', stroke: '#1A1B23', strokeWidth: 1 }}
-                        activeDot={{ r: 6, fill: '#9c7aff', stroke: '#fff', strokeWidth: 2 }}
-                        isAnimationActive={true}
-                        animationDuration={1000}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="bsv"
-                        name="bsv"
-                        stroke="#00E6CC"
-                        strokeWidth={3}
-                        yAxisId="right"
-                        dot={{ r: 4, fill: '#00E6CC', stroke: '#1A1B23', strokeWidth: 1 }}
-                        activeDot={{ r: 6, fill: '#00E6CC', stroke: '#fff', strokeWidth: 2 }}
-                        isAnimationActive={true}
-                        animationDuration={1000}
                       />
                       <Line
                         type="monotone"
                         dataKey="price"
-                        name="price"
-                        stroke="#FF69B4"
-                        strokeWidth={3}
+                        name="BSV Price"
+                        stroke={CHART_COLORS.price}
+                        strokeWidth={2}
                         yAxisId="price"
-                        dot={{ r: 4, fill: '#FF69B4', stroke: '#1A1B23', strokeWidth: 1 }}
-                        activeDot={{ r: 6, fill: '#FF69B4', stroke: '#fff', strokeWidth: 2 }}
+                        dot={{ r: 3, fill: CHART_COLORS.price, strokeWidth: 1 }}
+                        activeDot={{ r: 5, fill: CHART_COLORS.price, stroke: '#fff', strokeWidth: 1 }}
                         isAnimationActive={true}
                         animationDuration={1000}
                       />
@@ -525,7 +468,7 @@ const Stats: React.FC = () => {
                         dataKey="name" 
                         height={30} 
                         stroke="#666"
-                        fill="#2A2A40"
+                        fill="#222"
                         tickFormatter={(tick) => ''}
                       />
                     </LineChart>
@@ -534,34 +477,34 @@ const Stats: React.FC = () => {
               </div>
             </div>
 
-            {/* Secondary charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-              {/* Lock Distribution */}
-              <div className="bg-[#24253B] rounded-xl border border-gray-800/30 p-6 shadow-lg">
-                <h3 className="text-xl font-bold text-white mb-1">Lock Distribution</h3>
-                <p className="text-gray-400 text-sm mb-4">Visualizing lock activity trends</p>
+            {/* Two-column charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+              {/* Lock Count Over Time */}
+              <div className="border border-gray-700 rounded-lg p-5">
+                <h3 className="text-xl font-bold mb-1">Lock Activity Trend</h3>
+                <p className="text-sm opacity-70 mb-4">Number of new locks over time</p>
                 
                 <div className="h-[300px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={addSampleData()}
-                      margin={{ top: 10, right: 30, left: 0, bottom: 20 }}
+                      margin={{ top: 10, right: 10, left: 10, bottom: 20 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#444" opacity={0.3} />
                       <XAxis dataKey="name" tick={{ fill: '#ccc' }} reversed={true} />
                       <YAxis tick={{ fill: '#ccc' }} />
                       <Tooltip
                         contentStyle={{ 
-                          backgroundColor: 'rgba(28, 29, 49, 0.95)', 
-                          border: '1px solid #666',
-                          borderRadius: '8px'
+                          backgroundColor: 'rgba(20, 20, 20, 0.95)', 
+                          border: '1px solid #444',
+                          borderRadius: '4px',
                         }}
                         formatter={(value) => [`${value}`, 'Locks']}
                       />
                       <Bar 
                         dataKey="locks" 
-                        fill="#9c7aff" 
-                        radius={[4, 4, 0, 0]}
+                        fill={CHART_COLORS.locks} 
+                        radius={[2, 2, 0, 0]}
                         isAnimationActive={true}
                         animationDuration={1200}
                       />
@@ -570,21 +513,21 @@ const Stats: React.FC = () => {
                 </div>
               </div>
 
-              {/* BSV Locked Over Time */}
-              <div className="bg-[#24253B] rounded-xl border border-gray-800/30 p-6 shadow-lg">
-                <h3 className="text-xl font-bold text-white mb-1">BSV Value Locked</h3>
-                <p className="text-gray-400 text-sm mb-4">Total BSV locked across time periods</p>
+              {/* BSV Value Locked by Time */}
+              <div className="border border-gray-700 rounded-lg p-5">
+                <h3 className="text-xl font-bold mb-1">Value Locked Trend</h3>
+                <p className="text-sm opacity-70 mb-4">BSV locked over time periods</p>
                 
                 <div className="h-[300px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
                       data={addSampleData()}
-                      margin={{ top: 10, right: 30, left: 0, bottom: 20 }}
+                      margin={{ top: 10, right: 10, left: 10, bottom: 20 }}
                     >
                       <defs>
                         <linearGradient id="bsvGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#00E6CC" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#00E6CC" stopOpacity={0.1}/>
+                          <stop offset="5%" stopColor={CHART_COLORS.bsv} stopOpacity={0.6}/>
+                          <stop offset="95%" stopColor={CHART_COLORS.bsv} stopOpacity={0.1}/>
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#444" opacity={0.3} />
@@ -592,16 +535,16 @@ const Stats: React.FC = () => {
                       <YAxis tick={{ fill: '#ccc' }} tickFormatter={(value) => formatBSV(value)} />
                       <Tooltip
                         contentStyle={{ 
-                          backgroundColor: 'rgba(28, 29, 49, 0.95)', 
-                          border: '1px solid #666',
-                          borderRadius: '8px'
+                          backgroundColor: 'rgba(20, 20, 20, 0.95)', 
+                          border: '1px solid #444',
+                          borderRadius: '4px'
                         }}
                         formatter={(value) => [formatBSV(Number(value)), 'BSV Locked']}
                       />
                       <Area 
                         type="monotone" 
                         dataKey="bsv" 
-                        stroke="#00E6CC" 
+                        stroke={CHART_COLORS.bsv} 
                         fillOpacity={1} 
                         fill="url(#bsvGradient)"
                         isAnimationActive={true}
@@ -613,36 +556,73 @@ const Stats: React.FC = () => {
               </div>
             </div>
 
-            {/* Latest activity and duration info */}
-            <div className="bg-[#24253B] rounded-xl border border-gray-800/30 p-6 shadow-lg mb-8">
-              <div className="flex flex-col md:flex-row justify-between">
-                <div className="mb-6 md:mb-0">
-                  <h3 className="text-xl font-bold text-white mb-2">Average Lock Duration</h3>
-                  <div className="flex items-center space-x-2">
-                    <FiClock className="h-5 w-5 text-[#00E6CC]" />
-                    <span className="text-2xl font-bold text-white">
-                      {Math.round(stats?.avg_lock_duration || 0).toLocaleString()} blocks
-                    </span>
-                  </div>
-                  <p className="text-gray-400 text-sm mt-2">Average time before locks can be unlocked</p>
+            {/* Platform Activity Breakdown */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+              <div className="border border-gray-700 rounded-lg p-5">
+                <h3 className="text-xl font-bold mb-1">Platform Activity</h3>
+                <p className="text-sm opacity-70 mb-4">Distribution of platform interactions</p>
+                
+                <div className="h-[240px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={getPlatformActivityData()}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={90}
+                        paddingAngle={2}
+                        dataKey="value"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {getPlatformActivityData().map((entry, index) => (
+                          <Cell 
+                            key={`cell-${index}`} 
+                            fill={index === 0 ? '#8884d8' : index === 1 ? '#82ca9d' : CHART_COLORS.locks} 
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ 
+                          backgroundColor: 'rgba(20, 20, 20, 0.95)', 
+                          border: '1px solid #444',
+                          borderRadius: '4px'
+                        }}
+                        formatter={(value, name) => [value, name]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-                
-                <div className="border-l border-gray-700 mx-4 hidden md:block"></div>
-                
-                <div>
-                  <h3 className="text-xl font-bold text-white mb-2">Most Active User</h3>
-                  <div className="bg-[#2A2A40] rounded-lg p-2 inline-block">
-                    <span className="text-[#00E6CC] font-mono">
-                      {stats?.most_active_user ? `${stats.most_active_user.substring(0, 6)}...${stats.most_active_user.substring(stats.most_active_user.length - 4)}` : 'N/A'}
-                    </span>
+              </div>
+
+              <div className="border border-gray-700 rounded-lg p-5 col-span-1 lg:col-span-2">
+                <div className="flex flex-col h-full justify-between">
+                  <div>
+                    <h3 className="text-xl font-bold mb-3">Average Lock Duration</h3>
+                    <div className="flex items-center mt-4">
+                      <FiClock className="h-6 w-6 text-[#00E6CC] mr-2" />
+                      <span className="text-3xl font-bold">
+                        {Math.round(stats?.avg_lock_duration || 0).toLocaleString()} blocks
+                      </span>
+                    </div>
+                    <p className="text-sm opacity-70 mt-2">Average time before locks can be unlocked</p>
                   </div>
-                  <p className="text-gray-400 text-sm mt-2">User with most locks and interactions</p>
+                  
+                  <div className="mt-6">
+                    <h3 className="text-lg font-bold mb-2">Most Active User</h3>
+                    <div className="bg-gray-800/50 rounded-md p-2 inline-block">
+                      <span className="text-[#00E6CC] font-mono">
+                        {stats?.most_active_user ? `${stats.most_active_user.substring(0, 6)}...${stats.most_active_user.substring(stats.most_active_user.length - 4)}` : 'N/A'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
             <div className="flex items-center justify-center my-8">
-              <div className="text-sm text-gray-400 flex items-center">
+              <div className="text-sm opacity-70 flex items-center">
                 <FiLock className="mr-2 text-[#00E6CC]" /> 
                 <span>All data secured onchain • Last updated: {stats ? new Date(stats.last_updated).toLocaleString() : 'N/A'}</span>
               </div>
