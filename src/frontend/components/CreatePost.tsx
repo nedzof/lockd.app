@@ -57,6 +57,8 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const [showLockOptions, setShowLockOptions] = useState(false);
   const [lockAmount, setLockAmount] = useState(0.001); // Default 0.001 BSV
   const [lockDuration, setLockDuration] = useState(10); // Default 10 blocks
+  // Add a new state to track which icon/feature is currently active
+  const [activeFeature, setActiveFeature] = useState<'image' | 'vote' | 'tag' | 'schedule' | 'lock' | null>(null);
 
   // Compute if any panel is currently active
   const isPanelActive = showImagePanel || showTagInput || isVotePost || showScheduleOptions || showLockOptions;
@@ -78,14 +80,14 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     // Handle clicking outside to close the modal
     const handleClickOutside = (event: MouseEvent) => {
       if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose();
+        handleCloseModal();
       }
     };
 
     // Handle escape key to close the modal
     const handleEscKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose();
+        handleCloseModal();
       }
     };
 
@@ -98,7 +100,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscKey);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   useEffect(() => {
     const attemptWalletConnection = async () => {
@@ -202,6 +204,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     setIsVotePost(false);
     setShowScheduleOptions(false);
     setShowImagePanel(true);
+    setActiveFeature('image');
   };
   
   const handleRemoveImage = () => {
@@ -209,6 +212,10 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     setImagePreview('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+    // Reset active feature if it was image
+    if (activeFeature === 'image') {
+      setActiveFeature(null);
     }
   };
   
@@ -225,6 +232,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const toggleImagePanel = () => {
     if (showImagePanel) {
       setShowImagePanel(false);
+      setActiveFeature(null);
     } else {
       // Close all other panels
       setShowTagInput(false);
@@ -232,7 +240,14 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       setShowScheduleOptions(false);
       setShowLockOptions(false);
       setShowImagePanel(true);
+      setActiveFeature('image');
     }
+  };
+
+  const handleCloseModal = () => {
+    // Reset all panel states
+    setActiveFeature(null);
+    onClose();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -346,6 +361,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         setShowScheduleOptions(false);
         setIsLocked(false);
         setShowLockOptions(false);
+        setActiveFeature(null); // Reset active feature
         
         // Notify success
         toast.success(isScheduled ? 'Post scheduled successfully!' : 'Post created successfully!', {
@@ -381,6 +397,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     if (showScheduleOptions) {
       setShowScheduleOptions(false);
       setIsScheduled(false);
+      setActiveFeature(null);
     } else {
       // Set default date and time values
       const now = new Date();
@@ -409,6 +426,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       
       setIsScheduled(true);
       setShowScheduleOptions(true);
+      setActiveFeature('schedule');
     }
   };
 
@@ -417,6 +435,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     if (showLockOptions) {
       setShowLockOptions(false);
       setIsLocked(false);
+      setActiveFeature(null);
     } else {
       // Close all other panels
       setShowScheduleOptions(false);
@@ -426,6 +445,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       
       setIsLocked(true);
       setShowLockOptions(true);
+      setActiveFeature('lock');
     }
   };
 
@@ -433,6 +453,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const toggleTagInput = () => {
     if (showTagInput) {
       setShowTagInput(false);
+      setActiveFeature(null);
     } else {
       // Close all other panels
       setShowScheduleOptions(false);
@@ -441,6 +462,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       setShowLockOptions(false);
       
       setShowTagInput(true);
+      setActiveFeature('tag');
     }
   };
 
@@ -449,6 +471,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     if (isVotePost) {
       setIsVotePost(false);
       setvote_options(['', '']);
+      setActiveFeature(null);
     } else {
       // Close all other panels
       setShowScheduleOptions(false);
@@ -462,6 +485,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       }
       
       setIsVotePost(true);
+      setActiveFeature('vote');
     }
   };
 
@@ -596,7 +620,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white">Create a Post</h2>
           <button
-            onClick={onClose}
+            onClick={handleCloseModal}
             className="text-gray-400 hover:text-[#00ffa3] transition-colors duration-300 p-1.5 rounded-full hover:bg-gray-800/50"
           >
             <FiX size={24} />
@@ -703,7 +727,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                         type="button"
                         onClick={handleClickUpload}
                         className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                          showImagePanel
+                          activeFeature === 'image'
                             ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
                             : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
                         }`}
@@ -730,7 +754,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                     type="button"
                     onClick={toggleVotePost}
                     className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                      isVotePost 
+                      activeFeature === 'vote'
                         ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
                         : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
                     }`}
@@ -747,7 +771,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                     type="button"
                     onClick={toggleTagInput}
                     className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                      showTagInput
+                      activeFeature === 'tag'
                         ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
                         : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
                     }`}
@@ -764,7 +788,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                     type="button"
                     onClick={toggleScheduleOptions}
                     className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                      showScheduleOptions || isScheduled
+                      activeFeature === 'schedule'
                         ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
                         : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
                     }`}
@@ -782,7 +806,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                       type="button"
                       onClick={toggleLockOptions}
                       className={`flex items-center justify-center p-2 rounded-full transition-all duration-300 ${
-                        showLockOptions || isLocked
+                        activeFeature === 'lock'
                           ? 'text-[#00ffa3] bg-[#00ffa3]/10' 
                           : 'text-gray-400 hover:text-[#00ffa3] hover:bg-[#00ffa3]/10'
                       }`}
