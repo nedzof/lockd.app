@@ -48,6 +48,20 @@ interface ExtendedPost {
   media_url?: string;
   base64Image?: string;
   lock_likes?: { amount: number; author_address?: string }[];
+  isSearchResult?: boolean;
+  _highlightContent?: boolean;
+  _matchedFields?: string[];
+  _score?: number;
+  _searchInfo?: {
+    score: number;
+    matchedInFields: string[];
+    query: string;
+  };
+  matchInfo?: {
+    fields: string[];
+    query: string;
+    score: number;
+  };
 }
 
 interface PostGridProps {
@@ -116,6 +130,28 @@ const extractFirstUrl = (text: string): string | null => {
   }
   
   return url;
+};
+
+// Function to highlight search term in text
+const highlightSearchTerm = (text: string, searchTerm: string): React.ReactNode => {
+  if (!searchTerm || !text) return text;
+  
+  // Escape special regex characters in the search term
+  const escapedSearchTerm = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  
+  // Create regex for the search term (case insensitive)
+  const regex = new RegExp(`(${escapedSearchTerm})`, 'gi');
+  
+  // Split text by search term
+  const parts = text.split(regex);
+  
+  // Map parts to JSX elements, highlighting matches
+  return parts.map((part, i) => {
+    if (part.toLowerCase() === searchTerm.toLowerCase()) {
+      return <span key={i} className="bg-[#00ffa3]/30 text-white font-semibold px-0.5 rounded">{part}</span>;
+    }
+    return part;
+  });
 };
 
 const PostGrid: React.FC<PostGridProps> = ({
@@ -247,6 +283,25 @@ const PostGrid: React.FC<PostGridProps> = ({
               // Remove any score information from the post
               if (post.content && typeof post.content === 'string') {
                 post.content = post.content.replace(/\s*\(Score:\s*\d+%\)\s*$/g, '');
+              }
+              
+              // Add search match information
+              if (post._searchInfo) {
+                console.log(`Post ${post.id} matched search in fields:`, post._matchedFields);
+                
+                // Create a special field to indicate this is a search result
+                post.isSearchResult = true;
+                post.matchInfo = {
+                  fields: post._matchedFields || [],
+                  query: post._searchInfo.query || searchTerm,
+                  score: post._score || 0
+                };
+                
+                // Highlight search term in content if it matched there
+                if (post.content && post._matchedFields?.includes('content')) {
+                  // Add a marker for later highlighting
+                  post._highlightContent = true;
+                }
               }
               
               // Process image data if available - ensures images appear in search results
@@ -1133,9 +1188,15 @@ const PostGrid: React.FC<PostGridProps> = ({
                       <p className="text-gray-200 font-medium flex items-center">
                         {post.author_address ? 
                           <>
-                            <span className="bg-[#00ffa3]/10 text-[#00ffa3] px-2 py-0.5 rounded text-xs mr-1.5">
-                              {post.author_address.substring(0, 6)}...{post.author_address.substring(post.author_address.length - 4)}
-                            </span>
+                            {post.isSearchResult && post.matchInfo?.fields.includes('author_address') ? (
+                              <span className="bg-[#00ffa3]/30 text-[#00ffa3] px-2 py-0.5 rounded text-xs mr-1.5 font-bold">
+                                {post.author_address.substring(0, 6)}...{post.author_address.substring(post.author_address.length - 4)}
+                              </span>
+                            ) : (
+                              <span className="bg-[#00ffa3]/10 text-[#00ffa3] px-2 py-0.5 rounded text-xs mr-1.5">
+                                {post.author_address.substring(0, 6)}...{post.author_address.substring(post.author_address.length - 4)}
+                              </span>
+                            )}
                           </> : 
                           <span className="text-gray-400">Anonymous</span>
                         }
@@ -1152,7 +1213,9 @@ const PostGrid: React.FC<PostGridProps> = ({
                     href={`https://whatsonchain.com/tx/${post.tx_id}`} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="text-gray-400 hover:text-[#00ffa3] transition-colors flex items-center text-xs"
+                    className={`text-gray-400 hover:text-[#00ffa3] transition-colors flex items-center text-xs ${
+                      post.isSearchResult && post.matchInfo?.fields.includes('tx_id') ? 'bg-[#00ffa3]/30 text-[#00ffa3] px-2 py-1 rounded font-bold' : ''
+                    }`}
                     title="View on WhatsonChain"
                   >
                     <span className="mr-1 hidden sm:inline">Transaction</span>
@@ -1164,15 +1227,37 @@ const PostGrid: React.FC<PostGridProps> = ({
                   {/* Post content - Moved before image for better visual hierarchy */}
                   {post.content && (
                     <div className="mb-4 whitespace-pre-wrap text-gray-100 leading-relaxed">
-                      <p className="text-xl font-semibold mb-2 text-white">{post.content.split('\n')[0]}</p>
-                      {post.content.split('\n').slice(1).join('\n') && (
-                        <p className="text-gray-200">{post.content.split('\n').slice(1).join('\n')}</p>
+                      {post.isSearchResult && post._highlightContent ? (
+                        <>
+                          <p className="text-xl font-semibold mb-2 text-white">
+                            {highlightSearchTerm(post.content.split('\n')[0], post.matchInfo?.query || searchTerm || '')}
+                          </p>
+                          {post.content.split('\n').slice(1).join('\n') && (
+                            <p className="text-gray-200">
+                              {highlightSearchTerm(post.content.split('\n').slice(1).join('\n'), post.matchInfo?.query || searchTerm || '')}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-xl font-semibold mb-2 text-white">{post.content.split('\n')[0]}</p>
+                          {post.content.split('\n').slice(1).join('\n') && (
+                            <p className="text-gray-200">{post.content.split('\n').slice(1).join('\n')}</p>
+                          )}
+                        </>
                       )}
                       
                       {/* Add link preview if URL is detected in content */}
                       {extractFirstUrl(post.content) && (
                         <div className="transition-all duration-300 opacity-100 mt-3">
                           <LinkPreview url={extractFirstUrl(post.content)!} />
+                        </div>
+                      )}
+                      
+                      {/* Show search match info for debugging */}
+                      {post.isSearchResult && post.matchInfo && (
+                        <div className="mt-2 text-xs bg-[#00ffa3]/10 text-[#00ffa3] p-1 rounded">
+                          Matched in: {post.matchInfo.fields.join(', ')}
                         </div>
                       )}
                     </div>
@@ -1294,7 +1379,10 @@ const PostGrid: React.FC<PostGridProps> = ({
                                     {/* Content area */}
                                     <div className="flex-1 min-w-0">
                                       <p className="text-base font-semibold text-white line-clamp-2 hover:line-clamp-none transition-all duration-300" title={option.content}>
-                                        {option.content}
+                                        {post.isSearchResult && post.matchInfo?.fields.includes('vote_options.content') && option.content.toLowerCase().includes(post.matchInfo.query.toLowerCase())
+                                          ? highlightSearchTerm(option.content, post.matchInfo.query)
+                                          : option.content
+                                        }
                                       </p>
                                     </div>
                                     
@@ -1331,7 +1419,13 @@ const PostGrid: React.FC<PostGridProps> = ({
                         {post.tags.slice(0, 2).map(tag => (
                           <span 
                             key={tag} 
-                            className="bg-white/5 text-gray-300 text-xs px-1.5 py-0.5 rounded-full cursor-pointer hover:bg-white/10 transition-colors"
+                            className={`${
+                              post.isSearchResult && post.matchInfo?.fields.includes('tags') && 
+                              (tag.toLowerCase() === post.matchInfo.query.toLowerCase() || 
+                               tag.toLowerCase().includes(post.matchInfo.query.toLowerCase()))
+                                ? 'bg-[#00ffa3]/30 text-white font-bold' 
+                                : 'bg-white/5 text-gray-300'
+                            } text-xs px-1.5 py-0.5 rounded-full cursor-pointer hover:bg-white/10 transition-colors`}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleTagClick(tag);

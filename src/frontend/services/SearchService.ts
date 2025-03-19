@@ -9,11 +9,15 @@ const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
 // Configure Fuse.js options
 const fuseOptions = {
   includeScore: true,
-  threshold: 0.3,
+  threshold: 0.4,
+  includeMatches: true,
+  ignoreLocation: true,
   keys: [
     { name: 'content', weight: 2 },
-    { name: 'author_address', weight: 1 },
-    { name: 'tags', weight: 1.5 }
+    { name: 'author_address', weight: 1.5 },
+    { name: 'tags', weight: 1.5 },
+    { name: 'tx_id', weight: 1.5 },
+    { name: 'vote_options.content', weight: 1.8 }
   ]
 };
 
@@ -61,6 +65,16 @@ export async function enhanceSearch(query: string, type: string = 'all'): Promis
           
           // Store score as a separate property for sorting only
           enhancedItem._score = result.score;
+          
+          // Track where the match was found
+          enhancedItem._matchedFields = result.matches?.map(match => match.key) || [];
+          
+          // Store information about where the match was found for debugging and highlighting
+          enhancedItem._searchInfo = {
+            score: result.score,
+            matchedInFields: result.matches?.map(match => match.key) || [],
+            query: query
+          };
           
           // Make sure raw_image_data is preserved
           if (item.raw_image_data) {
