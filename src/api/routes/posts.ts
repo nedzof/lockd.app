@@ -34,4 +34,38 @@ router.get('/search', async (req, res) => {
   }
 });
 
+// Transaction lookup endpoint - for direct TX ID lookups
+router.get('/tx/:txId', async (req, res) => {
+  const txId = req.params.txId;
+  
+  if (!txId || !/^[0-9a-fA-F]{64}$/.test(txId)) {
+    return res.status(400).json({ error: 'Invalid transaction ID format' });
+  }
+  
+  try {
+    console.log(`Looking up transaction: ${txId}`);
+    
+    // Search specifically for this exact transaction ID
+    const results = await searchPosts(txId, 1, 'tx');
+    
+    if (results && results.posts && results.posts.length > 0) {
+      return res.json({
+        success: true,
+        post: results.posts[0],
+      });
+    } else {
+      return res.status(404).json({ 
+        error: 'Transaction not found in database',
+        success: false
+      });
+    }
+  } catch (error) {
+    console.error('Transaction lookup error:', error);
+    return res.status(500).json({ 
+      error: 'Failed to lookup transaction',
+      success: false
+    });
+  }
+});
+
 export default router; 

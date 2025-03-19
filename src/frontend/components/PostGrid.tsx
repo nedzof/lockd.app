@@ -12,6 +12,7 @@ import { API_URL } from '../config';
 import LinkPreview from './LinkPreview';
 import { calculate_active_locked_amount } from '../utils/lockStatus';
 import { calculate_active_stats } from '../utils/stats';
+import { enhanceSearch } from '../services/SearchService';
 
 interface vote_option {
   id: string;
@@ -230,6 +231,60 @@ const PostGrid: React.FC<PostGridProps> = ({
         setIsFetchingMore(true);
       }
       
+      // If we're doing a search, use the enhanced search service
+      if (searchTerm) {
+        console.log(`SEARCH: Using enhanced search with query: "${searchTerm}", type: ${searchType || 'all'}`);
+        
+        try {
+          // Use the enhanced search service
+          const searchResults = await enhanceSearch(searchTerm, searchType);
+          
+          if (searchResults && searchResults.length > 0) {
+            console.log(`Found ${searchResults.length} results with enhanced search`);
+            
+            // Process search results
+            const processedPosts = searchResults.map((post: any) => {
+              // Add any additional processing specific to search results
+              return {
+                ...post,
+                // If the post has a search score, show it for debugging
+                ...(post.score !== undefined && { 
+                  content: `${post.content} ${process.env.NODE_ENV === 'development' ? `(Score: ${Math.round((1 - (post.score || 0)) * 100)}%)` : ''}`
+                })
+              };
+            });
+            
+            // Update submissions with the search results
+            setSubmissions(processedPosts);
+            
+            // Keep track of the post IDs we've seen
+            processedPosts.forEach((post: any) => {
+              seenpost_ids.current.add(post.id);
+            });
+            
+            // Update pagination state for search results
+            setHasMore(false); // Search doesn't support pagination yet
+            setNextCursor(null);
+            
+            // Finally, set loading to false
+            setLoading(false);
+            setIsFetchingMore(false);
+            isFetchInProgress.current = false;
+            
+            return; // Exit early since we've handled the search
+          } else {
+            console.log('No results found with enhanced search');
+            // If no results, still continue with the regular API approach as fallback
+          }
+        } catch (error) {
+          console.error('Error with enhanced search:', error);
+          // Continue with regular API approach as fallback
+        }
+      }
+      
+      // This is the original code for fetching posts, used if we're not searching
+      // or if the enhanced search didn't return results
+
       // Build the query parameters
       const queryParams = new URLSearchParams();
       

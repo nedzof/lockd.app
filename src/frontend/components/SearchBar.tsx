@@ -36,24 +36,78 @@ const SearchBar: React.FC = () => {
     
     // Special handling for transaction IDs
     if (TX_ID_REGEX.test(searchTerm.trim())) {
-      // Redirect to WhatsonChain for transaction details
-      window.open(`https://whatsonchain.com/tx/${searchTerm.trim()}`, '_blank');
-      toast.success('Opening transaction details in a new tab');
+      try {
+        // First attempt to redirect to transaction details on the server
+        toast.loading('Looking up transaction...');
+        
+        fetch(`${API_URL}/api/posts/tx/${searchTerm.trim()}`)
+          .then(response => {
+            if (response.ok) {
+              return response.json();
+            } else {
+              throw new Error('Transaction not found in our database');
+            }
+          })
+          .then(data => {
+            toast.dismiss();
+            if (data && data.post) {
+              // If we found the post, navigate to it
+              toast.success('Transaction found!');
+              // TODO: Navigate to post detail view when implemented
+              console.log('Found post:', data.post);
+              
+              // For now, fallback to WhatsonChain
+              window.open(`https://whatsonchain.com/tx/${searchTerm.trim()}`, '_blank');
+              toast.success('Opening transaction details in a new tab');
+            } else {
+              // If we didn't find a post, redirect to WhatsonChain
+              window.open(`https://whatsonchain.com/tx/${searchTerm.trim()}`, '_blank');
+              toast.success('Opening transaction details in a new tab');
+            }
+          })
+          .catch(error => {
+            toast.dismiss();
+            console.error('Error looking up transaction:', error);
+            // Fallback to WhatsonChain
+            window.open(`https://whatsonchain.com/tx/${searchTerm.trim()}`, '_blank');
+            toast.success('Opening transaction details in a new tab');
+          });
+      } catch (error) {
+        console.error('Error processing transaction ID:', error);
+        // Fallback to WhatsonChain
+        window.open(`https://whatsonchain.com/tx/${searchTerm.trim()}`, '_blank');
+        toast.success('Opening transaction details in a new tab');
+      }
+      
       setIsExpanded(false);
       return;
     }
     
-    // For regular searches, continue with the normal flow
-    const searchParams = new URLSearchParams();
-    searchParams.set('q', searchTerm.trim());
-    searchParams.set('type', searchType);
-    
-    // Navigate to home with search query params
-    navigate(`/?${searchParams.toString()}`);
-    
-    // Close search after submitting
-    setIsExpanded(false);
-  }, [searchTerm, searchType, navigate]);
+    // For regular searches, use the search API endpoint directly
+    // This provides more reliable search than relying on the URL params
+    try {
+      toast.loading('Searching...');
+      
+      // Clear any existing search params from the URL
+      const currentParams = new URLSearchParams(location.search);
+      currentParams.delete('q');
+      currentParams.delete('type');
+      
+      // Add the new search params
+      currentParams.set('q', searchTerm.trim());
+      currentParams.set('type', searchType);
+      
+      // Navigate to the search URL
+      navigate(`/?${currentParams.toString()}`);
+      
+      // Close the search after submitting
+      setIsExpanded(false);
+      toast.dismiss();
+    } catch (error) {
+      console.error('Error performing search:', error);
+      toast.error('Error performing search');
+    }
+  }, [searchTerm, searchType, navigate, location.search]);
   
   const toggleExpand = () => {
     setIsExpanded(!isExpanded);

@@ -76,16 +76,6 @@ const Stats: React.FC = () => {
       }
       
       const data = await response.json();
-      
-      // Log the raw data for debugging
-      console.log("Stats API response:", {
-        total_bsv_locked: data.total_bsv_locked,
-        formatted_bsv_locked: formatBSV(data.total_bsv_locked),
-        total_lock_likes: data.total_lock_likes,
-        total_users: data.total_users,
-        bsv_price: data.current_bsv_price
-      });
-      
       setStats(data);
       
       // Set last updated time
@@ -291,12 +281,7 @@ const Stats: React.FC = () => {
                     <h3 className="text-base font-medium opacity-80">BSV Locked</h3>
                     <FiTrendingUp className="h-5 w-5 text-[#00E6CC]" />
                   </div>
-                  <p className="text-2xl font-bold">
-                    {formatBSV(stats?.total_bsv_locked || 0)} 
-                    {/* Debug info, remove in production */}
-                    {stats?.total_bsv_locked ? 
-                      <span className="text-xs text-gray-500"> ({stats.total_bsv_locked} satoshis)</span> : ''}
-                  </p>
+                  <p className="text-2xl font-bold">{formatBSV(stats?.total_bsv_locked || 0)}</p>
                   <p className="text-[#00E6CC] text-xs mt-1">Total value locked</p>
                 </div>
                 

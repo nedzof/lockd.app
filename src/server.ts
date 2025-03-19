@@ -3,6 +3,7 @@ import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import postsRouter from './api/posts';
+import searchRouter from './api/routes/posts';
 import lockLikesRouter from './api/lock-likes';
 import tagsRouter from './api/tags';
 import statsRouter from './api/stats';
@@ -126,6 +127,7 @@ function sanitizeRequestBody(body: any): any {
 
 // API Routes
 app.use('/api/posts', postsRouter);
+app.use('/api/posts', searchRouter);
 app.use('/api/lock-likes', lockLikesRouter);
 app.use('/api/tags', tagsRouter);
 app.use('/api/stats', statsRouter);

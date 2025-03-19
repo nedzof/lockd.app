@@ -13,14 +13,16 @@ export function is_still_locked(unlock_height: number | undefined | null, curren
   // Log the input values
   console.log('is_still_locked check:', { unlock_height, current_height });
   
-  // If we're missing either height, consider it locked to be safe
+  // If unlock_height is undefined or null, consider it unlocked since permanent locks are not allowed
   if (unlock_height === undefined || unlock_height === null) {
-    console.log('unlock_height is undefined or null, considering locked');
-    return true;
+    console.log('unlock_height is undefined or null, considering unlocked');
+    return false;
   }
+  
+  // If current_height is undefined or null, we can't determine lock status
   if (current_height === undefined || current_height === null) {
-    console.log('current_height is undefined or null, considering locked');
-    return true;
+    console.log('current_height is undefined or null, cannot determine lock status');
+    return false;
   }
   
   // If current block height has reached or exceeded unlock height, it's unlockable
@@ -60,7 +62,7 @@ export function calculate_active_locked_amount(
   // Ensure it's an array
   if (!Array.isArray(lock_likes)) {
     console.warn('calculate_active_locked_amount received non-array input:', lock_likes);
-    // NEW: Try to convert from object format if possible
+    // Try to convert from object format if possible
     if (typeof lock_likes === 'object' && lock_likes !== null) {
       try {
         // Try to extract values if it's an object with numeric keys
@@ -95,7 +97,7 @@ export function calculate_active_locked_amount(
     });
   });
   
-  // NEW: Check and fix invalid amount values in the array
+  // Check and fix invalid amount values in the array
   const fixedLocks = lock_likes.map(lock => {
     if (!lock) return { amount: 0, unlock_height: null };
     
@@ -119,16 +121,16 @@ export function calculate_active_locked_amount(
     return lock;
   });
   
-  // If we don't have current height, return total amount as a fallback
+  // Filter out locks with null unlock_height and calculate total of valid locks
+  const validLocks = fixedLocks.filter(lock => lock.unlock_height !== null && lock.unlock_height !== undefined);
+  
+  // If we don't have current height, we can't determine lock status
   if (current_height === null) {
-    const total = fixedLocks.reduce((total, lock) => {
-      return total + (typeof lock.amount === 'number' ? lock.amount : 0);
-    }, 0);
-    console.log(`No current height, returning total amount: ${total}`);
-    return total;
+    console.log('No current height, cannot determine lock status, returning 0');
+    return 0;
   }
   
-  const result = fixedLocks.reduce((total, lock) => {
+  const result = validLocks.reduce((total, lock) => {
     // Skip invalid locks
     if (!lock || typeof lock !== 'object') {
       console.warn('Skipping invalid lock in calculate_active_locked_amount:', lock);

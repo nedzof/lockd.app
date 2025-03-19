@@ -1,26 +1,32 @@
 [
   {
     "name": "Mar",
-    "price": 33.48
+    "price": 34.3,
+    "date": "2025-03-14"
   },
   {
     "name": "Mar",
-    "price": 34.37
+    "price": 33.75,
+    "date": "2025-03-15"
   },
   {
     "name": "Mar",
-    "price": 34.3
+    "price": 34.06,
+    "date": "2025-03-16"
   },
   {
     "name": "Mar",
-    "price": 33.75
+    "price": 33.53,
+    "date": "2025-03-17"
   },
   {
     "name": "Mar",
-    "price": 34.06
+    "price": 34.8,
+    "date": "2025-03-18"
   },
   {
     "name": "Mar",
-    "price": 33.79
+    "price": 34.8,
+    "date": "2025-03-19"
   }
 ]
