@@ -19,10 +19,13 @@ interface StatsData {
   most_active_user: string | null;
   current_bsv_price: number | null;
   last_updated: string;
-  lockTimeData: Array<{ name: string; locks: number }>;
-  bsvLockedOverTime: Array<{ name: string; bsv: number }>;
+  lockTimeData: Array<{ name: string; locks: number; active_locks: number }>;
+  bsvLockedOverTime: Array<{ name: string; bsv: number; total_bsv: number }>;
   priceData: Array<{ name: string; price: number }>;
-  lockSizeDistribution: Array<{ name: string; value: number }>;
+  lockSizeDistribution: {
+    distribution: Array<{ name: string; count: number }>;
+    totalLockedAmount: number;
+  };
 }
 
 // Chart colors - using the app's color scheme
@@ -114,18 +117,22 @@ const Stats: React.FC = () => {
 
   // Generate lock size distribution data from API
   const getLockSizeDistributionData = () => {
-    if (!stats || !stats.lockSizeDistribution) {
+    if (!stats || !stats.lockSizeDistribution || !stats.lockSizeDistribution.distribution) {
       // Fallback to sample data if API data is not available
       return [
-        { name: "<0.0001 BSV", value: 0 },
-        { name: "0.0001-0.001 BSV", value: 0 },
-        { name: "0.001-0.01 BSV", value: 0 },
-        { name: "0.01-0.1 BSV", value: 0 },
-        { name: ">0.1 BSV", value: 0 }
+        { name: "0-1", value: 0 },
+        { name: "1-10", value: 0 },
+        { name: "10-100", value: 0 },
+        { name: "100-1000", value: 0 },
+        { name: "1000+", value: 0 }
       ];
     }
     
-    return stats.lockSizeDistribution;
+    // Transform the distribution data to match the expected format for the chart
+    return stats.lockSizeDistribution.distribution.map(item => ({
+      name: item.name,
+      value: item.count
+    }));
   };
 
   // Function to manually trigger a stats update
@@ -457,7 +464,7 @@ const Stats: React.FC = () => {
                 </div>
                 
                 <div className="text-sm opacity-70 text-center mt-2">
-                  Total BSV locked: {formatBSV(stats?.total_bsv_locked || 0)}
+                  Total BSV locked: {formatBSV(stats?.lockSizeDistribution?.totalLockedAmount || stats?.total_bsv_locked || 0)}
                 </div>
               </div>
 

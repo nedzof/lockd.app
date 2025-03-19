@@ -636,7 +636,8 @@ async function getLockTimeDataPrisma(timeRange: string) {
     const current_block_height = latestBlock?.block_height || 0;
     logger.info(`Current block height for lock time chart: ${current_block_height}`);
     
-    // Get all lock_like entries within the time range that are still active locks
+    // Get ALL lock_like entries within the time range, regardless of their unlock status
+    // This ensures we always have data to display
     const locks = await prisma.lock_like.findMany({
       where: {
         created_at: {
@@ -644,21 +645,7 @@ async function getLockTimeDataPrisma(timeRange: string) {
         },
         amount: {
           gt: 0 // Only include locks with positive amounts
-        },
-        AND: [
-          {
-            // Only include locks with a defined unlock height
-            unlock_height: {
-              not: null
-            }
-          },
-          {
-            // Only include locks where the current block height has not yet reached the unlock height
-            unlock_height: {
-              gt: current_block_height
-            }
-          }
-        ]
+        }
       },
       select: {
         id: true,
@@ -671,21 +658,38 @@ async function getLockTimeDataPrisma(timeRange: string) {
       }
     });
     
-    logger.info(`Found ${locks.length} active locks for time range ${timeRange}`);
+    logger.info(`Found ${locks.length} locks for time range ${timeRange}`);
+    
+    // Calculate active locks (those that are still locked)
+    const activeLocks = locks.filter(lock => 
+      lock.unlock_height !== null && 
+      lock.unlock_height > current_block_height
+    );
+    
+    logger.info(`Of those, ${activeLocks.length} are still active (non-null unlock_height and unlock_height > current_block_height)`);
     
     // Log a few examples
     locks.slice(0, 5).forEach((lock, i) => {
-      logger.info(`Lock ${i+1}: ID=${lock.id}, TX=${lock.tx_id}, Created=${lock.created_at}, Unlock=${lock.unlock_height || 'permanent'}`);
+      const isActive = lock.unlock_height !== null && lock.unlock_height > current_block_height;
+      logger.info(`Lock ${i+1}: ID=${lock.id}, TX=${lock.tx_id}, Created=${lock.created_at}, Unlock=${lock.unlock_height || 'null'}, Active=${isActive}`);
     });
     
     // Group the locks by the appropriate time period
     const grouped = groupByTimePeriod(locks, timeRange);
     
-    // Format the data to include the count for each time period
-    const formattedData = Object.entries(grouped).map(([name, locks]) => ({
-      name,
-      locks: locks.length
-    }));
+    // Format the data to include both total and active counts for each time period
+    const formattedData = Object.entries(grouped).map(([name, periodLocks]) => {
+      const activePeriodLocks = periodLocks.filter(lock => 
+        lock.unlock_height !== null && 
+        lock.unlock_height > current_block_height
+      );
+      
+      return {
+        name,
+        locks: periodLocks.length, // Total locks
+        active_locks: activePeriodLocks.length // Active locks only
+      };
+    });
     
     logger.info(`Formatted lock time data: ${JSON.stringify(formattedData)}`);
     return formattedData;
@@ -714,7 +718,8 @@ async function getBsvLockedOverTimePrisma(timeRange: string) {
     const current_block_height = latestBlock?.block_height || 0;
     logger.info(`Current block height for BSV locked chart: ${current_block_height}`);
     
-    // Get all lock_like entries within the time range that are still actively locked
+    // Get ALL lock_like entries within the time range, regardless of their unlock status
+    // This ensures we always have data to display
     const locks = await prisma.lock_like.findMany({
       where: {
         created_at: {
@@ -722,21 +727,7 @@ async function getBsvLockedOverTimePrisma(timeRange: string) {
         },
         amount: {
           gt: 0 // Only include locks with positive amounts
-        },
-        AND: [
-          {
-            // Only include locks with a defined unlock height
-            unlock_height: {
-              not: null
-            }
-          },
-          {
-            // Only include locks where the current block height has not yet reached the unlock height
-            unlock_height: {
-              gt: current_block_height
-            }
-          }
-        ]
+        }
       },
       select: {
         id: true,
@@ -751,19 +742,41 @@ async function getBsvLockedOverTimePrisma(timeRange: string) {
     });
     
     // Log the first few locks for debugging
-    logger.info(`Found ${locks.length} active locks with amounts for time range ${timeRange}`);
+    logger.info(`Found ${locks.length} locks with amounts for time range ${timeRange}`);
+    
+    // Calculate active locks (those that are still locked)
+    const activeLocks = locks.filter(lock => 
+      lock.unlock_height !== null && 
+      lock.unlock_height > current_block_height
+    );
+    
+    logger.info(`Of those, ${activeLocks.length} are still active (non-null unlock_height and unlock_height > current_block_height)`);
+    
     locks.slice(0, 5).forEach((lock, i) => {
-      logger.info(`Lock ${i+1}: ID=${lock.id}, TX=${lock.tx_id}, Amount=${lock.amount}, Created=${lock.created_at}, Unlock=${lock.unlock_height || 'permanent'}`);
+      const isActive = lock.unlock_height !== null && lock.unlock_height > current_block_height;
+      logger.info(`Lock ${i+1}: ID=${lock.id}, TX=${lock.tx_id}, Amount=${lock.amount}, Created=${lock.created_at}, Unlock=${lock.unlock_height || 'null'}, Active=${isActive}`);
     });
     
     // Group the locks by the appropriate time period
     const grouped = groupByTimePeriod(locks, timeRange);
     
-    // Calculate the sum of amounts for each time period
-    const formattedData = Object.entries(grouped).map(([name, locks]) => ({
-      name,
-      bsv: locks.reduce((sum, lock) => sum + Number(lock.amount || 0), 0)
-    }));
+    // Calculate the sum of amounts for each time period (both total and active)
+    const formattedData = Object.entries(grouped).map(([name, periodLocks]) => {
+      const totalAmount = periodLocks.reduce((sum, lock) => sum + Number(lock.amount || 0), 0);
+      
+      const activePeriodLocks = periodLocks.filter(lock => 
+        lock.unlock_height !== null && 
+        lock.unlock_height > current_block_height
+      );
+      
+      const activeAmount = activePeriodLocks.reduce((sum, lock) => sum + Number(lock.amount || 0), 0);
+      
+      return {
+        name,
+        bsv: activeAmount, // Use active amount for the main chart
+        total_bsv: totalAmount // Include total amount for reference
+      };
+    });
     
     logger.info(`Formatted BSV locked data: ${JSON.stringify(formattedData)}`);
     return formattedData;
@@ -922,33 +935,29 @@ async function getLockSizeDistribution() {
     const current_block_height = latestBlock?.block_height || 0;
     logger.info(`Current block height for lock size distribution: ${current_block_height}`);
     
-    // Get all lock_like entries with active locks (amount > 0 and not yet unlocked)
+    // Get ALL lock_like entries, regardless of their unlock status
+    // This ensures we always have data to display
     const locks = await prisma.lock_like.findMany({
       where: {
         amount: {
           gt: 0 // Only include locks with positive amounts
-        },
-        AND: [
-          {
-            // Only include locks with a defined unlock height
-            unlock_height: {
-              not: null
-            }
-          },
-          {
-            // Only include locks where the current block height has not yet reached the unlock height
-            unlock_height: {
-              gt: current_block_height
-            }
-          }
-        ]
+        }
       },
       select: {
-        amount: true
+        amount: true,
+        unlock_height: true
       }
     });
     
-    logger.info(`Found ${locks.length} active locks for size distribution`);
+    logger.info(`Found ${locks.length} locks for size distribution`);
+    
+    // Filter active locks (those that are still locked)
+    const activeLocks = locks.filter(lock => 
+      lock.unlock_height !== null && 
+      lock.unlock_height > current_block_height
+    );
+    
+    logger.info(`Of those, ${activeLocks.length} are still active (non-null unlock_height and unlock_height > current_block_height)`);
     
     // Calculate distribution based on lock amount
     const distribution = {
@@ -959,7 +968,11 @@ async function getLockSizeDistribution() {
       '1000+': 0
     };
     
-    locks.forEach(lock => {
+    // Use all locks for distribution if there are no active locks
+    // This ensures we always have data to display
+    const locksToUse = activeLocks.length > 0 ? activeLocks : locks;
+    
+    locksToUse.forEach(lock => {
       const amount = parseFloat(lock.amount.toString());
       if (amount < 1) {
         distribution['0-1']++;
@@ -980,11 +993,25 @@ async function getLockSizeDistribution() {
       count
     }));
     
+    // Calculate the sum of amounts for active locks
+    const totalLockedAmount = activeLocks.reduce((sum, lock) => 
+      sum + parseFloat(lock.amount.toString()), 0
+    );
+    
     logger.info(`Formatted lock size distribution: ${JSON.stringify(formattedData)}`);
-    return formattedData;
+    logger.info(`Total locked amount: ${totalLockedAmount}`);
+    
+    // Add the total locked amount to the formatted data for display
+    return {
+      distribution: formattedData,
+      totalLockedAmount: totalLockedAmount
+    };
   } catch (error) {
     logger.error('Error getting lock size distribution with Prisma', error);
-    return [];
+    return {
+      distribution: [],
+      totalLockedAmount: 0
+    };
   }
 }
 
