@@ -438,6 +438,8 @@ const Stats: React.FC = () => {
                       tick={{ fill: '#ccc' }}
                       tickLine={{ stroke: '#666' }}
                       axisLine={{ stroke: '#666' }}
+                      domain={['auto', 'auto']}
+                      allowDataOverflow={false}
                     />
                     <YAxis 
                       yAxisId="right" 
@@ -447,6 +449,8 @@ const Stats: React.FC = () => {
                       tickLine={{ stroke: '#666' }}
                       axisLine={{ stroke: '#666' }}
                       tickFormatter={(value) => `${value}`}
+                      domain={['auto', 'auto']}
+                      allowDataOverflow={false}
                     />
                     <YAxis 
                       yAxisId="price" 
@@ -454,8 +458,9 @@ const Stats: React.FC = () => {
                       stroke="#FF69B4"
                       tick={{ fontSize: 12 }}
                       tickFormatter={(value) => `$${value}`}
-                      domain={[30, 'auto']}
+                      domain={['dataMin - 1', 'dataMax + 1']}
                       width={40}
+                      allowDataOverflow={false}
                     />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#333', border: '1px solid #666' }}
@@ -466,7 +471,7 @@ const Stats: React.FC = () => {
                         } else if (name === 'locks') {
                           return [value, 'Total Locks'];
                         } else if (name === 'bsv') {
-                          return [value, 'BSV Locked'];
+                          return [formatBSV(Number(value)), 'BSV Locked'];
                         }
                         return [value, name];
                       }}
