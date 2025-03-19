@@ -465,13 +465,15 @@ export const updateStats = async (req: Request, res: Response) => {
         amount: {
           gt: 0  // Only consider locks with amount greater than 0
         },
-        OR: [
+        AND: [
           {
-            // Include locks without an unlock_height (permanent locks)
-            unlock_height: null
+            // Only include locks with a defined unlock height
+            unlock_height: {
+              not: null
+            }
           },
           {
-            // Include locks where the current block height has not yet reached the unlock height
+            // Only include locks where the current block height has not yet reached the unlock height
             unlock_height: {
               gt: current_block_height
             }
@@ -643,13 +645,15 @@ async function getLockTimeDataPrisma(timeRange: string) {
         amount: {
           gt: 0 // Only include locks with positive amounts
         },
-        OR: [
+        AND: [
           {
-            // Include locks without an unlock_height (permanent locks)
-            unlock_height: null
+            // Only include locks with a defined unlock height
+            unlock_height: {
+              not: null
+            }
           },
           {
-            // Include locks where the current block height has not yet reached the unlock height
+            // Only include locks where the current block height has not yet reached the unlock height
             unlock_height: {
               gt: current_block_height
             }
@@ -719,13 +723,15 @@ async function getBsvLockedOverTimePrisma(timeRange: string) {
         amount: {
           gt: 0 // Only include locks with positive amounts
         },
-        OR: [
+        AND: [
           {
-            // Include locks without an unlock_height (permanent locks)
-            unlock_height: null
+            // Only include locks with a defined unlock height
+            unlock_height: {
+              not: null
+            }
           },
           {
-            // Include locks where the current block height has not yet reached the unlock height
+            // Only include locks where the current block height has not yet reached the unlock height
             unlock_height: {
               gt: current_block_height
             }
@@ -922,13 +928,15 @@ async function getLockSizeDistribution() {
         amount: {
           gt: 0 // Only include locks with positive amounts
         },
-        OR: [
+        AND: [
           {
-            // Include locks without an unlock_height (permanent locks)
-            unlock_height: null
+            // Only include locks with a defined unlock height
+            unlock_height: {
+              not: null
+            }
           },
           {
-            // Include locks where the current block height has not yet reached the unlock height
+            // Only include locks where the current block height has not yet reached the unlock height
             unlock_height: {
               gt: current_block_height
             }
