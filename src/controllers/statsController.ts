@@ -512,7 +512,7 @@ export const updateStats = async (req: Request, res: Response) => {
       - Total lock likes: ${total_lock_likes}
       - Total users: ${total_users}
       - Active locks count: ${active_locks.length}
-      - Total active BSV locked: ${total_bsv_locked}
+      - Total active BSV locked in satoshis: ${total_bsv_locked} (${total_bsv_locked / 100000000} BSV)
       - Average blocks until unlock: ${Math.round(avg_lock_duration)}
       - Current block height: ${current_block_height}
     `);
@@ -554,9 +554,9 @@ export const updateStats = async (req: Request, res: Response) => {
         - Total locks: ${totalLocks}
         - Locks with zero amount: ${zeroAmountLocks}
         - Unlockable locks: ${unlockable_locks}
-        - Unlockable amount: ${unlockable_amount}
+        - Unlockable amount in satoshis: ${unlockable_amount} (${unlockable_amount / 100000000} BSV)
         - Active locks: ${active_locks.length}
-        - Active locked amount: ${total_bsv_locked}
+        - Active locked amount in satoshis: ${total_bsv_locked} (${total_bsv_locked / 100000000} BSV)
       `);
     } catch (error) {
       logger.error('Error getting lock amount distribution', error);
@@ -564,7 +564,7 @@ export const updateStats = async (req: Request, res: Response) => {
     
     // Check for unlockable funds for debugging purposes
     const unlockableFundsInfo = await checkUnlockableFunds();
-    logger.info(`Unlockable funds summary: ${unlockableFundsInfo.count} locks with ${unlockableFundsInfo.totalAmount} BSV can be unlocked`);
+    logger.info(`Unlockable funds summary: ${unlockableFundsInfo.count} locks with ${unlockableFundsInfo.totalAmount / 100000000} BSV can be unlocked`);
     
     // Create stats data object with real data
     const statsData: any = {
@@ -573,7 +573,7 @@ export const updateStats = async (req: Request, res: Response) => {
       total_votes,
       total_lock_likes,
       total_users,
-      total_bsv_locked: Number(total_bsv_locked),
+      total_bsv_locked: Number(total_bsv_locked), // This is in satoshis (1 BSV = 100,000,000 satoshis)
       avg_lock_duration: Number(avg_lock_duration),
       most_used_tag: most_used_tag.length > 0 ? most_used_tag[0].name : null,
       most_active_user: mostActiveUser.length > 0 ? mostActiveUser[0].author_address : null,
