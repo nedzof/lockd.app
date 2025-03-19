@@ -1293,6 +1293,8 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all',
     // Clean the query to prevent injection
     const cleanQuery = query.trim();
     
+    console.log('Search request with query:', cleanQuery, 'and filters:', JSON.stringify(filters));
+    
     // Build where condition for the main Prisma query
     const whereConditions: Prisma.postWhereInput = {
       OR: []
@@ -1363,17 +1365,27 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all',
     
     // Time filter
     if (filters.time_filter) {
-      let timeThreshold = new Date();
-      
-      if (filters.time_filter === '1d') {
-        timeThreshold.setDate(timeThreshold.getDate() - 1);
-        andConditions.push({ created_at: { gte: timeThreshold } });
-      } else if (filters.time_filter === '7d') {
-        timeThreshold.setDate(timeThreshold.getDate() - 7);
-        andConditions.push({ created_at: { gte: timeThreshold } });
-      } else if (filters.time_filter === '30d') {
-        timeThreshold.setDate(timeThreshold.getDate() - 30);
-        andConditions.push({ created_at: { gte: timeThreshold } });
+      try {
+        let timeThreshold = new Date();
+        
+        if (filters.time_filter === '1d' || filters.time_filter === '24h') {
+          timeThreshold.setDate(timeThreshold.getDate() - 1);
+          andConditions.push({ created_at: { gte: timeThreshold } });
+          console.log('Applied 1d/24h time filter:', timeThreshold);
+        } else if (filters.time_filter === '7d') {
+          timeThreshold.setDate(timeThreshold.getDate() - 7);
+          andConditions.push({ created_at: { gte: timeThreshold } });
+          console.log('Applied 7d time filter:', timeThreshold);
+        } else if (filters.time_filter === '30d') {
+          timeThreshold.setDate(timeThreshold.getDate() - 30);
+          andConditions.push({ created_at: { gte: timeThreshold } });
+          console.log('Applied 30d time filter:', timeThreshold);
+        } else {
+          console.warn(`Unsupported time_filter value: ${filters.time_filter}`);
+        }
+      } catch (timeError) {
+        console.error('Error applying time filter:', timeError);
+        // Continue without this filter
       }
     }
     
@@ -1382,12 +1394,16 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all',
       // Get current block height from somewhere
       const currentBlockHeight = 800000; // Placeholder value, should be fetched from DB or API
       
+      console.log(`Processing block filter: ${filters.block_filter}`);
       if (filters.block_filter === 'last-block') {
         andConditions.push({ block_height: { gte: currentBlockHeight - 1 } });
+        console.log('Applied last-block filter with height:', currentBlockHeight - 1);
       } else if (filters.block_filter === 'last-10-blocks') {
         andConditions.push({ block_height: { gte: currentBlockHeight - 10 } });
+        console.log('Applied last-10-blocks filter with height:', currentBlockHeight - 10);
       } else if (filters.block_filter === 'last-50-blocks') {
         andConditions.push({ block_height: { gte: currentBlockHeight - 50 } });
+        console.log('Applied last-50-blocks filter with height:', currentBlockHeight - 50);
       }
     }
     
@@ -1398,6 +1414,13 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all',
           hasSome: filters.tags
         }
       });
+      console.log('Applied tags filter with values:', filters.tags);
+    }
+    
+    // Ranking filter (implement any special handling beyond sorting)
+    if (filters.ranking_filter) {
+      console.log(`Applied ranking filter: ${filters.ranking_filter}`);
+      // Add any specific where conditions for ranking filters if needed
     }
     
     // User filter
@@ -1411,12 +1434,14 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all',
             }
           }
         });
+        console.log('Applied my-locks filter for user:', filters.user_id);
       }
       // For 'my-posts', we find posts authored by the user
       else if (filters.personal_filter === 'my-posts') {
         andConditions.push({
           author_address: filters.user_id
         });
+        console.log('Applied my-posts filter for user:', filters.user_id);
       }
     }
     
@@ -1425,7 +1450,36 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all',
       whereConditions.AND = andConditions;
     }
     
-    console.log('Search query with conditions:', JSON.stringify(whereConditions, null, 2));
+    console.log('Final search query with conditions:', JSON.stringify(whereConditions, null, 2));
+    
+    // Determine sorting based on ranking_filter
+    let orderBy: any;
+    
+    if (filters.ranking_filter && filters.ranking_filter.startsWith('top-') || filters.ranking_filter === 'top') {
+      // For "top" rankings, we need to sort by lock_likes count, but this requires post-query sorting
+      // We'll use created_at for the initial query and then sort by lock_count after fetching
+      orderBy = { created_at: 'desc' };
+      console.log('Will sort by lock_count after fetching (top ranking)');
+    } else {
+      // Default to newest first
+      orderBy = { created_at: 'desc' };
+      console.log('Ordering by created_at (desc) as default');
+    }
+    
+    // Calculate the limit based on ranking filter if applicable
+    let effectiveLimit = limit;
+    if (filters.ranking_filter && filters.ranking_filter.startsWith('top-')) {
+      try {
+        const topN = parseInt(filters.ranking_filter.split('-')[1], 10);
+        if (!isNaN(topN) && topN > 0) {
+          effectiveLimit = topN;
+          console.log(`Using effective limit of ${effectiveLimit} from ranking filter ${filters.ranking_filter}`);
+        }
+      } catch (limitError) {
+        console.error('Error parsing ranking limit:', limitError);
+        // Keep the default limit
+      }
+    }
     
     // Find posts matching the criteria
     const posts = await prisma.post.findMany({
@@ -1434,67 +1488,81 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all',
         vote_options: true,
         lock_likes: true  // Include all lock_likes data for ranking
       },
-      orderBy: filters.ranking_filter && 
-              ['top-1', 'top-3', 'top-5', 'top-10', 'top-25', 'top-50'].includes(filters.ranking_filter) 
-                ? { lock_likes: { _count: 'desc' } } // Order by lock count for ranking filters
-                : { created_at: 'desc' },           // Default to newest first
-      take: filters.ranking_filter 
-            ? parseInt(filters.ranking_filter.split('-')[1], 10) || limit // Take specified number for top-N filters
-            : limit                                                       // Otherwise use standard limit
+      orderBy,
+      take: effectiveLimit > 0 ? effectiveLimit * 3 : 50 // Fetch more to allow for ranking
     });
     
-    // Get user data for posts
-    const userAddresses = posts.map(post => post.author_address).filter(Boolean) as string[];
-    let users: Record<string, any> = {};
+    console.log(`Found ${posts.length} search results before sorting`);
     
-    // Skip user lookup since the user model doesn't exist in this prisma instance
-    // This avoids the error "Cannot read properties of undefined (reading 'findMany')"
-    console.log(`Found ${posts.length} search results, skipping user lookup`);
-
-    // Process posts to include necessary data
-    const processedPosts = posts.map(post => {
-      // Add user data to post (simplified - no database lookup to avoid errors)
-      const user = null; // We're not fetching from database to avoid prisma.user error
-      
+    // Process posts to include necessary data but exclude binary content
+    let processedPosts = posts.map(post => {
       // Calculate lock count
-      const lock_count = post.lock_likes.length;
+      const lock_count = Array.isArray(post.lock_likes) ? post.lock_likes.length : 0;
       
-      // Process raw_image_data for frontend
-      let processedImageData = null;
-      if (post.raw_image_data) {
-        try {
-          processedImageData = Buffer.from(post.raw_image_data).toString('base64');
-        } catch (e) {
-          console.error('Error processing raw_image_data:', e);
-        }
+      // Instead of including raw_image_data directly, create a flag indicating if image exists
+      const has_image = post.raw_image_data ? true : false;
+      
+      // Create a media URL if needed (for frontend to fetch the image separately)
+      let media_url = null;
+      if (has_image) {
+        media_url = `/api/posts/${post.id}/media`;
       }
       
-      // Return processed post with all necessary data
+      // Return processed post with all necessary data without binary content
       return {
-        ...post,
-        raw_image_data: processedImageData,
+        id: post.id,
+        tx_id: post.tx_id,
+        content: post.content,
+        author_address: post.author_address,
+        created_at: post.created_at,
+        tags: Array.isArray(post.tags) ? post.tags : [],
+        media_type: post.media_type,
+        has_image, // Flag indicating image exists
+        media_url, // URL to fetch image if needed
         lock_count,
-        // Add user data - null values since we're not fetching from DB
-        display_name: null,
-        username: null,
-        avatar_url: null,
-        // Remove lock_likes array since we just need the count
-        lock_likes: undefined
+        is_locked: post.is_locked || false,
+        is_vote: post.is_vote || false,
+        vote_options: post.vote_options || [],
+        // Include other fields but exclude binary data
+        description: post.description,
+        metadata: post.metadata
       };
     });
     
-    // Debug log first result's lock count if available
+    // Sort by lock_count if using a "top" ranking filter
+    if (filters.ranking_filter && (filters.ranking_filter.startsWith('top-') || filters.ranking_filter === 'top')) {
+      console.log('Applying post-query sort by lock_count');
+      processedPosts = processedPosts.sort((a, b) => (b.lock_count || 0) - (a.lock_count || 0));
+      
+      // Limit the results to the requested amount after sorting
+      if (effectiveLimit > 0 && processedPosts.length > effectiveLimit) {
+        processedPosts = processedPosts.slice(0, effectiveLimit);
+      }
+    }
+    
+    // Debug log first result if available
     if (processedPosts.length > 0) {
-      console.log('First result lock_count:', processedPosts[0].lock_count, 
-                  'type:', typeof processedPosts[0].lock_count);
+      console.log('First result:', {
+        id: processedPosts[0].id,
+        content: processedPosts[0].content?.substring(0, 30) + '...',
+        lock_count: processedPosts[0].lock_count,
+        has_image: processedPosts[0].has_image
+      });
     }
     
     return { 
       posts: processedPosts, 
-      count: processedPosts.length 
+      count: processedPosts.length,
+      hasMore: false,
+      nextCursor: null
     };
   } catch (error) {
     console.error('Error searching posts:', error);
+    if (error instanceof Error) {
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+      console.error('Search parameters:', { query, limit, searchType, filters: JSON.stringify(filters) });
+    }
     throw error;
   }
 }
