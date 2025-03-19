@@ -93,6 +93,11 @@ const Stats: React.FC = () => {
     return stats?.bsvLockedOverTime || [];
   };
 
+  // Get lock activity trend data
+  const getLockActivityData = () => {
+    return stats?.lockTimeData || [];
+  };
+
   // Format large numbers with K/M suffix
   const formatNumber = (num: number): string => {
     if (num >= 1000000) {
@@ -306,7 +311,7 @@ const Stats: React.FC = () => {
                   <div className="h-[280px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={getChartData()}
+                        data={getLockActivityData()}
                         margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="#444" opacity={0.3} />
@@ -318,11 +323,24 @@ const Stats: React.FC = () => {
                             border: '1px solid #444',
                             borderRadius: '4px',
                           }}
-                          formatter={(value) => [`${value}`, 'Locks']}
+                          formatter={(value, name) => [value, name === 'active_locks' ? 'Active Locks' : 'Total Locks']}
+                        />
+                        <Legend
+                          formatter={(value) => value === 'active_locks' ? 'Active Locks' : 'Total Locks'}
                         />
                         <Bar 
+                          name="Total Locks"
                           dataKey="locks" 
                           fill={CHART_COLORS.locks} 
+                          radius={[2, 2, 0, 0]}
+                          isAnimationActive={true}
+                          animationDuration={1200}
+                          opacity={0.7}
+                        />
+                        <Bar 
+                          name="Active Locks"
+                          dataKey="active_locks" 
+                          fill="#FF69B4"
                           radius={[2, 2, 0, 0]}
                           isAnimationActive={true}
                           animationDuration={1200}
@@ -348,6 +366,10 @@ const Stats: React.FC = () => {
                             <stop offset="5%" stopColor={CHART_COLORS.bsv} stopOpacity={0.6}/>
                             <stop offset="95%" stopColor={CHART_COLORS.bsv} stopOpacity={0.1}/>
                           </linearGradient>
+                          <linearGradient id="totalBsvGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#8884d8" stopOpacity={0.4}/>
+                            <stop offset="95%" stopColor="#8884d8" stopOpacity={0.1}/>
+                          </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#444" opacity={0.3} />
                         <XAxis dataKey="name" tick={{ fill: '#ccc' }} reversed={true} />
@@ -358,10 +380,25 @@ const Stats: React.FC = () => {
                             border: '1px solid #444',
                             borderRadius: '4px'
                           }}
-                          formatter={(value) => [formatBSV(Number(value)), 'BSV Locked']}
+                          formatter={(value, name) => [formatBSV(Number(value)), name === 'bsv' ? 'Active BSV' : 'Total BSV']}
+                        />
+                        <Legend 
+                          formatter={(value) => value === 'bsv' ? 'Active BSV' : 'Total BSV'}
                         />
                         <Area 
                           type="monotone" 
+                          name="Total BSV"
+                          dataKey="total_bsv" 
+                          stroke="#8884d8" 
+                          fillOpacity={1} 
+                          fill="url(#totalBsvGradient)"
+                          isAnimationActive={true}
+                          animationDuration={1200}
+                          strokeDasharray="3 3"
+                        />
+                        <Area 
+                          type="monotone" 
+                          name="Active BSV"
                           dataKey="bsv" 
                           stroke={CHART_COLORS.bsv} 
                           fillOpacity={1} 
@@ -443,7 +480,7 @@ const Stats: React.FC = () => {
                           border: '1px solid #444',
                           borderRadius: '4px'
                         }}
-                        formatter={(value, name, props) => [value, 'Locks']}
+                        formatter={(value) => [value, 'Locks']}
                       />
                       <Bar 
                         dataKey="value" 
@@ -465,6 +502,9 @@ const Stats: React.FC = () => {
                 
                 <div className="text-sm opacity-70 text-center mt-2">
                   Total BSV locked: {formatBSV(stats?.lockSizeDistribution?.totalLockedAmount || stats?.total_bsv_locked || 0)}
+                </div>
+                <div className="text-xs opacity-50 text-center mt-1">
+                  Shows only currently active locks (not unlockable)
                 </div>
               </div>
 
