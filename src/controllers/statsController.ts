@@ -6,12 +6,16 @@ import { fetchBsvPrice } from '../utils/bsvPrice';
 import * as fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import express from 'express';
 
 // Get the directory name in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const prisma = new PrismaClient();
+
+// Export the router for the app to use
+const router = express.Router();
 
 // Helper function to get date range based on timeRange parameter
 const getDateRange = (timeRange: string) => {
@@ -328,6 +332,9 @@ export const getStats = async (req: Request, res: Response) => {
         statsData.current_bsv_price = stats.current_bsv_price;
       }
       
+      // Get lock size distribution data
+      const lockSizeDistribution = await getLockSizeDistribution();
+      
       return res.json({
         ...statsData,
         lockTimeData,
@@ -335,7 +342,8 @@ export const getStats = async (req: Request, res: Response) => {
         postDistributionData,
         tagUsageData,
         userActivityData,
-        priceData
+        priceData,
+        lockSizeDistribution
       });
     } catch (innerError) {
       logger.error('Error processing stats data', { error: innerError });
@@ -365,14 +373,25 @@ export const updateStats = async (req: Request, res: Response) => {
   try {
     logger.info('Starting stats update process');
 
+    // First, get the current block height to determine which locks are still active
+    const latestBlock = await prisma.processed_transaction.findFirst({
+      orderBy: {
+        block_height: 'desc'
+      },
+      select: {
+        block_height: true
+      }
+    });
+    
+    const current_block_height = latestBlock?.block_height || 0;
+    logger.info(`Current block height for stats calculation: ${current_block_height}`);
+
     // Calculate statistics from real data
     const [
       total_posts,
       total_votes,
       total_lock_likes,
       total_users,
-      total_bsv_lockedResult,
-      avg_lock_durationResult,
       most_used_tag,
       mostActiveUser,
       currentBsvPrice
@@ -409,20 +428,6 @@ export const updateStats = async (req: Request, res: Response) => {
         distinct: ['author_address']
       }).then(users => users.length),
       
-      // Total BSV locked
-      prisma.lock_like.aggregate({
-        _sum: {
-          amount: true
-        }
-      }),
-      
-      // Average lock duration
-      prisma.lock_like.aggregate({
-        _avg: {
-          unlock_height: true
-        }
-      }),
-      
       // Most used tag
       prisma.tag.findMany({
         orderBy: {
@@ -454,16 +459,62 @@ export const updateStats = async (req: Request, res: Response) => {
       fetchBsvPrice()
     ]);
     
-    // Log results for debugging
+    // Calculate total BSV locked with only active locks (considering block height)
+    const active_locks = await prisma.lock_like.findMany({
+      where: {
+        amount: {
+          gt: 0  // Only consider locks with amount greater than 0
+        },
+        OR: [
+          {
+            // Include locks without an unlock_height (permanent locks)
+            unlock_height: null
+          },
+          {
+            // Include locks where the current block height has not yet reached the unlock height
+            unlock_height: {
+              gt: current_block_height
+            }
+          }
+        ]
+      },
+      select: {
+        id: true,
+        tx_id: true,
+        amount: true,
+        unlock_height: true
+      }
+    });
+    
+    // Log each active lock for debugging
+    logger.info(`Found ${active_locks.length} active locks with details:`);
+    active_locks.forEach((lock, index) => {
+      if (index < 10) { // Only log the first 10 for brevity
+        logger.info(`Active lock #${index+1}: ID=${lock.id}, TX=${lock.tx_id}, Amount=${lock.amount}, Unlock Height=${lock.unlock_height || 'permanent'}, Current Height=${current_block_height}`);
+      }
+    });
+    
+    // Calculate the total active locked amount
+    const total_bsv_locked = active_locks.reduce((sum, lock) => sum + Number(lock.amount), 0);
+    
+    // Calculate average lock duration for active locks only
+    const active_locks_with_unlock = active_locks.filter(lock => lock.unlock_height !== null);
+    const avg_lock_duration = active_locks_with_unlock.length > 0
+      ? active_locks_with_unlock.reduce((sum, lock) => sum + Number(lock.unlock_height || 0) - current_block_height, 0) / active_locks_with_unlock.length
+      : 0;
+    
+    // Log detailed statistics
     logger.info(`Stats update results: 
       - Total posts: ${total_posts}
       - Total votes: ${total_votes}
       - Total lock likes: ${total_lock_likes}
       - Total users: ${total_users}
-      - Total BSV locked: ${total_bsv_lockedResult._sum?.amount || 0}
-      - Avg unlock height: ${avg_lock_durationResult._avg?.unlock_height || 0}
+      - Active locks count: ${active_locks.length}
+      - Total active BSV locked: ${total_bsv_locked}
+      - Average blocks until unlock: ${Math.round(avg_lock_duration)}
+      - Current block height: ${current_block_height}
     `);
-
+    
     // Additional debugging for lock amounts
     try {
       // Count locks with zero amount
@@ -473,27 +524,46 @@ export const updateStats = async (req: Request, res: Response) => {
         }
       });
       
-      // Count locks with positive amount 
-      const positiveAmountLocks = await prisma.lock_like.count({
+      // Count unlockable locks (those that have reached their unlock height)
+      const unlockable_locks = await prisma.lock_like.count({
         where: {
-          amount: {
-            gt: 0
-          }
+          amount: { gt: 0 },
+          unlock_height: { lte: current_block_height, not: null }
         }
       });
       
       // Get total locks
       const totalLocks = await prisma.lock_like.count();
       
+      // Get total amount of unlockable funds
+      const unlockable_amount_result = await prisma.lock_like.aggregate({
+        _sum: {
+          amount: true
+        },
+        where: {
+          amount: { gt: 0 },
+          unlock_height: { lte: current_block_height, not: null }
+        }
+      });
+      
+      const unlockable_amount = Number(unlockable_amount_result._sum?.amount || 0);
+      
       logger.info(`Lock amount distribution:
         - Total locks: ${totalLocks}
         - Locks with zero amount: ${zeroAmountLocks}
-        - Locks with positive amount: ${positiveAmountLocks}
+        - Unlockable locks: ${unlockable_locks}
+        - Unlockable amount: ${unlockable_amount}
+        - Active locks: ${active_locks.length}
+        - Active locked amount: ${total_bsv_locked}
       `);
     } catch (error) {
       logger.error('Error getting lock amount distribution', error);
     }
-
+    
+    // Check for unlockable funds for debugging purposes
+    const unlockableFundsInfo = await checkUnlockableFunds();
+    logger.info(`Unlockable funds summary: ${unlockableFundsInfo.count} locks with ${unlockableFundsInfo.totalAmount} BSV can be unlocked`);
+    
     // Create stats data object with real data
     const statsData: any = {
       id: 'current-stats',
@@ -501,8 +571,8 @@ export const updateStats = async (req: Request, res: Response) => {
       total_votes,
       total_lock_likes,
       total_users,
-      total_bsv_locked: Number(total_bsv_lockedResult._sum?.amount || 0),
-      avg_lock_duration: Number(avg_lock_durationResult._avg?.unlock_height || 0),
+      total_bsv_locked: Number(total_bsv_locked),
+      avg_lock_duration: Number(avg_lock_duration),
       most_used_tag: most_used_tag.length > 0 ? most_used_tag[0].name : null,
       most_active_user: mostActiveUser.length > 0 ? mostActiveUser[0].author_address : null,
       current_bsv_price: Number(currentBsvPrice || 0),
@@ -524,13 +594,17 @@ export const updateStats = async (req: Request, res: Response) => {
     // Get BSV locked over time data for chart
     const bsvLockedOverTime = await getBsvLockedOverTimePrisma('all');
     
+    // Get lock size distribution data
+    const lockSizeDistribution = await getLockSizeDistribution();
+    
     logger.info('Stats update completed successfully');
     
     return res.json({
       message: 'Statistics updated successfully',
       stats,
       lockTimeData,
-      bsvLockedOverTime
+      bsvLockedOverTime,
+      lockSizeDistribution
     });
   } catch (error) {
     logger.error('Error updating statistics:', error);
@@ -547,7 +621,20 @@ async function getLockTimeDataPrisma(timeRange: string) {
     const startDate = getDateRange(timeRange);
     logger.info(`Getting lock time data for range ${timeRange}, startDate: ${startDate.toISOString()}`);
     
-    // Get all lock_like entries within the time range
+    // First, get the current block height
+    const latestBlock = await prisma.processed_transaction.findFirst({
+      orderBy: {
+        block_height: 'desc'
+      },
+      select: {
+        block_height: true
+      }
+    });
+    
+    const current_block_height = latestBlock?.block_height || 0;
+    logger.info(`Current block height for lock time chart: ${current_block_height}`);
+    
+    // Get all lock_like entries within the time range that are still active locks
     const locks = await prisma.lock_like.findMany({
       where: {
         created_at: {
@@ -555,22 +642,42 @@ async function getLockTimeDataPrisma(timeRange: string) {
         },
         amount: {
           gt: 0 // Only include locks with positive amounts
-        }
+        },
+        OR: [
+          {
+            // Include locks without an unlock_height (permanent locks)
+            unlock_height: null
+          },
+          {
+            // Include locks where the current block height has not yet reached the unlock height
+            unlock_height: {
+              gt: current_block_height
+            }
+          }
+        ]
       },
       select: {
-        created_at: true
+        id: true,
+        tx_id: true, 
+        created_at: true,
+        unlock_height: true
       },
       orderBy: {
         created_at: 'asc'
       }
     });
     
-    logger.info(`Found ${locks.length} locks for time range ${timeRange}`);
+    logger.info(`Found ${locks.length} active locks for time range ${timeRange}`);
+    
+    // Log a few examples
+    locks.slice(0, 5).forEach((lock, i) => {
+      logger.info(`Lock ${i+1}: ID=${lock.id}, TX=${lock.tx_id}, Created=${lock.created_at}, Unlock=${lock.unlock_height || 'permanent'}`);
+    });
     
     // Group the locks by the appropriate time period
     const grouped = groupByTimePeriod(locks, timeRange);
     
-    // Format the data for the chart and ensure sequential order
+    // Format the data to include the count for each time period
     const formattedData = Object.entries(grouped).map(([name, locks]) => ({
       name,
       locks: locks.length
@@ -590,7 +697,20 @@ async function getBsvLockedOverTimePrisma(timeRange: string) {
     const startDate = getDateRange(timeRange);
     logger.info(`Getting BSV locked data for range ${timeRange}, startDate: ${startDate.toISOString()}`);
     
-    // Get all lock_like entries within the time range
+    // First, get the current block height
+    const latestBlock = await prisma.processed_transaction.findFirst({
+      orderBy: {
+        block_height: 'desc'
+      },
+      select: {
+        block_height: true
+      }
+    });
+    
+    const current_block_height = latestBlock?.block_height || 0;
+    logger.info(`Current block height for BSV locked chart: ${current_block_height}`);
+    
+    // Get all lock_like entries within the time range that are still actively locked
     const locks = await prisma.lock_like.findMany({
       where: {
         created_at: {
@@ -598,18 +718,37 @@ async function getBsvLockedOverTimePrisma(timeRange: string) {
         },
         amount: {
           gt: 0 // Only include locks with positive amounts
-        }
+        },
+        OR: [
+          {
+            // Include locks without an unlock_height (permanent locks)
+            unlock_height: null
+          },
+          {
+            // Include locks where the current block height has not yet reached the unlock height
+            unlock_height: {
+              gt: current_block_height
+            }
+          }
+        ]
       },
       select: {
+        id: true,
+        tx_id: true,
         created_at: true,
-        amount: true
+        amount: true,
+        unlock_height: true
       },
       orderBy: {
         created_at: 'asc'
       }
     });
     
-    logger.info(`Found ${locks.length} locks with amounts for time range ${timeRange}`);
+    // Log the first few locks for debugging
+    logger.info(`Found ${locks.length} active locks with amounts for time range ${timeRange}`);
+    locks.slice(0, 5).forEach((lock, i) => {
+      logger.info(`Lock ${i+1}: ID=${lock.id}, TX=${lock.tx_id}, Amount=${lock.amount}, Created=${lock.created_at}, Unlock=${lock.unlock_height || 'permanent'}`);
+    });
     
     // Group the locks by the appropriate time period
     const grouped = groupByTimePeriod(locks, timeRange);
@@ -760,3 +899,223 @@ function generateSamplePriceData(stats: any) {
     };
   });
 }
+
+// Helper function to get lock size distribution using Prisma instead of raw SQL
+async function getLockSizeDistribution() {
+  try {
+    // First, get the current block height
+    const latestBlock = await prisma.processed_transaction.findFirst({
+      orderBy: {
+        block_height: 'desc'
+      },
+      select: {
+        block_height: true
+      }
+    });
+    
+    const current_block_height = latestBlock?.block_height || 0;
+    logger.info(`Current block height for lock size distribution: ${current_block_height}`);
+    
+    // Get all lock_like entries with active locks (amount > 0 and not yet unlocked)
+    const locks = await prisma.lock_like.findMany({
+      where: {
+        amount: {
+          gt: 0 // Only include locks with positive amounts
+        },
+        OR: [
+          {
+            // Include locks without an unlock_height (permanent locks)
+            unlock_height: null
+          },
+          {
+            // Include locks where the current block height has not yet reached the unlock height
+            unlock_height: {
+              gt: current_block_height
+            }
+          }
+        ]
+      },
+      select: {
+        amount: true
+      }
+    });
+    
+    logger.info(`Found ${locks.length} active locks for size distribution`);
+    
+    // Calculate distribution based on lock amount
+    const distribution = {
+      '0-1': 0,
+      '1-10': 0,
+      '10-100': 0,
+      '100-1000': 0,
+      '1000+': 0
+    };
+    
+    locks.forEach(lock => {
+      const amount = parseFloat(lock.amount.toString());
+      if (amount < 1) {
+        distribution['0-1']++;
+      } else if (amount < 10) {
+        distribution['1-10']++;
+      } else if (amount < 100) {
+        distribution['10-100']++;
+      } else if (amount < 1000) {
+        distribution['100-1000']++;
+      } else {
+        distribution['1000+']++;
+      }
+    });
+    
+    // Format the data for the chart
+    const formattedData = Object.entries(distribution).map(([range, count]) => ({
+      name: range,
+      count
+    }));
+    
+    logger.info(`Formatted lock size distribution: ${JSON.stringify(formattedData)}`);
+    return formattedData;
+  } catch (error) {
+    logger.error('Error getting lock size distribution with Prisma', error);
+    return [];
+  }
+}
+
+// Utility function to check for unlockable funds
+async function checkUnlockableFunds() {
+  try {
+    // Get the current block height
+    const latestBlock = await prisma.processed_transaction.findFirst({
+      orderBy: {
+        block_height: 'desc'
+      },
+      select: {
+        block_height: true
+      }
+    });
+    
+    const current_block_height = latestBlock?.block_height || 0;
+    
+    // Find locks that should be unlockable (current height >= unlock height)
+    const unlockableLocks = await prisma.lock_like.findMany({
+      where: {
+        amount: {
+          gt: 0
+        },
+        unlock_height: {
+          not: null,
+          lte: current_block_height
+        }
+      },
+      select: {
+        id: true,
+        tx_id: true,
+        amount: true,
+        unlock_height: true,
+        created_at: true
+      }
+    });
+    
+    const totalUnlockableAmount = unlockableLocks.reduce((sum, lock) => 
+      sum + parseFloat(lock.amount.toString()), 0);
+      
+    logger.info(`Found ${unlockableLocks.length} unlockable locks with total amount ${totalUnlockableAmount} BSV`);
+    
+    // Log the first few unlockable locks
+    unlockableLocks.slice(0, 10).forEach((lock, i) => {
+      logger.info(`Unlockable lock ${i+1}: ID=${lock.id}, TX=${lock.tx_id}, Amount=${lock.amount}, Created=${lock.created_at}, Unlock Height=${lock.unlock_height}, Current Height=${current_block_height}`);
+    });
+    
+    return {
+      count: unlockableLocks.length,
+      totalAmount: totalUnlockableAmount,
+      locks: unlockableLocks.slice(0, 10) // Return first 10 for details
+    };
+  } catch (error) {
+    logger.error('Error checking unlockable funds', error);
+    return {
+      count: 0,
+      totalAmount: 0,
+      locks: []
+    };
+  }
+}
+
+// API endpoints
+router.get('/', async (req: Request, res: Response) => {
+  // Pass the request to the existing exported getStats function
+  return getStats(req, res);
+});
+
+router.get('/refresh', async (req: Request, res: Response) => {
+  // Pass the request to the existing updateStats function
+  return updateStats(req, res);
+});
+
+router.get('/bsv-locked', async (req: Request, res: Response) => {
+  try {
+    const timeRange = req.query.timeRange as string || '1w';
+    const data = await getBsvLockedOverTimePrisma(timeRange);
+    res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    logger.error('Error getting BSV locked over time:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error getting BSV locked over time'
+    });
+  }
+});
+
+router.get('/lock-time', async (req: Request, res: Response) => {
+  try {
+    const timeRange = req.query.timeRange as string || '1w';
+    const data = await getLockTimeDataPrisma(timeRange);
+    res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    logger.error('Error getting lock time data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error getting lock time data'
+    });
+  }
+});
+
+router.get('/lock-size', async (req: Request, res: Response) => {
+  try {
+    const data = await getLockSizeDistribution();
+    res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    logger.error('Error getting lock size distribution data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error getting lock size distribution data'
+    });
+  }
+});
+
+// API endpoint to check for unlockable funds
+router.get('/check-unlockable', async (req: Request, res: Response) => {
+  try {
+    const unlockableFundsInfo = await checkUnlockableFunds();
+    res.status(200).json({
+      success: true,
+      data: unlockableFundsInfo
+    });
+  } catch (error) {
+    logger.error('Error checking unlockable funds:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error checking unlockable funds'
+    });
+  }
+});
+
+export default router;
