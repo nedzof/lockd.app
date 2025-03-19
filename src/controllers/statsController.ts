@@ -984,7 +984,7 @@ async function getLockSizeDistribution() {
     // If all amounts are the same, create just one bucket
     if (minAmount === maxAmount) {
       const distribution = [{
-        name: `${minAmount.toFixed(8)} BSV`,
+        name: `${Math.floor(minAmount)} BSV`,
         count: bsvAmounts.length
       }];
       
@@ -999,45 +999,39 @@ async function getLockSizeDistribution() {
       };
     }
     
-    // Create 5 buckets based on data distribution
+    // Instead of using percentiles, create fixed integer-based ranges
+    // Determine a suitable range based on data distribution
+    // Find a nice round max value for bucket creation
+    const maxBucketValue = Math.max(5, Math.ceil(maxAmount));
+    
+    // Create a set of integer-based buckets
     const numBuckets = 5;
+    const bucketSize = Math.ceil(maxBucketValue / numBuckets);
+    
     const buckets: {[key: string]: number} = {};
     
-    // Determine bucket boundaries using quantiles
+    // Create buckets with integer boundaries
     for (let i = 0; i < numBuckets; i++) {
-      // Use percentiles to create even distribution
-      const percentile = i / numBuckets;
-      const nextPercentile = (i + 1) / numBuckets;
+      const lowerBound = i * bucketSize;
+      const upperBound = (i === numBuckets - 1) ? null : (i + 1) * bucketSize;
       
-      const lowerIdx = Math.floor(percentile * sortedAmounts.length);
-      const upperIdx = Math.floor(nextPercentile * sortedAmounts.length) - 1;
-      
-      const lowerValue = sortedAmounts[lowerIdx];
-      let upperValue = i === numBuckets - 1 ? 
-        sortedAmounts[sortedAmounts.length - 1] : 
-        sortedAmounts[upperIdx];
-      
-      // Format bucket name based on range
       let bucketName: string;
-      
-      if (i === numBuckets - 1) {
-        // For the last bucket, use a "+" format
-        bucketName = `${lowerValue.toFixed(lowerValue < 0.01 ? 6 : 4)}+ BSV`;
+      if (upperBound === null) {
+        bucketName = `${lowerBound}+ BSV`;
       } else {
-        // For other buckets, use a range format
-        bucketName = `${lowerValue.toFixed(lowerValue < 0.01 ? 6 : 4)}-${upperValue.toFixed(upperValue < 0.01 ? 6 : 4)} BSV`;
+        bucketName = `${lowerBound}-${upperBound} BSV`;
       }
       
       buckets[bucketName] = 0;
     }
     
     // Now assign locks to buckets
-    bsvAmounts.forEach((amount, index) => {
+    bsvAmounts.forEach((amount) => {
       // Find the right bucket for this amount
       for (const bucketName of Object.keys(buckets)) {
         // Special case for the last bucket with '+'
         if (bucketName.includes('+')) {
-          const lowerBound = parseFloat(bucketName.split('-')[0].split(' ')[0]);
+          const lowerBound = parseInt(bucketName.split('+')[0], 10);
           if (amount >= lowerBound) {
             buckets[bucketName]++;
             break;
@@ -1045,10 +1039,10 @@ async function getLockSizeDistribution() {
         } else {
           // Handle normal range buckets
           const [lowerBoundStr, upperBoundStr] = bucketName.split('-');
-          const lowerBound = parseFloat(lowerBoundStr);
-          const upperBound = parseFloat(upperBoundStr.split(' ')[0]);
+          const lowerBound = parseInt(lowerBoundStr, 10);
+          const upperBound = parseInt(upperBoundStr.split(' ')[0], 10);
           
-          if (amount >= lowerBound && amount <= upperBound) {
+          if (amount >= lowerBound && amount < upperBound) {
             buckets[bucketName]++;
             break;
           }
@@ -1068,20 +1062,42 @@ async function getLockSizeDistribution() {
     );
     
     logger.info(`Formatted lock size distribution: ${JSON.stringify(formattedData)}`);
-    logger.info(`Total locked amount: ${totalLockedAmount}`);
+    logger.info(`Total locked amount: ${totalLockedAmount / 100000000} BSV`);
+    
+    // Format totalLockedAmount to remove trailing zeros
+    const formattedTotalAmount = (totalLockedAmount / 100000000).toFixed(8).replace(/\.?0+$/, "");
     
     // Add the total locked amount to the formatted data for display
     return {
       distribution: formattedData,
-      totalLockedAmount: totalLockedAmount
+      totalLockedAmount,
+      formattedTotalAmount
     };
   } catch (error) {
     logger.error('Error getting lock size distribution with Prisma', error);
     return {
       distribution: [],
-      totalLockedAmount: 0
+      totalLockedAmount: 0,
+      formattedTotalAmount: "0"
     };
   }
+}
+
+// Helper function to format BSV amounts without unnecessary zeros
+function formatBsvAmount(amount: number): string {
+  // For integer values, return as integers
+  if (Number.isInteger(amount)) {
+    return amount.toString();
+  }
+  
+  // For small values (less than 0.01), keep precision but remove trailing zeros
+  if (amount < 0.01) {
+    // Convert to string and remove trailing zeros
+    return amount.toString().replace(/\.?0+$/, '');
+  }
+  
+  // For other values, use 2 decimal places and remove trailing zeros
+  return amount.toFixed(2).replace(/\.?0+$/, '');
 }
 
 // Utility function to check for unlockable funds

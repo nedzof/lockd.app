@@ -1,7 +1,7 @@
 import { API_URL } from "../config";
 import React, { useState, useEffect } from 'react';
 import { FiBarChart2, FiLock, FiTrendingUp, FiClock, FiDollarSign, FiUsers, FiPieChart } from 'react-icons/fi';
-import { formatBSV } from '../utils/formatBSV';
+import { formatBSV, formatAxisValue } from '../utils/formatBSV';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush
@@ -30,9 +30,16 @@ interface StatsData {
 
 // Chart colors - using the app's color scheme
 const CHART_COLORS = {
-  locks: "#00E6CC",
-  bsv: "#FF69B4",
-  price: "#FFCA28"
+  primary: "#FF69B4", // Hot pink for primary data series
+  secondary: "#00E6CC", // Teal for secondary data series
+  tertiary: "#FFCA28", // Amber for tertiary data series
+  bars: [
+    "#FF69B4", // Hot pink base
+    "#FF79C4", // Lighter pink
+    "#FF89D4", // Even lighter pink
+    "#FF99E4", // Very light pink
+    "#FFA9F4"  // Almost white pink
+  ]
 };
 
 const Stats: React.FC = () => {
@@ -331,7 +338,7 @@ const Stats: React.FC = () => {
                         <Bar 
                           name="locks"
                           dataKey="locks" 
-                          fill={CHART_COLORS.locks} 
+                          fill={CHART_COLORS.secondary} 
                           radius={[2, 2, 0, 0]}
                           isAnimationActive={true}
                           animationDuration={1200}
@@ -340,7 +347,7 @@ const Stats: React.FC = () => {
                         <Bar 
                           name="active_locks"
                           dataKey="active_locks" 
-                          fill="#FF69B4"
+                          fill={CHART_COLORS.primary}
                           radius={[2, 2, 0, 0]}
                           isAnimationActive={true}
                           animationDuration={1200}
@@ -362,7 +369,10 @@ const Stats: React.FC = () => {
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="#444" opacity={0.3} />
                         <XAxis dataKey="name" tick={{ fill: '#ccc' }} reversed={true} />
-                        <YAxis tick={{ fill: '#ccc' }} tickFormatter={(value) => formatBSV(Number(value))} />
+                        <YAxis 
+                          tick={{ fill: '#ccc' }} 
+                          tickFormatter={(value) => formatAxisValue(Number(value))} 
+                        />
                         <Tooltip
                           contentStyle={{ 
                             backgroundColor: 'rgba(20, 20, 20, 0.95)', 
@@ -382,7 +392,7 @@ const Stats: React.FC = () => {
                           name="total_bsv"
                           type="monotone"
                           dataKey="total_bsv"
-                          stroke={CHART_COLORS.bsv}
+                          stroke={CHART_COLORS.secondary}
                           strokeWidth={2}
                           dot={false}
                           activeDot={{ r: 6 }}
@@ -392,7 +402,7 @@ const Stats: React.FC = () => {
                           name="bsv"
                           type="monotone"
                           dataKey="bsv"
-                          stroke="#FF69B4"
+                          stroke={CHART_COLORS.primary}
                           strokeWidth={2}
                           dot={false}
                           activeDot={{ r: 6 }}
@@ -424,7 +434,7 @@ const Stats: React.FC = () => {
                           {getPlatformActivityData().map((entry, index) => (
                             <Cell 
                               key={`cell-${index}`} 
-                              fill={index === 0 ? '#8884d8' : index === 1 ? '#82ca9d' : CHART_COLORS.locks} 
+                              fill={index === 0 ? '#8884d8' : index === 1 ? '#82ca9d' : CHART_COLORS.secondary} 
                             />
                           ))}
                         </Pie>
@@ -475,7 +485,7 @@ const Stats: React.FC = () => {
                       />
                       <Bar 
                         dataKey="value" 
-                        fill={CHART_COLORS.bsv}
+                        fill={CHART_COLORS.primary}
                         radius={[0, 2, 2, 0]} 
                         isAnimationActive={true}
                         animationDuration={1200}
@@ -483,7 +493,7 @@ const Stats: React.FC = () => {
                         {getLockSizeDistributionData().map((entry, index) => (
                           <Cell 
                             key={`cell-${index}`}
-                            fill={`rgba(255, 105, 180, ${0.5 + index * 0.1})`}
+                            fill={CHART_COLORS.bars[index % CHART_COLORS.bars.length]}
                           />
                         ))}
                       </Bar>
