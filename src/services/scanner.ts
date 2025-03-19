@@ -60,34 +60,52 @@ export class Scanner {
   
   /**
    * Handle incoming transactions from JungleBus
+   * Delegates parsing to tx_parser, avoiding duplicate logic
    */
   private async handleTransaction(tx: any): Promise<void> {
     try {
+      // Extract transaction ID using robust method
       const txId = tx?.tx?.h || tx?.hash || tx?.id || tx?.tx_id;
       
       if (!txId) {
         return; // Skip transactions without ID
       }
       
-      // Check if already processed
+      // Log basic transaction info for debugging
+      logger.debug(`🔍 Received transaction ${txId}`, {
+        addresses: tx.addresses,
+        contexts: tx.contexts,
+        output_types: tx.output_types
+      });
+      
+      // Check if already processed - avoid duplicate work
       const isAlreadySaved = await tx_repository.isTransactionSaved(txId);
       if (isAlreadySaved) {
+        logger.debug(`⏭️ Transaction ${txId} already processed, skipping`);
+        return;
+      }
+
+      // Let the parser handle the transaction - clear separation of concerns
+      // The parser examines outputs and extracts metadata
+      const parsedTx = await tx_parser.parse_transaction_data(tx);
+      
+      // Skip if no valid outputs
+      if (!parsedTx?.outputs?.length) {
+        logger.debug(`⏭️ Transaction ${txId} has no valid outputs, skipping`);
         return;
       }
       
-      // Parse and process the transaction
-      const parsedTx = await tx_parser.parse_transaction(txId);
-      
-      // Skip if no valid outputs or no lockd outputs
-      if (!parsedTx?.outputs?.length) return;
-      
+      // Filter for lockd.app outputs - our specific app concern
       const lockdOutputs = parsedTx.outputs.filter(output => output.isValid && output.type === 'lockd');
-      if (lockdOutputs.length === 0) return;
+      if (lockdOutputs.length === 0) {
+        logger.debug(`⏭️ Transaction ${txId} has no lockd.app outputs, skipping`);
+        return;
+      }
       
-      // Save the transaction
+      // Save the transaction to the database via repository
       await tx_repository.saveProcessedTransaction(parsedTx);
       
-      // Create a post from the transaction
+      // Process the transaction to create a post
       try {
         const savedTx = await prisma.processed_transaction.findUnique({
           where: { tx_id: txId }
@@ -95,22 +113,55 @@ export class Scanner {
         
         if (savedTx) {
           await post_repository.processTransaction(savedTx);
+          logger.debug(`✅ Created post for transaction ${txId}`);
         }
       } catch (error) {
-        logger.error(`❌ Error creating post: ${(error as Error).message}`);
+        logger.error(`❌ Error creating post: ${(error as Error).message}`, {
+          tx_id: txId,
+          error_stack: (error as Error).stack
+        });
       }
       
-      // Log transaction information
+      // Determine transaction type and log appropriate information
       const isVote = lockdOutputs.some(output => output.metadata?.is_vote === true);
+      const hasVoteData = !!(lockdOutputs[0]?.metadata as any)?._custom_metadata?.vote_data;
       
-      logger.info(`${isVote ? '📊' : '📝'} ${isVote ? 'Vote' : 'Post'} found in block ${parsedTx.blockHeight || 'unconfirmed'}`, {
+      // Create detailed log data for this transaction
+      const logData: Record<string, any> = {
         tx_id: txId,
         block_height: parsedTx.blockHeight,
         outputs_count: lockdOutputs.length,
-        timestamp: parsedTx.timestamp
-      });
+        timestamp: parsedTx.timestamp,
+        content_type: lockdOutputs[0]?.metadata?.content_type || 'text',
+        author: parsedTx.authorAddress || '(unknown)'
+      };
+      
+      // Add vote-specific information if it's a vote
+      if (isVote) {
+        logData.is_vote = true;
+        logData.question = lockdOutputs[0]?.metadata?.vote_question || '';
+        logData.options_count = lockdOutputs[0]?.metadata?.total_options || 0;
+        
+        // Log detailed vote data for debugging
+        logger.debug(`📊 Vote details for ${txId}`, {
+          question: logData.question,
+          options_count: logData.options_count,
+          has_vote_data: hasVoteData
+        });
+      }
+      
+      // Log the transaction with appropriate emoji based on type
+      logger.info(`${isVote ? '📊' : '📝'} ${isVote ? 'Vote' : 'Post'} found in block ${parsedTx.blockHeight || 'unconfirmed'}`, logData);
+      
     } catch (error) {
-      logger.error(`❌ Error processing transaction: ${(error as Error).message}`);
+      // Log detailed error information
+      const errorInfo = {
+        message: (error as Error).message,
+        stack: (error as Error).stack,
+        tx_id: tx?.tx?.h || tx?.hash || tx?.id || tx?.tx_id || 'unknown'
+      };
+      
+      logger.error(`❌ Error processing transaction:`, errorInfo);
     }
   }
   
