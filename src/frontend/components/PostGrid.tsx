@@ -249,9 +249,30 @@ const PostGrid: React.FC<PostGridProps> = ({
                 post.content = post.content.replace(/\s*\(Score:\s*\d+%\)\s*$/g, '');
               }
               
+              // Process image data if available - ensures images appear in search results
+              let imageUrl = post.imageUrl || post.media_url || null;
+              
+              // Convert raw_image_data to URL if available
+              if (post.raw_image_data && !imageUrl) {
+                // Check if we already have a blob URL for this image
+                if (imageUrlMap.current.has(post.id)) {
+                  imageUrl = imageUrlMap.current.get(post.id);
+                } else {
+                  try {
+                    // Create a data URL from the base64 string
+                    imageUrl = `data:${post.media_type || 'image/jpeg'};base64,${post.raw_image_data}`;
+                    // Store in our map for future reference
+                    imageUrlMap.current.set(post.id, imageUrl);
+                  } catch (error) {
+                    console.error(`Error processing image for search result ${post.id}:`, error);
+                  }
+                }
+              }
+              
               // Add any additional processing specific to search results
               return {
-                ...post
+                ...post,
+                imageUrl: imageUrl
               };
             });
             

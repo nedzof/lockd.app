@@ -52,19 +52,25 @@ export async function enhanceSearch(query: string, type: string = 'all'): Promis
       // Extract the items and sort by score (but don't add score to content)
       const enhancedResults = results
         .map(result => {
-          // Create a new object by copying properties instead of using spread
+          // Get the original item
           const item = result.item as Record<string, any>;
-          const enhancedItem: Record<string, any> = {};
           
-          // Copy properties manually
-          Object.keys(item).forEach(key => {
-            // Copy all properties except don't modify content
-            enhancedItem[key] = item[key];
-          });
+          // Create a simple copy with all properties, preserving the original structure
+          // This ensures we don't lose any important data like images
+          const enhancedItem = { ...item };
           
-          // Store score as a separate property (but don't add to content)
-          // It's used for sorting only
+          // Store score as a separate property for sorting only
           enhancedItem._score = result.score;
+          
+          // Make sure raw_image_data is preserved
+          if (item.raw_image_data) {
+            enhancedItem.raw_image_data = item.raw_image_data;
+          }
+          
+          // Make sure media_url is preserved
+          if (item.media_url) {
+            enhancedItem.media_url = item.media_url;
+          }
           
           return enhancedItem as unknown as Post;
         })
