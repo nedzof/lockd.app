@@ -394,10 +394,13 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
 
       toast.success(`Successfully locked ${amount} BSV`);
       
-      // FORCE IMMEDIATE UI UPDATE WITH DRAMATIC DEBUGGING
-      console.log('=== IMMEDIATE UI UPDATE DIAGNOSTICS ===');
-      console.log(`[LOCK DIAGNOSTICS] Original vote_options:`, JSON.stringify(vote_options, null, 2));
-      
+      // Ensure we're calculating active locks correctly
+      console.log('[LOCK DIAGNOSTICS] Lock transaction successful:', lockResponse || 'No response data');
+
+      // Get the current block height for calculating active locks
+      // Use the existing value from scope
+      console.log(`[LOCK DIAGNOSTICS] Using current block height: ${currentBlockHeight}`);
+
       // Create a deep copy to avoid reference issues
       const updatedOptions = vote_options.map(opt => {
         if (opt.id === optionId) {
@@ -429,7 +432,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       
       console.log(`[LOCK DIAGNOSTICS] Updated vote_options:`, JSON.stringify(updatedOptions, null, 2));
       
-      // Calculate the new total locked amount directly
+      // Calculate the new total locked amount directly using active locks
       const newTotalLocked = updatedOptions.reduce((total, opt) => {
         let optionTotal = 0;
         
@@ -461,6 +464,11 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       setTimeout(() => {
         console.log('[LOCK DIAGNOSTICS] Force second UI update after delay');
         setvote_options([...updatedOptions]);
+        
+        // Force another update of the parent component
+        if (onTotalLockedAmountChange) {
+          onTotalLockedAmountChange(newTotalLocked);
+        }
       }, 500);
       
       // Then fetch fresh data from server
@@ -477,6 +485,11 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       setTimeout(() => {
         console.log('[LOCK DIAGNOSTICS] Final UI refresh');
         refreshVoteOptions().catch(e => console.error('Final refresh error:', e));
+        
+        // Make sure to notify parent again
+        updatedOptions.forEach(opt => {
+          console.log(`[LOCK DIAGNOSTICS] Final update - Option ${opt.id} (${opt.content}) has ${opt.lock_likes?.length || 0} locks and total_locked ${opt.total_locked || 0}`);
+        });
       }, 1500);
       
       // Refresh wallet balance
@@ -552,11 +565,20 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
             ? calculate_active_locked_amount(option.lock_likes, current_block_height)
             : (option.total_locked || 0);
           
-          const percentage = totalLockedAmount > 0 
-            ? Math.round((activeOptionLocked / totalLockedAmount) * 100) 
+          // Ensure we're dealing with numbers
+          const safeOptionLocked = typeof activeOptionLocked === 'number' 
+            ? activeOptionLocked 
+            : parseInt(String(activeOptionLocked), 10) || 0;
+          
+          const safeTotalLocked = typeof totalLockedAmount === 'number'
+            ? totalLockedAmount
+            : parseInt(String(totalLockedAmount), 10) || 0;
+          
+          const percentage = safeTotalLocked > 0 
+            ? Math.round((safeOptionLocked / safeTotalLocked) * 100) 
             : 0;
           
-          console.log(`Option ${option.id} (${option.content}): ${activeOptionLocked} satoshis (${percentage.toFixed(2)}%)`);
+          console.log(`[VOTE DEBUG] Option ${option.id} (${option.content}): ${safeOptionLocked} satoshis (${percentage}% of ${safeTotalLocked})`);
           
           return (
             <div key={option.id} className="relative border-b border-gray-700/20 p-3 mb-2 overflow-hidden">
@@ -574,8 +596,8 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
                   <div className="font-medium text-white">{option.content}</div>
                   {/* Always show the percentage, even if zero */}
                   <div className="text-xs text-gray-400 mt-1">
-                    {formatBSV(activeOptionLocked / 100000000)} BSV 
-                    <span className={activeOptionLocked > 0 ? 'text-[#00E6CC]' : 'text-gray-500'}>
+                    {formatBSV(safeOptionLocked / 100000000)} BSV 
+                    <span className={safeOptionLocked > 0 ? 'text-[#00E6CC]' : 'text-gray-500'}>
                       {' '}({percentage.toFixed(1)}%)
                     </span>
                   </div>

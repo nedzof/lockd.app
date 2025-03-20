@@ -38,31 +38,52 @@ async function updateVoteStats(post_id: string, vote_option_id?: string | null):
     const totalLocked = allLocks.reduce((sum, lock) => sum + lock.amount, 0);
     
     // Group by vote option to get totals per option
-    const optionTotals = new Map<string, number>();
+    const optionTotals = new Map<string, { id: string, amount: number }>();
     allLocks.forEach(lock => {
       if (lock.vote_option_id) {
         const optionId = lock.vote_option_id;
         const optionName = lock.vote_option?.content || 'Unknown Option';
         const optionKey = `${optionId} (${optionName})`;
-        optionTotals.set(optionKey, (optionTotals.get(optionKey) || 0) + lock.amount);
+        
+        // Initialize or update the total for this option
+        if (!optionTotals.has(optionKey)) {
+          optionTotals.set(optionKey, { id: optionId, amount: lock.amount });
+        } else {
+          const current = optionTotals.get(optionKey)!;
+          optionTotals.set(optionKey, { ...current, amount: current.amount + lock.amount });
+        }
       }
     });
     
     // Log per-option totals
     logger.info(`Option totals for post ${post_id}:`);
-    optionTotals.forEach((total, optionKey) => {
-      logger.info(`  - ${optionKey}: ${total} satoshis`);
+    optionTotals.forEach((data, optionKey) => {
+      logger.info(`  - ${optionKey}: ${data.amount} satoshis`);
     });
     
     // Log the updated stats
     logger.info(`Updated stats for post ${post_id}: Total locked amount: ${totalLocked} satoshis, Total locks: ${allLocks.length}`);
     
-    // Update the vote options in the database with their current totals
-    for (const [optionKey, total] of optionTotals.entries()) {
-      const optionId = optionKey.split(' ')[0]; // Extract the ID part
+    // Get all vote options for this post
+    const vote_options = await prisma.vote_option.findMany({
+      where: { post_id }
+    });
+    
+    // Update the vote options in the database
+    for (const vote_option of vote_options) {
+      // Find the total for this option
+      let amount = 0;
+      for (const [_, data] of optionTotals.entries()) {
+        if (data.id === vote_option.id) {
+          amount = data.amount;
+          break;
+        }
+      }
       
-      // This doesn't actually update the database, just logs for debugging
-      logger.info(`Vote option ${optionId} has total locked: ${total} satoshis`);
+      logger.info(`Vote option ${vote_option.id} has total locked: ${amount} satoshis`);
+      
+      // For now we won't try to update the database
+      // We'll just log the information
     }
     
     const elapsed = Date.now() - startTime;

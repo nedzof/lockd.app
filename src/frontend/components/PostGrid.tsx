@@ -25,6 +25,11 @@ interface vote_option {
   lock_duration: number;
   unlock_height?: number;
   tags: string[];
+  lock_likes?: Array<{
+    amount: number | string;
+    author_address?: string;
+    unlock_height?: number | null;
+  }>;
 }
 
 interface ExtendedPost {
@@ -109,10 +114,16 @@ function formatDate(dateString: string): string {
   }
 }
 
-// Helper function to calculate percentage of locked amount
+// Add or update this function for better percentage calculation
 function calculatePercentage(amount: number, total: number): number {
   if (!total) return 0;
-  return Math.round((amount / total) * 100);
+  
+  // Ensure we're dealing with numbers
+  const safeAmount = typeof amount === 'number' ? amount : parseInt(String(amount), 10) || 0;
+  const safeTotal = typeof total === 'number' ? total : parseInt(String(total), 10) || 0;
+  
+  // Calculate percentage and round to nearest integer
+  return Math.round((safeAmount / safeTotal) * 100);
 }
 
 // Add a function to extract URLs from content
@@ -838,14 +849,34 @@ const PostGrid: React.FC<PostGridProps> = ({
         // Calculate total locked amount for the post
         let totalLocked = 0;
         
+        // Get current block height to determine active locks
+        const currentBlockHeight = post.block_height || 888000;
+        
         // Sum up lock_likes amounts if available
         if (post.lock_likes && Array.isArray(post.lock_likes)) {
-          totalLocked += post.lock_likes.reduce((sum: number, lock: any) => sum + (lock.amount || 0), 0);
+          // Use calculate_active_locked_amount to only count locks that are still active
+          const typedLockLikes = post.lock_likes as Array<{
+            amount: number;
+            unlock_height?: number | null;
+          }>;
+          totalLocked += calculate_active_locked_amount(typedLockLikes, currentBlockHeight);
         }
         
         // For vote posts, also include the lock amounts from vote options
         if (post.is_vote && post.vote_options && Array.isArray(post.vote_options)) {
-          totalLocked += post.vote_options.reduce((sum: number, option: any) => sum + (option.lock_amount || 0), 0);
+          post.vote_options.forEach((option: vote_option) => {
+            if (option.lock_likes && Array.isArray(option.lock_likes)) {
+              // Use calculate_active_locked_amount to only count locks that are still active
+              const typedOptionLockLikes = option.lock_likes as Array<{
+                amount: number;
+                unlock_height?: number | null;
+              }>;
+              totalLocked += calculate_active_locked_amount(typedOptionLockLikes, currentBlockHeight);
+            } else {
+              // Fallback to lock_amount if lock_likes is not available
+              totalLocked += option.lock_amount || 0;
+            }
+          });
         }
         
         // Assign the calculated total locked amount
@@ -1457,12 +1488,55 @@ const PostGrid: React.FC<PostGridProps> = ({
                   <div className="mt-4 p-4 pt-0 w-full">
                     {/* Calculate total locked amount for percentages */}
                     {(() => {
-                      const totalLocked = post.vote_options.reduce((sum, option) => sum + option.lock_amount, 0);
+                      // Get current block height from post's block height if available, or fall back to a default
+                      const currentBlockHeight = post.block_height || 888000;
+                      
+                      // Calculate total active locked amount for all vote options
+                      const totalLocked = post.vote_options.reduce((sum, option) => {
+                        // Calculate active locked amount for this option
+                        let optionLockedAmount = option.lock_amount || 0;
+                        
+                        if (option.lock_likes && Array.isArray(option.lock_likes)) {
+                          // Type assertion for TypeScript
+                          const typedLockLikes = option.lock_likes as Array<{
+                            amount: number;
+                            unlock_height?: number | null;
+                          }>;
+                          
+                          optionLockedAmount = calculate_active_locked_amount(typedLockLikes, currentBlockHeight);
+                          
+                          // Log the calculated amount for debugging
+                          console.log(`[VOTE DEBUG] Option "${option.content}" has active locked amount: ${optionLockedAmount} satoshis`);
+                        }
+                        
+                        return sum + optionLockedAmount;
+                      }, 0);
+                      
+                      const percentage = calculatePercentage(totalLocked, totalLocked);
+                      console.log(`[VOTE DEBUG] Total locked amount for post ${post.id}: ${totalLocked} satoshis`);
+                      console.log(`[VOTE DEBUG] Total locked percentage for post ${post.id}: ${percentage}%`);
                       
                       return (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
                           {post.vote_options.map((option: vote_option) => {
-                            const percentage = calculatePercentage(option.lock_amount, totalLocked);
+                            // Calculate active locked amount for this option
+                            let optionLockedAmount = option.lock_amount || 0;
+                            
+                            if (option.lock_likes && Array.isArray(option.lock_likes)) {
+                              // Use type assertion to make TypeScript happy
+                              const typedLockLikes = option.lock_likes as Array<{
+                                amount: number;
+                                unlock_height?: number | null;
+                              }>;
+                              optionLockedAmount = calculate_active_locked_amount(typedLockLikes, currentBlockHeight);
+                              
+                              // Log the calculated amount for debugging
+                              console.log(`[VOTE DEBUG] Option "${option.content}" has active locked amount: ${optionLockedAmount} satoshis`);
+                            }
+                            
+                            const percentage = calculatePercentage(optionLockedAmount, totalLocked);
+                            console.log(`[VOTE DEBUG] Option "${option.content}" has percentage: ${percentage}% of total: ${totalLocked}`);
+                            
                             // Determine color based on percentage
                             const getStatusColor = (pct: number) => {
                               if (pct >= 60) return "from-emerald-500 to-emerald-400";
