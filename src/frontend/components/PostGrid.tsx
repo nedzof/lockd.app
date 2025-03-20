@@ -156,6 +156,22 @@ const highlightSearchTerm = (text: string, searchTerm: string): React.ReactNode 
   });
 };
 
+// Add getCurrentBlockHeight function near the top of the file, outside components
+async function getCurrentBlockHeight(): Promise<number | null> {
+  try {
+    const response = await fetch(`${API_URL}/api/status/block-height`);
+    if (!response.ok) {
+      console.error('Failed to fetch current block height');
+      return null;
+    }
+    const data = await response.json();
+    return data.block_height;
+  } catch (error) {
+    console.error('Error fetching block height:', error);
+    return null;
+  }
+}
+
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
   time_filter,
@@ -1073,65 +1089,130 @@ const PostGrid: React.FC<PostGridProps> = ({
     };
   }, [hasMore, isFetchingMore, handleLoadMore, ranking_filter]);
 
-  const handlevote_optionLock = async (optionId: string, amount: number, duration: number) => {
-    // Check if wallet is connected
+  const handleLockVoteOption = async (
+    optionId: string,
+    amount: number,
+    duration: number = 1000
+  ) => {
+    console.log('Lock requested for vote option:', optionId, 'amount:', amount, 'duration:', duration);
+    
+    if (amount <= 0) {
+      toast.error('Please enter a valid amount to lock');
+      return;
+    }
+
     if (!wallet) {
       toast.error('Please connect your wallet first');
       return;
     }
 
+    // Check balance without assuming wallet.bsv exists
+    const hasInsufficientBalance = wallet.getBalance && 
+      typeof wallet.getBalance() === 'object' && 
+      wallet.getBalance().bsv !== undefined && 
+      amount > wallet.getBalance().bsv;
+      
+    if (hasInsufficientBalance) {
+      toast.error('Insufficient balance');
+      return;
+    }
+
+    setIsLocking(true);
+
     try {
-      // Show loading toast while checking wallet balance
+      const amountInSatoshis = Math.round(amount * 100000000);
+      console.log('Converted amount to satoshis:', amountInSatoshis);
+      
+      // Show loading toast
       const toastId = toast.loading('Checking wallet balance...');
       
-      setIsLocking(true);
-
-      // Convert amount to satoshis for BSV transactions (1 BSV = 100,000,000 satoshis)
-      const amountInSatoshis = Math.round(amount * 100000000);
+      // Get current block height for calculating unlock height
+      const currentBlockHeight = await getCurrentBlockHeight();
+      if (!currentBlockHeight) {
+        toast.dismiss(toastId);
+        toast.error('Could not determine current block height');
+        return;
+      }
       
-      // Request wallet transaction approval before proceeding
-      if (wallet.sendBsv) {
-        // Use wallet's sendBsv function to handle wallet confirmation
-        const result = await wallet.sendBsv([{
-          satoshis: amountInSatoshis,
-          address: user_id || '',
-          data: [`Vote option lock: ${optionId}`]
-        }]);
-        
-        if (!result?.txid) {
-          throw new Error('Wallet transaction was not completed');
-        }
-        
-        // Use the transaction ID from the wallet in the lock request
-        const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            vote_option_id: optionId,
-            amount: amountInSatoshis,
-            lock_duration: duration,
-            author_address: user_id,
-            tx_id: result.txid
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to lock BSV on vote option');
-        }
-
-        // Dismiss loading toast and show success
+      // Calculate unlock height based on current height and duration
+      const unlockHeight = currentBlockHeight + duration;
+      console.log(`Calculated unlock height: ${unlockHeight} (current: ${currentBlockHeight} + duration: ${duration})`);
+      
+      // Check if wallet has lockBsv function
+      if (!wallet || !wallet.lockBsv) {
         toast.dismiss(toastId);
-        toast.success('Successfully locked BSV on vote option');
-        fetchPosts(); // Refresh posts to show updated lock amounts
-      } else {
-        // Fallback if sendBsv is not available
+        toast.error('Wallet locking capability not available');
+        return;
+      }
+      
+      // Get the wallet address (should be user_id in this component)
+      if (!user_id) {
         toast.dismiss(toastId);
-        toast.error('Wallet transaction capability not available');
+        toast.error('Could not get wallet address');
+        return;
+      }
+      
+      console.log('Using address for locking:', user_id);
+      
+      // Update toast message
+      toast.dismiss(toastId);
+      const lockingToastId = toast.loading('Waiting for wallet confirmation...');
+      
+      // Create lock parameters
+      const locks = [
+        {
+          address: user_id,
+          blockHeight: unlockHeight,
+          sats: amountInSatoshis
+        }
+      ];
+      
+      console.log('Requesting wallet to lock with parameters:', locks);
+      
+      // Call wallet lockBsv function
+      const lockResponse = await wallet.lockBsv(locks);
+      console.log('Lock transaction response:', lockResponse);
+      
+      if (!lockResponse || !lockResponse.txid) {
+        toast.dismiss(lockingToastId);
+        throw new Error('Failed to create lock transaction');
+      }
+      
+      // Update toast message
+      toast.dismiss(lockingToastId);
+      const apiToastId = toast.loading('Processing lock...');
+      
+      const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          vote_option_id: optionId,
+          author_address: user_id,
+          amount: amountInSatoshis,
+          lock_duration: duration,
+          tx_id: lockResponse.txid
+        }),
+      });
+
+      toast.dismiss(apiToastId);
+
+      if (!response.ok) {
+        throw new Error('Failed to lock BSV on vote option');
+      }
+
+      toast.success(`Successfully locked ${amount} BSV`);
+      
+      // Refresh posts to show updated lock amounts
+      fetchPosts();
+      
+      // If connected to wallet, fetch updated balance
+      if (wallet && wallet.getBalance) {
+        wallet.getBalance();
       }
     } catch (error: unknown) {
-      console.error('Error locking vote option:', error);
+      console.error('Error locking BSV on vote option:', error);
       
       // Handle user cancellation vs actual errors
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -1184,7 +1265,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         post_id: postId,
         amount,
         lock_duration: duration,
-        author_address: user_id, // Use the user_id from props which should be the wallet address
+        author_address: user_id, // Use user_id not wallet.address
       };
       
       logLock('API request payload', requestPayload);
@@ -1575,7 +1656,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                                     <div className="flex-shrink-0 ml-2">
                                       <VoteOptionLockInteraction 
                                         optionId={option.id} 
-                                        onLock={handlevote_optionLock}
+                                        onLock={handleLockVoteOption}
                                         isLocking={isLocking}
                                         connected={!!wallet}
                                       />

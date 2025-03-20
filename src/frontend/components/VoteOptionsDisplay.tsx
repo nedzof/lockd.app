@@ -37,6 +37,22 @@ interface VoteOptionsDisplayProps {
   onTotalLockedAmountChange?: (amount: number) => void;
 }
 
+// Add at appropriate location outside component
+async function getCurrentBlockHeight(): Promise<number | null> {
+  try {
+    const response = await fetch(`${API_URL}/api/status/block-height`);
+    if (!response.ok) {
+      console.error('Failed to fetch current block height');
+      return null;
+    }
+    const data = await response.json();
+    return data.block_height;
+  } catch (error) {
+    console.error('Error fetching block height:', error);
+    return null;
+  }
+}
+
 const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({ 
   transaction, 
   onTotalLockedAmountChange 
@@ -217,33 +233,65 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       console.log('Converted amount to satoshis:', amountInSatoshis);
       
       // Show loading toast
-      const toastId = toast.loading('Waiting for wallet confirmation...');
+      const toastId = toast.loading('Checking wallet balance...');
       
-      // Request wallet transaction approval before proceeding
-      if (!wallet || !wallet.sendBsv) {
+      // Get current block height for calculating unlock height
+      const currentBlockHeight = current_block_height || await getCurrentBlockHeight();
+      if (!currentBlockHeight) {
         toast.dismiss(toastId);
-        toast.error('Wallet transaction capability not available');
+        toast.error('Could not determine current block height');
         return;
       }
       
-      // Use wallet's sendBsv function to handle wallet confirmation
-      console.log('Requesting wallet transaction approval...');
-      const walletResult = await wallet.sendBsv([{
-        satoshis: amountInSatoshis,
-        address: bsvAddress || '',
-        data: [`Vote option lock: ${optionId}, duration: ${duration}`]
-      }]);
+      // Calculate unlock height based on current height and duration
+      const unlockHeight = currentBlockHeight + duration;
+      console.log(`Calculated unlock height: ${unlockHeight} (current: ${currentBlockHeight} + duration: ${duration})`);
       
-      if (!walletResult?.txid) {
+      // Check if wallet has lockBsv function
+      if (!wallet || !wallet.lockBsv) {
         toast.dismiss(toastId);
-        throw new Error('Wallet transaction was not completed');
+        toast.error('Wallet locking capability not available');
+        return;
       }
       
-      console.log('Wallet transaction approved with txid:', walletResult.txid);
-      toast.dismiss(toastId);
-      toast.loading('Processing lock...');
+      // Get the wallet address (we should already have this from the wallet provider)
+      if (!bsvAddress) {
+        toast.dismiss(toastId);
+        toast.error('Could not get wallet address');
+        return;
+      }
       
-      // Proceed with API call using the transaction ID from the wallet
+      console.log('Using address for locking:', bsvAddress);
+      
+      // Update toast message
+      toast.dismiss(toastId);
+      const lockingToastId = toast.loading('Waiting for wallet confirmation...');
+      
+      // Create lock parameters using exact format from documentation
+      const locks = [
+        {
+          address: bsvAddress,
+          blockHeight: unlockHeight,
+          sats: amountInSatoshis
+        }
+      ];
+      
+      console.log('Requesting wallet to lock with parameters:', locks);
+      
+      // Call wallet lockBsv function
+      const lockResponse = await wallet.lockBsv(locks);
+      console.log('Lock transaction response:', lockResponse);
+      
+      if (!lockResponse || !lockResponse.txid) {
+        toast.dismiss(lockingToastId);
+        throw new Error('Failed to create lock transaction');
+      }
+      
+      // Update toast message
+      toast.dismiss(lockingToastId);
+      const apiToastId = toast.loading('Processing lock...');
+      
+      // Call the API with the transaction ID
       console.log('Sending lock request to API for option:', optionId);
       const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
         method: 'POST',
@@ -255,9 +303,12 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
           author_address: bsvAddress,
           amount: amountInSatoshis,
           lock_duration: duration,
-          tx_id: walletResult.txid
+          tx_id: lockResponse.txid
         }),
       });
+
+      // Dismiss API toast
+      toast.dismiss(apiToastId);
 
       if (!response.ok) {
         throw new Error('Failed to lock BSV on vote option');
