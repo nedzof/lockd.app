@@ -25,12 +25,6 @@ interface vote_option {
   lock_duration: number;
   unlock_height?: number;
   tags: string[];
-  total_locked?: number;
-  lock_likes?: Array<{
-    amount: number;
-    author_address?: string;
-    unlock_height?: number | null;
-  }>;
 }
 
 interface ExtendedPost {
@@ -161,32 +155,6 @@ const highlightSearchTerm = (text: string, searchTerm: string): React.ReactNode 
     return part;
   });
 };
-
-// Add getCurrentBlockHeight function near the top of the file, outside components
-async function getCurrentBlockHeight(): Promise<number | null> {
-  try {
-    // Use the WhatsOnChain block headers endpoint as suggested
-    const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/block/headers');
-    if (!response.ok) {
-      console.error('Failed to fetch current block height from WhatsOnChain');
-      return null;
-    }
-    
-    const data = await response.json();
-    
-    // The first item in the array is the latest block
-    if (Array.isArray(data) && data.length > 0 && data[0].height) {
-      console.log('Current block height from WhatsOnChain:', data[0].height);
-      return data[0].height;
-    } else {
-      console.error('Unexpected response format from WhatsOnChain:', data);
-      return null;
-    }
-  } catch (error) {
-    console.error('Error fetching block height from WhatsOnChain:', error);
-    return null;
-  }
-}
 
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
@@ -1105,163 +1073,18 @@ const PostGrid: React.FC<PostGridProps> = ({
     };
   }, [hasMore, isFetchingMore, handleLoadMore, ranking_filter]);
 
-  const handleLockVoteOption = async (
-    optionId: string,
-    amount: number,
-    duration: number = 1000
-  ) => {
-    console.log('[LOCK DIAGNOSTICS] Lock requested for vote option:', optionId);
-    console.log('[LOCK DIAGNOSTICS] Lock amount:', amount, 'BSV');
-    console.log('[LOCK DIAGNOSTICS] Lock duration:', duration, 'blocks');
-    
-    if (amount <= 0) {
-      toast.error('Please enter a valid amount to lock');
-      return;
-    }
-
+  const handlevote_optionLock = async (optionId: string, amount: number, duration: number) => {
+    // Check if wallet is connected
     if (!wallet) {
       toast.error('Please connect your wallet first');
       return;
     }
 
-    // Check balance without assuming wallet.bsv exists
-    console.log('[LOCK DIAGNOSTICS] Wallet balance info:', {
-      hasGetBalance: !!wallet.getBalance,
-      getBalanceType: typeof wallet.getBalance,
-      balanceResult: wallet.getBalance ? await wallet.getBalance() : null
-    });
-    
-    const hasInsufficientBalance = wallet.getBalance && 
-      typeof wallet.getBalance() === 'object' && 
-      wallet.getBalance().bsv !== undefined && 
-      amount > wallet.getBalance().bsv;
-      
-    if (hasInsufficientBalance) {
-      toast.error('Insufficient balance');
-      return;
-    }
-
-    setIsLocking(true);
-
     try {
-      const amountInSatoshis = Math.round(amount * 100000000);
-      console.log('[LOCK DIAGNOSTICS] Converted amount to satoshis:', amountInSatoshis);
+      // Check balance - simplified approach
+      toast.loading('Checking wallet balance...');
       
-      // Show loading toast
-      const toastId = toast.loading('Checking wallet balance...');
-      
-      // Get current block height for calculating unlock height
-      const currentBlockHeight = await getCurrentBlockHeight();
-      console.log('[LOCK DIAGNOSTICS] Current block height:', currentBlockHeight);
-      
-      if (!currentBlockHeight) {
-        toast.dismiss(toastId);
-        toast.error('Could not determine current block height');
-        return;
-      }
-      
-      // Calculate unlock height based on current height and duration
-      const unlockHeight = currentBlockHeight + duration;
-      console.log('[LOCK DIAGNOSTICS] Calculated unlock height:', unlockHeight, '(current:', currentBlockHeight, '+ duration:', duration, ')');
-      
-      // Check what methods are actually available on the wallet object
-      console.log('[LOCK DIAGNOSTICS] Wallet object methods:', {
-        exists: !!wallet,
-        hasLock: !!(wallet && wallet.lock),
-        hasLockBsv: !!(wallet && wallet.lockBsv),
-        // List all available methods on the wallet
-        methods: wallet ? Object.getOwnPropertyNames(Object.getPrototypeOf(wallet)) : [],
-        // List all available properties on the wallet
-        properties: wallet ? Object.keys(wallet) : []
-      });
-      
-      // Determine which lock method to use based on what's available
-      const lockMethod = wallet && wallet.lock 
-        ? 'lock'  // Use new method per docs
-        : wallet && wallet.lockBsv 
-          ? 'lockBsv'  // Fall back to old method
-          : null;  // No lock method available
-      
-      if (!wallet || !lockMethod) {
-        toast.dismiss(toastId);
-        toast.error('Wallet locking capability not available');
-        return;
-      }
-      
-      // Get the wallet address (should be user_id in this component)
-      console.log('[LOCK DIAGNOSTICS] User ID (address):', user_id);
-      
-      if (!user_id) {
-        toast.dismiss(toastId);
-        toast.error('Could not get wallet address');
-        return;
-      }
-      
-      console.log('[LOCK DIAGNOSTICS] Using address for locking:', user_id);
-      
-      // Update toast message
-      toast.dismiss(toastId);
-      const lockingToastId = toast.loading('Waiting for wallet confirmation...');
-      
-      // Create lock parameters
-      const locks = [
-        {
-          address: user_id,
-          blockHeight: unlockHeight,
-          sats: amountInSatoshis
-        }
-      ];
-      
-      console.log('[LOCK DIAGNOSTICS] Lock parameters:', JSON.stringify(locks, null, 2));
-      console.log('[LOCK DIAGNOSTICS] Lock parameters types:', {
-        address: typeof user_id,
-        blockHeight: typeof unlockHeight,
-        sats: typeof amountInSatoshis
-      });
-      
-      // Declare lockResponse variable outside try block
-      let lockResponse;
-      
-      try {
-        // Use the appropriate lock method based on availability
-        console.log(`[LOCK DIAGNOSTICS] Calling wallet.${lockMethod} with parameters...`);
-        
-        if (lockMethod === 'lock') {
-          lockResponse = await wallet.lock(locks);
-        } else {
-          // Fall back to lockBsv
-          lockResponse = await wallet.lockBsv(locks);
-        }
-        
-        console.log('[LOCK DIAGNOSTICS] Lock transaction response:', lockResponse);
-        
-        if (!lockResponse || !lockResponse.txid) {
-          console.error('[LOCK DIAGNOSTICS] Lock response missing txid:', lockResponse);
-          toast.dismiss(lockingToastId);
-          throw new Error('Failed to create lock transaction - missing txid in response');
-        }
-      } catch (lockError) {
-        console.error(`[LOCK DIAGNOSTICS] Error in wallet.${lockMethod} call:`, lockError);
-        
-        // Try to extract detailed error information
-        let errorDetails = '';
-        if (lockError instanceof Error) {
-          errorDetails = lockError.message;
-          console.error('[LOCK DIAGNOSTICS] Error message:', lockError.message);
-          console.error('[LOCK DIAGNOSTICS] Error stack:', lockError.stack);
-        } else {
-          errorDetails = String(lockError);
-          console.error('[LOCK DIAGNOSTICS] Non-Error object thrown:', lockError);
-        }
-        
-        toast.dismiss(lockingToastId);
-        throw new Error(`Wallet lock error: ${errorDetails}`);
-      }
-      
-      // Update toast message
-      toast.dismiss(lockingToastId);
-      const apiToastId = toast.loading('Processing lock...');
-      
+      setIsLocking(true);
       const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
         method: 'POST',
         headers: {
@@ -1269,38 +1092,20 @@ const PostGrid: React.FC<PostGridProps> = ({
         },
         body: JSON.stringify({
           vote_option_id: optionId,
-          author_address: user_id,
-          amount: amountInSatoshis,
+          amount,
           lock_duration: duration,
-          tx_id: lockResponse.txid
+          author_address: user_id, // Use the user_id from props which should be the wallet address
         }),
       });
-
-      toast.dismiss(apiToastId);
 
       if (!response.ok) {
         throw new Error('Failed to lock BSV on vote option');
       }
 
-      toast.success(`Successfully locked ${amount} BSV`);
-      
-      // Refresh posts to show updated lock amounts
-      fetchPosts();
-      
-      // If connected to wallet, fetch updated balance
-      if (wallet && wallet.getBalance) {
-        wallet.getBalance();
-      }
-    } catch (error: unknown) {
-      console.error('Error locking BSV on vote option:', error);
-      
-      // Handle user cancellation vs actual errors
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (errorMessage.includes('User cancelled') || errorMessage.includes('User rejected')) {
-        toast.error('Transaction cancelled by user');
-      } else {
-        toast.error('Failed to lock BSV on vote option');
-      }
+      toast.success('Successfully locked BSV on vote option');
+      fetchPosts(); // Refresh posts to show updated lock amounts
+    } catch (error) {
+      toast.error('Failed to lock BSV on vote option');
     } finally {
       setIsLocking(false);
     }
@@ -1345,7 +1150,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         post_id: postId,
         amount,
         lock_duration: duration,
-        author_address: user_id, // Use user_id not wallet.address
+        author_address: user_id, // Use the user_id from props which should be the wallet address
       };
       
       logLock('API request payload', requestPayload);
@@ -1652,38 +1457,12 @@ const PostGrid: React.FC<PostGridProps> = ({
                   <div className="mt-4 p-4 pt-0 w-full">
                     {/* Calculate total locked amount for percentages */}
                     {(() => {
-                      // Calculate total locked amount properly, considering both lock_amount and total_locked fields
-                      const totalLocked = post.vote_options.reduce((sum, option) => {
-                        // Check if option has lock_likes array for detailed calculation
-                        if (option.lock_likes && Array.isArray(option.lock_likes) && option.lock_likes.length > 0) {
-                          return sum + calculate_active_locked_amount(option.lock_likes, current_block_height);
-                        }
-                        // If not, use total_locked if available, otherwise fall back to lock_amount
-                        return sum + (option.total_locked || option.lock_amount || 0);
-                      }, 0);
-                      
-                      console.log(`Total locked for vote post ${post.id}:`, totalLocked);
+                      const totalLocked = post.vote_options.reduce((sum, option) => sum + option.lock_amount, 0);
                       
                       return (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
                           {post.vote_options.map((option: vote_option) => {
-                            // Calculate active locked amount for this option
-                            let optionLockedAmount = 0;
-                            if (option.lock_likes && Array.isArray(option.lock_likes)) {
-                              optionLockedAmount = calculate_active_locked_amount(option.lock_likes, current_block_height);
-                            } else if (typeof option.total_locked === 'number') {
-                              optionLockedAmount = option.total_locked;
-                            } else {
-                              optionLockedAmount = option.lock_amount || 0;
-                            }
-                            
-                            // Calculate percentage based on total locked
-                            const percentage = totalLocked > 0 
-                              ? Math.round((optionLockedAmount / totalLocked) * 100) 
-                              : 0;
-                              
-                            console.log(`Vote option ${option.id} (${option.content}): ${optionLockedAmount} / ${totalLocked} = ${percentage}%`);
-                            
+                            const percentage = calculatePercentage(option.lock_amount, totalLocked);
                             // Determine color based on percentage
                             const getStatusColor = (pct: number) => {
                               if (pct >= 60) return "from-emerald-500 to-emerald-400";
@@ -1741,7 +1520,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                                           y="18" 
                                           dominantBaseline="middle" 
                                           textAnchor="middle" 
-                                          className="fill-white font-bold text-xs"
+                                          className={`${percentage > 0 ? 'fill-[#00ffa3] font-bold' : 'fill-gray-400'} text-xs`}
                                         >
                                           {percentage}%
                                         </text>
@@ -1762,7 +1541,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                                     <div className="flex-shrink-0 ml-2">
                                       <VoteOptionLockInteraction 
                                         optionId={option.id} 
-                                        onLock={handleLockVoteOption}
+                                        onLock={handlevote_optionLock}
                                         isLocking={isLocking}
                                         connected={!!wallet}
                                       />
@@ -1845,32 +1624,8 @@ const PostGrid: React.FC<PostGridProps> = ({
                         // Calculate locked amount with better error handling
                         let lockedAmount = 0;
                         try {
-                          // First check if we have vote options with locks
-                          if (post.is_vote && post.vote_options && post.vote_options.length > 0) {
-                            // Sum all vote option locks
-                            lockedAmount = post.vote_options.reduce((sum: number, option: any) => {
-                              // Calculate active locks for this option
-                              let optionLockedAmount = 0;
-                              
-                              // Check if option has lock_likes
-                              if (option.lock_likes && Array.isArray(option.lock_likes) && option.lock_likes.length > 0) {
-                                optionLockedAmount = calculate_active_locked_amount(option.lock_likes, current_block_height);
-                              } else if (typeof option.total_locked === 'number') {
-                                optionLockedAmount = option.total_locked;
-                              } else if (typeof option.lock_amount === 'number') {
-                                optionLockedAmount = option.lock_amount;
-                              }
-                              
-                              console.log(`Option ${option.id} locked amount: ${optionLockedAmount}`);
-                              return sum + optionLockedAmount;
-                            }, 0);
-                            
-                            console.log(`Calculated total locked amount from vote options for post ${post.id}: ${lockedAmount}`);
-                          } else {
-                            // Regular post locks
-                            lockedAmount = calculate_active_locked_amount(post.lock_likes || [], current_block_height);
-                            console.log(`Calculated locked amount for regular post ${post.id}: ${lockedAmount}`);
-                          }
+                          lockedAmount = calculate_active_locked_amount(post.lock_likes || [], current_block_height);
+                          console.log(`Calculated locked amount for post ${post.id}: ${lockedAmount}`);
                         } catch (error) {
                           console.error(`Error calculating locked amount for post ${post.id}:`, error);
                           // Fall back to manually calculating
@@ -1882,9 +1637,6 @@ const PostGrid: React.FC<PostGridProps> = ({
                             console.log(`Manually calculated locked amount for post ${post.id}: ${lockedAmount}`);
                           }
                         }
-                        
-                        // Store calculated amount on post for other components to use
-                        post.totalLocked = lockedAmount;
                         
                         return formatBSV(lockedAmount) + ' ₿';
                       })()}

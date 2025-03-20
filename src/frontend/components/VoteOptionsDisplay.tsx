@@ -387,55 +387,100 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       toast.dismiss(apiToastId);
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[LOCK DIAGNOSTICS] API error (${response.status}):`, errorText);
         throw new Error('Failed to lock BSV on vote option');
       }
 
       toast.success(`Successfully locked ${amount} BSV`);
       
-      // MORE AGGRESSIVE REFRESH STRATEGY
-      // First update UI optimistically
-      console.log('Updating UI with new lock data');
-      const updatedOptions = vote_options.map(opt => 
-        opt.id === optionId 
-          ? { 
-              ...opt, 
-              total_locked: (opt.total_locked || 0) + amountInSatoshis,
-              // Add this lock to lock_likes as well for percentage calculation
-              lock_likes: [
-                ...(opt.lock_likes || []),
-                {
-                  amount: amountInSatoshis,
-                  author_address: bsvAddress,
-                  unlock_height: unlockHeight
-                }
-              ]
-            } 
-          : opt
-      );
+      // FORCE IMMEDIATE UI UPDATE WITH DRAMATIC DEBUGGING
+      console.log('=== IMMEDIATE UI UPDATE DIAGNOSTICS ===');
+      console.log(`[LOCK DIAGNOSTICS] Original vote_options:`, JSON.stringify(vote_options, null, 2));
       
+      // Create a deep copy to avoid reference issues
+      const updatedOptions = vote_options.map(opt => {
+        if (opt.id === optionId) {
+          console.log(`[LOCK DIAGNOSTICS] Updating option ${opt.id} (${opt.content})`);
+          console.log(`[LOCK DIAGNOSTICS] - Current total_locked:`, opt.total_locked);
+          console.log(`[LOCK DIAGNOSTICS] - Adding amount:`, amountInSatoshis);
+          
+          // Create new lock_likes array or add to existing
+          const newLockLikes = [
+            ...(opt.lock_likes || []),
+            {
+              amount: amountInSatoshis,
+              author_address: bsvAddress,
+              unlock_height: unlockHeight
+            }
+          ];
+          
+          console.log(`[LOCK DIAGNOSTICS] - New lock_likes:`, JSON.stringify(newLockLikes, null, 2));
+          
+          // Return updated option with new values
+          return { 
+            ...opt, 
+            total_locked: (opt.total_locked || 0) + amountInSatoshis,
+            lock_likes: newLockLikes
+          }; 
+        }
+        return opt;
+      });
+      
+      console.log(`[LOCK DIAGNOSTICS] Updated vote_options:`, JSON.stringify(updatedOptions, null, 2));
+      
+      // Calculate the new total locked amount directly
+      const newTotalLocked = updatedOptions.reduce((total, opt) => {
+        let optionTotal = 0;
+        
+        if (opt.lock_likes && Array.isArray(opt.lock_likes) && opt.lock_likes.length > 0) {
+          // Calculate active locked amount for this option
+          optionTotal = calculate_active_locked_amount(opt.lock_likes, currentBlockHeight);
+        } else {
+          // Fall back to total_locked or lock_amount
+          optionTotal = opt.total_locked || opt.lock_amount || 0;
+        }
+        
+        console.log(`[LOCK DIAGNOSTICS] Option ${opt.id} (${opt.content}) locked amount: ${optionTotal}`);
+        return total + optionTotal;
+      }, 0);
+      
+      console.log(`[LOCK DIAGNOSTICS] New total locked amount: ${newTotalLocked}`);
+      console.log(`[LOCK DIAGNOSTICS] Setting new vote_options and total locked amount`);
+      
+      // Update state with the new options
       setvote_options(updatedOptions);
-      updateTotalLocked(updatedOptions);
+      
+      // Notify parent of total amount change
+      if (onTotalLockedAmountChange) {
+        console.log(`[LOCK DIAGNOSTICS] Calling onTotalLockedAmountChange with: ${newTotalLocked}`);
+        onTotalLockedAmountChange(newTotalLocked);
+      }
+      
+      // Add a delay and force a second update to ensure UI refreshes
+      setTimeout(() => {
+        console.log('[LOCK DIAGNOSTICS] Force second UI update after delay');
+        setvote_options([...updatedOptions]);
+      }, 500);
       
       // Then fetch fresh data from server
       try {
-        console.log('Fetching updated lock data for all options');
+        console.log('[LOCK DIAGNOSTICS] Fetching updated lock data from server');
         await refreshVoteOptions();
-        console.log('Vote options refreshed from server');
+        console.log('[LOCK DIAGNOSTICS] Vote options refreshed from server');
       } catch (refreshError) {
-        console.error('Error refreshing vote options after lock:', refreshError);
+        console.error('[LOCK DIAGNOSTICS] Error refreshing vote options after lock:', refreshError);
         // We already updated UI optimistically, so just log this error
       }
       
+      // Force another refresh
+      setTimeout(() => {
+        console.log('[LOCK DIAGNOSTICS] Final UI refresh');
+        refreshVoteOptions().catch(e => console.error('Final refresh error:', e));
+      }, 1500);
+      
       // Refresh wallet balance
       refreshBalance();
-      
-      // Force parent component to update as well (post grid)
-      if (onTotalLockedAmountChange) {
-        // Calculate new total including this lock
-        const newTotal = (totalLockedAmount || 0) + amountInSatoshis;
-        console.log('Notifying parent of new total locked amount:', newTotal);
-        onTotalLockedAmountChange(newTotal);
-      }
     } catch (error: unknown) {
       console.error('Error locking BSV on vote option:', error);
       
@@ -515,20 +560,25 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
           
           return (
             <div key={option.id} className="relative border-b border-gray-700/20 p-3 mb-2 overflow-hidden">
-              {/* Background progress bar */}
+              {/* Background progress bar - ensure it's visible when non-zero */}
               <div 
-                className="absolute inset-0 bg-[#00E6CC]/10 z-0" 
-                style={{ width: `${percentage}%` }}
+                className={`absolute inset-0 bg-[#00E6CC]/10 z-0 ${percentage > 0 ? 'transition-all duration-300' : ''}`}
+                style={{ 
+                  width: `${Math.max(percentage, percentage > 0 ? 5 : 0)}%`, 
+                  minWidth: percentage > 0 ? '5%' : '0'
+                }}
               />
               
               <div className="flex items-center justify-between relative z-10">
                 <div className="flex-grow">
                   <div className="font-medium text-white">{option.content}</div>
-                  {activeOptionLocked > 0 && (
-                    <div className="text-xs text-gray-400 mt-1">
-                      {formatBSV(activeOptionLocked / 100000000)} BSV ({percentage.toFixed(1)}%)
-                    </div>
-                  )}
+                  {/* Always show the percentage, even if zero */}
+                  <div className="text-xs text-gray-400 mt-1">
+                    {formatBSV(activeOptionLocked / 100000000)} BSV 
+                    <span className={activeOptionLocked > 0 ? 'text-[#00E6CC]' : 'text-gray-500'}>
+                      {' '}({percentage.toFixed(1)}%)
+                    </span>
+                  </div>
                 </div>
                 
                 {isConnected && (
