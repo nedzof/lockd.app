@@ -131,15 +131,6 @@ async function handleGetPosts(req: NextApiRequest, res: NextApiResponse) {
           };
           console.log('Filtering posts with lock_likes');
         }
-      } else if (user_id) {
-        // If no personal filter but user_id is provided, filter by that user
-        if (user_id === 'anon') {
-          where.author_address = {
-            isNull: true
-          };
-        } else {
-          where.author_address = user_id;
-        }
       }
 
       // Apply time filter

@@ -393,12 +393,6 @@ const listPosts: PostListHandler = async (req, res, next) => {
         });
         logger.debug(`Added filter for posts with lock_likes by user: ${user_id}`);
       }
-    } else if (user_id && user_id !== 'anon') {
-      // If no personal filter but user_id is provided and not 'anon', filter by that user
-      whereConditions.push({
-        author_address: user_id as string
-      });
-      logger.debug(`Filtering posts by author: ${user_id}`);
     }
     
     // Determine the order by clause based on ranking filter
