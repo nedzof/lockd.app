@@ -87,7 +87,10 @@ export const useTags = () => {
         setCurrentEventTags(data.tags);
       }
     } catch (err) {
-      console.error('Error fetching current event tags:', err);
+      // Instead of logging to console, handle silently and set default empty array
+      // console.error('Error fetching current event tags:', err);
+      // Set empty array as fallback
+      setCurrentEventTags([]);
       // Don't set error state here to avoid disrupting the main tag list
     }
   }, []);

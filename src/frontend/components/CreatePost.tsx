@@ -6,9 +6,28 @@ import { useWallet } from '../providers/WalletProvider';
 import { useTags } from '../hooks/useTags';
 import { FiX, FiPlus, FiCheck, FiRefreshCw, FiImage, FiFile, FiPlusCircle, FiTrash2, FiBarChart2, FiLink, FiHash, FiClock, FiCalendar, FiLock } from 'react-icons/fi';
 import { createPost } from '../services/post.service';
-import { isWalletConnected, ensureWalletConnection, getBsvAddress, getWalletStatus } from '../utils/walletConnectionHelpers';
+import { getBsvAddress, getWalletStatus } from '../utils/walletConnectionHelpers';
 import LinkPreview from './LinkPreview';
+import { YoursProviderType } from 'yours-wallet-provider';
 
+// Define wallet state diagnostics logging utility
+const logWalletState = (message: string, wallet: any, isConnected: boolean) => {
+  console.log(`🔍 WALLET-DIAG [${message}]`, {
+    timestamp: new Date().toISOString(),
+    isConnected,
+    walletExists: !!wallet,
+    walletReady: wallet?.isReady || false,
+    walletHasBsvProvider: !!wallet?.bsv,
+    walletHasAddress: async () => {
+      try {
+        const address = await getBsvAddress(wallet);
+        return !!address;
+      } catch (e: any) {
+        return `Error: ${e.message}`;
+      }
+    }
+  });
+};
 
 interface CreatePostProps {
   onPostCreated?: () => void;
@@ -28,7 +47,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const [showImagePanel, setShowImagePanel] = useState(false);
   const [error, setError] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
-  const { wallet, connect, isConnected } = useWallet();
+  const { wallet, connect, disconnect, isConnected, clearPendingTransactions } = useWallet();
   const { 
     tags, 
     currentEventTags, 
@@ -59,6 +78,10 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const [lockDuration, setLockDuration] = useState(10); // Default 10 blocks
   // Add a new state to track which icon/feature is currently active
   const [activeFeature, setActiveFeature] = useState<'image' | 'vote' | 'tag' | 'schedule' | 'lock' | null>(null);
+  // Add new state for transaction timeout tracking
+  const [transactionStartTime, setTransactionStartTime] = useState<number | null>(null);
+  const transactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [showRetryButton, setShowRetryButton] = useState(false);
 
   // Compute if any panel is currently active
   const isPanelActive = showImagePanel || showTagInput || isVotePost || showScheduleOptions || showLockOptions;
@@ -102,51 +125,98 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     };
   }, [isOpen]);
 
-  useEffect(() => {
-    const attemptWalletConnection = async () => {
-      console.log('Component mounted, checking wallet connection:', {
-        isConnected,
-        hasWallet: !!wallet,
-        walletReady: wallet?.isReady
-      });
+  // ULTRA-SIMPLE wallet connection check - with extra diagnostics
+  const simpleWalletCheck = useCallback(async () => {
+    logWalletState('WALLET-CHECK START', wallet, isConnected);
+    
+    // 1. Basic availability check
+    if (!wallet) {
+      console.error('🔴 WALLET-DIAG: Wallet object is null or undefined');
+      throw new Error('Wallet not available');
+    }
+    
+    // Log wallet API structure
+    console.log('🔍 WALLET-DIAG: Available wallet properties:', Object.keys(wallet as object));
+    console.log('🔍 WALLET-DIAG: Wallet provider info:', { 
+      providerType: (wallet as any)?.provider?.constructor?.name || 'Unknown',
+      isReady: wallet?.isReady || false
+    });
+    
+    // 2. If not connected, connect with patience
+    if (!isConnected && connect) {
+      console.log('🟡 WALLET-DIAG: Attempting wallet connection...');
+      try {
+        await connect();
+        console.log('🟢 WALLET-DIAG: Initial connection call completed');
+        
+        // Give wallet time to fully initialize (important!)
+        console.log('🟡 WALLET-DIAG: Waiting for wallet initialization...');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        console.log('🟢 WALLET-DIAG: Wallet wait completed');
+      } catch (error: any) {
+        console.error('🔴 WALLET-DIAG: Connect error:', error);
+        throw new Error(`Failed to connect wallet: ${error.message || 'Unknown error'}`);
+      }
+    } else {
+      console.log(`🟢 WALLET-DIAG: Wallet already connected: ${isConnected}`);
+    }
+    
+    // 3. Verify wallet has an address - with multiple gentle attempts
+    console.log('🟡 WALLET-DIAG: Verifying wallet address...');
+    let bsvAddress = null;
+    
+    // First attempt
+    try {
+      bsvAddress = await getBsvAddress(wallet as YoursProviderType);
+      console.log(`🟡 WALLET-DIAG: First address check result: ${bsvAddress || 'null'}`);
+    } catch (error) {
+      console.error('🔴 WALLET-DIAG: Initial address fetch error:', error);
+    }
+    
+    // If no address, wait and try again (don't reconnect)
+    if (!bsvAddress) {
+      console.log('🟡 WALLET-DIAG: Address not available yet, waiting patiently...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
       
+      try {
+        bsvAddress = await getBsvAddress(wallet as YoursProviderType);
+        console.log(`🟡 WALLET-DIAG: Second address check result: ${bsvAddress || 'null'}`);
+      } catch (error) {
+        console.error('🔴 WALLET-DIAG: Second address fetch error:', error);
+      }
+    }
+    
+    // Log wallet state again
+    logWalletState('WALLET-CHECK COMPLETE', wallet, isConnected);
+    
+    // Final check
+    if (!bsvAddress) {
+      console.error('🔴 WALLET-DIAG: Final check failed - no BSV address available');
+      throw new Error('Wallet not properly connected (no address)');
+    }
+    
+    console.log('🟢 WALLET-DIAG: Wallet successfully ready with address:', bsvAddress);
+    return true;
+  }, [wallet, isConnected, connect]);
+
+  useEffect(() => {
+    // Simplified initial connection attempt - only connects if needed
+    const attemptInitialConnection = async () => {
+      // Only try to connect if wallet is ready but not connected
       if (!isConnected && wallet?.isReady) {
-        console.log('Wallet is ready but not connected, attempting connection...');
         try {
-          await connect();
-          console.log('Initial wallet connection completed');
-          
-          // Verify we have an address after connection
-          const bsvAddress = await getBsvAddress(wallet);
-          if (!bsvAddress) {
-            console.log('No wallet address after initial connection, waiting briefly and checking again...');
-            
-            // Wait a moment and check if address is available
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            
-            const addressAfterDelay = await getBsvAddress(wallet);
-            console.log('Checking wallet address after delay:', {
-              hasBsvAddress: !!addressAfterDelay,
-              bsvAddress: addressAfterDelay
-            });
-            
-            // If still no address, try connecting again
-            if (!addressAfterDelay && wallet?.isReady) {
-              console.log('Still no address, attempting second connection...');
-              await connect();
-              console.log('Second connection attempt completed');
-            }
-          }
+          // Use our patient connection function
+          await simpleWalletCheck();
+          console.log('Initial wallet connection successful');
         } catch (error) {
-          console.error('Error during initial wallet connection:', error);
-          // Don't show error toast here as it might be confusing to users
-          // who haven't explicitly tried to connect yet
+          // Silent failure - don't bother user on initial load
+          console.log('Initial connection attempt failed, will try on user action');
         }
       }
     };
     
-    attemptWalletConnection();
-  }, [isConnected, wallet, connect]);
+    attemptInitialConnection();
+  }, [isConnected, wallet, simpleWalletCheck]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -244,152 +314,192 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     }
   };
 
+  // Simple modal close
   const handleCloseModal = () => {
-    // Reset all panel states
-    setActiveFeature(null);
+    setIsSubmitting(false);
     onClose();
   };
 
+  // Ultra-simplified submission with detailed diagnostics
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
     setError('');
-
+    setShowRetryButton(false);
+    
+    console.log('🟡 SUBMIT-DIAG: Starting post submission process');
+    logWalletState('PRE-SUBMIT', wallet, isConnected);
+    
+    // Start tracking transaction time
+    const startTime = Date.now();
+    setTransactionStartTime(startTime);
+    
     try {
-      console.log('Starting post submission process...');
+      // Wait for wallet to be ready - patiently
+      console.log('🟡 SUBMIT-DIAG: Checking wallet connection...');
+      await simpleWalletCheck();
+      console.log('🟢 SUBMIT-DIAG: Wallet connection verified');
       
-      // Validate wallet connection
-      console.log('Checking wallet connection status...');
-      const walletStatus = await getWalletStatus(wallet);
-      if (!walletStatus.isReady) {
-        console.error('Wallet is not available or not ready');
-        throw new Error('Wallet is not available. Please refresh the page and try again.');
-      }
-
-      // Connect wallet if not already connected
-      if (!walletStatus.isConnected) {
-        console.log('Wallet not connected, attempting to connect...');
-        try {
-          await connect();
-        } catch (error) {
-          console.error('Failed to connect wallet:', error);
-          throw new Error('Failed to connect wallet. Please try again.');
-        }
-      }
-
-      console.log('Wallet connected successfully');
-
-      // Check if wallet is available
-      if (!wallet) {
-        throw new Error('Wallet is not available for post creation');
-      }
-
-      // Get BSV address
-      const bsvAddress = await getBsvAddress(wallet);
-      if (!bsvAddress) {
-        console.error('Failed to get BSV address');
-        throw new Error('Could not get BSV address from wallet. Please reconnect and try again.');
-      }
-
-      console.log('BSV address retrieved:', bsvAddress);
-
-      // Validate vote options if it's a vote post
-      let shouldBeVotePost = isVotePost;
-      let filteredVoteOptions: string[] = [];
+      // Capture detailed wallet state before transaction
+      console.log('🔍 WALLET-DIAG: Pre-transaction state', {
+        timestamp: new Date().toISOString(),
+        startTime,
+        walletMethods: Object.keys(wallet || {}).filter(k => typeof (wallet as any)[k] === 'function'),
+        hasInscribe: wallet && typeof (wallet as any).inscribe === 'function',
+        hasSignTransaction: wallet && typeof (wallet as any).signTransaction === 'function', 
+        walletReadyState: wallet?.isReady
+      });
       
-      if (isVotePost) {
-        console.log('Validating vote options:', vote_options);
-        
-        // Filter out empty options
-        filteredVoteOptions = vote_options.filter(option => option.trim() !== '');
-        console.log('Filtered vote options:', filteredVoteOptions);
-        
-        if (filteredVoteOptions.length < 2) {
-          console.error('A vote post requires at least 2 options');
-          throw new Error('A vote post requires at least 2 options');
-        }
-        
-        // Ensure isLocked is set to false for vote posts
-        if (isLocked) {
-          console.log('Auto-disabling lock for vote post (locking per option will be used instead)');
-          setIsLocked(false);
-        }
-      } else {
-        console.log('Not a vote post, clearing vote options');
-        shouldBeVotePost = false;
-        filteredVoteOptions = [];
+      // Log post creation parameters
+      console.log('🟡 SUBMIT-DIAG: Post parameters:', {
+        contentLength: content.length,
+        isVotePost,
+        hasImage: !!image,
+        selectedTags: selected_tags,
+        isScheduled,
+        isLocked
+      });
+      
+      // Prepare post options
+      const options = {
+        isVotePost: isVotePost,
+        voteOptions: isVotePost ? vote_options.filter(o => o.trim() !== '') : [],
+        scheduledInfo: isScheduled && scheduleDate && scheduleTime ? {
+          scheduledAt: new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString(),
+          timezone: scheduleTimezone
+        } : undefined,
+        lockSettings: !isVotePost && isLocked ? {
+          is_locked: true, 
+          lock_amount: lockAmount * 100000000,
+          lock_duration: lockDuration
+        } : undefined
+      };
+      
+      // Validate options
+      if (options.isVotePost && options.voteOptions.length < 2) {
+        throw new Error('A vote post requires at least 2 options');
       }
       
-      console.log('Final filtered vote options:', filteredVoteOptions);
+      // Create the post with careful error handling
+      console.log('🟡 SUBMIT-DIAG: Initiating createPost call...');
+      let transactionTimedOut = false;
+      
+      // Set a UI-side timeout to update the status if it takes too long
+      const uiTimeoutId = setTimeout(() => {
+        console.log('🟡 SUBMIT-DIAG: Transaction taking longer than expected (UI timeout)');
+        // We don't cancel here, just update the UI
+        if (isSubmitting) {
+          toast.loading('Transaction is taking longer than expected...', { id: 'transaction-timeout' });
+        }
+      }, 15000);
       
       try {
-        // Create the post with lock parameters
-        const lockParams = !shouldBeVotePost && isLocked ? {
-          is_locked: true, 
-          lock_amount: lockAmount * 100000000, // Convert to satoshis
-          lock_duration: lockDuration
-        } : undefined;
-
-        // Create the post
         const newPost = await createPost(
           wallet,
           content,
-          image || undefined, // Pass undefined instead of null
+          image || undefined,
           image ? image.type : undefined,
-          shouldBeVotePost, // Use the validated flag
-          shouldBeVotePost ? filteredVoteOptions : [], // Only pass options if it's a vote post
-          isScheduled && scheduleDate && scheduleTime ? {
-            scheduledAt: new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString(),
-            timezone: scheduleTimezone
-          } : undefined,
-          selected_tags, // Pass the selected tags to the createPost function
-          lockParams
+          options.isVotePost,
+          options.voteOptions,
+          options.scheduledInfo,
+          selected_tags,
+          options.lockSettings
         );
         
-        console.log('Post created successfully:', newPost);
+        // Clear the UI timeout since we got a response
+        clearTimeout(uiTimeoutId);
         
-        // Reset form and state
+        console.log('🟢 SUBMIT-DIAG: Post created successfully:', { 
+          postReceived: !!newPost,
+          postDataType: typeof newPost,
+          elapsedTimeMs: Date.now() - startTime
+        });
+        
+        // Success! Reset everything
         setContent('');
         setImage(null);
         setImagePreview('');
         setvote_options(['', '']);
         setIsVotePost(false);
         setselected_tags([]);
-        setIsScheduled(false);
-        setShowScheduleOptions(false);
-        setIsLocked(false);
-        setShowLockOptions(false);
-        setActiveFeature(null); // Reset active feature
+        setActiveFeature(null);
         
-        // Notify success
-        toast.success(isScheduled ? 'Post scheduled successfully!' : 'Post created successfully!', {
-          style: {
-            background: '#1A1B23',
-            color: '#34d399',
-            border: '1px solid rgba(52, 211, 153, 0.3)',
-            borderRadius: '0.375rem'
-          }
-        });
-        
-        // Close the modal
+        toast.success('Post created successfully!');
         onClose();
+        if (onPostCreated) onPostCreated();
+      } catch (createError: any) {
+        // Clear the UI timeout since we got a response (even if it's an error)
+        clearTimeout(uiTimeoutId);
         
-        // Call the onPostCreated callback if provided
-        if (onPostCreated) {
-          onPostCreated();
+        console.error('🔴 SUBMIT-DIAG: Error in createPost:', createError);
+        console.error('🔴 SUBMIT-DIAG: Error type:', createError.constructor.name);
+        console.error('🔴 SUBMIT-DIAG: Error message:', createError.message);
+        
+        // Enhanced error info from wallet errors
+        if (createError?.response?.data) {
+          console.error('🔴 SUBMIT-DIAG: Server response:', createError.response.data);
         }
-      } catch (error: any) {
-        console.error('Error creating post:', error);
-        setError(error.message || 'Failed to create post');
+        
+        // Check if this is a timeout error
+        if (createError.message && createError.message.includes('timed out')) {
+          transactionTimedOut = true;
+          console.error('🔴 SUBMIT-DIAG: Transaction timed out after', Date.now() - startTime, 'ms');
+          
+          // Check wallet state after timeout
+          logWalletState('POST-TIMEOUT', wallet, isConnected);
+          
+          throw new Error('Transaction timed out. Please check your wallet and try again later.');
+        }
+        
+        if (createError?.message?.includes('wallet') || createError?.message?.includes('Wallet')) {
+          logWalletState('POST-ERROR', wallet, isConnected);
+        }
+        
+        throw createError;
       }
     } catch (error: any) {
-      console.error('Error in form submission:', error);
-      setError(error.message || 'An error occurred');
+      console.error('🔴 SUBMIT-DIAG: Post submission error:', error);
+      
+      // Log detailed error information
+      console.error('🔴 SUBMIT-DIAG: Error type:', error.constructor.name);
+      console.error('🔴 SUBMIT-DIAG: Error message:', error.message);
+      if (error.cause) console.error('🔴 SUBMIT-DIAG: Error cause:', error.cause);
+      if (error.stack) console.error('🔴 SUBMIT-DIAG: Error stack:', error.stack);
+      
+      // Log final wallet state
+      logWalletState('FINAL-ERROR-STATE', wallet, isConnected);
+      
+      setError(error.message || 'Failed to create post');
+      
+      // Only show retry for wallet connection issues
+      if (error.message?.includes('Wallet not properly connected') || 
+          error.message?.includes('Failed to connect wallet') ||
+          error.message?.includes('timed out')) {
+        console.log('🟡 SUBMIT-DIAG: Showing retry button for wallet connection issue');
+        setShowRetryButton(true);
+      }
     } finally {
+      console.log('🟡 SUBMIT-DIAG: Submission process completed in', Date.now() - startTime, 'ms');
+      setTransactionStartTime(null);
       setIsSubmitting(false);
     }
+  };
+
+  // Very simple retry - just try again, with diagnostics
+  const handleRetry = async () => {
+    console.log('🟡 RETRY-DIAG: Retry requested');
+    logWalletState('PRE-RETRY', wallet, isConnected);
+    
+    setError('');
+    await handleSubmit(new Event('submit') as any);
+  };
+
+  // Simple cancel function
+  const cancelSubmission = () => {
+    setIsSubmitting(false);
+    setError('Submission canceled');
   };
 
   // Toggle schedule options
@@ -636,36 +746,15 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                   toast.loading('Connecting wallet...', { id: 'wallet-connect' });
                   
                   if (wallet) {
-                    await ensureWalletConnection(wallet, connect);
-                    
-                    // Check if we have an address
-                    const bsvAddress = await getBsvAddress(wallet);
-                    if (isConnected && bsvAddress) {
-                      toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
-                    } else {
-                      // If connect() succeeded but we still don't have an address, try again after a delay
-                      await new Promise(resolve => setTimeout(resolve, 1500));
-                      
-                      const addressAfterDelay = await getBsvAddress(wallet);
-                      if (!addressAfterDelay) {
-                        await ensureWalletConnection(wallet, connect);
-                        
-                        const finalAddress = await getBsvAddress(wallet);
-                        if (finalAddress) {
-                          toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
-                        } else {
-                          toast.error('Connected but failed to get wallet address. Please try again.', { id: 'wallet-connect' });
-                        }
-                      } else {
-                        toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
-                      }
-                    }
+                    // Use our simple wallet check function
+                    await simpleWalletCheck();
+                    toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
                   } else {
                     toast.error('Wallet not available. Please install a compatible wallet.', { id: 'wallet-connect' });
                   }
                 } catch (error) {
                   console.error('Error connecting wallet:', error);
-                  toast.error('Failed to connect wallet. Please check your wallet extension.', { id: 'wallet-connect' });
+                  toast.error('Failed to connect wallet. Please try again.', { id: 'wallet-connect' });
                 }
               }}
               className="group relative px-4 py-2 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 flex items-center justify-center mx-auto"
@@ -1077,22 +1166,66 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           )}
           
           {/* Action buttons */}
-          <div className="flex justify-end mt-6">
+          <div className="flex justify-end space-x-3 mt-4">
+            {isSubmitting && transactionStartTime && (
+              <div className="flex items-center text-gray-400 text-sm mr-auto">
+                <div className="animate-pulse mr-2">
+                  <div className="h-2 w-2 bg-green-400 rounded-full inline-block"></div>
+                </div>
+                Transaction in progress
+                {Date.now() - transactionStartTime > 5000 && (
+                  <span className="ml-1 text-yellow-500">
+                    (taking longer than usual...)
+                  </span>
+                )}
+              </div>
+            )}
+            
+            {isSubmitting && (
+              <button
+                type="button"
+                onClick={cancelSubmission}
+                className="px-4 py-2 bg-red-900/30 hover:bg-red-900/50 text-red-200 rounded-lg text-sm transition-colors"
+              >
+                Cancel
+              </button>
+            )}
+            
             <button
               type="submit"
-              disabled={isSubmitting || !content.trim()}
-              className={`px-5 py-2.5 rounded-lg transition-all duration-300 min-w-[100px] ${
-                (isSubmitting || !content.trim()) 
-                  ? 'bg-[#00ffa3]/50 text-gray-800 cursor-not-allowed' 
-                  : 'bg-[#00ffa3] text-black hover:bg-[#00ffa3]/80 hover:shadow-[0_0_20px_rgba(0,255,163,0.3)]'
+              disabled={isSubmitting || !content.trim() || (!isConnected && !wallet?.isReady)}
+              className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 ${
+                isSubmitting || !content.trim() || (!isConnected && !wallet?.isReady)
+                  ? 'bg-gray-700/50 text-gray-500 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-[#00ffa3] to-[#00ffa3] text-black shadow-lg shadow-[#00ffa3]/10 hover:shadow-[#00ffa3]/20 hover:scale-105 transform'
               }`}
             >
-              {isSubmitting ? 'Posting...' : 'Post'}
+              {isSubmitting ? (
+                <div className="flex items-center">
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  {isScheduled ? 'Scheduling...' : 'Publishing...'}
+                </div>
+              ) : (
+                <span>{isScheduled ? 'Schedule Post' : 'Publish'}</span>
+              )}
             </button>
           </div>
+          {/* Show error message and retry button when there's an error */}
           {error && (
-            <div className="mt-3 p-3 rounded-md bg-red-900/20 backdrop-blur-sm border border-red-500/50 text-red-400 text-sm">
-              {error}
+            <div className="mb-4 bg-red-900/20 border border-red-500/30 p-4 rounded-lg">
+              <p className="text-red-400 text-sm">{error}</p>
+              {showRetryButton && (
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  className="mt-2 px-4 py-2 bg-red-700/30 hover:bg-red-700/50 text-white rounded-lg text-sm transition-colors duration-200 flex items-center"
+                >
+                  <FiRefreshCw className="mr-2" /> Retry with Reconnected Wallet
+                </button>
+              )}
             </div>
           )}
         </form>

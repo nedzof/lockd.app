@@ -937,133 +937,197 @@ export const createPost = async (
             mapKeys: Object.keys(comp.map)
         })));
 
-        const response = await wallet.inscribe(components);
-        console.log('[DEBUG] Wallet inscription response:', response);
-        
-        // Add logging for better debugging
-        console.log('[DEBUG] Response analysis:');
-        console.log('[DEBUG] - Response type:', typeof response);
-        console.log('[DEBUG] - Response keys:', Object.keys(response));
-
-        // Here's the fix: Check for txid in addition to tx_id and id
-        const tx_id = response.tx_id || response.id || response.txid;
-        if (!tx_id) {
-            console.error('[DEBUG] Transaction ID not found in response:', response);
-            throw new Error('Failed to create inscription - no transaction ID returned');
-        }
-        console.log('Inscription successful with tx_id:', tx_id);
-
-        // Create post in database
-        const dbPost = createDbPost(metadata, tx_id);
-        dbPost.author_address = bsvAddress;
-        
-        // Use the transaction ID as the post ID to avoid conflicts
-        dbPost.id = tx_id;
-        
-        // Add vote options if this is a vote post
-        if (isVotePost && metadata.vote?.options) {
-            dbPost.is_vote = true;
-            dbPost.vote_options = metadata.vote.options.map((option, idx) => ({
-                id: `${tx_id}-option-${option.optionIndex}`,
-                tx_id: `${tx_id}-option-${option.optionIndex}`,
-                content: option.text,
-                author_address: bsvAddress,
-                created_at: new Date(metadata.timestamp),
-                post_id: tx_id,
-                option_index: option.optionIndex,
-                tags: metadata.tags || []
-            }));
-        }
-        
-        console.log('Created database post object:', { 
-            ...dbPost, 
-            content: dbPost.content.substring(0, 50) + '...',
-            vote_options: dbPost.vote_options
+        // Add detailed logging around wallet.inscribe call
+        console.log('[DEBUG] Pre-inscription wallet state:', {
+            walletExists: !!wallet,
+            walletIsReady: wallet?.isReady || false,
+            walletHasBsv: !!wallet?.bsv,
+            walletHasInscribe: typeof wallet.inscribe === 'function',
+            bsvAddress,
+            timestamp: new Date().toISOString()
         });
 
-        // Function to attempt the database post creation with retry logic
-        const attemptDatabasePost = async (retries = 2): Promise<any> => {
-            try {
-                console.log(`Attempting to create post in database (retries left: ${retries})`);
-                
-                // Create a copy of the dbPost object without vote_options for the API request
-                const { vote_options, ...postData } = dbPost;
-                
-                // Format vote options properly for the API
-                const formattedVoteOptions = vote_options?.map(option => ({
-                    text: option.content,
-                    tx_id: option.tx_id,
-                    index: option.option_index
-                })) || [];
-                
-                // Prepare the final payload for the API
-                const apiPayload = {
-                    ...postData,
-                    vote_options: formattedVoteOptions
-                };
-                
-                console.log('Database post structure:', JSON.stringify(apiPayload, null, 2));
-                console.log('Keys in API payload:', Object.keys(apiPayload));
-                
-                const dbResponse = await fetch(`${API_BASE_URL}/api/posts`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(apiPayload)
+        let response;
+        
+        try {
+            // Setup a separate timeout handler instead of combining with Promise.race
+            const inscribePromise = wallet.inscribe(components);
+            
+            // Create a separate timeout function
+            const timeout = (ms: number) => {
+                return new Promise((_, reject) => {
+                    setTimeout(() => {
+                        reject(new Error('Transaction timed out. The wallet may be stuck or unresponsive.'));
+                    }, ms);
                 });
+            };
+            
+            // Use Promise.race between the wallet call and timeout
+            response = await Promise.race([
+                inscribePromise,
+                timeout(45000)
+            ]);
+            
+            console.log('[DEBUG] Wallet inscription completed successfully');
+            console.log('[DEBUG] Wallet inscription response:', response);
+            
+            // Add logging for better debugging
+            console.log('[DEBUG] Response analysis:');
+            console.log('[DEBUG] - Response type:', typeof response);
+            console.log('[DEBUG] - Response keys:', Object.keys(response));
 
-                if (!dbResponse.ok) {
-                    const errorText = await dbResponse.text();
-                    let errorDetails;
-                    try {
-                        errorDetails = JSON.parse(errorText);
-                    } catch (e) {
-                        errorDetails = errorText;
+            // Here's the fix: Check for txid in addition to tx_id and id
+            const tx_id = response.tx_id || response.id || response.txid;
+            if (!tx_id) {
+                console.error('[DEBUG] Transaction ID not found in response:', response);
+                throw new Error('Failed to create inscription - no transaction ID returned');
+            }
+            console.log('Inscription successful with tx_id:', tx_id);
+
+            // Create post in database
+            const dbPost = createDbPost(metadata, tx_id);
+            dbPost.author_address = bsvAddress;
+            
+            // Use the transaction ID as the post ID to avoid conflicts
+            dbPost.id = tx_id;
+            
+            // Add vote options if this is a vote post
+            if (isVotePost && metadata.vote?.options) {
+                dbPost.is_vote = true;
+                dbPost.vote_options = metadata.vote.options.map((option, idx) => ({
+                    id: `${tx_id}-option-${option.optionIndex}`,
+                    tx_id: `${tx_id}-option-${option.optionIndex}`,
+                    content: option.text,
+                    author_address: bsvAddress,
+                    created_at: new Date(metadata.timestamp),
+                    post_id: tx_id,
+                    option_index: option.optionIndex,
+                    tags: metadata.tags || []
+                }));
+            }
+            
+            console.log('Created database post object:', { 
+                ...dbPost, 
+                content: dbPost.content.substring(0, 50) + '...',
+                vote_options: dbPost.vote_options
+            });
+
+            // Function to attempt the database post creation with retry logic
+            const attemptDatabasePost = async (retries = 2): Promise<any> => {
+                try {
+                    console.log(`Attempting to create post in database (retries left: ${retries})`);
+                    
+                    // Create a copy of the dbPost object without vote_options for the API request
+                    const { vote_options, ...postData } = dbPost;
+                    
+                    // Format vote options properly for the API
+                    const formattedVoteOptions = vote_options?.map(option => ({
+                        text: option.content,
+                        tx_id: option.tx_id,
+                        index: option.option_index
+                    })) || [];
+                    
+                    // Prepare the final payload for the API
+                    const apiPayload = {
+                        ...postData,
+                        vote_options: formattedVoteOptions
+                    };
+                    
+                    console.log('Database post structure:', JSON.stringify(apiPayload, null, 2));
+                    console.log('Keys in API payload:', Object.keys(apiPayload));
+                    
+                    const dbResponse = await fetch(`${API_BASE_URL}/api/posts`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(apiPayload)
+                    });
+
+                    if (!dbResponse.ok) {
+                        const errorText = await dbResponse.text();
+                        let errorDetails;
+                        try {
+                            errorDetails = JSON.parse(errorText);
+                        } catch (e) {
+                            errorDetails = errorText;
+                        }
+                        
+                        console.error('Database error response:', {
+                            status: dbResponse.status,
+                            statusText: dbResponse.statusText,
+                            body: errorDetails
+                        });
+                        
+                        // If we have retries left, wait and try again
+                        if (retries > 0) {
+                            console.log(`Retrying database post creation in 1 second...`);
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            return attemptDatabasePost(retries - 1);
+                        }
+                        
+                        throw new Error(`Failed to create post in database: ${dbResponse.statusText}`);
                     }
                     
-                    console.error('Database error response:', {
-                        status: dbResponse.status,
-                        statusText: dbResponse.statusText,
-                        body: errorDetails
-                    });
-                    
-                    // If we have retries left, wait and try again
+                    return dbResponse.json();
+                } catch (error: any) {
                     if (retries > 0) {
-                        console.log(`Retrying database post creation in 1 second...`);
+                        console.log(`Network error, retrying database post creation in 1 second...`, error);
                         await new Promise(resolve => setTimeout(resolve, 1000));
                         return attemptDatabasePost(retries - 1);
                     }
-                    
-                    throw new Error(`Failed to create post in database: ${dbResponse.statusText}`);
+                    throw error;
                 }
+            };
+            
+            // Attempt to create the post with retry logic
+            const createdPost = await attemptDatabasePost();
+
+            // Update toast
+            toast.success('Post created successfully!', {
+                id: pendingToast,
+                style: {
+                    background: '#1A1B23',
+                    color: '#34d399',
+                    border: '1px solid rgba(52, 211, 153, 0.3)',
+                    borderRadius: '0.375rem'
+                }
+            });
+
+            return createdPost;
+
+        } catch (error: any) {
+            console.error('[DEBUG] Wallet inscription error:', error);
+            
+            // Check if this is a timeout error
+            if (error.message && error.message.includes('timed out')) {
+                console.error('[DEBUG] Transaction timed out - checking if wallet is still responsive');
                 
-                return dbResponse.json();
-            } catch (error: any) {
-                if (retries > 0) {
-                    console.log(`Network error, retrying database post creation in 1 second...`, error);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    return attemptDatabasePost(retries - 1);
+                // Check wallet state after timeout
+                try {
+                    const isWalletStillConnected = await getBsvAddress(wallet).then(address => !!address).catch(() => false);
+                    console.log('[DEBUG] Post-timeout wallet state:', {
+                        walletResponsive: isWalletStillConnected,
+                        isReady: wallet?.isReady || false,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    // If wallet seems still connected, this might be a temporary issue
+                    if (isWalletStillConnected) {
+                        throw new Error('Transaction is taking longer than expected. The wallet may be processing another transaction. Please try again in a moment.');
+                    } else {
+                        throw new Error('Wallet connection was lost during the transaction. Please reconnect your wallet and try again.');
+                    }
+                } catch (walletCheckError) {
+                    console.error('[DEBUG] Wallet check after timeout failed:', walletCheckError);
+                    throw new Error('Transaction timed out and wallet state check failed. Please refresh the page and try again.');
                 }
-                throw error;
             }
-        };
-        
-        // Attempt to create the post with retry logic
-        const createdPost = await attemptDatabasePost();
 
-        // Update toast
-        toast.success('Post created successfully!', {
-            id: pendingToast,
-            style: {
-                background: '#1A1B23',
-                color: '#34d399',
-                border: '1px solid rgba(52, 211, 153, 0.3)',
-                borderRadius: '0.375rem'
-            }
-        });
-
-        return createdPost;
+            // For non-timeout errors, rethrow with more details
+            const errorMessage = error instanceof Error ? error.message : 'Unknown wallet error';
+            throw new Error(`Failed to create inscription: ${errorMessage}`);
+        }
 
     } catch (error: any) {
         console.error('Error in post creation:', error);

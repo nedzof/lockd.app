@@ -1,10 +1,9 @@
-import type { useYoursWallet } from 'yours-wallet-provider';
-import { toast } from 'react-hot-toast';
+import { useYoursWallet } from 'yours-wallet-provider';
 
-type YoursWallet = NonNullable<ReturnType<typeof useYoursWallet>>;
+type YoursWallet = ReturnType<typeof useYoursWallet>;
 
 /**
- * Helper function to retrieve BSV address from wallet with multiple fallback mechanisms
+ * Helper function to retrieve BSV address from wallet
  * @param wallet The wallet instance
  * @returns The BSV address if found, otherwise null
  */
@@ -14,72 +13,16 @@ export const getBsvAddress = async (wallet: YoursWallet): Promise<string | null>
     return null;
   }
 
-  console.log('Attempting to get BSV address with fallbacks...');
-  
-  // Try direct bsvAddress property
-  let bsvAddress = wallet.bsvAddress;
-  if (bsvAddress) {
-    console.log('Found address in wallet.bsvAddress:', bsvAddress);
-    return bsvAddress;
-  }
-  
-  // Try getAddresses method
-  if (typeof wallet.getAddresses === 'function') {
-    try {
-      console.log('Trying wallet.getAddresses()...');
-      const addresses = await wallet.getAddresses();
-      console.log('getAddresses returned:', addresses);
-      
-      if (addresses && typeof addresses === 'object') {
-        // Handle case where getAddresses returns an object with bsvAddress property
-        if (addresses.bsvAddress) {
-          bsvAddress = addresses.bsvAddress;
-          console.log('Using bsvAddress from getAddresses object:', bsvAddress);
-          return bsvAddress;
-        }
-        // Handle case where getAddresses returns an array
-        else if (Array.isArray(addresses) && addresses.length > 0) {
-          bsvAddress = addresses[0];
-          console.log('Using first address from getAddresses array:', bsvAddress);
-          return bsvAddress;
-        }
-      }
-    } catch (error) {
-      console.error('Error getting addresses:', error);
+  try {
+    const addresses = await wallet.getAddresses();
+    if (addresses && typeof addresses === 'object' && 'bsvAddress' in addresses) {
+      return addresses.bsvAddress;
     }
+    return null;
+  } catch (error) {
+    console.error('Error getting BSV address:', error);
+    return null;
   }
-  
-  // Try getAddress method (singular)
-  if (typeof wallet.getAddress === 'function') {
-    try {
-      console.log('Trying wallet.getAddress()...');
-      const address = await wallet.getAddress();
-      console.log('getAddress returned:', address);
-      if (address) {
-        bsvAddress = address;
-        console.log('Using address from getAddress:', bsvAddress);
-        return bsvAddress;
-      }
-    } catch (error) {
-      console.error('Error calling getAddress():', error);
-    }
-  }
-  
-  // Try to extract from wallet object properties
-  console.log('Searching wallet object for address properties...');
-  // Look for common address property names
-  const possibleAddressProps = ['address', 'walletAddress', 'paymentAddress', 'receivingAddress'];
-  for (const prop of possibleAddressProps) {
-    if (wallet[prop] && typeof wallet[prop] === 'string') {
-      bsvAddress = wallet[prop];
-      console.log(`Found address in wallet.${prop}:`, bsvAddress);
-      return bsvAddress;
-    }
-  }
-  
-  // If we still don't have an address, return null
-  console.warn('No BSV address found after trying all fallback methods');
-  return null;
 };
 
 /**
@@ -102,7 +45,6 @@ export const ensureWalletConnection = async (
   // Check if wallet is ready
   if (!wallet.isReady) {
     console.log('Wallet is not ready');
-    toast.error('Wallet is not ready. Please install or unlock your wallet extension.');
     return { success: false, address: null };
   }
 
@@ -161,26 +103,11 @@ export const ensureWalletConnection = async (
  */
 export const isWalletConnected = async (wallet?: YoursWallet): Promise<boolean> => {
   if (!wallet) {
-    console.log('No wallet provided to isWalletConnected, using window.yours');
-    wallet = window.yours;
-    if (!wallet) {
-      console.warn('No wallet available in window.yours');
-      return false;
-    }
+    return false;
   }
 
   try {
-    // Check if wallet has an address
-    const address = await getBsvAddress(wallet);
-    if (!address) {
-      console.warn('Wallet has no address, considering as not connected');
-      return false;
-    }
-
-    // Additional checks could be added here
-    // For example, checking if wallet has a balance, or if it's ready
-
-    return true;
+    return wallet.isConnected ? await wallet.isConnected() : false;
   } catch (error) {
     console.error('Error checking wallet connection:', error);
     return false;
@@ -201,18 +128,14 @@ export const getWalletStatus = async (wallet?: YoursWallet): Promise<{
   balance?: { bsv?: number; satoshis?: number };
 }> => {
   if (!wallet) {
-    console.log('No wallet provided to getWalletStatus, using window.yours');
-    wallet = window.yours;
-    if (!wallet) {
-      console.warn('No wallet available in window.yours');
-      return {
-        isReady: false,
-        isConnected: false,
-        hasAddress: false,
-        address: null,
-        hasBalance: false
-      };
-    }
+    // Return a default response instead of trying to use window.yours
+    return {
+      isReady: false,
+      isConnected: false,
+      hasAddress: false,
+      address: null,
+      hasBalance: false
+    };
   }
 
   const isReady = !!wallet.isReady;
@@ -239,4 +162,12 @@ export const getWalletStatus = async (wallet?: YoursWallet): Promise<{
     hasBalance,
     balance
   };
+};
+
+/**
+ * Helper function to detect if the Yours wallet is installed
+ * @returns True if wallet is installed, false otherwise
+ */
+export const isWalletInstalled = (): boolean => {
+  return 'yours' in window && !!window.yours?.isReady;
 };
