@@ -412,6 +412,8 @@ function createInscriptionRequest(
         address,
         base64Data: mimeType.startsWith('image/') ? content : stringToBase64(content),
         mimeType: mimeType as MimeTypes,
+        contentType: mimeType.startsWith('image/') ? 'image' as const : 'text' as const,
+        type: mimeType.startsWith('image/') ? 'image' as const : 'text' as const,
         map,
         satoshis
     };
@@ -815,6 +817,8 @@ export const createPost = async (
             address: bsvAddress,
             base64Data: metadata.image ? metadata.image.base64Data : stringToBase64(content),
             mimeType: metadata.image ? metadata.image.content_type : 'text/plain',
+            contentType: metadata.image ? 'image' as const : 'text' as const,
+            type: metadata.image ? 'image' as const : 'text' as const,
             map: createMapData(metadata),
             satoshis: await calculateOutputSatoshis(content.length, isVotePost)
         };
@@ -1001,6 +1005,8 @@ interface InscribeRequest {
     address: string;
     base64Data: string;
     mimeType: MimeTypes;
+    contentType: 'image' | 'text';
+    type: 'image' | 'text';
     map: MAP;
     satoshis: number;
 }
