@@ -45,7 +45,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isLocking, setIsLocking] = useState<Record<string, boolean>>({});
-  const { isConnected, bsvAddress, balance, refreshBalance } = useWallet();
+  const { isConnected, bsvAddress, balance, refreshBalance, wallet } = useWallet();
 
   // Add current block height state
   const [current_block_height, set_current_block_height] = useState<number | null>(null);
@@ -216,6 +216,34 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       const amountInSatoshis = Math.round(amount * 100000000);
       console.log('Converted amount to satoshis:', amountInSatoshis);
       
+      // Show loading toast
+      const toastId = toast.loading('Waiting for wallet confirmation...');
+      
+      // Request wallet transaction approval before proceeding
+      if (!wallet || !wallet.sendBsv) {
+        toast.dismiss(toastId);
+        toast.error('Wallet transaction capability not available');
+        return;
+      }
+      
+      // Use wallet's sendBsv function to handle wallet confirmation
+      console.log('Requesting wallet transaction approval...');
+      const walletResult = await wallet.sendBsv([{
+        satoshis: amountInSatoshis,
+        address: bsvAddress || '',
+        data: [`Vote option lock: ${optionId}, duration: ${duration}`]
+      }]);
+      
+      if (!walletResult?.txid) {
+        toast.dismiss(toastId);
+        throw new Error('Wallet transaction was not completed');
+      }
+      
+      console.log('Wallet transaction approved with txid:', walletResult.txid);
+      toast.dismiss(toastId);
+      toast.loading('Processing lock...');
+      
+      // Proceed with API call using the transaction ID from the wallet
       console.log('Sending lock request to API for option:', optionId);
       const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
         method: 'POST',
@@ -225,8 +253,9 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
         body: JSON.stringify({
           vote_option_id: optionId,
           author_address: bsvAddress,
-          amount: amountInSatoshis, // Use the satoshi amount here
-          lock_duration: duration, // Use the specified duration
+          amount: amountInSatoshis,
+          lock_duration: duration,
+          tx_id: walletResult.txid
         }),
       });
 
@@ -271,9 +300,16 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       
       // Refresh wallet balance
       refreshBalance();
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error locking BSV on vote option:', error);
-      toast.error('Failed to lock BSV on vote option');
+      
+      // Handle user cancellation vs actual errors
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (errorMessage.includes('User cancelled') || errorMessage.includes('User rejected')) {
+        toast.error('Transaction cancelled by user');
+      } else {
+        toast.error('Failed to lock BSV on vote option');
+      }
     } finally {
       setIsLocking(prev => ({ ...prev, [optionId]: false }));
     }

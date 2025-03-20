@@ -1081,31 +1081,65 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
 
     try {
-      // Check balance - simplified approach
-      toast.loading('Checking wallet balance...');
+      // Show loading toast while checking wallet balance
+      const toastId = toast.loading('Checking wallet balance...');
       
       setIsLocking(true);
-      const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          vote_option_id: optionId,
-          amount,
-          lock_duration: duration,
-          author_address: user_id, // Use the user_id from props which should be the wallet address
-        }),
-      });
 
-      if (!response.ok) {
-        throw new Error('Failed to lock BSV on vote option');
+      // Convert amount to satoshis for BSV transactions (1 BSV = 100,000,000 satoshis)
+      const amountInSatoshis = Math.round(amount * 100000000);
+      
+      // Request wallet transaction approval before proceeding
+      if (wallet.sendBsv) {
+        // Use wallet's sendBsv function to handle wallet confirmation
+        const result = await wallet.sendBsv([{
+          satoshis: amountInSatoshis,
+          address: user_id || '',
+          data: [`Vote option lock: ${optionId}`]
+        }]);
+        
+        if (!result?.txid) {
+          throw new Error('Wallet transaction was not completed');
+        }
+        
+        // Use the transaction ID from the wallet in the lock request
+        const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            vote_option_id: optionId,
+            amount: amountInSatoshis,
+            lock_duration: duration,
+            author_address: user_id,
+            tx_id: result.txid
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to lock BSV on vote option');
+        }
+
+        // Dismiss loading toast and show success
+        toast.dismiss(toastId);
+        toast.success('Successfully locked BSV on vote option');
+        fetchPosts(); // Refresh posts to show updated lock amounts
+      } else {
+        // Fallback if sendBsv is not available
+        toast.dismiss(toastId);
+        toast.error('Wallet transaction capability not available');
       }
-
-      toast.success('Successfully locked BSV on vote option');
-      fetchPosts(); // Refresh posts to show updated lock amounts
-    } catch (error) {
-      toast.error('Failed to lock BSV on vote option');
+    } catch (error: unknown) {
+      console.error('Error locking vote option:', error);
+      
+      // Handle user cancellation vs actual errors
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (errorMessage.includes('User cancelled') || errorMessage.includes('User rejected')) {
+        toast.error('Transaction cancelled by user');
+      } else {
+        toast.error('Failed to lock BSV on vote option');
+      }
     } finally {
       setIsLocking(false);
     }
