@@ -1158,14 +1158,14 @@ const PostGrid: React.FC<PostGridProps> = ({
       const unlockHeight = currentBlockHeight + duration;
       console.log('[LOCK DIAGNOSTICS] Calculated unlock height:', unlockHeight, '(current:', currentBlockHeight, '+ duration:', duration, ')');
       
-      // Check if wallet has lockBsv function
+      // Check if wallet has lock function
       console.log('[LOCK DIAGNOSTICS] Wallet object:', {
         exists: !!wallet,
-        hasLockBsv: !!(wallet && wallet.lockBsv),
-        type: wallet ? typeof wallet.lockBsv : 'undefined'
+        hasLock: !!(wallet && wallet.lock),
+        type: wallet ? typeof wallet.lock : 'undefined'
       });
       
-      if (!wallet || !wallet.lockBsv) {
+      if (!wallet || !wallet.lock) {
         toast.dismiss(toastId);
         toast.error('Wallet locking capability not available');
         return;
@@ -1206,9 +1206,9 @@ const PostGrid: React.FC<PostGridProps> = ({
       let lockResponse;
       
       try {
-        // Call wallet lockBsv function
-        console.log('[LOCK DIAGNOSTICS] Calling wallet.lockBsv with parameters...');
-        lockResponse = await wallet.lockBsv(locks);
+        // Call wallet lock function - USING CORRECT METHOD AS PER DOCS
+        console.log('[LOCK DIAGNOSTICS] Calling wallet.lock with parameters...');
+        lockResponse = await wallet.lock(locks);
         console.log('[LOCK DIAGNOSTICS] Lock transaction response:', lockResponse);
         
         if (!lockResponse || !lockResponse.txid) {
@@ -1217,7 +1217,7 @@ const PostGrid: React.FC<PostGridProps> = ({
           throw new Error('Failed to create lock transaction - missing txid in response');
         }
       } catch (lockError) {
-        console.error('[LOCK DIAGNOSTICS] Error in wallet.lockBsv call:', lockError);
+        console.error('[LOCK DIAGNOSTICS] Error in wallet.lock call:', lockError);
         
         // Try to extract detailed error information
         let errorDetails = '';
