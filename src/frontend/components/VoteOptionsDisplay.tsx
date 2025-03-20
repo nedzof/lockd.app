@@ -4,6 +4,7 @@ import { useWallet } from '../providers/WalletProvider';
 import toast from 'react-hot-toast';
 import { formatBSV } from '../utils/formatBSV';
 import { calculate_active_locked_amount } from '../utils/lockStatus';
+import VoteOptionLockInteraction from './VoteOptionLockInteraction';
 
 // Define needed types locally if they're not properly exported
 interface VoteOption {
@@ -190,8 +191,8 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
     };
   }, []);
 
-  const handleLock = async (optionId: string, amount: number) => {
-    console.log('Lock button clicked for option:', optionId, 'amount:', amount);
+  const handleLock = async (optionId: string, amount: number, duration: number = 1000) => {
+    console.log('Lock requested for option:', optionId, 'amount:', amount, 'duration:', duration);
     
     if (!isConnected) {
       toast.error('Please connect your wallet first');
@@ -225,7 +226,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
           vote_option_id: optionId,
           author_address: bsvAddress,
           amount: amountInSatoshis, // Use the satoshi amount here
-          lock_duration: 1000, // Default lock duration
+          lock_duration: duration, // Use the specified duration
         }),
       });
 
@@ -359,13 +360,12 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
                 </div>
                 
                 {isConnected && (
-                  <button
-                    onClick={() => handleLock(option.id, 0.001)}
-                    disabled={isLocking[option.id]}
-                    className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-gray-800 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-                  >
-                    {isLocking[option.id] ? 'Locking...' : 'Lock BSV'}
-                  </button>
+                  <VoteOptionLockInteraction
+                    optionId={option.id}
+                    connected={isConnected}
+                    isLocking={isLocking[option.id]}
+                    onLock={handleLock}
+                  />
                 )}
               </div>
             </div>
