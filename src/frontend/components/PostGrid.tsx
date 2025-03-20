@@ -1104,7 +1104,9 @@ const PostGrid: React.FC<PostGridProps> = ({
     amount: number,
     duration: number = 1000
   ) => {
-    console.log('Lock requested for vote option:', optionId, 'amount:', amount, 'duration:', duration);
+    console.log('[LOCK DIAGNOSTICS] Lock requested for vote option:', optionId);
+    console.log('[LOCK DIAGNOSTICS] Lock amount:', amount, 'BSV');
+    console.log('[LOCK DIAGNOSTICS] Lock duration:', duration, 'blocks');
     
     if (amount <= 0) {
       toast.error('Please enter a valid amount to lock');
@@ -1117,6 +1119,12 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
 
     // Check balance without assuming wallet.bsv exists
+    console.log('[LOCK DIAGNOSTICS] Wallet balance info:', {
+      hasGetBalance: !!wallet.getBalance,
+      getBalanceType: typeof wallet.getBalance,
+      balanceResult: wallet.getBalance ? await wallet.getBalance() : null
+    });
+    
     const hasInsufficientBalance = wallet.getBalance && 
       typeof wallet.getBalance() === 'object' && 
       wallet.getBalance().bsv !== undefined && 
@@ -1131,13 +1139,15 @@ const PostGrid: React.FC<PostGridProps> = ({
 
     try {
       const amountInSatoshis = Math.round(amount * 100000000);
-      console.log('Converted amount to satoshis:', amountInSatoshis);
+      console.log('[LOCK DIAGNOSTICS] Converted amount to satoshis:', amountInSatoshis);
       
       // Show loading toast
       const toastId = toast.loading('Checking wallet balance...');
       
       // Get current block height for calculating unlock height
       const currentBlockHeight = await getCurrentBlockHeight();
+      console.log('[LOCK DIAGNOSTICS] Current block height:', currentBlockHeight);
+      
       if (!currentBlockHeight) {
         toast.dismiss(toastId);
         toast.error('Could not determine current block height');
@@ -1146,9 +1156,15 @@ const PostGrid: React.FC<PostGridProps> = ({
       
       // Calculate unlock height based on current height and duration
       const unlockHeight = currentBlockHeight + duration;
-      console.log(`Calculated unlock height: ${unlockHeight} (current: ${currentBlockHeight} + duration: ${duration})`);
+      console.log('[LOCK DIAGNOSTICS] Calculated unlock height:', unlockHeight, '(current:', currentBlockHeight, '+ duration:', duration, ')');
       
       // Check if wallet has lockBsv function
+      console.log('[LOCK DIAGNOSTICS] Wallet object:', {
+        exists: !!wallet,
+        hasLockBsv: !!(wallet && wallet.lockBsv),
+        type: wallet ? typeof wallet.lockBsv : 'undefined'
+      });
+      
       if (!wallet || !wallet.lockBsv) {
         toast.dismiss(toastId);
         toast.error('Wallet locking capability not available');
@@ -1156,13 +1172,15 @@ const PostGrid: React.FC<PostGridProps> = ({
       }
       
       // Get the wallet address (should be user_id in this component)
+      console.log('[LOCK DIAGNOSTICS] User ID (address):', user_id);
+      
       if (!user_id) {
         toast.dismiss(toastId);
         toast.error('Could not get wallet address');
         return;
       }
       
-      console.log('Using address for locking:', user_id);
+      console.log('[LOCK DIAGNOSTICS] Using address for locking:', user_id);
       
       // Update toast message
       toast.dismiss(toastId);
@@ -1177,15 +1195,43 @@ const PostGrid: React.FC<PostGridProps> = ({
         }
       ];
       
-      console.log('Requesting wallet to lock with parameters:', locks);
+      console.log('[LOCK DIAGNOSTICS] Lock parameters:', JSON.stringify(locks, null, 2));
+      console.log('[LOCK DIAGNOSTICS] Lock parameters types:', {
+        address: typeof user_id,
+        blockHeight: typeof unlockHeight,
+        sats: typeof amountInSatoshis
+      });
       
-      // Call wallet lockBsv function
-      const lockResponse = await wallet.lockBsv(locks);
-      console.log('Lock transaction response:', lockResponse);
+      // Declare lockResponse variable outside try block
+      let lockResponse;
       
-      if (!lockResponse || !lockResponse.txid) {
+      try {
+        // Call wallet lockBsv function
+        console.log('[LOCK DIAGNOSTICS] Calling wallet.lockBsv with parameters...');
+        lockResponse = await wallet.lockBsv(locks);
+        console.log('[LOCK DIAGNOSTICS] Lock transaction response:', lockResponse);
+        
+        if (!lockResponse || !lockResponse.txid) {
+          console.error('[LOCK DIAGNOSTICS] Lock response missing txid:', lockResponse);
+          toast.dismiss(lockingToastId);
+          throw new Error('Failed to create lock transaction - missing txid in response');
+        }
+      } catch (lockError) {
+        console.error('[LOCK DIAGNOSTICS] Error in wallet.lockBsv call:', lockError);
+        
+        // Try to extract detailed error information
+        let errorDetails = '';
+        if (lockError instanceof Error) {
+          errorDetails = lockError.message;
+          console.error('[LOCK DIAGNOSTICS] Error message:', lockError.message);
+          console.error('[LOCK DIAGNOSTICS] Error stack:', lockError.stack);
+        } else {
+          errorDetails = String(lockError);
+          console.error('[LOCK DIAGNOSTICS] Non-Error object thrown:', lockError);
+        }
+        
         toast.dismiss(lockingToastId);
-        throw new Error('Failed to create lock transaction');
+        throw new Error(`Wallet lock error: ${errorDetails}`);
       }
       
       // Update toast message
