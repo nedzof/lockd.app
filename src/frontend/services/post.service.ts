@@ -653,19 +653,37 @@ export const createPost = async (
     tags: string[] = [],
     lockSettings?: { is_locked: boolean; lock_amount: number; lock_duration: number }
 ): Promise<Post> => {
+    const start_time = Date.now();
+    const log_with_time = (message: string) => {
+      const elapsed = Date.now() - start_time;
+      console.log(`⏱️ [${elapsed}ms] ${message}`);
+    };
+
+    log_with_time('🔄 [PostService] Starting post creation process');
     if (!wallet) {
         throw new Error('Wallet is required');
     }
 
+    // Log wallet state
+    log_with_time('🔄 [PostService] Checking wallet capabilities');
+    console.log('Wallet state:', {
+        hasInscribe: typeof wallet.inscribe === 'function',
+        methods: Object.keys(wallet).filter(key => typeof wallet[key] === 'function'),
+        wallet_type: wallet?.constructor?.name || 'unknown'
+    });
+
     // Get BSV address
+    log_with_time('🔄 [PostService] Getting BSV address');
     const bsvAddress = await getBsvAddress(wallet);
-    if (!bsvAddress) {
+        if (!bsvAddress) {
         throw new Error('Could not retrieve wallet address');
     }
+    log_with_time('🔄 [PostService] Got BSV address: ' + bsvAddress.substring(0, 6) + '...');
 
     // Create a single post_id
     const post_id = generatepost_id();
-    
+    log_with_time('🔄 [PostService] Generated post_id: ' + post_id);
+
     // Show pending toast
     const pendingToast = toast.loading(scheduleInfo ? 'Scheduling post...' : 'Creating post...', {
         style: {
@@ -679,6 +697,7 @@ export const createPost = async (
     try {
         // Validate vote post parameters
         if (isVotePost) {
+            log_with_time('🔄 [PostService] Validating vote options: ' + vote_options.length);
             const validOptions = vote_options.filter(opt => opt.trim() !== '');
             if (validOptions.length < 2) {
                 throw new Error('Vote posts require at least 2 valid options');
@@ -686,6 +705,7 @@ export const createPost = async (
         }
 
         // Create main content metadata
+        log_with_time('🔄 [PostService] Creating post metadata');
         const metadata: PostMetadata = {
             app: 'lockd.app',
             type: isVotePost ? 'vote_question' : 'content',
@@ -702,11 +722,13 @@ export const createPost = async (
 
         // Add locking parameters if provided
         if (lockSettings?.is_locked && !isVotePost) {
+            log_with_time('🔄 [PostService] Adding lock settings: ' + JSON.stringify(lockSettings));
             metadata.amount = lockSettings.lock_amount;
         }
 
         // Add scheduling information if provided
         if (scheduleInfo) {
+            log_with_time('🔄 [PostService] Adding schedule info: ' + scheduleInfo.scheduledAt);
             metadata.scheduled = {
                 scheduledAt: scheduleInfo.scheduledAt,
                 timezone: scheduleInfo.timezone
@@ -715,6 +737,7 @@ export const createPost = async (
 
         // Process image if provided
         if (imageData) {
+            log_with_time('🔄 [PostService] Processing image data');
             try {
                 let processedImage;
                 let imageFile: File;
@@ -722,16 +745,19 @@ export const createPost = async (
                 // Handle different imageData types
                 if (imageData instanceof File) {
                     imageFile = imageData;
+                    log_with_time('🔄 [PostService] Image data is a File object');
                 } else if (typeof imageData === 'string') {
-                    const blob = dataURItoBlob(imageData);
-                    imageFile = new File([blob], 'image.' + (blob.type.split('/')[1] || 'jpg'), { 
-                        type: blob.type || imageMimeType || 'image/jpeg' 
-                    });
+                    log_with_time('🔄 [PostService] Image data is a string, converting to Blob');
+                        const blob = dataURItoBlob(imageData);
+                        imageFile = new File([blob], 'image.' + (blob.type.split('/')[1] || 'jpg'), { 
+                            type: blob.type || imageMimeType || 'image/jpeg' 
+                        });
                 } else {
                     throw new Error('Invalid image data format');
                 }
                 
                 // Process the image file to get base64 and metadata
+                log_with_time('🔄 [PostService] Processing image to get base64 and metadata');
                 const { base64Data, metadata: imageMetadata } = await processImage(imageFile);
                 
                 // Create an image data object
@@ -749,8 +775,9 @@ export const createPost = async (
                     ...imageDataObj,
                     format: imageMetadata?.format || 'png'
                 };
+                log_with_time('✅ [PostService] Image processing complete');
             } catch (imageError: any) {
-                console.error('Error processing image:', imageError);
+                log_with_time('❌ [PostService] Error processing image: ' + imageError.message);
                 toast.error(`Error processing image: ${imageError.message || 'Unknown error'}`, {
                     id: pendingToast
                 });
@@ -760,14 +787,15 @@ export const createPost = async (
 
         // Handle vote post options
         if (isVotePost && vote_options.length >= 2) {
+            log_with_time('🔄 [PostService] Processing vote options');
             const validOptions = vote_options.filter(opt => opt.trim() !== '');
             
             // Create vote options objects
             const vote_optionObjects: vote_option[] = validOptions.map((text, index) => ({
-                text,
-                lock_amount: 1000, // Base lock amount in satoshis
-                lock_duration: 144, // Default to 1 day (144 blocks)
-                optionIndex: index
+                        text,
+                        lock_amount: 1000, // Base lock amount in satoshis
+                        lock_duration: 144, // Default to 1 day (144 blocks)
+                        optionIndex: index
             }));
             
             // Add vote data to metadata
@@ -778,9 +806,11 @@ export const createPost = async (
                 total_options: vote_optionObjects.length,
                 options_hash: await hashContent(JSON.stringify(vote_optionObjects))
             };
+            log_with_time('🔄 [PostService] Vote options processed: ' + vote_optionObjects.length);
         }
 
         // Create a single inscription request
+        log_with_time('🔄 [PostService] Creating inscription request');
         const request = {
             address: bsvAddress,
             base64Data: metadata.image ? metadata.image.base64Data : stringToBase64(content),
@@ -788,134 +818,123 @@ export const createPost = async (
             map: createMapData(metadata),
             satoshis: await calculateOutputSatoshis(content.length, isVotePost)
         };
+        log_with_time('🔄 [PostService] Inscription request created');
 
-        // Send to wallet with timeout
-        const response = await Promise.race([
-            wallet.inscribe([request]),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Transaction timed out')), 30000))
-        ]);
+        // Send to wallet
+        log_with_time('🔄 [PostService] Sending inscription to wallet');
+        const response = await wallet.inscribe([request]);
+        log_with_time('✅ [PostService] Inscription sent successfully');
 
         // Extract transaction ID
-        const tx_id = response.tx_id || response.id || response.txid;
+        log_with_time('🔄 [PostService] Analyzing wallet response for transaction ID');
+        console.log('[DEBUG] Response analysis:');
+        console.log('[DEBUG] - Response type:', typeof response);
+        console.log('[DEBUG] - Response keys:', Object.keys(response));
+        
+        // Check for transaction ID in various formats
+        const tx_id = response?.tx_id || response?.id || response?.txid || 
+                     (response?.hash ? response.hash.toString() : null) ||
+                     (typeof response === 'string' ? response : null);
+                         
         if (!tx_id) {
-            throw new Error('No transaction ID returned');
+            log_with_time('❌ [PostService] No transaction ID in response');
+            console.error('[DEBUG] Transaction ID not found in response:', response);
+            throw new Error('Failed to create inscription - no transaction ID returned');
         }
+        log_with_time('✅ [PostService] Got transaction ID: ' + tx_id);
 
         // Create database post
-        const dbPost = createDbPost(metadata, tx_id);
-        dbPost.author_address = bsvAddress;
-
+        log_with_time('🔄 [PostService] Creating database post object');
+            const dbPost = createDbPost(metadata, tx_id);
+            dbPost.author_address = bsvAddress;
+            
         // Add vote options if needed
-        if (isVotePost && metadata.vote?.options) {
-            dbPost.is_vote = true;
+            if (isVotePost && metadata.vote?.options) {
+            log_with_time('🔄 [PostService] Adding vote options to database post');
+                dbPost.is_vote = true;
             dbPost.vote_options = metadata.vote.options.map((option) => ({
-                id: `${tx_id}-option-${option.optionIndex}`,
-                tx_id: `${tx_id}-option-${option.optionIndex}`,
-                content: option.text,
-                author_address: bsvAddress,
-                created_at: new Date(metadata.timestamp),
-                post_id: tx_id,
-                option_index: option.optionIndex,
-                tags: metadata.tags || []
-            }));
-        }
-
+                    id: `${tx_id}-option-${option.optionIndex}`,
+                    tx_id: `${tx_id}-option-${option.optionIndex}`,
+                    content: option.text,
+                    author_address: bsvAddress,
+                    created_at: new Date(metadata.timestamp),
+                    post_id: tx_id,
+                    option_index: option.optionIndex,
+                    tags: metadata.tags || []
+                }));
+            }
+            
         // Save to database
         try {
-            // Create a copy of the dbPost object without vote_options for the API request
-            const { vote_options, ...postData } = dbPost;
-            
-            // Format vote options properly for the API
-            const formattedVoteOptions = vote_options?.map(option => ({
-                text: option.content,
-                tx_id: option.tx_id,
-                index: option.option_index
-            })) || [];
-            
-            // Prepare the final payload for the API
-            const apiPayload = {
-                ...postData,
-                vote_options: formattedVoteOptions
-            };
-            
-            const dbResponse = await fetch(`${API_BASE_URL}/api/posts`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(apiPayload)
-            });
+            log_with_time('🔄 [PostService] Preparing API request to save post');
+                    // Create a copy of the dbPost object without vote_options for the API request
+                    const { vote_options, ...postData } = dbPost;
+                    
+                    // Format vote options properly for the API
+                    const formattedVoteOptions = vote_options?.map(option => ({
+                        text: option.content,
+                        tx_id: option.tx_id,
+                        index: option.option_index
+                    })) || [];
+                    
+                    // Prepare the final payload for the API
+                    const apiPayload = {
+                        ...postData,
+                        vote_options: formattedVoteOptions
+                    };
+                    
+            log_with_time('🔄 [PostService] Sending API request to save post');
+                    const dbResponse = await fetch(`${API_BASE_URL}/api/posts`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(apiPayload)
+                    });
 
-            if (!dbResponse.ok) {
-                const errorText = await dbResponse.text();
-                let errorDetails;
-                try {
-                    errorDetails = JSON.parse(errorText);
-                } catch (e) {
-                    errorDetails = errorText;
-                }
-                
-                console.error('Database error response:', {
-                    status: dbResponse.status,
-                    statusText: dbResponse.statusText,
-                    details: errorDetails
-                });
-                
-                throw new Error(`Database error: ${dbResponse.statusText}`);
+                    if (!dbResponse.ok) {
+                const errorData = await dbResponse.json();
+                log_with_time('❌ [PostService] API error response:');
+                console.error('API error response:', errorData);
+                throw new Error(`API error: ${errorData.error || dbResponse.statusText}`);
             }
 
-            const createdPost = await dbResponse.json();
-            
-            // Show success toast (with external link icon text, not JSX)
-            toast.success('Post created successfully!', {
-                id: pendingToast,
-                style: {
-                    background: '#1A1B23',
-                    color: '#10B981',
-                    border: '1px solid rgba(16, 185, 129, 0.2)',
-                    borderRadius: '0.375rem'
-                }
-            });
-            
-            return createdPost;
+            log_with_time('✅ [PostService] Post saved to database successfully');
         } catch (dbError: any) {
-            console.error('Error saving post to database:', dbError);
-            
-            // Show warning - transaction was created but DB save failed
-            toast.error('Post created on-chain but failed to save to our database.', {
-                id: pendingToast,
-                style: {
-                    background: '#1A1B23',
-                    color: '#F59E0B',
-                    border: '1px solid rgba(245, 158, 11, 0.2)',
-                    borderRadius: '0.375rem'
-                }
-            });
-            
-            // Return a basic post object with the transaction ID
-            return {
-                tx_id,
-                content,
-                author_address: bsvAddress,
-                created_at: new Date().toISOString(),
-                post_id,
-                is_locked: !!metadata.is_locked,
-                tags: metadata.tags || []
-            } as Post;
+            log_with_time('❌ [PostService] Database save error:');
+            console.error('Database save error:', dbError);
+            // Don't throw here, as the blockchain transaction was successful
+            // We'll just log it and continue
         }
+
+        // Success toast
+        toast.success(
+            scheduleInfo 
+                ? 'Post scheduled successfully!' 
+                : 'Post created successfully!', 
+            { id: pendingToast }
+        );
+        
+        log_with_time('✅ [PostService] Post creation complete');
+        return dbPost as Post;
     } catch (error: any) {
-        console.error('Error creating post:', error);
+        log_with_time(`❌ [PostService] Post creation error: ${error?.message || 'Unknown error'}`);
+        console.error('Full error:', error);
         
-        toast.error(`Failed to create post: ${error.message || 'Unknown error'}`, {
-            id: pendingToast,
-            style: {
-                background: '#1A1B23',
-                color: '#f87171',
-                border: '1px solid rgba(248, 113, 113, 0.3)',
-                borderRadius: '0.375rem'
-            }
-        });
+        // Error toast with descriptive message
+        let errorMessage = 'Failed to create post';
         
+        if (error.message?.includes('timed out')) {
+            errorMessage = 'Transaction is taking too long. Please try again.';
+        } else if (error.message?.includes('not enough satoshis')) {
+            errorMessage = 'Not enough BSV in your wallet. Please add funds and try again.';
+        } else if (error.message?.includes('unauthorized') || error.message?.includes('Unauthorized')) {
+            errorMessage = 'Wallet authorization failed. Please reconnect your wallet and try again.';
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+        
+        toast.error(errorMessage, { id: pendingToast });
         throw error;
     }
 };

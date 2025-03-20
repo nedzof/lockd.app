@@ -6,18 +6,28 @@ import { useWallet } from '../providers/WalletProvider';
 import { useTags } from '../hooks/useTags';
 import { FiX, FiPlus, FiCheck, FiRefreshCw, FiImage, FiFile, FiPlusCircle, FiTrash2, FiBarChart2, FiLink, FiHash, FiClock, FiCalendar, FiLock } from 'react-icons/fi';
 import { createPost } from '../services/post.service';
-import { getBsvAddress } from '../utils/walletConnectionHelpers';
+import { getBsvAddress, getWalletStatus } from '../utils/walletConnectionHelpers';
 import LinkPreview from './LinkPreview';
 import { YoursProviderType } from 'yours-wallet-provider';
 
-// Define post creation states for state machine approach
-type PostCreationState = 
-  | 'idle' 
-  | 'connecting_wallet'
-  | 'preparing_post'
-  | 'submitting_post'
-  | 'success'
-  | 'error';
+// Define wallet state diagnostics logging utility
+const logWalletState = (message: string, wallet: any, isConnected: boolean) => {
+  console.log(`🔍 WALLET-DIAG [${message}]`, {
+    timestamp: new Date().toISOString(),
+    isConnected,
+    walletExists: !!wallet,
+    walletReady: wallet?.isReady || false,
+    walletHasBsvProvider: !!wallet?.bsv,
+    walletHasAddress: async () => {
+      try {
+        const address = await getBsvAddress(wallet);
+        return !!address;
+      } catch (e: any) {
+        return `Error: ${e.message}`;
+      }
+    }
+  });
+};
 
 interface CreatePostProps {
   onPostCreated?: () => void;
@@ -37,16 +47,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const [showImagePanel, setShowImagePanel] = useState(false);
   const [error, setError] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
-  const { 
-    wallet, 
-    connect, 
-    disconnect, 
-    isConnected, 
-    clearPendingTransactions, 
-    queueTransaction, 
-    recoverFromFailedTransaction,
-    wallet_state
-  } = useWallet();
+  const { wallet, connect, disconnect, isConnected, clearPendingTransactions } = useWallet();
   const { 
     tags, 
     currentEventTags, 
@@ -77,9 +78,68 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
   const [lockDuration, setLockDuration] = useState(10); // Default 10 blocks
   // Add a new state to track which icon/feature is currently active
   const [activeFeature, setActiveFeature] = useState<'image' | 'vote' | 'tag' | 'schedule' | 'lock' | null>(null);
-  // Add state machine state for post creation
-  const [creation_state, set_creation_state] = useState<PostCreationState>('idle');
+  // Add new state for transaction timeout tracking
+  const [transactionStartTime, setTransactionStartTime] = useState<number | null>(null);
+  const [transactionTimeoutRef, setTransactionTimeoutRef] = useState<NodeJS.Timeout | null>(null);
   const [showRetryButton, setShowRetryButton] = useState(false);
+  const [creation_state, set_creation_state] = useState<'idle' | 'connecting_wallet' | 'preparing_post' | 'submitting_post' | 'success' | 'error'>('idle');
+
+  // Image handling functions
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Check file size (5MB limit)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size must be less than 5MB');
+      return;
+    }
+
+    // Check file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/svg+xml', 'image/webp', 'image/tiff'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Unsupported image format');
+      return;
+    }
+
+    // Create preview URL
+    const previewUrl = URL.createObjectURL(file);
+    setImagePreview(previewUrl);
+    setImage(file);
+    setShowImagePanel(true);
+    setActiveFeature('image');
+
+    // Close other panels
+    setShowScheduleOptions(false);
+    setShowTagInput(false);
+    setIsVotePost(false);
+    setShowLockOptions(false);
+  };
+
+  const handleClickUpload = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleRemoveImage = () => {
+    if (imagePreview) {
+      URL.revokeObjectURL(imagePreview);
+    }
+    setImage(null);
+    setImagePreview('');
+    setShowImagePanel(false);
+    setActiveFeature(null);
+  };
+
+  // Cleanup image preview URL on unmount
+  useEffect(() => {
+    return () => {
+      if (imagePreview) {
+        URL.revokeObjectURL(imagePreview);
+      }
+    };
+  }, [imagePreview]);
 
   // Compute if any panel is currently active
   const isPanelActive = showImagePanel || showTagInput || isVotePost || showScheduleOptions || showLockOptions;
@@ -123,124 +183,18 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     };
   }, [isOpen]);
 
-  // Attempt initial wallet connection when modal opens
-  useEffect(() => {
-    if (isOpen && !isConnected && wallet?.isReady) {
-      // Try to connect wallet silently without showing errors
-      connect().catch(() => {
-        // Silently ignore connection errors on initial load
-        // User will need to click connect button
-      });
-    }
-  }, [isOpen, isConnected, wallet, connect]);
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    // Define supported image formats
-    const supportedFormats = [
-      'image/jpeg', 
-      'image/jpg', 
-      'image/png', 
-      'image/gif', 
-      'image/bmp', 
-      'image/svg+xml', 
-      'image/webp', 
-      'image/tiff'
-    ];
-    
-    // Check file type
-    if (!supportedFormats.includes(file.type)) {
-      toast.error(`Unsupported image format. Please upload one of: JPEG, PNG, GIF, BMP, SVG, WEBP, or TIFF`, {
-        style: {
-          background: '#1A1B23',
-          color: '#f87171',
-          border: '1px solid rgba(248, 113, 113, 0.3)',
-          borderRadius: '0.375rem'
-        }
-      });
-      return;
-    }
-    
-    // Check file size (limit to 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Image size should be less than 5MB', {
-        style: {
-          background: '#1A1B23',
-          color: '#f87171',
-          border: '1px solid rgba(248, 113, 113, 0.3)',
-          borderRadius: '0.375rem'
-        }
-      });
-      return;
-    }
-    
-    setImage(file);
-    
-    // Create preview
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setImagePreview(reader.result as string);
-    };
-    reader.readAsDataURL(file);
-    
-    // Close other option panels when an image is uploaded
-    setShowTagInput(false);
-    setIsVotePost(false);
-    setShowScheduleOptions(false);
-    setShowImagePanel(true);
-    setActiveFeature('image');
-  };
-  
-  const handleRemoveImage = () => {
-    setImage(null);
-    setImagePreview('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-    // Reset active feature if it was image
-    if (activeFeature === 'image') {
-      setActiveFeature(null);
-    }
-  };
-  
-  const handleClickUpload = () => {
-    // If there's already an image, toggle the image panel
-    if (imagePreview) {
-      toggleImagePanel();
-      return;
-    }
-    // Otherwise show the file selector
-    fileInputRef.current?.click();
-  };
-
-  const toggleImagePanel = () => {
-    if (showImagePanel) {
-      setShowImagePanel(false);
-      setActiveFeature(null);
-    } else {
-      // Close all other panels
-      setShowTagInput(false);
-      setIsVotePost(false);
-      setShowScheduleOptions(false);
-      setShowLockOptions(false);
-      setShowImagePanel(true);
-      setActiveFeature('image');
-    }
-  };
-
-  // Simple modal close
-  const handleCloseModal = () => {
-    setIsSubmitting(false);
-    onClose();
-  };
-
   // Simplified submission process using state machine
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim() || isSubmitting) return;
 
+    const start_time = Date.now();
+    const log_with_time = (message: string) => {
+      const elapsed = Date.now() - start_time;
+      console.log(`⏱️ [${elapsed}ms] ${message}`);
+    };
+
+    log_with_time('🔄 [CreatePost] Starting submission process...');
     setIsSubmitting(true);
     setError('');
     setShowRetryButton(false);
@@ -248,19 +202,40 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     
     try {
       // Step 1: Ensure wallet is connected
+      log_with_time('🔄 [CreatePost] Step 1: Checking wallet connection');
+      console.log('Wallet state:', { 
+        isConnected, 
+        walletExists: !!wallet,
+        walletReady: wallet?.isReady || false,
+        walletHasInscribe: typeof wallet?.inscribe === 'function',
+        hasWalletProperties: wallet ? Object.keys(wallet).join(',') : 'none'
+      });
+      
       if (!isConnected) {
         try {
+          log_with_time('🔄 [CreatePost] Attempting to connect wallet...');
           await connect();
+          log_with_time('🔄 [CreatePost] Connect result:');
+          console.log('New wallet state:', { 
+            isConnected, 
+            walletExists: !!wallet,
+            walletReady: wallet?.isReady || false,
+            walletHasInscribe: typeof wallet?.inscribe === 'function',
+            hasWalletProperties: wallet ? Object.keys(wallet).join(',') : 'none'
+          });
+          
           if (!isConnected) {
             throw new Error('Failed to connect wallet');
           }
         } catch (error: any) {
+          console.error('❌ [CreatePost] Connection error:', error);
           set_creation_state('error');
           throw new Error(`Connection error: ${error.message || 'Unknown error'}`);
         }
       }
       
       // Step 2: Prepare post creation options
+      log_with_time('🔄 [CreatePost] Step 2: Preparing post options');
       set_creation_state('preparing_post');
       
       // Create post options
@@ -283,33 +258,36 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
         throw new Error('A vote post requires at least 2 options');
       }
       
-      // Step 3: Queue the post creation transaction
+      // Step 3: Submit the post
+      log_with_time('🔄 [CreatePost] Step 3: Submitting post, setting state to submitting_post');
       set_creation_state('submitting_post');
       
-      // Use transaction queue to handle the post creation
-      await queueTransaction(async () => {
-        const createdPost = await createPost(
-          wallet,
-          content,
-          image || undefined,
-          image ? image.type : undefined,
-          options.isVotePost,
-          options.voteOptions,
-          options.scheduledInfo,
-          selected_tags,
-          options.lockSettings
-        );
-        
-        // On success, reset form and close modal
-        set_creation_state('success');
-        resetForm();
-        onClose();
-        if (onPostCreated) onPostCreated();
-        
-        return createdPost;
-      });
+      // Direct call to createPost
+      log_with_time('🔄 [CreatePost] Calling createPost...');
+      const createdPost = await createPost(
+        wallet,
+        content,
+        image || undefined,
+        image ? image.type : undefined,
+        options.isVotePost,
+        options.voteOptions,
+        options.scheduledInfo,
+        selected_tags,
+        options.lockSettings
+      );
+      
+      log_with_time('✅ [CreatePost] Post created successfully, result:');
+      console.log('Created post ID:', createdPost?.tx_id || 'unknown');
+      
+      // On success, reset form and close modal
+      set_creation_state('success');
+      resetForm();
+      onClose();
+      if (onPostCreated) onPostCreated();
+      
     } catch (error: any) {
-      console.error('Error creating post:', error);
+      log_with_time(`❌ [CreatePost] Error creating post: ${error.message || 'Unknown error'}`);
+      console.error('Full error:', error);
       
       // Set error state
       set_creation_state('error');
@@ -317,51 +295,35 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
       
       // Show retry button for certain error types
       if (
+        error.message?.toLowerCase().includes('unauthorized') ||
         error.message?.includes('wallet') || 
         error.message?.includes('Wallet') || 
         error.message?.includes('timed out') ||
         error.message?.includes('transaction')
       ) {
+        log_with_time('🔄 [CreatePost] Setting retry button for error: ' + error.message);
         setShowRetryButton(true);
       }
     } finally {
+      log_with_time('🔄 [CreatePost] Submission process complete, resetting states');
       setIsSubmitting(false);
+      setTransactionStartTime(null);
     }
   };
 
-  // Simple retry function using the recovery system
+  // Very simple retry - just try again, with diagnostics
   const handleRetry = async () => {
-    setError('');
-    setShowRetryButton(false);
+    console.log('🟡 RETRY-DIAG: Retry requested');
+    logWalletState('PRE-RETRY', wallet, isConnected);
     
-    try {
-      // First try to recover from any failed transactions
-      const recovered = await recoverFromFailedTransaction();
-      
-      if (recovered) {
-        // If recovery was successful, try submitting again
-        await handleSubmit(new Event('submit') as any);
-      } else {
-        throw new Error('Could not recover wallet state. Please try again later.');
-      }
-    } catch (error: any) {
-      setError(`Retry failed: ${error.message || 'Unknown error'}`);
-      setShowRetryButton(true);
-    }
+    setError('');
+    await handleSubmit(new Event('submit') as any);
   };
 
-  // Simple form reset
-  const resetForm = () => {
-    setContent('');
-    setImage(null);
-    setImagePreview('');
-    setvote_options(['', '']);
-    setIsVotePost(false);
-    setselected_tags([]);
-    setIsScheduled(false);
-    setIsLocked(false);
-    setActiveFeature(null);
-    set_creation_state('idle');
+  // Simple cancel function
+  const cancelSubmission = () => {
+    setIsSubmitting(false);
+    setError('Submission canceled');
   };
 
   // Toggle schedule options
@@ -581,6 +543,32 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
     }
   }, [isVotePost]);
 
+  // Simple modal close
+  const handleCloseModal = () => {
+    setIsSubmitting(false);
+    onClose();
+  };
+
+  // Reset form state
+  const resetForm = () => {
+    setContent('');
+    setImage(null);
+    setImagePreview('');
+    setvote_options(['', '']);
+    setIsVotePost(false);
+    setselected_tags([]);
+    setActiveFeature(null);
+    setIsScheduled(false);
+    setScheduleDate('');
+    setScheduleTime('');
+    setIsLocked(false);
+    setLockAmount(0.001);
+    setLockDuration(10);
+    setError('');
+    setShowRetryButton(false);
+    set_creation_state('idle');
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -606,19 +594,8 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               onClick={async () => {
                 try {
                   toast.loading('Connecting wallet...', { id: 'wallet-connect' });
-                  
-                  if (wallet?.isReady) {
-                    await connect();
-                    
-                    if (isConnected) {
-                      toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
-                    } else {
-                      toast.error('Failed to connect wallet. Please try again.', { id: 'wallet-connect' });
-                    }
-                  } else {
-                    toast.error('Wallet not available. Please install a compatible wallet.', { id: 'wallet-connect' });
-                    window.open('https://yours.org', '_blank');
-                  }
+                  await connect();
+                  toast.success('Wallet connected successfully!', { id: 'wallet-connect' });
                 } catch (error) {
                   console.error('Error connecting wallet:', error);
                   toast.error('Failed to connect wallet. Please try again.', { id: 'wallet-connect' });
@@ -635,9 +612,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
               <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-lg"></div>
             </button>
             <p className="text-gray-400 text-sm mt-3 text-center">
-              {wallet_state === 'not_installed' 
-                ? 'You need to install a compatible wallet extension first' 
-                : 'You need to connect your wallet to create posts'}
+              You need to connect your wallet to create posts
             </p>
           </div>
         )}
@@ -1036,24 +1011,27 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
           
           {/* Action buttons */}
           <div className="flex justify-end space-x-3 mt-4">
-            {isSubmitting && (
+            {isSubmitting && transactionStartTime && (
               <div className="flex items-center text-gray-400 text-sm mr-auto">
                 <div className="animate-pulse mr-2">
                   <div className="h-2 w-2 bg-green-400 rounded-full inline-block"></div>
                 </div>
-                {creation_state === 'connecting_wallet' && 'Connecting to wallet...'}
-                {creation_state === 'preparing_post' && 'Preparing post...'}
-                {creation_state === 'submitting_post' && 'Publishing transaction...'}
+                Transaction in progress
+                {Date.now() - transactionStartTime > 5000 && (
+                  <span className="ml-1 text-yellow-500">
+                    (taking longer than usual...)
+                  </span>
+                )}
               </div>
             )}
             
             {isSubmitting && (
               <button
                 type="button"
-                onClick={handleRetry}
+                onClick={cancelSubmission}
                 className="px-4 py-2 bg-red-900/30 hover:bg-red-900/50 text-red-200 rounded-lg text-sm transition-colors"
               >
-                Retry
+                Cancel
               </button>
             )}
             
@@ -1080,7 +1058,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
             </button>
           </div>
           {/* Show error message and retry button when there's an error */}
-          {creation_state === 'error' && error && (
+          {error && (
             <div className="mb-4 bg-red-900/20 border border-red-500/30 p-4 rounded-lg">
               <p className="text-red-400 text-sm">{error}</p>
               {showRetryButton && (
@@ -1089,7 +1067,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, isOpen, onClose 
                   onClick={handleRetry}
                   className="mt-2 px-4 py-2 bg-red-700/30 hover:bg-red-700/50 text-white rounded-lg text-sm transition-colors duration-200 flex items-center"
                 >
-                  <FiRefreshCw className="mr-2" /> Retry
+                  <FiRefreshCw className="mr-2" /> Retry with Reconnected Wallet
                 </button>
               )}
             </div>
