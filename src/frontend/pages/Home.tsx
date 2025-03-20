@@ -32,7 +32,7 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
   const searchParamType = searchParams.get('type') || '';
   
   // Use the search state hook at the top level
-  const { searchTerm, searchType, searchResults, isLoading } = useSearchState();
+  const { searchTerm, searchType, searchResults, isLoading, clearSearch } = useSearchState();
   
   // Add refs for dropdown menus
   const periodDropdownRef = useRef<HTMLDivElement>(null);
@@ -500,7 +500,11 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
                 {searchType === 'tx' && <span className="ml-1 text-sm text-gray-400">(Transaction ID)</span>}
               </h2>
               <button 
-                onClick={() => navigate('/')} 
+                onClick={() => {
+                  clearSearch();
+                  // Also reset the ranking filter to show all posts instead of just top-1
+                  setranking_filter('');
+                }} 
                 className="ml-3 text-xs text-gray-400 hover:text-white flex items-center"
               >
                 <FiX size={12} className="mr-1" />
