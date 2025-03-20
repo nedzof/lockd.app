@@ -422,13 +422,16 @@ export default function Home({ connected, bsvAddress }: HomeProps) {
               {/* Tag filter toggle */}
               <button
                 onClick={toggleTagsVisibility}
-                className={`flex items-center justify-center p-1.5 text-xs rounded-md transition-all duration-200 ${
+                className={`flex items-center justify-between px-2 py-1.5 text-xs rounded-md transition-all duration-200 ${
                   selected_tags.length > 0 ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-white/5 text-gray-300 border border-gray-700/30 hover:border-gray-600'
                 }`}
                 title={`${isTagsVisible ? 'Hide' : 'Show'} Tags ${selected_tags.length > 0 ? `(${selected_tags.length} selected)` : ''}`}
                 aria-label={`${isTagsVisible ? 'Hide' : 'Show'} Tags ${selected_tags.length > 0 ? `(${selected_tags.length} selected)` : ''}`}
               >
-                <FiTag size={12} />
+                <div className="flex items-center space-x-1.5">
+                  <FiTag size={12} />
+                  <span className="truncate hidden sm:inline-block">Tags</span>
+                </div>
                 {selected_tags.length > 0 && (
                   <span className="ml-1 text-[0.65rem] bg-[#00ffa3]/20 px-1 rounded-full">
                     {selected_tags.length}
