@@ -8,107 +8,75 @@ const prisma = new PrismaClient();
 // Search posts endpoint
 router.get('/search', async (req, res) => {
   try {
-    // Validate search term
-    const searchTerm = req.query.q as string;
-    if (!searchTerm) {
-      return res.status(400).json({ error: 'Search term is required' });
+    const { 
+      q, limit, type, 
+      time_filter, ranking_filter, personal_filter, block_filter, tags, user_id 
+    } = req.query;
+    
+    if (!q) {
+      return res.status(400).json({ error: 'Search query is required' });
     }
-
-    // Get filters & pagination from query params
-    const limit = parseInt(req.query.limit as string) || 20;
-    const searchType = req.query.type as string || 'all';
     
-    // Apply various filters if provided
-    const time_filter = req.query.time_filter as string || undefined;
-    const ranking_filter = req.query.ranking_filter as string || undefined;
-    const personal_filter = req.query.personal_filter as string || undefined;
-    const block_filter = req.query.block_filter as string || undefined;
-    const tags = Array.isArray(req.query.tags) ? req.query.tags as string[] : 
-                (req.query.tags ? [req.query.tags as string] : undefined);
-    const user_id = req.query.user_id as string || undefined;
-    
-    // Log all filters being applied
-    console.log(`SEARCH: Term="${searchTerm}", Type=${searchType}, Filters:`, {
+    console.log('Search request:', { 
+      query: q, 
+      limit, 
+      type,
       time_filter,
-      ranking_filter, 
+      ranking_filter,
       personal_filter,
       block_filter,
-      tags: tags?.join(','),
+      tags: tags ? (Array.isArray(tags) ? tags : [tags]) : [],
       user_id
     });
     
-    // Call the search function (passing all filters)
+    const searchType = type as string || 'all';
+    const limitValue = parseInt(limit as string) || 50;
+    
+    // Pass all filter parameters to searchPosts
     const results = await searchPosts(
-      searchTerm, 
-      limit, 
-      searchType, 
+      q as string, 
+      limitValue, 
+      searchType,
       {
-        time_filter,
-        ranking_filter,
-        personal_filter,
-        block_filter,
-        tags,
-        user_id
+        time_filter: time_filter as string,
+        ranking_filter: ranking_filter as string,
+        personal_filter: personal_filter as string,
+        block_filter: block_filter as string,
+        tags: tags ? (Array.isArray(tags) ? tags as string[] : [tags as string]) : [],
+        user_id: user_id as string,
       }
     );
     
-    // Set correct content type for the response
-    res.setHeader('Content-Type', 'application/json');
-    
-    // Check if results are valid
-    if (!results || !results.posts) {
-      console.error('Search returned invalid results:', results);
-      return res.status(500).json({ error: 'Invalid search results format' });
-    }
-    
-    // Process the results to remove binary data and clean up content
-    const cleanedPosts = results.posts.map((post: any) => {
-      // Create a clean post object without binary data
-      const cleanPost = {
-        id: post.id,
-        tx_id: post.tx_id,
-        content: post.content,
-        author_address: post.author_address,
-        created_at: post.created_at,
-        tags: post.tags || [],
-        media_type: post.media_type || null,
-        has_image: post.media_type ? true : false,
-        media_url: post.media_url || null,
-        is_locked: post.is_locked || false,
-        is_vote: post.is_vote || false,
-        vote_options: post.vote_options || [],
-        description: post.description || null,
-        lock_count: post.lock_count || 0,
-        metadata: post.metadata || null
-      };
-      
-      // Remove any null/undefined values to clean up the response
-      Object.keys(cleanPost).forEach(key => {
-        // @ts-ignore
-        if (cleanPost[key] === null || cleanPost[key] === undefined) {
-          // @ts-ignore
-          delete cleanPost[key];
-        }
+    // Debug log first few results
+    if (results.posts && results.posts.length > 0) {
+      console.log(`Found ${results.posts.length} results. First result:`, {
+        id: results.posts[0].id,
+        content: results.posts[0].content?.substring(0, 30),
+        lock_count: results.posts[0].lock_count,
+        has_image: results.posts[0].has_image,
+        media_url: results.posts[0].media_url,
+        media_type: results.posts[0].media_type
       });
-      
-      return cleanPost;
-    });
-    
-    // Return the cleaned results
-    return res.json({
-      count: results.count,
-      posts: cleanedPosts,
-      hasMore: results.hasMore,
-      nextCursor: results.nextCursor
-    });
-  } catch (error) {
-    console.error('Search error details:', error);
-    // Log the stack trace for debugging
-    if (error instanceof Error) {
-      console.error('Error stack:', error.stack);
-      return res.status(500).json({ error: 'Failed to search posts', message: error.message });
+    } else {
+      console.log('No search results found');
     }
-    res.status(500).json({ error: 'Failed to search posts' });
+    
+    // Process the posts to ensure media_url is correctly set
+    if (results.posts) {
+      results.posts = results.posts.map(post => {
+        // If post has an image but no media_url, create one
+        if (post.has_image && !post.media_url) {
+          post.media_url = `/api/posts/${post.id}/media`;
+          console.log(`Added media_url for post ${post.id}: ${post.media_url}`);
+        }
+        return post;
+      });
+    }
+    
+    return res.json(results);
+  } catch (error) {
+    console.error('Error searching posts:', error);
+    return res.status(500).json({ error: 'Failed to search posts' });
   }
 });
 

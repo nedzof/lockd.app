@@ -699,8 +699,7 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
       where: { id: req.params.id },
       select: {
         media_type: true,
-        raw_image_data: true,
-        imageFormat: true
+        raw_image_data: true
       }
     });
 
@@ -724,9 +723,9 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     // Determine content type
     let content_type = post.media_type;
     
-    // If we have an imageFormat but no media_type, try to determine from format
-    if (!content_type && post.imageFormat && content_typeMap[post.imageFormat.toLowerCase()]) {
-      content_type = content_typeMap[post.imageFormat.toLowerCase()];
+    // If we don't have a media_type, use a default
+    if (!content_type) {
+      content_type = 'image/jpeg'; // Default to jpeg
     }
     
     // Default to octet-stream if we can't determine the type
@@ -737,6 +736,10 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     // Set appropriate content type
     res.setHeader('Content-Type', content_type);
 
+    // Add CORS headers for better compatibility
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET');
+    
     // Add cache control headers for better performance
     res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
     res.setHeader('ETag', `"${req.params.id}"`);
@@ -753,7 +756,11 @@ const getPostMedia: PostMediaHandler = async (req, res, next) => {
     res.send(post.raw_image_data);
   } catch (error) {
     logger.error('Error fetching media:', error);
-    res.status(500).json({ message: 'Error fetching media' });
+    // Send a proper error response
+    res.status(500).json({ 
+      message: 'Error fetching media',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 };
 
@@ -1506,6 +1513,8 @@ export async function searchPosts(query: string, limit = 50, searchType = 'all',
       let media_url = null;
       if (has_image) {
         media_url = `/api/posts/${post.id}/media`;
+        // Log that we're creating a media URL for debugging
+        console.log(`Created media URL for post ${post.id} in search results: ${media_url}`);
       }
       
       // Return processed post with all necessary data without binary content

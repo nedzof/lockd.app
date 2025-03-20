@@ -169,13 +169,24 @@ const PostGrid: React.FC<PostGridProps> = ({
   searchType = 'all',
   forceUpdate
 }) => {
+  // States for posts and pagination
   const [submissions, setSubmissions] = useState<ExtendedPost[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [stats, setStats] = useState({ totalLocked: 0, participantCount: 0, roundNumber: 0 });
+  const [showConfirmDeleteModal, setShowConfirmDeleteModal] = useState(false);
+  const [postToDelete, setPostToDelete] = useState<string | null>(null);
+  const [currentPostContent, setCurrentPostContent] = useState('');
+  const [votingExpanded, setVotingExpanded] = useState<Record<string, boolean>>({});
+  const [showExplanation, setShowExplanation] = useState(false);
+  const [currentVoteOption, setCurrentVoteOption] = useState<vote_option | null>(null);
+  const [isVoting, setIsVoting] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [imageLoadingStates, setImageLoadingStates] = useState<Record<string, 'loading' | 'loaded' | 'error'>>({});
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const [isLocking, setIsLocking] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const imageRefs = useRef<{ [key: string]: HTMLImageElement }>({});
   const imageUrlMap = useRef<Map<string, string>>(new Map());
@@ -273,21 +284,48 @@ const PostGrid: React.FC<PostGridProps> = ({
       
       // Process the global search results to match ExtendedPost format
       const processedPosts = globalSearchResults.map(post => {
-        // Start with the post's properties and override/add required properties
-        const postAny = post as any; // Use any type for flexible access to properties
-        const extendedPost = {
-          ...post, // Spread the post first
+        const postAny = post as any; // Use any type for flexible access
+        
+        // Debug log each post's image data
+        console.log(`Search result post ${postAny.id} image data:`, {
+          has_image: postAny.has_image,
+          media_url: postAny.media_url,
+          media_type: postAny.media_type,
+          raw_image_data_length: postAny.raw_image_data ? postAny.raw_image_data.length : 0
+        });
+        
+        const extendedPost: ExtendedPost = {
+          ...post, // Spread post properties
           id: postAny.id || postAny.tx_id || '',
+          content: postAny.content || '',
+          author_address: postAny.author_address || '',
+          created_at: postAny.created_at || new Date().toISOString(),
+          tags: Array.isArray(postAny.tags) ? postAny.tags : [],
           is_locked: Boolean(postAny.is_locked),
           is_vote: Boolean(postAny.is_vote),
           vote_options: Array.isArray(postAny.vote_options) ? postAny.vote_options : [],
-          isSearchResult: true
-        } as unknown as ExtendedPost;
+          isSearchResult: true,
+          _highlightContent: true,
+          matchInfo: {
+            fields: postAny._matchedFields || [],
+            query: globalSearchTerm || '',
+            score: postAny._score || 0
+          }
+        };
         
         // Handle image URLs
         if (postAny.has_image && postAny.media_url) {
+          console.log(`Post ${postAny.id} has image with media_url: ${postAny.media_url}`);
           extendedPost.imageUrl = postAny.media_url;
+          extendedPost.media_url = postAny.media_url; // Ensure media_url is copied too
           imageUrlMap.current.set(postAny.id, postAny.media_url);
+        } else if (postAny.has_image) {
+          // Post has an image but no media_url, so generate one
+          const generatedMediaUrl = `/api/posts/${postAny.id}/media`;
+          console.log(`Post ${postAny.id} has image but no media_url. Using generated URL: ${generatedMediaUrl}`);
+          extendedPost.imageUrl = generatedMediaUrl;
+          extendedPost.media_url = generatedMediaUrl;
+          imageUrlMap.current.set(postAny.id, generatedMediaUrl);
         } else if (postAny.raw_image_data) {
           try {
             if (imageUrlMap.current.has(postAny.id)) {
@@ -406,22 +444,24 @@ const PostGrid: React.FC<PostGridProps> = ({
               
               // Handle image URLs based on has_image and media_url flags
               if (postAny.has_image && postAny.media_url) {
-                console.log(`Post ${postAny.id} has image at ${postAny.media_url}`);
+                console.log(`Post ${postAny.id} has image with media_url: ${postAny.media_url}`);
                 extendedPost.imageUrl = postAny.media_url;
-                // Store in our ref map
+                extendedPost.media_url = postAny.media_url; // Ensure media_url is copied too
                 imageUrlMap.current.set(postAny.id, postAny.media_url);
-              }
-              // Fallback to raw_image_data for backward compatibility
-              else if (postAny.raw_image_data) {
+              } else if (postAny.has_image) {
+                // Post has an image but no media_url, so generate one
+                const generatedMediaUrl = `/api/posts/${postAny.id}/media`;
+                console.log(`Post ${postAny.id} has image but no media_url. Using generated URL: ${generatedMediaUrl}`);
+                extendedPost.imageUrl = generatedMediaUrl;
+                extendedPost.media_url = generatedMediaUrl;
+                imageUrlMap.current.set(postAny.id, generatedMediaUrl);
+              } else if (postAny.raw_image_data) {
                 try {
                   if (imageUrlMap.current.has(postAny.id)) {
                     extendedPost.imageUrl = imageUrlMap.current.get(postAny.id);
-                  } else {
-                    // Create a data URL from the base64 string
-                    if (typeof postAny.raw_image_data === 'string') {
-                      extendedPost.imageUrl = `data:${postAny.media_type || 'image/jpeg'};base64,${postAny.raw_image_data}`;
-                      imageUrlMap.current.set(postAny.id, extendedPost.imageUrl);
-                    }
+                  } else if (typeof postAny.raw_image_data === 'string') {
+                    extendedPost.imageUrl = `data:${postAny.media_type || 'image/jpeg'};base64,${postAny.raw_image_data}`;
+                    imageUrlMap.current.set(postAny.id, extendedPost.imageUrl);
                   }
                 } catch (imageError) {
                   console.error(`Error processing image for search result ${postAny.id}:`, imageError);
@@ -1356,23 +1396,48 @@ const PostGrid: React.FC<PostGridProps> = ({
                         <img 
                           src={post.imageUrl} 
                           alt={`Image for post ${post.id}`}
-                          className="w-full h-auto object-contain max-h-[400px] rounded"
+                          className={`w-full h-auto object-contain max-h-[400px] rounded ${imageLoadingStates[post.id] === 'loading' ? 'hidden' : 'block'}`}
+                          onLoad={() => {
+                            setImageLoadingStates(prev => ({
+                              ...prev,
+                              [post.id]: 'loaded'
+                            }));
+                          }}
                           onError={(e) => {
                             // Try to reload the image once
                             const currentSrc = e.currentTarget.src;
+                            
+                            // Check if the current URL is already the media_url
+                            const isMediaUrl = currentSrc.includes('/api/posts/') && currentSrc.includes('/media');
+                            
+                            // Check if this is a search result with media_url available
+                            if (post.isSearchResult && post.media_url && !isMediaUrl) {
+                              console.log(`Search result: Using direct media URL for post ${post.id}: ${post.media_url}`);
+                              e.currentTarget.src = post.media_url;
+                              return;
+                            }
+                            
+                            // If this is already a direct media URL but post.has_image is true,
+                            // try regenerating the URL without query params
+                            if (isMediaUrl && currentSrc.includes('?')) {
+                              const cleanMediaUrl = currentSrc.split('?')[0];
+                              console.log(`Retry with clean media URL: ${cleanMediaUrl}`);
+                              e.currentTarget.src = cleanMediaUrl;
+                              return;
+                            }
+                            
+                            // Normal retry logic with cache busting
                             if (!e.currentTarget.dataset.retried) {
                               e.currentTarget.dataset.retried = 'true';
                               // Add a cache-busting parameter
                               e.currentTarget.src = `${currentSrc}${currentSrc.includes('?') ? '&' : '?'}retry=${Date.now()}`;
                             } else {
-                              // Hide the failed image element
-                              e.currentTarget.style.display = 'none';
-                              
-                              // Show a fallback message
-                              const fallbackEl = document.createElement('div');
-                              fallbackEl.className = 'p-4 text-center text-gray-400';
-                              fallbackEl.textContent = 'Image could not be loaded';
-                              e.currentTarget.parentNode?.appendChild(fallbackEl);
+                              // Mark this image as having an error
+                              console.error(`Failed to load image for post ${post.id} after retries`);
+                              setImageLoadingStates(prev => ({
+                                ...prev,
+                                [post.id]: 'error'
+                              }));
                             }
                           }}
                           ref={(el) => {
