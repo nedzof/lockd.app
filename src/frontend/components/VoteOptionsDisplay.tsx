@@ -269,14 +269,25 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       const unlockHeight = currentBlockHeight + duration;
       console.log('[LOCK DIAGNOSTICS] Calculated unlock height:', unlockHeight, '(current:', currentBlockHeight, '+ duration:', duration, ')');
       
-      // Check if wallet has lock function
-      console.log('[LOCK DIAGNOSTICS] Wallet object:', {
+      // Check what methods are actually available on the wallet object
+      console.log('[LOCK DIAGNOSTICS] Wallet object methods:', {
         exists: !!wallet,
         hasLock: !!(wallet && wallet.lock),
-        type: wallet ? typeof wallet.lock : 'undefined'
+        hasLockBsv: !!(wallet && wallet.lockBsv),
+        // List all available methods on the wallet
+        methods: wallet ? Object.getOwnPropertyNames(Object.getPrototypeOf(wallet)) : [],
+        // List all available properties on the wallet
+        properties: wallet ? Object.keys(wallet) : []
       });
       
-      if (!wallet || !wallet.lock) {
+      // Determine which lock method to use based on what's available
+      const lockMethod = wallet && wallet.lock 
+        ? 'lock'  // Use new method per docs
+        : wallet && wallet.lockBsv 
+          ? 'lockBsv'  // Fall back to old method
+          : null;  // No lock method available
+      
+      if (!wallet || !lockMethod) {
         toast.dismiss(toastId);
         toast.error('Wallet locking capability not available');
         return;
@@ -317,9 +328,16 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       let lockResponse;
       
       try {
-        // Call wallet lock function - USING CORRECT METHOD AS PER DOCS
-        console.log('[LOCK DIAGNOSTICS] Calling wallet.lock with parameters...');
-        lockResponse = await wallet.lock(locks);
+        // Use the appropriate lock method based on availability
+        console.log(`[LOCK DIAGNOSTICS] Calling wallet.${lockMethod} with parameters...`);
+        
+        if (lockMethod === 'lock') {
+          lockResponse = await wallet.lock(locks);
+        } else {
+          // Fall back to lockBsv
+          lockResponse = await wallet.lockBsv(locks);
+        }
+        
         console.log('[LOCK DIAGNOSTICS] Lock transaction response:', lockResponse);
         
         if (!lockResponse || !lockResponse.txid) {
@@ -328,7 +346,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
           throw new Error('Failed to create lock transaction - missing txid in response');
         }
       } catch (lockError) {
-        console.error('[LOCK DIAGNOSTICS] Error in wallet.lock call:', lockError);
+        console.error(`[LOCK DIAGNOSTICS] Error in wallet.${lockMethod} call:`, lockError);
         
         // Try to extract detailed error information
         let errorDetails = '';
