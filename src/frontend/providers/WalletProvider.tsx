@@ -5,9 +5,9 @@ import { toast } from 'react-hot-toast';
 import { getBsvAddress, isWalletConnected } from '../utils/walletConnectionHelpers';
 
 // Helper function to safely check if a wallet method exists and is callable
-const safe_wallet_method_check = (wallet: any, method_name: string): boolean => {
+const safeWalletMethodCheck = (wallet: any, methodName: string): boolean => {
   if (!wallet) return false;
-  return typeof wallet[method_name] === 'function';
+  return typeof wallet[methodName] === 'function';
 };
 
 interface WalletContextType {
@@ -21,9 +21,7 @@ interface WalletContextType {
   wallet: YoursProviderType | undefined;
   refreshBalance: () => Promise<void>;
   clearPendingTransactions: () => Promise<void>;
-  queueTransaction: <T>(transactionFn: () => Promise<T>) => Promise<T>;
-  recoverFromFailedTransaction: () => Promise<boolean>;
-  wallet_state: 'not_installed' | 'not_connected' | 'connecting' | 'connected' | 'error';
+  queueTransaction: <T>(transaction_fn: () => Promise<T>) => Promise<T>;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -37,7 +35,7 @@ export const useWallet = () => {
 };
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const yours_wallet = useYoursWallet();
+  const yoursWallet = useYoursWallet();
   const [publicKey, setPublicKey] = useState<string>();
   const [bsvAddress, setBsvAddress] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -48,17 +46,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   });
   const [isWalletDetected, setIsWalletDetected] = useState(false);
   const [wallet, setWallet] = useState<YoursProviderType>();
-  const [wallet_state, set_wallet_state] = useState<'not_installed' | 'not_connected' | 'connecting' | 'connected' | 'error'>('not_installed');
-  const [pending_transactions, set_pending_transactions] = useState<Array<{ id: string; fn: () => Promise<any> }>>([]);
+  const [pending_transactions, set_pending_transactions] = useState<{ id: string; fn: () => Promise<any> }[]>([]);
   const [is_processing_transaction, set_is_processing_transaction] = useState(false);
 
   // Cleanup function to reset state
-  const reset_state = useCallback(() => {
+  const resetState = useCallback(() => {
     setIsConnected(false);
     setPublicKey(undefined);
     setBsvAddress(null);
     setBalance({ bsv: 0, satoshis: 0, usdInCents: 0 });
-    set_wallet_state('not_connected');
   }, []);
 
   // Add clearPendingTransactions function
@@ -76,18 +72,19 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       };
       
       // Try various methods that might exist to clear transactions
-      if (safe_wallet_method_check(walletWithClearMethod, 'clearPendingTransactions')) {
+      // Use our helper to safely check method existence
+      if (safeWalletMethodCheck(walletWithClearMethod, 'clearPendingTransactions')) {
         await walletWithClearMethod.clearPendingTransactions!();
-      } else if (safe_wallet_method_check(walletWithClearMethod, 'cancelAllTransactions')) {
+      } else if (safeWalletMethodCheck(walletWithClearMethod, 'cancelAllTransactions')) {
         await walletWithClearMethod.cancelAllTransactions!();
-      } else if (safe_wallet_method_check(walletWithClearMethod, 'resetState')) {
+      } else if (safeWalletMethodCheck(walletWithClearMethod, 'resetState')) {
         await walletWithClearMethod.resetState!();
       } else {
         // If no clear method exists, try to disconnect and reconnect
         console.log('No clear transaction method found, resetting wallet connection state...');
         
         // Force reset connection state - this helps when wallet dialogs are still open
-        if (safe_wallet_method_check(wallet, 'disconnect')) {
+        if (safeWalletMethodCheck(wallet, 'disconnect')) {
           try {
             // Don't await to avoid blocking if there's an error
             wallet.disconnect().catch(() => {});
@@ -96,139 +93,36 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }
         }
       }
-      
-      // Always clear our internal transaction queue regardless of wallet response
-      set_pending_transactions([]);
-      set_is_processing_transaction(false);
     } catch (error) {
       // Silently handle errors to prevent console messages
-      // Reset our transaction state anyway
-      set_pending_transactions([]);
-      set_is_processing_transaction(false);
+      // console.error('Error clearing pending transactions:', error);
     }
   }, [wallet]);
-
-  // Implement transaction queue manager
-  const queue_transaction = useCallback(async <T,>(transaction_fn: () => Promise<T>): Promise<T> => {
-    // Set a unique ID for this transaction
-    const tx_id = Date.now().toString();
-    
-    // Create a promise that will resolve with the transaction result
-    const result_promise = new Promise<T>((resolve, reject) => {
-      // Wrap the provided function to capture its result
-      const wrapped_fn = async () => {
-        try {
-          const result = await transaction_fn();
-          resolve(result);
-          return result;
-        } catch (error) {
-          reject(error);
-          throw error;
-        }
-      };
-      
-      // Add to queue
-      set_pending_transactions(prev => [...prev, { id: tx_id, fn: wrapped_fn }]);
-    });
-    
-    // Process queue if not already processing
-    if (!is_processing_transaction) {
-      process_transaction_queue();
-    }
-    
-    return result_promise;
-  }, [is_processing_transaction]);
-
-  // Process transaction queue
-  const process_transaction_queue = useCallback(async () => {
-    if (pending_transactions.length === 0) {
-      set_is_processing_transaction(false);
-      return;
-    }
-    
-    set_is_processing_transaction(true);
-    const tx = pending_transactions[0];
-    
-    try {
-      await tx.fn();
-    } catch (error) {
-      console.error('Transaction failed:', error);
-    } finally {
-      // Remove from queue regardless of success/failure
-      set_pending_transactions(prev => prev.filter(t => t.id !== tx.id));
-      
-      // Process next transaction
-      setTimeout(() => {
-        if (pending_transactions.length > 0) {
-          process_transaction_queue();
-        } else {
-          set_is_processing_transaction(false);
-        }
-      }, 100);
-    }
-  }, [pending_transactions]);
 
   // Function to refresh balance - defined early to avoid circular dependencies
   const refreshBalance = useCallback(async () => {
     if (wallet && isConnected) {
       try {
-        const balance_result = await wallet.getBalance();
-        if (balance_result) {
+        const balanceResult = await wallet.getBalance();
+        if (balanceResult) {
           setBalance({
-            bsv: balance_result.bsv ?? 0,
-            satoshis: balance_result.satoshis ?? 0,
-            usdInCents: balance_result.usdInCents ?? 0
+            bsv: balanceResult.bsv ?? 0,
+            satoshis: balanceResult.satoshis ?? 0,
+            usdInCents: balanceResult.usdInCents ?? 0
           });
         }
       } catch (error) {
         // Handle silently instead of logging to console
+        // Common errors like Unauthorized should be handled gracefully
+        // If we need to debug, we can uncomment this line
+        // console.error('Error fetching balance:', error);
+        
         // No need to show errors to the user, just continue with current balance value
       }
     }
   }, [wallet, isConnected]);
 
-  // Implement proper transaction recovery system
-  const recoverFromFailedTransaction = useCallback(async () => {
-    console.log('Attempting to recover from failed transaction...');
-    
-    // First, try to clear any pending transactions
-    await clearPendingTransactions();
-    
-    // Then disconnect and reconnect the wallet
-    try {
-      set_wallet_state('connecting');
-      
-      if (wallet?.disconnect) {
-        await wallet.disconnect();
-      }
-      
-      // Wait a moment before reconnecting
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Reconnect
-      if (wallet?.connect) {
-        await wallet.connect();
-        
-        // Verify connection
-        const address = await getBsvAddress(wallet);
-        if (address) {
-          setBsvAddress(address);
-          setIsConnected(true);
-          set_wallet_state('connected');
-          await refreshBalance();
-          return true;
-        }
-      }
-      set_wallet_state('error');
-      return false;
-    } catch (error) {
-      console.error('Recovery failed:', error);
-      set_wallet_state('error');
-      return false;
-    }
-  }, [wallet, clearPendingTransactions, refreshBalance]);
-
-  // Handle wallet disconnection
+  // Handle wallet disconnection - defined early to avoid circular dependencies
   const disconnect = useCallback(async () => {
     if (!wallet?.disconnect) return;
     try {
@@ -237,31 +131,31 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       
       // Then disconnect
       await wallet.disconnect();
-      reset_state();
+      resetState();
     } catch (error) {
       console.error('Failed to disconnect:', error);
-      reset_state();
+      resetState();
     }
-  }, [wallet, reset_state, clearPendingTransactions]);
+  }, [wallet, resetState, clearPendingTransactions]);
 
-  // Set wallet when yours_wallet changes
+  // Set wallet when yoursWallet changes
   useEffect(() => {
-    if (yours_wallet) {
-      setWallet(yours_wallet);
+    if (yoursWallet) {
+      setWallet(yoursWallet);
     }
-  }, [yours_wallet]);
+  }, [yoursWallet]);
 
   // Updated function to get BSV address according to official docs
-  const get_wallet_addresses = async (wallet_instance: YoursProviderType): Promise<string | null> => {
+  const getWalletAddresses = async (walletInstance: YoursProviderType): Promise<string | null> => {
     try {
       // Try the method from the official docs first
-      const addresses = await wallet_instance.getAddresses();
+      const addresses = await walletInstance.getAddresses();
       if (addresses && addresses.bsvAddress) {
         return addresses.bsvAddress;
       }
       
       // Fall back to the previous method if needed
-      return await getBsvAddress(wallet_instance);
+      return await getBsvAddress(walletInstance);
     } catch (error) {
       console.error('Error getting wallet addresses:', error);
       return null;
@@ -270,24 +164,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Check if wallet is detected
   useEffect(() => {
-    const wallet_ready = !!wallet?.isReady;
-    setIsWalletDetected(wallet_ready);
-    
-    if (!wallet_ready) {
-      set_wallet_state('not_installed');
-    } else if (!isConnected) {
-      set_wallet_state('not_connected');
-    }
+    setIsWalletDetected(!!wallet?.isReady);
     
     // If wallet is ready and connected, fetch balance
-    const check_and_fetch_balance = async () => {
+    const checkAndFetchBalance = async () => {
       if (wallet?.isReady) {
         try {
-          const is_connected_result = await isWalletConnected(wallet);
-          if (is_connected_result) {
+          const isConnectedResult = await isWalletConnected(wallet);
+          if (isConnectedResult) {
             setIsConnected(true);
-            set_wallet_state('connected');
-            const address = await get_wallet_addresses(wallet);
+            const address = await getWalletAddresses(wallet);
             if (address) {
               setBsvAddress(address);
               await refreshBalance();
@@ -295,28 +181,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }
         } catch (error) {
           console.error('Error checking initial connection:', error);
-          set_wallet_state('error');
         }
       }
     };
     
-    if (wallet_ready) {
-      check_and_fetch_balance();
-    }
-  }, [wallet?.isReady, refreshBalance, isConnected]);
+    checkAndFetchBalance();
+  }, [wallet?.isReady, refreshBalance]);
 
   // Setup event listeners for wallet events
   useEffect(() => {
     if (!wallet) return;
     
     // Only set up listeners if the 'on' method exists
-    if (safe_wallet_method_check(wallet, 'on')) {
+    if (safeWalletMethodCheck(wallet, 'on')) {
       // Handle account switch
       wallet.on('switchAccount', async () => {
         console.log('Wallet account switched');
         try {
           // Update address and balance after account switch
-          const address = await get_wallet_addresses(wallet);
+          const address = await getWalletAddresses(wallet);
           if (address) {
             setBsvAddress(address);
             await refreshBalance();
@@ -335,75 +218,158 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return () => {
         // Clean up event listeners if possible
         try {
-          if (safe_wallet_method_check(wallet, 'removeAllListeners')) {
+          if (safeWalletMethodCheck(wallet, 'removeAllListeners')) {
             (wallet as any).removeAllListeners();
-          } else if (safe_wallet_method_check(wallet, 'removeListener')) {
+          } else if (safeWalletMethodCheck(wallet, 'removeListener')) {
             // Fall back to removing individual listeners if available
             wallet.removeListener('switchAccount', () => {});
             wallet.removeListener('signedOut', () => {});
           }
         } catch (cleanupError) {
           // Silently handle errors during cleanup
+          // console.error('Error cleaning up wallet event listeners:', cleanupError);
         }
       };
     } else {
       console.log('Wallet does not support event listeners (no "on" method)');
     }
-  }, [wallet, disconnect, refreshBalance]);
+  }, [wallet, disconnect, refreshBalance, clearPendingTransactions]);
 
-  // Simplified wallet connection
+  // Handle wallet connection
   const connect = useCallback(async () => {
+    console.log('Connect called, wallet state:', {
+      isReady: wallet?.isReady,
+      hasConnect: !!wallet?.connect,
+      wallet
+    });
+
     if (!wallet?.isReady) {
       console.log('Wallet not ready, redirecting to yours.org');
       toast.error('Wallet not detected. Please install the Yours wallet extension.');
       window.open('https://yours.org', '_blank');
-      set_wallet_state('not_installed');
       return;
     }
     
-    set_wallet_state('connecting');
-    
+    // Check if already connected first before attempting to connect again
     try {
+      console.log('Pre-checking connection status...');
+      const preCheckConnected = await isWalletConnected(wallet);
+      
+      if (preCheckConnected) {
+        console.log('Already connected, validating connection...');
+        
+        // Validate the connection by trying to get the address
+        const existingAddress = await getWalletAddresses(wallet);
+        
+        if (existingAddress) {
+          console.log('Connection is valid with address:', existingAddress);
+          // We're already connected with a valid address
+          setIsConnected(true);
+          setBsvAddress(existingAddress);
+          await refreshBalance();
+          return;
+        }
+        
+        console.log('Connection seems invalid (no address), will reconnect...');
+        // If we couldn't get an address, try disconnecting first
+        try {
+          await wallet.disconnect();
+          // Add a short delay to allow the wallet to process the disconnect
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } catch (disconnectError) {
+          console.log('Error during pre-connect disconnect:', disconnectError);
+          // Continue anyway
+        }
+      }
+      
       // Clear any pending transactions first
       await clearPendingTransactions();
       
-      // Simple connection with timeout
-      const connection_result = await Promise.race([
-        wallet.connect(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timeout')), 10000))
-      ]);
+      // Try to connect and log all outputs for debugging
+      console.log('Calling wallet.connect()...');
+      const connectResult = await wallet.connect();
+      console.log('wallet.connect() returned:', connectResult);
       
-      // Verify address to confirm connection
-      const address = await get_wallet_addresses(wallet);
-      if (!address) {
-        throw new Error('Failed to get wallet address');
-      }
+      // Check if connected
+      console.log('Checking connection status...');
+      const isConnectedResult = await isWalletConnected(wallet);
+      console.log('isWalletConnected() returned:', isConnectedResult);
       
-      // Set connection state
-      setIsConnected(true);
-      setBsvAddress(address);
-      set_wallet_state('connected');
+      // Add a short delay to allow the wallet to fully process the connection
+      // This helps with race conditions in the wallet extension
+      await new Promise(resolve => setTimeout(resolve, 300));
       
-      // Refresh balance
-      await refreshBalance();
+      // Get BSV address using the updated method
+      console.log('Attempting to get BSV address...');
+      const address = await getWalletAddresses(wallet);
+      console.log('getWalletAddresses() returned:', address);
       
-      // Try to get public keys
-      try {
-        const pub_keys = await wallet.getPubKeys();
-        if (pub_keys?.identityPubKey) {
-          setPublicKey(pub_keys.identityPubKey);
+      // If we didn't get an address, try once more with a longer delay
+      if (!address && isConnectedResult) {
+        console.log('Connected but no address returned, waiting longer and trying again...');
+        await new Promise(resolve => setTimeout(resolve, 800));
+        const retryAddress = await getWalletAddresses(wallet);
+        console.log('Retry getWalletAddresses() returned:', retryAddress);
+        
+        if (retryAddress) {
+          console.log('Got address on retry');
+          setBsvAddress(retryAddress);
+          setIsConnected(true);
+          await refreshBalance();
+          return;
         }
-      } catch (error) {
-        // Not critical, continue without public key
       }
       
-      // Don't return any value to match the Promise<void> type in the interface
+      console.log('Final connection state:', {
+        isConnected: isConnectedResult,
+        bsvAddress: address,
+        wallet
+      });
+      
+      // Update state
+      if (isConnectedResult) {
+        setIsConnected(true);
+        
+        // Set BSV address if we have one
+        if (address) {
+          setBsvAddress(address);
+          
+          // Refresh balance after successful connection
+          try {
+            console.log('Refreshing balance...');
+            await refreshBalance();
+            console.log('Balance refreshed');
+          } catch (balanceError) {
+            console.error('Error refreshing balance:', balanceError);
+          }
+        } else {
+          console.warn('No BSV address found after connection attempt');
+          // Use error toast instead of warning since warning is not available
+          toast.error('Connected to wallet but could not retrieve address. Some features may be limited.', {
+            style: { background: '#413A30', color: '#FFB74D' } // Use a yellowish style to indicate warning
+          });
+        }
+        
+        // Try to get public keys as well
+        try {
+          console.log('Getting public keys...');
+          const pubKeys = await wallet.getPubKeys();
+          console.log('wallet.getPubKeys() returned:', pubKeys);
+          if (pubKeys?.identityPubKey) {
+            setPublicKey(pubKeys.identityPubKey);
+          }
+        } catch (pubKeyError) {
+          console.warn('Could not get public keys:', pubKeyError);
+          // Continue anyway since this is not critical
+        }
+      } else {
+        console.log('Connection failed or was rejected');
+        setIsConnected(false);
+      }
     } catch (error) {
       console.error('Error connecting wallet:', error);
       toast.error('Failed to connect wallet');
       setIsConnected(false);
-      set_wallet_state('error');
-      throw error;
     }
   }, [wallet, refreshBalance, clearPendingTransactions]);
 
@@ -425,18 +391,128 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (!isConnected) return;
     
     // Refresh balance every 30 seconds
-    const interval_id = setInterval(async () => {
+    const intervalId = setInterval(async () => {
       try {
         await refreshBalance();
       } catch (error) {
         // Silently handle any errors during balance refresh
+        // This prevents console errors from automatic refresh attempts
       }
     }, 30000);
     
     return () => {
-      clearInterval(interval_id);
+      clearInterval(intervalId);
     };
   }, [isConnected, refreshBalance]);
+
+  // Implement transaction queue manager with better timeout handling
+  const queue_transaction = useCallback(async <T,>(transaction_fn: () => Promise<T>): Promise<T> => {
+    // Set a unique ID for this transaction
+    const tx_id = Date.now().toString();
+    console.log(`📋 [WalletProvider] Queue transaction with ID: ${tx_id}`);
+    
+    // Create a promise that will resolve with the transaction result
+    return new Promise<T>((resolve, reject) => {
+      // Wrap the provided function to capture its result
+      const wrapped_fn = async () => {
+        console.log(`📋 [WalletProvider] Starting wrapped transaction function for ID: ${tx_id}`);
+        try {
+          // Add a timeout to the transaction function
+          console.log(`📋 [WalletProvider] Starting transaction with timeout for ID: ${tx_id}`);
+          
+          // Execute transaction with timeout
+          let timeout_id: NodeJS.Timeout | null = null;
+          
+          try {
+            const transaction_promise = transaction_fn();
+            
+            // Create timeout promise
+            const timeout_promise = new Promise<never>((_, timeout_reject) => {
+              timeout_id = setTimeout(() => {
+                console.log(`⏱️ [WalletProvider] Transaction function TIMEOUT for ID: ${tx_id}`);
+                timeout_reject(new Error('Transaction function timed out'));
+              }, 45000);
+            });
+            
+            // Race the transaction against the timeout
+            const result = await Promise.race([transaction_promise, timeout_promise]);
+            
+            console.log(`✅ [WalletProvider] Transaction function completed for ID: ${tx_id}`);
+            resolve(result);
+            return result;
+          } finally {
+            // Always clear timeout if it exists
+            if (timeout_id) clearTimeout(timeout_id);
+          }
+        } catch (error) {
+          console.error(`❌ [WalletProvider] Transaction function error for ID: ${tx_id}:`, error);
+          reject(error);
+          return null; // End function execution
+        }
+      };
+      
+      // Add to queue
+      console.log(`📋 [WalletProvider] Adding transaction ID: ${tx_id} to queue`);
+      set_pending_transactions(prev => [...prev, { id: tx_id, fn: wrapped_fn }]);
+      
+      // Start processing queue immediately if not already processing
+      if (!is_processing_transaction) {
+        console.log(`📋 [WalletProvider] Starting queue processing for new transaction`);
+        
+        const process_queue = async () => {
+          if (pending_transactions.length === 0) {
+            console.log(`📋 [WalletProvider] No transactions to process, setting processing=false`);
+            set_is_processing_transaction(false);
+            return;
+          }
+          
+          console.log(`📋 [WalletProvider] Processing queue with ${pending_transactions.length} transactions`);
+          set_is_processing_transaction(true);
+          const tx = pending_transactions[0];
+          console.log(`📋 [WalletProvider] Processing transaction ID: ${tx.id}`);
+          
+          try {
+            // Execute the transaction function
+            console.log(`📋 [WalletProvider] Executing function for transaction ID: ${tx.id}`);
+            await tx.fn();
+            console.log(`✅ [WalletProvider] Transaction ID: ${tx.id} completed successfully`);
+          } catch (error: any) {
+            console.error(`❌ [WalletProvider] Transaction failed ID: ${tx.id}:`, error);
+            
+            // If we get an unauthorized error, try to reconnect
+            if (error?.message?.toLowerCase().includes('unauthorized')) {
+              console.log(`🔄 [WalletProvider] Unauthorized error, attempting to reconnect wallet`);
+              try {
+                if (wallet?.connect) {
+                  await wallet.connect();
+                  console.log(`✅ [WalletProvider] Wallet reconnected successfully after unauthorized error`);
+                }
+              } catch (reconnectError) {
+                console.error(`❌ [WalletProvider] Failed to reconnect after unauthorized error:`, reconnectError);
+              }
+            }
+          } finally {
+            // Remove from queue
+            console.log(`🧹 [WalletProvider] Removing transaction ID: ${tx.id} from queue`);
+            set_pending_transactions(prev => prev.filter(t => t.id !== tx.id));
+            
+            // Continue processing queue with a brief delay
+            setTimeout(() => {
+              if (pending_transactions.length > 0) {
+                console.log(`📋 [WalletProvider] Starting next transaction in queue (${pending_transactions.length} remaining)`);
+                process_queue();
+              } else {
+                console.log(`📋 [WalletProvider] Queue empty, setting processing=false`);
+                set_is_processing_transaction(false);
+              }
+            }, 1000);
+          }
+        };
+        
+        process_queue();
+      }
+    });
+  }, [is_processing_transaction, pending_transactions, wallet]);
 
   return (
     <WalletContext.Provider
@@ -451,9 +527,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         wallet,
         refreshBalance,
         clearPendingTransactions,
-        queueTransaction: queue_transaction,
-        recoverFromFailedTransaction,
-        wallet_state
+        queueTransaction: queue_transaction
       }}
     >
       {children}
