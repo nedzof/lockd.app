@@ -25,6 +25,12 @@ interface vote_option {
   lock_duration: number;
   unlock_height?: number;
   tags: string[];
+  total_locked?: number;
+  lock_likes?: Array<{
+    amount: number;
+    author_address?: string;
+    unlock_height?: number | null;
+  }>;
 }
 
 interface ExtendedPost {
@@ -1646,12 +1652,38 @@ const PostGrid: React.FC<PostGridProps> = ({
                   <div className="mt-4 p-4 pt-0 w-full">
                     {/* Calculate total locked amount for percentages */}
                     {(() => {
-                      const totalLocked = post.vote_options.reduce((sum, option) => sum + option.lock_amount, 0);
+                      // Calculate total locked amount properly, considering both lock_amount and total_locked fields
+                      const totalLocked = post.vote_options.reduce((sum, option) => {
+                        // Check if option has lock_likes array for detailed calculation
+                        if (option.lock_likes && Array.isArray(option.lock_likes) && option.lock_likes.length > 0) {
+                          return sum + calculate_active_locked_amount(option.lock_likes, current_block_height);
+                        }
+                        // If not, use total_locked if available, otherwise fall back to lock_amount
+                        return sum + (option.total_locked || option.lock_amount || 0);
+                      }, 0);
+                      
+                      console.log(`Total locked for vote post ${post.id}:`, totalLocked);
                       
                       return (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
                           {post.vote_options.map((option: vote_option) => {
-                            const percentage = calculatePercentage(option.lock_amount, totalLocked);
+                            // Calculate active locked amount for this option
+                            let optionLockedAmount = 0;
+                            if (option.lock_likes && Array.isArray(option.lock_likes)) {
+                              optionLockedAmount = calculate_active_locked_amount(option.lock_likes, current_block_height);
+                            } else if (typeof option.total_locked === 'number') {
+                              optionLockedAmount = option.total_locked;
+                            } else {
+                              optionLockedAmount = option.lock_amount || 0;
+                            }
+                            
+                            // Calculate percentage based on total locked
+                            const percentage = totalLocked > 0 
+                              ? Math.round((optionLockedAmount / totalLocked) * 100) 
+                              : 0;
+                              
+                            console.log(`Vote option ${option.id} (${option.content}): ${optionLockedAmount} / ${totalLocked} = ${percentage}%`);
+                            
                             // Determine color based on percentage
                             const getStatusColor = (pct: number) => {
                               if (pct >= 60) return "from-emerald-500 to-emerald-400";
@@ -1813,8 +1845,32 @@ const PostGrid: React.FC<PostGridProps> = ({
                         // Calculate locked amount with better error handling
                         let lockedAmount = 0;
                         try {
-                          lockedAmount = calculate_active_locked_amount(post.lock_likes || [], current_block_height);
-                          console.log(`Calculated locked amount for post ${post.id}: ${lockedAmount}`);
+                          // First check if we have vote options with locks
+                          if (post.is_vote && post.vote_options && post.vote_options.length > 0) {
+                            // Sum all vote option locks
+                            lockedAmount = post.vote_options.reduce((sum: number, option: any) => {
+                              // Calculate active locks for this option
+                              let optionLockedAmount = 0;
+                              
+                              // Check if option has lock_likes
+                              if (option.lock_likes && Array.isArray(option.lock_likes) && option.lock_likes.length > 0) {
+                                optionLockedAmount = calculate_active_locked_amount(option.lock_likes, current_block_height);
+                              } else if (typeof option.total_locked === 'number') {
+                                optionLockedAmount = option.total_locked;
+                              } else if (typeof option.lock_amount === 'number') {
+                                optionLockedAmount = option.lock_amount;
+                              }
+                              
+                              console.log(`Option ${option.id} locked amount: ${optionLockedAmount}`);
+                              return sum + optionLockedAmount;
+                            }, 0);
+                            
+                            console.log(`Calculated total locked amount from vote options for post ${post.id}: ${lockedAmount}`);
+                          } else {
+                            // Regular post locks
+                            lockedAmount = calculate_active_locked_amount(post.lock_likes || [], current_block_height);
+                            console.log(`Calculated locked amount for regular post ${post.id}: ${lockedAmount}`);
+                          }
                         } catch (error) {
                           console.error(`Error calculating locked amount for post ${post.id}:`, error);
                           // Fall back to manually calculating
@@ -1826,6 +1882,9 @@ const PostGrid: React.FC<PostGridProps> = ({
                             console.log(`Manually calculated locked amount for post ${post.id}: ${lockedAmount}`);
                           }
                         }
+                        
+                        // Store calculated amount on post for other components to use
+                        post.totalLocked = lockedAmount;
                         
                         return formatBSV(lockedAmount) + ' ₿';
                       })()}

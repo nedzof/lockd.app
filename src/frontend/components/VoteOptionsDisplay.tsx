@@ -392,41 +392,50 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
 
       toast.success(`Successfully locked ${amount} BSV`);
       
-      // Fetch the latest data from the server for the updated option
-      console.log('Fetching updated lock data for option:', optionId);
-      const updatedOptionResponse = await fetch(`${API_URL}/api/votes/option/${optionId}/total-locked`);
+      // MORE AGGRESSIVE REFRESH STRATEGY
+      // First update UI optimistically
+      console.log('Updating UI with new lock data');
+      const updatedOptions = vote_options.map(opt => 
+        opt.id === optionId 
+          ? { 
+              ...opt, 
+              total_locked: (opt.total_locked || 0) + amountInSatoshis,
+              // Add this lock to lock_likes as well for percentage calculation
+              lock_likes: [
+                ...(opt.lock_likes || []),
+                {
+                  amount: amountInSatoshis,
+                  author_address: bsvAddress,
+                  unlock_height: unlockHeight
+                }
+              ]
+            } 
+          : opt
+      );
       
-      if (updatedOptionResponse.ok) {
-        const updatedOptionData = await updatedOptionResponse.json();
-        console.log('Updated option data:', updatedOptionData);
-        
-        // Update the vote option's locked amount with fresh data from the server
-        const updatedOptions = vote_options.map(opt => 
-          opt.id === optionId 
-            ? { ...opt, total_locked: updatedOptionData.total_locked } 
-            : opt
-        );
-        
-        setvote_options(updatedOptions);
-        updateTotalLocked(updatedOptions);
-        
-        // Refresh all vote options to ensure consistency
+      setvote_options(updatedOptions);
+      updateTotalLocked(updatedOptions);
+      
+      // Then fetch fresh data from server
+      try {
+        console.log('Fetching updated lock data for all options');
         await refreshVoteOptions();
-      } else {
-        console.error('Failed to fetch updated lock data, using local estimate instead');
-        // Fall back to local estimate if server request fails
-        const updatedOptions = vote_options.map(opt => 
-          opt.id === optionId 
-            ? { ...opt, total_locked: (opt.total_locked || 0) + amount } 
-            : opt
-        );
-        
-        setvote_options(updatedOptions);
-        updateTotalLocked(updatedOptions);
+        console.log('Vote options refreshed from server');
+      } catch (refreshError) {
+        console.error('Error refreshing vote options after lock:', refreshError);
+        // We already updated UI optimistically, so just log this error
       }
       
       // Refresh wallet balance
       refreshBalance();
+      
+      // Force parent component to update as well (post grid)
+      if (onTotalLockedAmountChange) {
+        // Calculate new total including this lock
+        const newTotal = (totalLockedAmount || 0) + amountInSatoshis;
+        console.log('Notifying parent of new total locked amount:', newTotal);
+        onTotalLockedAmountChange(newTotal);
+      }
     } catch (error: unknown) {
       console.error('Error locking BSV on vote option:', error);
       
