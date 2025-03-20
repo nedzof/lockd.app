@@ -159,15 +159,25 @@ const highlightSearchTerm = (text: string, searchTerm: string): React.ReactNode 
 // Add getCurrentBlockHeight function near the top of the file, outside components
 async function getCurrentBlockHeight(): Promise<number | null> {
   try {
-    const response = await fetch(`${API_URL}/api/status/block-height`);
+    // Use the WhatsOnChain block headers endpoint as suggested
+    const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/block/headers');
     if (!response.ok) {
-      console.error('Failed to fetch current block height');
+      console.error('Failed to fetch current block height from WhatsOnChain');
       return null;
     }
+    
     const data = await response.json();
-    return data.block_height;
+    
+    // The first item in the array is the latest block
+    if (Array.isArray(data) && data.length > 0 && data[0].height) {
+      console.log('Current block height from WhatsOnChain:', data[0].height);
+      return data[0].height;
+    } else {
+      console.error('Unexpected response format from WhatsOnChain:', data);
+      return null;
+    }
   } catch (error) {
-    console.error('Error fetching block height:', error);
+    console.error('Error fetching block height from WhatsOnChain:', error);
     return null;
   }
 }
