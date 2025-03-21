@@ -62,12 +62,12 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
           ></div>
           
           {/* Modal container with overflow handling - centered with flex */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
-            <div className="my-auto bg-[#1A1B23] rounded-xl overflow-hidden border border-gray-800/40 shadow-xl shadow-black/30 w-full max-w-sm max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="my-auto bg-[#1A1B23] rounded-xl overflow-hidden border border-gray-800/40 shadow-xl shadow-black/30 w-full max-w-sm">
               {/* Modal header with gradient border */}
               <div className="relative">
                 <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d]"></div>
-                <div className="p-4 flex justify-between items-center border-b border-gray-800/40">
+                <div className="p-3 flex justify-between items-center border-b border-gray-800/40">
                   <div className="flex items-center space-x-2">
                     <div className="p-1.5 bg-[#00ffa3]/10 rounded-md">
                       <SiBitcoinsv className="text-[#00ffa3] w-4 h-4" />
@@ -83,10 +83,10 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
                 </div>
               </div>
               
-              {/* Modal body */}
-              <div className="p-5 space-y-4">
+              {/* Modal body - more compact */}
+              <div className="p-4 space-y-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">Amount (BSV)</label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Amount (BSV)</label>
                   <div className="relative">
                     <input
                       type="number"
@@ -94,26 +94,26 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
                       onChange={(e) => setAmount(Number(e.target.value))}
                       min="0.00001"
                       step="0.00001"
-                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-lg px-4 py-2.5 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
+                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-lg px-3 py-2 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
                     />
                   </div>
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">Duration (blocks)</label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Duration (blocks)</label>
                   <input
                     type="number"
                     value={duration}
                     onChange={(e) => setDuration(Number(e.target.value))}
                     min="1"
-                    className="w-full bg-[#13141B] border border-gray-800/60 rounded-lg px-4 py-2.5 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
+                    className="w-full bg-[#13141B] border border-gray-800/60 rounded-lg px-3 py-2 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
                   />
-                  <div className="text-sm text-gray-400 mt-1.5">≈ {Math.round(duration / 144)} days</div>
+                  <div className="text-xs text-gray-400 mt-1">≈ {Math.round(duration / 144)} days</div>
                 </div>
               </div>
               
               {/* Modal footer */}
-              <div className="p-4 border-t border-gray-800/40 bg-[#13141B]/30">
+              <div className="p-3 border-t border-gray-800/40 bg-[#13141B]/30">
                 <div className="flex space-x-3">
                   <button
                     onClick={handleLock}
