@@ -289,8 +289,49 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         }
         
         directLog('Lock transaction created with txid:', txResponse.txid);
+        toast.success('Transaction submitted. Waiting for confirmation...');
         
-        // Call the API with the transaction ID
+        // Function to verify transaction is on-chain
+        const verifyTx = async (txid: string): Promise<boolean> => {
+          try {
+            directLog(`Checking if transaction ${txid} is confirmed...`);
+            const response = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`);
+            const isConfirmed = response.status === 200;
+            directLog(`Transaction ${txid} confirmation status: ${isConfirmed}`);
+            return isConfirmed;
+          } catch (error) {
+            directLog(`Error checking transaction status:`, error);
+            return false;
+          }
+        };
+        
+        // Check for transaction confirmation with timeout
+        directLog('Waiting for transaction confirmation...');
+        const confirmationStart = performance.now();
+        let confirmed = await verifyTx(txResponse.txid);
+        let attempts = 1;
+        const MAX_ATTEMPTS = 10;
+        const RETRY_DELAY = 3000; // 3 seconds between retries
+        
+        while (!confirmed && attempts < MAX_ATTEMPTS) {
+          directLog(`Confirmation attempt ${attempts}/${MAX_ATTEMPTS} failed, retrying in ${RETRY_DELAY/1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          confirmed = await verifyTx(txResponse.txid);
+          attempts++;
+        }
+        
+        if (!confirmed) {
+          directLog(`Transaction not confirmed after ${Math.round((performance.now() - confirmationStart)/1000)}s and ${attempts} attempts`);
+          toast.error('Transaction broadcasted but not yet confirmed. Please check back later.');
+          // Set UI back to initial state
+          setShowOptions(false);
+          return;
+        } else {
+          directLog(`Transaction confirmed after ${Math.round((performance.now() - confirmationStart)/1000)}s and ${attempts} attempts`);
+          toast.success('Transaction confirmed on-chain!');
+        }
+        
+        // Call the API with the transaction ID only if confirmed
         directLog('Submitting lock to API...');
         const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
           method: 'POST',
@@ -316,7 +357,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
         
         // Success! Hide options and show toast
         toast.success(`Successfully locked ${amount} BSV for ${duration} blocks!`);
-      setShowOptions(false);
+        setShowOptions(false);
         
         // Refresh UI
         await onLock(postId, amount, duration);

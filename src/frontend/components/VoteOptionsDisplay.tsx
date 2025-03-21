@@ -268,107 +268,113 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       // Calculate unlock height based on current height and duration
       const unlockHeight = currentBlockHeight + duration;
       console.log('[LOCK DIAGNOSTICS] Calculated unlock height:', unlockHeight, '(current:', currentBlockHeight, '+ duration:', duration, ')');
-      
-      // Check what methods are actually available on the wallet object
-      console.log('[LOCK DIAGNOSTICS] Wallet object methods:', {
-        exists: !!wallet,
-        hasLock: !!(wallet && wallet.lock),
-        hasLockBsv: !!(wallet && wallet.lockBsv),
-        // List all available methods on the wallet
-        methods: wallet ? Object.getOwnPropertyNames(Object.getPrototypeOf(wallet)) : [],
-        // List all available properties on the wallet
-        properties: wallet ? Object.keys(wallet) : []
-      });
-      
-      // Determine which lock method to use based on what's available
-      const lockMethod = wallet && wallet.lock 
-        ? 'lock'  // Use new method per docs
-        : wallet && wallet.lockBsv 
-          ? 'lockBsv'  // Fall back to old method
-          : null;  // No lock method available
-      
-      if (!wallet || !lockMethod) {
-        toast.dismiss(toastId);
-        toast.error('Wallet locking capability not available');
-        return;
-      }
-      
-      // Get the wallet address (we should already have this from the wallet provider)
-      console.log('[LOCK DIAGNOSTICS] BSV address:', bsvAddress);
-      
-      if (!bsvAddress) {
-        toast.dismiss(toastId);
-        toast.error('Could not get wallet address');
-        return;
-      }
-      
-      console.log('[LOCK DIAGNOSTICS] Using address for locking:', bsvAddress);
-      
-      // Update toast message
+
+      // Show user that we're creating the lock transaction
       toast.dismiss(toastId);
-      const lockingToastId = toast.loading('Waiting for wallet confirmation...');
+      const lockToastId = toast.loading('Creating lock transaction...');
       
-      // Create lock parameters using exact format from documentation
-      const locks = [
-        {
-          address: bsvAddress,
-          blockHeight: unlockHeight,
-          sats: amountInSatoshis
-        }
-      ];
-      
-      console.log('[LOCK DIAGNOSTICS] Lock parameters:', JSON.stringify(locks, null, 2));
-      console.log('[LOCK DIAGNOSTICS] Lock parameters types:', {
-        address: typeof bsvAddress,
-        blockHeight: typeof unlockHeight,
-        sats: typeof amountInSatoshis
-      });
-      
-      // Declare lockResponse outside the try block
-      let lockResponse;
-      
-      try {
-        // Use the appropriate lock method based on availability
-        console.log(`[LOCK DIAGNOSTICS] Calling wallet.${lockMethod} with parameters...`);
-        
-        if (lockMethod === 'lock') {
-          lockResponse = await wallet.lock(locks);
-        } else {
-          // Fall back to lockBsv
-          lockResponse = await wallet.lockBsv(locks);
-        }
-        
-        console.log('[LOCK DIAGNOSTICS] Lock transaction response:', lockResponse);
-        
-        if (!lockResponse || !lockResponse.txid) {
-          console.error('[LOCK DIAGNOSTICS] Lock response missing txid:', lockResponse);
-          toast.dismiss(lockingToastId);
-          throw new Error('Failed to create lock transaction - missing txid in response');
-        }
-      } catch (lockError) {
-        console.error(`[LOCK DIAGNOSTICS] Error in wallet.${lockMethod} call:`, lockError);
-        
-        // Try to extract detailed error information
-        let errorDetails = '';
-        if (lockError instanceof Error) {
-          errorDetails = lockError.message;
-          console.error('[LOCK DIAGNOSTICS] Error message:', lockError.message);
-          console.error('[LOCK DIAGNOSTICS] Error stack:', lockError.stack);
-        } else {
-          errorDetails = String(lockError);
-          console.error('[LOCK DIAGNOSTICS] Non-Error object thrown:', lockError);
-        }
-        
-        toast.dismiss(lockingToastId);
-        throw new Error(`Wallet lock error: ${errorDetails}`);
+      // Make sure wallet is available
+      if (!wallet) {
+        toast.dismiss(lockToastId);
+        toast.error('Wallet is not available');
+        return;
       }
       
-      // Update toast message
-      toast.dismiss(lockingToastId);
-      const apiToastId = toast.loading('Processing lock...');
+      console.log('[LOCK DIAGNOSTICS] Getting addresses from wallet');
       
-      // Call the API with the transaction ID
-      console.log('Sending lock request to API for option:', optionId);
+      // Get identity address - IMPORTANT: this must match what's in your API
+      const addresses = await wallet.getAddresses();
+      console.log('[LOCK DIAGNOSTICS] Got addresses:', addresses);
+      
+      if (!addresses?.identityAddress) {
+        toast.dismiss(lockToastId);
+        toast.error('Could not get identity address');
+        return;
+      }
+
+      // Prepare the lock data
+      // NOTE: This MUST exactly match the expected format for the wallet's lockBsv method
+      const lockData = [{
+        address: addresses.identityAddress,
+        blockHeight: unlockHeight,
+        sats: amountInSatoshis
+      }];
+      
+      console.log('[LOCK DIAGNOSTICS] Creating lock with data:', lockData);
+
+      // Execute the lock transaction
+      let lockResponse;
+      try {
+        lockResponse = await wallet.lockBsv(lockData);
+        console.log('[LOCK DIAGNOSTICS] Lock transaction raw response:', lockResponse);
+      } catch (error) {
+        toast.dismiss(lockToastId);
+        console.error('[LOCK DIAGNOSTICS] Lock transaction failed:', error);
+        
+        // Detect user cancellation vs other errors
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        if (errorMessage.includes('User cancelled') || errorMessage.includes('User rejected')) {
+          toast.error('Transaction cancelled by user');
+        } else {
+          toast.error('Failed to create lock transaction');
+        }
+        return;
+      }
+      
+      if (!lockResponse || !lockResponse.txid) {
+        toast.dismiss(lockToastId);
+        console.error('[LOCK DIAGNOSTICS] Invalid lock response:', lockResponse);
+        toast.error('Failed to get transaction ID for lock');
+        return;
+      }
+      
+      console.log('[LOCK DIAGNOSTICS] Lock transaction successful with txid:', lockResponse.txid);
+      toast.dismiss(lockToastId);
+      toast.success('Transaction submitted. Waiting for confirmation...');
+      
+      // Function to verify transaction is on-chain
+      const verifyTx = async (txid: string): Promise<boolean> => {
+        try {
+          console.log(`[LOCK DIAGNOSTICS] Checking if transaction ${txid} is confirmed...`);
+          const response = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`);
+          const isConfirmed = response.status === 200;
+          console.log(`[LOCK DIAGNOSTICS] Transaction ${txid} confirmation status: ${isConfirmed}`);
+          return isConfirmed;
+        } catch (error) {
+          console.error(`[LOCK DIAGNOSTICS] Error checking transaction status:`, error);
+          return false;
+        }
+      };
+      
+      // Check for transaction confirmation with timeout
+      console.log('[LOCK DIAGNOSTICS] Waiting for transaction confirmation...');
+      const confirmationStart = performance.now();
+      let confirmed = await verifyTx(lockResponse.txid);
+      let attempts = 1;
+      const MAX_ATTEMPTS = 10;
+      const RETRY_DELAY = 3000; // 3 seconds between retries
+      
+      while (!confirmed && attempts < MAX_ATTEMPTS) {
+        console.log(`[LOCK DIAGNOSTICS] Confirmation attempt ${attempts}/${MAX_ATTEMPTS} failed, retrying in ${RETRY_DELAY/1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        confirmed = await verifyTx(lockResponse.txid);
+        attempts++;
+      }
+      
+      if (!confirmed) {
+        console.log(`[LOCK DIAGNOSTICS] Transaction not confirmed after ${Math.round((performance.now() - confirmationStart)/1000)}s and ${attempts} attempts`);
+        toast.error('Transaction broadcasted but not yet confirmed. Please check back later.');
+        setIsLocking(prev => ({ ...prev, [optionId]: false }));
+        return;
+      } else {
+        console.log(`[LOCK DIAGNOSTICS] Transaction confirmed after ${Math.round((performance.now() - confirmationStart)/1000)}s and ${attempts} attempts`);
+        toast.success('Transaction confirmed on-chain!');
+      }
+      
+      // Call the API with the transaction ID only if the transaction is confirmed
+      console.log('[LOCK DIAGNOSTICS] Submitting to API');
+      const apiToastId = toast.loading('Recording transaction in database...');
+      
       const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
         method: 'POST',
         headers: {
@@ -424,11 +430,11 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
           return { 
             ...opt, 
             total_locked: (opt.total_locked || 0) + amountInSatoshis,
-            lock_likes: newLockLikes
+            lock_likes: newLockLikes as VoteOption['lock_likes']
           }; 
         }
         return opt;
-      });
+      }) as VoteOption[];
       
       console.log(`[LOCK DIAGNOSTICS] Updated vote_options:`, JSON.stringify(updatedOptions, null, 2));
       
@@ -448,52 +454,23 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
         return total + optionTotal;
       }, 0);
       
-      console.log(`[LOCK DIAGNOSTICS] New total locked amount: ${newTotalLocked}`);
-      console.log(`[LOCK DIAGNOSTICS] Setting new vote_options and total locked amount`);
+      console.log(`[LOCK DIAGNOSTICS] New total locked amount:`, newTotalLocked);
       
-      // Update state with the new options
+      // Update the vote options
       setvote_options(updatedOptions);
       
-      // Notify parent of total amount change
+      // Notify parent component about the change
       if (onTotalLockedAmountChange) {
-        console.log(`[LOCK DIAGNOSTICS] Calling onTotalLockedAmountChange with: ${newTotalLocked}`);
+        console.log(`[LOCK DIAGNOSTICS] Notifying parent about new total:`, newTotalLocked);
         onTotalLockedAmountChange(newTotalLocked);
       }
       
-      // Add a delay and force a second update to ensure UI refreshes
-      setTimeout(() => {
-        console.log('[LOCK DIAGNOSTICS] Force second UI update after delay');
-        setvote_options([...updatedOptions]);
-        
-        // Force another update of the parent component
-        if (onTotalLockedAmountChange) {
-          onTotalLockedAmountChange(newTotalLocked);
-        }
-      }, 500);
+      // Force a refresh of the vote options
+      console.log(`[LOCK DIAGNOSTICS] Refreshing vote options`);
+      await refreshVoteOptions();
       
-      // Then fetch fresh data from server
-      try {
-        console.log('[LOCK DIAGNOSTICS] Fetching updated lock data from server');
-        await refreshVoteOptions();
-        console.log('[LOCK DIAGNOSTICS] Vote options refreshed from server');
-      } catch (refreshError) {
-        console.error('[LOCK DIAGNOSTICS] Error refreshing vote options after lock:', refreshError);
-        // We already updated UI optimistically, so just log this error
-      }
-      
-      // Force another refresh
-      setTimeout(() => {
-        console.log('[LOCK DIAGNOSTICS] Final UI refresh');
-        refreshVoteOptions().catch(e => console.error('Final refresh error:', e));
-        
-        // Make sure to notify parent again
-        updatedOptions.forEach(opt => {
-          console.log(`[LOCK DIAGNOSTICS] Final update - Option ${opt.id} (${opt.content}) has ${opt.lock_likes?.length || 0} locks and total_locked ${opt.total_locked || 0}`);
-        });
-      }, 1500);
-      
-      // Refresh wallet balance
-      refreshBalance();
+      // Update the UI with the total locked amount
+      console.log(`[LOCK DIAGNOSTICS] UI refresh completed`);
     } catch (error: unknown) {
       console.error('Error locking BSV on vote option:', error);
       
@@ -502,7 +479,7 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
       if (errorMessage.includes('User cancelled') || errorMessage.includes('User rejected')) {
         toast.error('Transaction cancelled by user');
       } else {
-        toast.error('Failed to lock BSV on vote option');
+      toast.error('Failed to lock BSV on vote option');
       }
     } finally {
       setIsLocking(prev => ({ ...prev, [optionId]: false }));
@@ -595,12 +572,12 @@ const VoteOptionsDisplay: React.FC<VoteOptionsDisplayProps> = ({
                 <div className="flex-grow">
                   <div className="font-medium text-white">{option.content}</div>
                   {/* Always show the percentage, even if zero */}
-                  <div className="text-xs text-gray-400 mt-1">
+                    <div className="text-xs text-gray-400 mt-1">
                     {formatBSV(safeOptionLocked / 100000000)} BSV 
                     <span className={safeOptionLocked > 0 ? 'text-[#00E6CC]' : 'text-gray-500'}>
                       {' '}({percentage.toFixed(1)}%)
                     </span>
-                  </div>
+                    </div>
                 </div>
                 
                 {isConnected && (

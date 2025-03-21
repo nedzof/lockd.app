@@ -326,30 +326,23 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   };
 
   const handleLockLike = async () => {
+    const operationId = ++operationIdRef.current;
+    const startTime = logCall(`handleLockLike [${operationId}]`);
+    directLog(`[${operationId}] Starting lock operation`);
+    
     try {
-      // Direct log first to ensure we see it
-      directLog('🔵 LOCK BSV BUTTON CLICKED 🔵');
-      directLog('Wallet and form state:', {
-        isConnected,
-        isWalletDetected,
-        balance,
-        amount,
-        lockDuration,
-        loading
-      });
-      
-      const operationId = ++operationIdRef.current;
-      const startTime = logPerformance(`[${operationId}] Lock BSV button clicked`);
-      
-      if (!wallet || !isConnected) {
-        directLog(`[${operationId}] Wallet not connected, aborting`);
-        logPerformance(`[${operationId}] Wallet not connected, aborting`, startTime);
-        toast.error('Please connect your wallet first');
-        setShowInput(false);
+      // Ensure we're in the right state
+      if (loading) {
+        directLog(`[${operationId}] Already loading, ignoring duplicate request`);
         return;
       }
 
-      directLog(`[${operationId}] Setting loading state to true`);
+      if (!isConnected) {
+        directLog(`[${operationId}] Not connected, cannot proceed`);
+        toast.error('Please connect your wallet first');
+        return;
+      }
+      
       setLoading(true);
       
       try {
@@ -376,6 +369,13 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
 
         // Get the user's identity address
         directLog(`[${operationId}] Getting identity address`);
+        
+        // Check if wallet is available
+        if (!wallet) {
+          directLog(`[${operationId}] Wallet not available`);
+          throw new Error('Wallet not available');
+        }
+        
         const addressStartTime = logPerformance(`[${operationId}] Getting user identity address`);
         const addresses = await wallet.getAddresses();
         directLog(`[${operationId}] Got addresses:`, addresses);
@@ -414,6 +414,7 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
         }];
         directLog(`[${operationId}] Lock params:`, lockParams);
         
+        // Wallet check has been added above, this is safe now
         const lockResponse = await wallet.lockBsv(lockParams);
         directLog(`[${operationId}] Lock response:`, lockResponse);
         logPerformance(`[${operationId}] Lock transaction created`, lockStartTime);
@@ -423,47 +424,92 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
           throw new Error('Failed to create lock transaction');
         }
 
-        // Create the lock like record
-        directLog(`[${operationId}] Creating lock like record via API`);
-        const apiStartTime = logPerformance(`[${operationId}] Creating lock like record via API`);
-        const apiRequestBody = {
-          post_id: posttx_id || replytx_id,
-          author_address: addresses.identityAddress,
-          amount: satoshiAmount,
-          lock_duration: parsedDuration,
-          tx_id: lockResponse.txid,
+        // Wait for the transaction to be confirmed on-chain
+        directLog(`[${operationId}] Transaction created with txid: ${lockResponse.txid}`);
+        toast.success('Transaction submitted. Waiting for confirmation...');
+        
+        // Function to verify transaction is on-chain
+        const verifyTx = async (txid: string): Promise<boolean> => {
+          try {
+            const response = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`);
+            return response.status === 200;
+          } catch (error) {
+            return false;
+          }
         };
         
-        directLog(`[${operationId}] API request:`, apiRequestBody);
+        // Check for transaction confirmation with timeout
+        directLog(`[${operationId}] Waiting for transaction confirmation...`);
+        const confirmationStart = performance.now();
+        let confirmed = await verifyTx(lockResponse.txid);
+        let attempts = 1;
+        const MAX_ATTEMPTS = 10;
+        const RETRY_DELAY = 3000; // 3 seconds between retries
         
-        const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(apiRequestBody),
-        });
+        while (!confirmed && attempts < MAX_ATTEMPTS) {
+          directLog(`[${operationId}] Confirmation attempt ${attempts}/${MAX_ATTEMPTS} failed, retrying in ${RETRY_DELAY/1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          confirmed = await verifyTx(lockResponse.txid);
+          attempts++;
+        }
         
-        const responseStatus = apiResponse.status;
-        directLog(`[${operationId}] API response status: ${responseStatus}`);
-        
-        const responseBody = await apiResponse.json();
-        directLog(`[${operationId}] API response body:`, responseBody);
-        
-        logPerformance(`[${operationId}] API response status: ${responseStatus}`, apiStartTime);
-
-        if (!apiResponse.ok) {
-          directLog(`[${operationId}] API error: ${responseStatus}`, responseBody);
-          throw new Error(responseBody.message || responseBody.error || 'Error creating lock like');
+        if (!confirmed) {
+          directLog(`[${operationId}] Transaction not confirmed after ${Math.round((performance.now() - confirmationStart)/1000)}s and ${attempts} attempts`);
+          toast.error('Transaction broadcasted but not yet confirmed. Please check back later.');
+          // Continue but warn the user
+        } else {
+          directLog(`[${operationId}] Transaction confirmed after ${Math.round((performance.now() - confirmationStart)/1000)}s and ${attempts} attempts`);
+          toast.success('Transaction confirmed on-chain!');
         }
 
-        directLog(`[${operationId}] Lock successful, cleaning up`);
-        toast.success(`Successfully locked ${parsedAmount} BSV for ${parsedDuration} blocks!`);
+        // Create the lock like record via API ONLY if confirmed
+        if (confirmed) {
+          directLog(`[${operationId}] Creating lock like record via API`);
+          const apiStartTime = logPerformance(`[${operationId}] Creating lock like record via API`);
+          const apiRequestBody = {
+            post_id: posttx_id || replytx_id,
+            author_address: addresses.identityAddress,
+            amount: satoshiAmount,
+            lock_duration: parsedDuration,
+            tx_id: lockResponse.txid,
+          };
+          
+          directLog(`[${operationId}] API request:`, apiRequestBody);
+          
+          const apiResponse = await fetch(`${API_URL}/api/lock-likes`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(apiRequestBody),
+          });
+          
+          const responseStatus = apiResponse.status;
+          directLog(`[${operationId}] API response status: ${responseStatus}`);
+          
+          const responseBody = await apiResponse.json();
+          directLog(`[${operationId}] API response body:`, responseBody);
+          
+          logPerformance(`[${operationId}] API response status: ${responseStatus}`, apiStartTime);
+
+          if (!apiResponse.ok) {
+            directLog(`[${operationId}] API error: ${responseStatus}`, responseBody);
+            throw new Error(responseBody.message || responseBody.error || 'Error creating lock like');
+          }
+
+          directLog(`[${operationId}] Lock successful, cleaning up`);
+          toast.success(`Successfully locked ${parsedAmount} BSV for ${parsedDuration} blocks!`);
+        } else {
+          directLog(`[${operationId}] Skipping API call as transaction is not confirmed yet`);
+          toast.error(`Transaction is not yet confirmed. Please try again later once the transaction is confirmed.`);
+        }
+        
+        // Always close the UI regardless of confirmation status
         setShowInput(false);
         setAmount(DEFAULT_LOCKLIKE_AMOUNT.toString());
         setLockDuration(DEFAULT_LOCKLIKE_BLOCKS.toString());
         
-        // Refresh balance after successful lock
+        // Refresh balance after transaction
         directLog(`[${operationId}] Refreshing balance`);
         const refreshStartTime = logPerformance(`[${operationId}] Refreshing balance after lock`);
         await refreshBalance();

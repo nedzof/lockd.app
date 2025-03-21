@@ -121,6 +121,32 @@ async function getCurrentBlockHeight(): Promise<number> {
   }
 }
 
+// Helper function to verify a transaction is on-chain
+const verifyTransactionExists = async (tx_id: string): Promise<boolean> => {
+  try {
+    logger.info(`Verifying transaction exists on-chain: ${tx_id}`);
+    
+    // Check if tx_id exists on the blockchain using WhatsonChain API
+    const response = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${tx_id}/hex`);
+    
+    if (response.status === 200) {
+      logger.info(`Transaction ${tx_id} verified on-chain`);
+      return true;
+    }
+    
+    if (response.status === 404) {
+      logger.warn(`Transaction ${tx_id} not found on-chain`);
+      return false;
+    }
+    
+    logger.warn(`Unexpected response from WhatsonChain API: ${response.status}`);
+    return false;
+  } catch (error) {
+    logger.error(`Error verifying transaction ${tx_id}:`, error);
+    return false;
+  }
+};
+
 interface LockLikeRequest {
   post_id: string;  // The post's id
   author_address: string;
@@ -158,11 +184,32 @@ const handleLockLike = async (
   
   try {
     logger.info(`[${requestId}] Received lock like request: ${JSON.stringify(req.body)}`);
-    const { post_id, author_address, amount, lock_duration } = req.body;
+    const { post_id, author_address, amount, lock_duration, tx_id: provided_tx_id } = req.body;
 
     if (!post_id || !amount || !author_address || !lock_duration) {
       logger.warn(`[${requestId}] Missing required fields`);
       res.status(400).json({ message: 'Missing required fields' });
+      return;
+    }
+    
+    // Validate that we have a transaction ID
+    if (!provided_tx_id) {
+      logger.warn(`[${requestId}] No transaction ID provided`);
+      res.status(400).json({ message: 'Transaction ID is required' });
+      return;
+    }
+    
+    // Verify the transaction is on-chain
+    const verificationStart = logPerformance(requestId, 'Verifying transaction on-chain');
+    const isOnChain = await verifyTransactionExists(provided_tx_id);
+    logPerformance(requestId, `Transaction verification result: ${isOnChain}`, verificationStart);
+    
+    if (!isOnChain) {
+      logger.warn(`[${requestId}] Transaction ${provided_tx_id} not found on-chain`);
+      res.status(400).json({ 
+        success: false,
+        error: `Transaction not confirmed on-chain yet. Please wait for confirmation before proceeding.`
+      });
       return;
     }
 
@@ -195,12 +242,10 @@ const handleLockLike = async (
 
     // Create the lock like record using the post's id
     const createLockStart = logPerformance(requestId, 'Creating lock like record');
-    const tx_id = req.body.tx_id || `lock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    logger.info(`[${requestId}] Using transaction ID: ${tx_id}`);
     
     const lockLike = await prisma.lock_like.create({
       data: {
-        tx_id,
+        tx_id: provided_tx_id,
         post_id: post.id,
         author_address,
         amount,
@@ -244,12 +289,33 @@ const handlevote_optionLock = async (
   
   try {
     logger.info(`[${requestId}] Received vote option lock request: ${JSON.stringify(req.body)}`);
-    const { vote_option_id, author_address, amount, lock_duration } = req.body;
+    const { vote_option_id, author_address, amount, lock_duration, tx_id: provided_tx_id } = req.body;
 
     // Add validation specifically for amount
     if (!vote_option_id || !author_address || !lock_duration) {
       logger.warn(`[${requestId}] Missing required fields`);
       res.status(400).json({ message: 'Missing required fields' });
+      return;
+    }
+
+    // Validate that we have a transaction ID
+    if (!provided_tx_id) {
+      logger.warn(`[${requestId}] No transaction ID provided`);
+      res.status(400).json({ message: 'Transaction ID is required' });
+      return;
+    }
+    
+    // Verify the transaction is on-chain
+    const verificationStart = logPerformance(requestId, 'Verifying transaction on-chain');
+    const isOnChain = await verifyTransactionExists(provided_tx_id);
+    logPerformance(requestId, `Transaction verification result: ${isOnChain}`, verificationStart);
+    
+    if (!isOnChain) {
+      logger.warn(`[${requestId}] Transaction ${provided_tx_id} not found on-chain`);
+      res.status(400).json({ 
+        success: false,
+        error: `Transaction not confirmed on-chain yet. Please wait for confirmation before proceeding.`
+      });
       return;
     }
 
@@ -302,12 +368,11 @@ const handlevote_optionLock = async (
 
     // Create a new lock like for the vote option
     const createLockStart = logPerformance(requestId, 'Creating vote option lock record');
-    const tx_id = req.body.tx_id || `lock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    logger.info(`[${requestId}] Creating lock with ID: ${tx_id}, amount: ${numericAmount}`);
+    logger.info(`[${requestId}] Creating lock with ID: ${provided_tx_id}, amount: ${numericAmount}`);
     
     const lockLike = await prisma.lock_like.create({
       data: {
-        tx_id,
+        tx_id: provided_tx_id,
         author_address,
         amount: numericAmount, // Use the validated numeric amount
         unlock_height,
