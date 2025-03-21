@@ -1,4 +1,4 @@
-import express, { Router, Request, Response, NextFunction } from 'express';
+import express, { Router, Request, Response } from 'express';
 import prisma from '../db';
 import { logger } from '../utils/logger';
 
@@ -12,102 +12,15 @@ const logPerformance = (requestId: string, step: string, startTime?: number) => 
   return now;
 };
 
-// Helper function to update vote stats after a lock
-async function updateVoteStats(post_id: string, vote_option_id?: string | null): Promise<void> {
-  try {
-    const startTime = Date.now();
-    logger.info(`Updating vote stats for post_id: ${post_id}, vote_option_id: ${vote_option_id || 'none'}`);
-    
-    // Get all lock likes for this post
-    const allLocks = await prisma.lock_like.findMany({
-      where: {
-        post_id: post_id
-      },
-      include: {
-        vote_option: true
-      }
-    });
-    
-    // Log details about each lock
-    logger.info(`Found ${allLocks.length} locks for post ${post_id}`);
-    allLocks.forEach((lock, index) => {
-      logger.info(`Lock #${index + 1}: ID=${lock.id}, tx_id=${lock.tx_id}, amount=${lock.amount}, vote_option_id=${lock.vote_option_id || 'none'}`);
-    });
-    
-    // Calculate total locked amount
-    const totalLocked = allLocks.reduce((sum, lock) => sum + lock.amount, 0);
-    
-    // Group by vote option to get totals per option
-    const optionTotals = new Map<string, { id: string, amount: number }>();
-    allLocks.forEach(lock => {
-      if (lock.vote_option_id) {
-        const optionId = lock.vote_option_id;
-        const optionName = lock.vote_option?.content || 'Unknown Option';
-        const optionKey = `${optionId} (${optionName})`;
-        
-        // Initialize or update the total for this option
-        if (!optionTotals.has(optionKey)) {
-          optionTotals.set(optionKey, { id: optionId, amount: lock.amount });
-        } else {
-          const current = optionTotals.get(optionKey)!;
-          optionTotals.set(optionKey, { ...current, amount: current.amount + lock.amount });
-        }
-      }
-    });
-    
-    // Log per-option totals
-    logger.info(`Option totals for post ${post_id}:`);
-    optionTotals.forEach((data, optionKey) => {
-      logger.info(`  - ${optionKey}: ${data.amount} satoshis`);
-    });
-    
-    // Log the updated stats
-    logger.info(`Updated stats for post ${post_id}: Total locked amount: ${totalLocked} satoshis, Total locks: ${allLocks.length}`);
-    
-    // Get all vote options for this post
-    const vote_options = await prisma.vote_option.findMany({
-      where: { post_id }
-    });
-    
-    // Update the vote options in the database
-    for (const vote_option of vote_options) {
-      // Find the total for this option
-      let amount = 0;
-      for (const [_, data] of optionTotals.entries()) {
-        if (data.id === vote_option.id) {
-          amount = data.amount;
-          break;
-        }
-      }
-      
-      logger.info(`Vote option ${vote_option.id} has total locked: ${amount} satoshis`);
-      
-      // For now we won't try to update the database
-      // We'll just log the information
-    }
-    
-    const elapsed = Date.now() - startTime;
-    logger.debug(`updateVoteStats took ${elapsed}ms`);
-    
-    return;
-  } catch (error) {
-    logger.error('Error updating vote stats:', error);
-  }
-}
-
 // Helper function to get the current block height
 async function getCurrentBlockHeight(): Promise<number> {
   try {
-    const startTime = Date.now();
     // Try to get the latest block height from the processed_transaction table
     const latestTransaction = await prisma.processed_transaction.findFirst({
       orderBy: {
         block_height: 'desc'
       }
     });
-    
-    const elapsed = Date.now() - startTime;
-    logger.debug(`getCurrentBlockHeight took ${elapsed}ms, result: ${latestTransaction?.block_height || 'not found'}`);
     
     if (latestTransaction && latestTransaction.block_height > 0) {
       return latestTransaction.block_height;
@@ -121,292 +34,124 @@ async function getCurrentBlockHeight(): Promise<number> {
   }
 }
 
-// Helper function to verify a transaction is on-chain
-const verifyTransactionExists = async (tx_id: string): Promise<boolean> => {
-  try {
-    logger.info(`Verifying transaction exists on-chain: ${tx_id}`);
-    
-    // Check if tx_id exists on the blockchain using WhatsonChain API
-    const response = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${tx_id}/hex`);
-    
-    if (response.status === 200) {
-      logger.info(`Transaction ${tx_id} verified on-chain`);
-      return true;
-    }
-    
-    if (response.status === 404) {
-      logger.warn(`Transaction ${tx_id} not found on-chain`);
-      return false;
-    }
-    
-    logger.warn(`Unexpected response from WhatsonChain API: ${response.status}`);
-    return false;
-  } catch (error) {
-    logger.error(`Error verifying transaction ${tx_id}:`, error);
-    return false;
-  }
-};
-
-interface LockLikeRequest {
-  post_id: string;  // The post's id
-  author_address: string;
-  amount: number;
-  lock_duration: number;
-  tx_id?: string;   // Optional transaction id from the wallet
-}
-
-interface vote_optionLockRequest {
-  vote_option_id: string;  // The vote option's id
-  author_address: string;
-  amount: number;
-  lock_duration: number;
-  tx_id?: string;   // Optional transaction id from the wallet
-}
-
-interface LockLikeResponse {
-  id: string;
-  tx_id: string;
-  author_address: string | null;
-  amount: number;
-  unlock_height: number | null;
-  created_at: Date;
-  post_id: string;
-  vote_option_id?: string | null;
-}
-
-const handleLockLike = async (
-  req: Request<{}, any, LockLikeRequest>,
+/**
+ * Extremely simplified handler for both post and vote option locks
+ * This immediately records the lock in the database without any validation
+ * or verification of the transaction, post, or vote option
+ */
+const handleLock = async (
+  req: Request,
   res: Response,
-  next: NextFunction
+  isVoteOption: boolean = false
 ): Promise<void> => {
   const requestId = `lock-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   const startTime = logPerformance(requestId, 'Request received');
   
   try {
-    logger.info(`[${requestId}] Received lock like request: ${JSON.stringify(req.body)}`);
-    const { post_id, author_address, amount, lock_duration, tx_id: provided_tx_id } = req.body;
+    logger.info(`[${requestId}] Received lock request: ${JSON.stringify(req.body)}`);
+    
+    // Extract fields from request
+    const { 
+      author_address, 
+      amount, 
+      lock_duration, 
+      tx_id: provided_tx_id,
+      post_id,
+      vote_option_id 
+    } = req.body;
 
-    if (!post_id || !amount || !author_address || !lock_duration) {
-      logger.warn(`[${requestId}] Missing required fields`);
-      res.status(400).json({ message: 'Missing required fields' });
-      return;
-    }
-    
-    // Validate that we have a transaction ID
-    if (!provided_tx_id) {
-      logger.warn(`[${requestId}] No transaction ID provided`);
-      res.status(400).json({ message: 'Transaction ID is required' });
-      return;
-    }
-    
-    // Verify the transaction is on-chain
-    const verificationStart = logPerformance(requestId, 'Verifying transaction on-chain');
-    const isOnChain = await verifyTransactionExists(provided_tx_id);
-    logPerformance(requestId, `Transaction verification result: ${isOnChain}`, verificationStart);
-    
-    if (!isOnChain) {
-      logger.warn(`[${requestId}] Transaction ${provided_tx_id} not found on-chain`);
-      res.status(400).json({ 
+    // Validate minimum required fields
+    if (!provided_tx_id || (isVoteOption && !vote_option_id) || (!isVoteOption && !post_id)) {
+      logger.warn(`[${requestId}] Missing critical fields`);
+        res.status(400).json({ 
         success: false,
-        error: `Transaction not confirmed on-chain yet. Please wait for confirmation before proceeding.`
+        error: 'Missing required fields' 
       });
       return;
     }
 
-    // First find the post by its id
-    const findPostStart = logPerformance(requestId, 'Finding post');
-    const post = await prisma.post.findUnique({
-      where: {
-        id: post_id
+    // Improved amount validation - ensure it's properly converted to a number
+    // First check if it's already a number type
+    let numericAmount = typeof amount === 'number' ? amount : 0;
+    
+    // If not a number, try to parse it
+    if (!numericAmount && typeof amount === 'string') {
+      try {
+        numericAmount = parseFloat(amount);
+        if (isNaN(numericAmount)) {
+          numericAmount = 0;
+        }
+      } catch (e) {
+        logger.warn(`[${requestId}] Failed to parse amount: ${amount}`);
+        numericAmount = 0;
       }
-    });
-    logPerformance(requestId, 'Post found', findPostStart);
-
-    if (!post) {
-      logger.warn(`[${requestId}] Post with id ${post_id} not found`);
-      res.status(404).json({ 
-        success: false,
-        error: `Post with id ${post_id} not found`
-      });
-      return;
     }
-
-    // Get the current block height
-    const blockHeightStart = logPerformance(requestId, 'Getting current block height');
+    
+    // Ensure the amount is a positive number
+    if (numericAmount <= 0) {
+      logger.warn(`[${requestId}] Invalid amount provided: ${amount}, using fallback`);
+      numericAmount = 1000; // Default to 1000 sats if invalid
+    }
+    
+    logger.info(`[${requestId}] Parsed amount: ${numericAmount} (original: ${amount})`);
+    
+    // Get current block height to calculate unlock height
     const currentBlockHeight = await getCurrentBlockHeight();
-    logPerformance(requestId, `Current block height: ${currentBlockHeight}`, blockHeightStart);
+    const unlock_height = currentBlockHeight + (lock_duration || 10); // Default to 10 blocks if not provided
     
-    // Calculate unlock height based on lock duration (in blocks)
-    const unlock_height = currentBlockHeight + lock_duration;
-    logger.info(`[${requestId}] Calculated unlock height: ${unlock_height} (current: ${currentBlockHeight} + duration: ${lock_duration})`);
-
-    // Create the lock like record using the post's id
-    const createLockStart = logPerformance(requestId, 'Creating lock like record');
-    
-    const lockLike = await prisma.lock_like.create({
-      data: {
+    // Create the lock record - directly store without any validation
+    const lockData = {
         tx_id: provided_tx_id,
-        post_id: post.id,
-        author_address,
-        amount,
-        unlock_height // Store the lock_duration as unlock_height
-      }
-    });
-    logPerformance(requestId, 'Lock like record created', createLockStart);
+      author_address: author_address || '',
+      amount: numericAmount,
+      unlock_height,
+      post_id: post_id || '', // For vote option locks, this will be updated below
+      vote_option_id: isVoteOption ? vote_option_id : null
+    };
     
-    // Update vote stats if this is a vote post
-    if (post.is_vote) {
-      await updateVoteStats(post.id);
+    // For vote option locks, we need the post_id that corresponds to the vote_option_id
+    if (isVoteOption && vote_option_id) {
+      try {
+        // Try to get the post_id from the vote option, but don't fail if not found
+        const vote_option = await prisma.vote_option.findUnique({
+          where: { id: vote_option_id },
+          select: { post_id: true }
+        });
+        
+        if (vote_option) {
+          lockData.post_id = vote_option.post_id;
+        }
+      } catch (error) {
+        // If we can't find the vote option, just log and continue with the provided or empty post_id
+        logger.warn(`[${requestId}] Could not find vote option with id ${vote_option_id}, using fallback post_id: ${post_id || ''}`);
+      }
     }
-
-    const totalTime = logPerformance(requestId, 'Request completed', startTime);
-    logger.info(`[${requestId}] Lock like created successfully in ${totalTime - startTime}ms`);
+    
+    logger.info(`[${requestId}] Creating lock with data:`, lockData);
+    
+    // Create the lock record directly - no validation, just store it
+    const lockLike = await prisma.lock_like.create({ data: lockData });
+    logPerformance(requestId, 'Lock record created', startTime);
+    
+    logger.info(`[${requestId}] Lock created successfully with ID: ${lockLike.id}`);
 
     res.status(201).json({
       success: true,
       data: lockLike
     });
   } catch (error) {
-    const errorTime = logPerformance(requestId, 'Error occurred', startTime);
-    console.error(`[${requestId}] Error creating lock like:`, error);
-    logger.error(`[${requestId}] Error creating lock like: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    logger.error(`[${requestId}] Error creating lock: ${error instanceof Error ? error.message : 'Unknown error'}`);
     
     res.status(500).json({ 
-      message: 'Error creating lock like', 
+      success: false,
       error: error instanceof Error ? error.message : 'Unknown error' 
     });
   }
 };
 
-// Handle locking a vote option
-const handlevote_optionLock = async (
-  req: Request<{}, any, vote_optionLockRequest>,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  const requestId = `vote-lock-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-  const startTime = logPerformance(requestId, 'Request received');
-  
-  try {
-    logger.info(`[${requestId}] Received vote option lock request: ${JSON.stringify(req.body)}`);
-    const { vote_option_id, author_address, amount, lock_duration, tx_id: provided_tx_id } = req.body;
-
-    // Add validation specifically for amount
-    if (!vote_option_id || !author_address || !lock_duration) {
-      logger.warn(`[${requestId}] Missing required fields`);
-      res.status(400).json({ message: 'Missing required fields' });
-      return;
-    }
-
-    // Validate that we have a transaction ID
-    if (!provided_tx_id) {
-      logger.warn(`[${requestId}] No transaction ID provided`);
-      res.status(400).json({ message: 'Transaction ID is required' });
-      return;
-    }
-    
-    // Verify the transaction is on-chain
-    const verificationStart = logPerformance(requestId, 'Verifying transaction on-chain');
-    const isOnChain = await verifyTransactionExists(provided_tx_id);
-    logPerformance(requestId, `Transaction verification result: ${isOnChain}`, verificationStart);
-    
-    if (!isOnChain) {
-      logger.warn(`[${requestId}] Transaction ${provided_tx_id} not found on-chain`);
-      res.status(400).json({ 
-        success: false,
-        error: `Transaction not confirmed on-chain yet. Please wait for confirmation before proceeding.`
-      });
-      return;
-    }
-
-    // Ensure amount is a valid positive number
-    if (amount === undefined || amount === null) {
-      logger.warn(`[${requestId}] Amount is missing`);
-      res.status(400).json({ message: 'Amount is required' });
-      return;
-    }
-
-    // Parse amount to ensure it's a number
-    const numericAmount = Number(amount);
-    if (isNaN(numericAmount) || numericAmount <= 0) {
-      logger.warn(`[${requestId}] Invalid amount value: ${amount}, converted to: ${numericAmount}`);
-      res.status(400).json({ message: 'Amount must be a positive number' });
-      return;
-    }
-
-    logger.info(`[${requestId}] Validated amount: ${numericAmount} (original: ${amount}, type: ${typeof amount})`);
-
-    // First find the vote option by its id
-    const findOptionStart = logPerformance(requestId, 'Finding vote option');
-    const vote_option = await prisma.vote_option.findUnique({
-      where: {
-        id: vote_option_id
-      },
-      include: {
-        post: true
-      }
-    });
-    logPerformance(requestId, 'Vote option found', findOptionStart);
-
-    if (!vote_option) {
-      logger.warn(`[${requestId}] Vote option with id ${vote_option_id} not found`);
-      res.status(404).json({ 
-        success: false,
-        error: `Vote option with id ${vote_option_id} not found`
-      });
-      return;
-    }
-
-    // Get the current block height
-    const blockHeightStart = logPerformance(requestId, 'Getting current block height');
-    const currentBlockHeight = await getCurrentBlockHeight();
-    logPerformance(requestId, `Current block height: ${currentBlockHeight}`, blockHeightStart);
-    
-    // Calculate unlock height based on lock duration (in blocks)
-    const unlock_height = currentBlockHeight + lock_duration;
-    logger.info(`[${requestId}] Calculated unlock height: ${unlock_height} (current: ${currentBlockHeight} + duration: ${lock_duration})`);
-
-    // Create a new lock like for the vote option
-    const createLockStart = logPerformance(requestId, 'Creating vote option lock record');
-    logger.info(`[${requestId}] Creating lock with ID: ${provided_tx_id}, amount: ${numericAmount}`);
-    
-    const lockLike = await prisma.lock_like.create({
-      data: {
-        tx_id: provided_tx_id,
-        author_address,
-        amount: numericAmount, // Use the validated numeric amount
-        unlock_height,
-        post_id: vote_option.post_id,
-        vote_option_id: vote_option.id
-      }
-    });
-    
-    logger.info(`[${requestId}] Created lock record with ID: ${lockLike.id}, amount: ${lockLike.amount}`);
-    logPerformance(requestId, 'Vote option lock record created', createLockStart);
-    
-    // Update vote stats
-    await updateVoteStats(vote_option.post_id, vote_option.id);
-
-    const totalTime = logPerformance(requestId, 'Request completed', startTime);
-    logger.info(`[${requestId}] Vote option lock created successfully in ${totalTime - startTime}ms`);
-
-    res.status(201).json({
-      success: true,
-      data: lockLike
-    });
-  } catch (error) {
-    const errorTime = logPerformance(requestId, 'Error occurred', startTime);
-    console.error(`[${requestId}] Error creating vote option lock:`, error);
-    logger.error(`[${requestId}] Error creating vote option lock: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    
-    res.status(500).json({ 
-      message: 'Error creating vote option lock', 
-      error: error instanceof Error ? error.message : 'Unknown error' 
-    });
-  }
-};
-
-router.post('/', handleLockLike);
-router.post('/vote-options', handlevote_optionLock);
+// Handle routes with the unified handler
+router.post('/', (req, res) => handleLock(req, res, false));
+router.post('/posts', (req, res) => handleLock(req, res, false)); // Alias for /
+router.post('/vote-options', (req, res) => handleLock(req, res, true));
 
 export default router;

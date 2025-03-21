@@ -978,6 +978,9 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
 
     try {
+      // Add timing logs
+      console.time('vote_option_lock_total');
+      
       // Debug: Log wallet methods to see what's available
       console.log('Available wallet methods:', Object.keys(wallet));
       console.log('wallet.lock exists?', typeof (wallet as any).lock === 'function');
@@ -1009,7 +1012,9 @@ const PostGrid: React.FC<PostGridProps> = ({
       setIsLocking(true);
 
       // Get wallet addresses to access the identity address
+      console.time('getAddresses');
       const addresses = await wallet.getAddresses();
+      console.timeEnd('getAddresses');
       console.log('Wallet addresses:', addresses);
       
       if (!addresses || !addresses.identityAddress) {
@@ -1045,9 +1050,11 @@ const PostGrid: React.FC<PostGridProps> = ({
       // First try with wallet.lock
       try {
         console.log('Attempting wallet.lock with locks array');
+        console.time('wallet_lock');
         // Use a type assertion with unknown first to satisfy TypeScript
         const typedWallet = wallet as unknown as { lock: (locks: any[]) => Promise<{ txid: string }> };
         const result = await typedWallet.lock(locks);
+        console.timeEnd('wallet_lock');
         console.log('Lock result:', result);
         
         if (result && result.txid) {
@@ -1062,7 +1069,9 @@ const PostGrid: React.FC<PostGridProps> = ({
       if (!txid && typeof window !== 'undefined' && window.yours && typeof window.yours.lock === 'function') {
         try {
           console.log('Attempting window.yours.lock');
+          console.time('window_yours_lock');
           const result = await (window.yours as any).lock(locks);
+          console.timeEnd('window_yours_lock');
           if (result && result.txid) {
             txid = result.txid;
             console.log('Lock successful with window.yours.lock');
@@ -1078,6 +1087,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         console.log('Falling back to wallet.lockBsv');
         try {
           console.log('Calling wallet.lockBsv with locks:', locks);
+          console.time('wallet_lockBsv');
           const result = await wallet.lockBsv([
             { 
               address: addresses.identityAddress,
@@ -1085,6 +1095,7 @@ const PostGrid: React.FC<PostGridProps> = ({
               sats: satoshis
             }
           ]);
+          console.timeEnd('wallet_lockBsv');
           
           console.log('lockBsv result:', result);
           
@@ -1117,6 +1128,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         // Register the lock with our API
         console.log('Registering lock with API. txid:', txid, 'optionId:', optionId, 'amount:', amount, 'duration:', duration);
         
+        console.time('api_register');
         const apiResponse = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
           method: 'POST',
           headers: {
@@ -1131,6 +1143,7 @@ const PostGrid: React.FC<PostGridProps> = ({
             raw_tx: rawTx // Include raw transaction data if available
           })
         });
+        console.timeEnd('api_register');
         
         console.log('API response status:', apiResponse.status);
         
@@ -1161,6 +1174,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         toast.error(`Failed to register lock: ${apiError.message || 'Unknown error'}`);
       }
       
+      console.timeEnd('vote_option_lock_total');
     } catch (error: any) {
       console.error('Lock error:', error);
       toast.error(`Lock failed: ${error.message || 'Unknown error'}`);
@@ -1177,6 +1191,7 @@ const PostGrid: React.FC<PostGridProps> = ({
     };
     
     logLock(`Starting lock operation for post ${postId}`, {amount, duration});
+    console.time('post_lock_total');
     
     // Check if wallet is connected
     if (!wallet) {
@@ -1217,7 +1232,9 @@ const PostGrid: React.FC<PostGridProps> = ({
       setIsLocking(true);
 
       // Get wallet addresses to access the identity address
+      console.time('getAddresses');
       const addresses = await wallet.getAddresses();
+      console.timeEnd('getAddresses');
       logLock('Wallet addresses:', addresses);
       
       if (!addresses || !addresses.identityAddress) {
@@ -1253,9 +1270,11 @@ const PostGrid: React.FC<PostGridProps> = ({
       // First try with wallet.lock
       try {
         logLock('Attempting wallet.lock with locks array');
+        console.time('wallet_lock');
         // Use a type assertion with unknown first to satisfy TypeScript
         const typedWallet = wallet as unknown as { lock: (locks: any[]) => Promise<{ txid: string }> };
         const result = await typedWallet.lock(locks);
+        console.timeEnd('wallet_lock');
         logLock('Lock result:', result);
         
         if (result && result.txid) {
@@ -1270,7 +1289,9 @@ const PostGrid: React.FC<PostGridProps> = ({
       if (!txid && typeof window !== 'undefined' && window.yours && typeof window.yours.lock === 'function') {
         try {
           logLock('Attempting window.yours.lock');
+          console.time('window_yours_lock');
           const result = await (window.yours as any).lock(locks);
+          console.timeEnd('window_yours_lock');
           if (result && result.txid) {
             txid = result.txid;
             logLock('Lock successful with window.yours.lock');
@@ -1286,6 +1307,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         logLock('Falling back to wallet.lockBsv');
         try {
           logLock('Calling wallet.lockBsv with locks:', locks);
+          console.time('wallet_lockBsv');
           const result = await wallet.lockBsv([
             { 
               address: addresses.identityAddress,
@@ -1293,6 +1315,7 @@ const PostGrid: React.FC<PostGridProps> = ({
               sats: satoshis
             }
           ]);
+          console.timeEnd('wallet_lockBsv');
           
           logLock('lockBsv result:', result);
           
@@ -1325,6 +1348,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         // Register the lock with our API
         logLock('Registering lock with API', { txid, postId, amount, duration });
         
+        console.time('api_register');
         const apiResponse = await fetch(`${API_URL}/api/lock-likes/posts`, {
           method: 'POST',
           headers: {
@@ -1339,6 +1363,7 @@ const PostGrid: React.FC<PostGridProps> = ({
             raw_tx: rawTx // Include raw transaction data if available
           })
         });
+        console.timeEnd('api_register');
         
         logLock('API response status:', apiResponse.status);
         
@@ -1369,6 +1394,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         toast.error(`Failed to register lock: ${apiError.message || 'Unknown error'}`);
       }
       
+      console.timeEnd('post_lock_total');
     } catch (error: any) {
       logLock('Lock error:', error);
       toast.error(`Lock failed: ${error.message || 'Unknown error'}`);
