@@ -60,6 +60,18 @@ const handleLock = async (
       vote_option_id 
     } = req.body;
 
+    // Add detailed logging for amount diagnostics
+    logger.info(`[${requestId}] 🔍 AMOUNT DEBUG:`, {
+      raw_amount: amount,
+      amount_type: typeof amount,
+      is_defined: amount !== undefined,
+      is_null: amount === null,
+      string_value: String(amount),
+      number_value: Number(amount),
+      parsed_float: parseFloat(String(amount)),
+      body_keys: Object.keys(req.body)
+    });
+
     // Validate minimum required fields
     if (!provided_tx_id || (isVoteOption && !vote_option_id) || (!isVoteOption && !post_id)) {
       logger.warn(`[${requestId}] Missing critical fields`);
@@ -87,10 +99,19 @@ const handleLock = async (
       }
     }
     
+    // Additional amount parsing diagnostics
+    logger.info(`[${requestId}] 🔍 AMOUNT PARSING:`, {
+      original: amount,
+      after_parsing: numericAmount,
+      is_zero: numericAmount === 0,
+      is_falsy: !numericAmount
+    });
+    
     // Ensure the amount is a positive number
     if (numericAmount <= 0) {
       logger.warn(`[${requestId}] Invalid amount provided: ${amount}, using fallback`);
       numericAmount = 1000; // Default to 1000 sats if invalid
+      logger.info(`[${requestId}] 🔍 FALLBACK AMOUNT SET: ${numericAmount}`);
     }
     
     logger.info(`[${requestId}] Parsed amount: ${numericAmount} (original: ${amount})`);
@@ -108,6 +129,9 @@ const handleLock = async (
       post_id: post_id || '', // For vote option locks, this will be updated below
       vote_option_id: isVoteOption ? vote_option_id : null
     };
+    
+    // Log the final data being saved to the database
+    logger.info(`[${requestId}] 🔍 FINAL DATA BEING SAVED:`, lockData);
     
     // For vote option locks, we need the post_id that corresponds to the vote_option_id
     if (isVoteOption && vote_option_id) {

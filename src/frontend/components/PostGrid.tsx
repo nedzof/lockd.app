@@ -978,38 +978,12 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
 
     try {
-      // Add timing logs
-      console.time('vote_option_lock_total');
-      
-      // Debug: Log wallet methods to see what's available
-      console.log('Available wallet methods:', Object.keys(wallet));
-      console.log('wallet.lock exists?', typeof (wallet as any).lock === 'function');
-      console.log('wallet.lockBsv exists?', typeof wallet.lockBsv === 'function');
-      
-      // Check for any method that might be related to locking
-      const possibleLockMethods = Object.keys(wallet).filter(method => 
-        method.toLowerCase().includes('lock')
-      );
-      console.log('Possible lock-related methods:', possibleLockMethods);
-
-      // Also log the full wallet object to inspect in console
-      console.log('Full wallet object:', wallet);
-      
-      // Also check if window.yours has lock method
-      if (typeof window !== 'undefined' && window.yours) {
-        console.log('window.yours available:', Object.keys(window.yours));
-        console.log('window.yours.lock exists?', typeof (window.yours as any).lock === 'function');
-        
-        // Check for lock-related methods
-        const windowYoursLockMethods = Object.keys(window.yours).filter(method => 
-          method.toLowerCase().includes('lock')
-        );
-        console.log('Possible lock-related methods in window.yours:', windowYoursLockMethods);
-      }
-      
       // Show loading toast
       const toastId = toast.loading('Creating lock transaction...');
       setIsLocking(true);
+      
+      // Start timing the total vote option lock process
+      console.time('vote_option_lock_total');
 
       // Get wallet addresses to access the identity address
       console.time('getAddresses');

@@ -212,6 +212,16 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
     if (!connected || !postId || !wallet) return;
     
     try {
+      // Log the amount being used for locking
+      console.log('🔍 POSTLOCKINTERACTION - Amount debug:', {
+        amount,
+        type: typeof amount,
+        satoshis: Math.round(amount * 100000000),
+        string_value: String(amount),
+        number_value: Number(amount),
+        parsed_float: parseFloat(String(amount))
+      });
+      
       // Get current block height
       const currentBlockHeight = await getBlockHeight();
       
@@ -276,11 +286,21 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
             },
             body: JSON.stringify({
               post_id: postId,
-              amount: amount * 100000000, // Convert to satoshis
+              amount: Math.round(amount * 100000000), // Convert to satoshis and ensure it's a whole number
               lock_duration: duration,
               author_address: addresses.identityAddress, // Use identity address for attribution
               tx_id: lockResult.txid
             })
+          });
+          
+          // Log what was sent to the API
+          console.log('🔍 POSTLOCKINTERACTION - API payload:', {
+            post_id: postId,
+            amount: Math.round(amount * 100000000),
+            amount_type: typeof Math.round(amount * 100000000),
+            lock_duration: duration,
+            author_address: addresses.identityAddress,
+            tx_id: lockResult.txid
           });
           
           toast.dismiss(apiToastId);
