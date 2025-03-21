@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FiLock, FiLoader, FiX } from 'react-icons/fi';
+import { SiBitcoinsv } from 'react-icons/si';
 import { useYoursWallet } from 'yours-wallet-provider';
 import { toast } from 'react-hot-toast';
 import { API_URL } from '../config';
@@ -347,70 +348,98 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
           >
             <FiX size={16} />
           </button>
-          <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-[#2A2A40]/95 p-3 rounded-lg border border-gray-800/50 shadow-xl w-64 backdrop-blur-sm">
-            <div className="space-y-2">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="text-sm font-semibold text-white">Lock Bitcoin</h3>
-                <button
-                  onClick={handleCancel}
-                  className="text-gray-400 hover:text-white"
-                >
-                  <FiX size={16} />
-                </button>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-300 mb-1">Amount (₿)</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={amount}
-                    onChange={handleAmountChange}
-                    min={MIN_BSV_AMOUNT}
-                    step="0.001"
-                    className="w-full bg-white/5 border border-gray-800/20 rounded-md py-1.5 px-2 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
-                  />
-                  <div className="text-xs text-gray-400 mt-1">Minimum: {MIN_BSV_AMOUNT} BSV</div>
+          
+          {/* Modal backdrop */}
+          <div 
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40 transition-opacity duration-300 ease-in-out"
+            onClick={handleCancel}
+          ></div>
+          
+          {/* Modal container - centered with flex */}
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 scale-in animate-fadeIn">
+            <div className="bg-[#1A1B23] rounded-xl overflow-hidden border border-gray-800/40 shadow-xl shadow-black/30 w-full max-w-sm mx-auto">
+              {/* Modal header with gradient border */}
+              <div className="relative">
+                <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d]"></div>
+                <div className="p-4 flex justify-between items-center border-b border-gray-800/40">
+                  <div className="flex items-center space-x-2">
+                    <div className="p-1.5 bg-[#00ffa3]/10 rounded-md">
+                      <SiBitcoinsv className="text-[#00ffa3] w-4 h-4" />
+                    </div>
+                    <h3 className="text-base font-semibold text-white">Lock BSV</h3>
+                  </div>
+                  <button
+                    onClick={handleCancel}
+                    className="text-gray-400 hover:text-[#00ffa3] transition-colors duration-300"
+                  >
+                    <FiX size={18} />
+                  </button>
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-300 mb-1">Duration (blocks)</label>
-                <input
-                  type="number"
-                  value={duration}
-                  onChange={handleDurationChange}
-                  min={MIN_LOCK_DURATION}
-                  className="w-full bg-white/5 border border-gray-800/20 rounded-md py-1.5 px-2 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
-                />
-                <div className="text-xs text-gray-400 mt-1">≈ {Math.round(duration / 144)} days</div>
+              
+              {/* Modal body */}
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Amount (BSV)</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      value={amount}
+                      onChange={handleAmountChange}
+                      min={MIN_BSV_AMOUNT}
+                      step="0.001"
+                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-lg px-4 py-2.5 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
+                    />
+                    <div className="text-sm text-gray-400 mt-1.5">Minimum: {MIN_BSV_AMOUNT} BSV</div>
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Duration (blocks)</label>
+                  <input
+                    type="number"
+                    value={duration}
+                    onChange={handleDurationChange}
+                    min={MIN_LOCK_DURATION}
+                    className="w-full bg-[#13141B] border border-gray-800/60 rounded-lg px-4 py-2.5 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
+                  />
+                  <div className="text-sm text-gray-400 mt-1.5">≈ {Math.round(duration / 144)} days</div>
+                </div>
               </div>
-              <div className="flex space-x-2 pt-2">
-                <button
-                  onClick={handleLock}
-                  disabled={!connected || isCurrentlyLocking || amount < MIN_BSV_AMOUNT || duration < MIN_LOCK_DURATION}
-                  className="flex-1 inline-flex items-center justify-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-1 focus:ring-[#00ffa3] transition-all duration-300 disabled:opacity-50"
-                >
-                  {isCurrentlyLocking ? (
-                    <>
-                      <FiLoader className="animate-spin mr-1" size={12} /> Locking...
-                    </>
-                  ) : (
-                    "Confirm"
-                  )}
-                </button>
-                <button
-                  onClick={handleCancel}
-                  className="flex-1 inline-flex items-center justify-center px-3 py-1.5 border border-gray-800/20 text-xs font-medium rounded-md shadow-sm text-gray-300 bg-white/5 hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-gray-500"
-                >
-                  Cancel
-                </button>
+              
+              {/* Modal footer */}
+              <div className="p-4 border-t border-gray-800/40 bg-[#13141B]/30">
+                <div className="flex space-x-3">
+                  <button
+                    onClick={handleLock}
+                    disabled={!connected || isCurrentlyLocking || amount < MIN_BSV_AMOUNT || duration < MIN_LOCK_DURATION}
+                    className="flex-1 group relative px-4 py-2 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-lg transition-all duration-300"></div>
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#00ff9d] to-[#00ffa3] rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
+                    <div className="relative flex items-center justify-center space-x-1 text-black">
+                      {isCurrentlyLocking ? (
+                        <>
+                          <FiLoader className="animate-spin w-4 h-4" /> 
+                          <span>Locking...</span>
+                        </>
+                      ) : (
+                        <span>Confirm</span>
+                      )}
+                    </div>
+                    <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-lg"></div>
+                  </button>
+                  
+                  <button
+                    onClick={handleCancel}
+                    className="flex-1 px-4 py-2 border border-gray-800/40 text-sm font-medium rounded-lg shadow-sm text-gray-300 bg-[#13141B]/50 hover:bg-[#13141B] focus:outline-none transition-colors duration-300"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-          {/* Add overlay to prevent clicking through */}
-          <div 
-            className="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm"
-            onClick={handleCancel}
-          ></div>
         </>
       }
     </div>
