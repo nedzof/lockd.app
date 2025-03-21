@@ -356,8 +356,8 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
           ></div>
           
           {/* Modal container - centered with flex */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 scale-in animate-fadeIn">
-            <div className="bg-[#1A1B23] rounded-xl overflow-hidden border border-gray-800/40 shadow-xl shadow-black/30 w-full max-w-sm mx-auto">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="my-auto bg-[#1A1B23] rounded-xl overflow-hidden border border-gray-800/40 shadow-xl shadow-black/30 w-full max-w-sm max-h-[90vh] overflow-y-auto">
               {/* Modal header with gradient border */}
               <div className="relative">
                 <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d]"></div>

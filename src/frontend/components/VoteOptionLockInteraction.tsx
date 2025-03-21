@@ -26,6 +26,10 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
     }
   };
 
+  const handleCancel = () => {
+    setShowOptions(false);
+  };
+
   return (
     <div className="relative">
       {!showOptions ? (
@@ -44,7 +48,7 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
       ) :
         <>
           <button
-            onClick={() => setShowOptions(false)}
+            onClick={handleCancel}
             disabled={isLocking}
             className="inline-flex items-center justify-center w-8 h-8 text-xs font-medium rounded-full shadow-sm text-gray-200 bg-gray-700/50 hover:bg-gray-700/70 border border-gray-700/30 focus:outline-none focus:ring-1 focus:ring-[#00ffa3]/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:border-gray-600"
           >
@@ -54,12 +58,12 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
           {/* Modal backdrop */}
           <div 
             className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40 transition-opacity duration-300 ease-in-out"
-            onClick={() => setShowOptions(false)}
+            onClick={handleCancel}
           ></div>
           
-          {/* Modal container - centered with flex */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 scale-in animate-fadeIn">
-            <div className="bg-[#1A1B23] rounded-xl overflow-hidden border border-gray-800/40 shadow-xl shadow-black/30 w-full max-w-sm mx-auto">
+          {/* Modal container with overflow handling - centered with flex */}
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="my-auto bg-[#1A1B23] rounded-xl overflow-hidden border border-gray-800/40 shadow-xl shadow-black/30 w-full max-w-sm max-h-[90vh] overflow-y-auto">
               {/* Modal header with gradient border */}
               <div className="relative">
                 <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d]"></div>
@@ -71,7 +75,7 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
                     <h3 className="text-base font-semibold text-white">Lock BSV on Vote</h3>
                   </div>
                   <button
-                    onClick={() => setShowOptions(false)}
+                    onClick={handleCancel}
                     className="text-gray-400 hover:text-[#00ffa3] transition-colors duration-300"
                   >
                     <FiX size={18} />
@@ -132,7 +136,7 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
                   </button>
                   
                   <button
-                    onClick={() => setShowOptions(false)}
+                    onClick={handleCancel}
                     className="flex-1 px-4 py-2 border border-gray-800/40 text-sm font-medium rounded-lg shadow-sm text-gray-300 bg-[#13141B]/50 hover:bg-[#13141B] focus:outline-none transition-colors duration-300"
                   >
                     Cancel
