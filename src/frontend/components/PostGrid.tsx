@@ -1102,6 +1102,10 @@ const PostGrid: React.FC<PostGridProps> = ({
         // Register the lock with our API
         console.log('Registering lock with API. txid:', txid, 'optionId:', optionId, 'amount:', amount, 'duration:', duration);
         
+        // Convert BSV to satoshis for API call
+        const amountInSatoshis = Math.round(amount * 100000000);
+        console.log('Amount in satoshis for API:', amountInSatoshis);
+        
         console.time('api_register');
         const apiResponse = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
           method: 'POST',
@@ -1110,7 +1114,7 @@ const PostGrid: React.FC<PostGridProps> = ({
           },
           body: JSON.stringify({
             vote_option_id: optionId,
-            amount: amount,
+            amount: amountInSatoshis, // Send amount in satoshis, not BSV
             lock_duration: duration,
             author_address: addresses.identityAddress,
             tx_id: txid,
@@ -1322,6 +1326,10 @@ const PostGrid: React.FC<PostGridProps> = ({
         // Register the lock with our API
         logLock('Registering lock with API', { txid, postId, amount, duration });
         
+        // Convert BSV to satoshis for API call
+        const amountInSatoshis = Math.round(amount * 100000000);
+        logLock('Amount in satoshis for API:', amountInSatoshis);
+        
         console.time('api_register');
         const apiResponse = await fetch(`${API_URL}/api/lock-likes/posts`, {
           method: 'POST',
@@ -1330,7 +1338,7 @@ const PostGrid: React.FC<PostGridProps> = ({
           },
           body: JSON.stringify({
             post_id: postId,
-            amount: amount,
+            amount: amountInSatoshis, // Send amount in satoshis, not BSV
             lock_duration: duration,
             author_address: addresses.identityAddress,
             tx_id: txid,
