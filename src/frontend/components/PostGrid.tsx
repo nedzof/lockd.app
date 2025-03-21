@@ -167,6 +167,9 @@ const highlightSearchTerm = (text: string, searchTerm: string): React.ReactNode 
   });
 };
 
+// Add these constants at the top level, after the interfaces but before the component function
+const BATCH_SIZE = 10; // Default batch size for pagination
+
 const PostGrid: React.FC<PostGridProps> = ({
   onStatsUpdate,
   time_filter,
@@ -394,208 +397,72 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
   }, [forceUpdate, globalSearchTerm, time_filter, ranking_filter, personal_filter, block_filter, selected_tags, user_id, performSearch]);
 
-  const fetchPosts = useCallback(async (reset = true) => {
-    if (!isMounted.current) {
-      console.warn('Fetch posts called when component is not mounted');
-      return;
-    }
-
-    if (isFetchInProgress.current) {
-      console.warn('Fetch already in progress, skipping');
-      return;
-    }
-
-    // Set the fetch in progress flag
-    isFetchInProgress.current = true;
-
-    try {
-      // If this is a reset (new query), reset the pagination and state
-    if (reset) {
-        setLoading(true);
-        setNextCursor(null);
-        setSubmissions([]);
-        seenpost_ids.current = new Set();
+  const fetchPosts = useCallback(async (isInitialFetch = false, customParams: URLSearchParams | null = null) => {
+    if (isInitialFetch) {
+      setLoading(true);
+      setSubmissions([]);
     } else {
       setIsFetchingMore(true);
     }
+    
+    isFetchInProgress.current = true;
+    setError(null);
+    
+    try {
+      const endpoint = `${API_URL}/api/posts`;
+      let queryParams = customParams || new URLSearchParams();
       
-      // Call the enhanced search service if we're searching
-      if (searchTerm) {
-        console.log(`Using enhanced search with query: "${searchTerm}", type: ${searchType || 'all'}`);
+      // Clear previous params if using custom ones
+      if (!customParams) {
+        // Add basic filters based on current state
+        if (searchTerm) {
+          queryParams.append('search', searchTerm.trim());
+          if (searchType && searchType !== 'all') {
+            queryParams.append('search_type', searchType);
+          }
+        }
         
-        try {
-          // Create a filters object to pass to the enhanceSearch function
-          const searchFilters: Record<string, any> = {};
-          
-          // Add all active filters
-          if (time_filter) searchFilters.time_filter = time_filter;
-          if (ranking_filter) searchFilters.ranking_filter = ranking_filter;
-          if (personal_filter) searchFilters.personal_filter = personal_filter;
-          if (block_filter) searchFilters.block_filter = block_filter;
-          if (selected_tags.length > 0) searchFilters.tags = selected_tags;
-          if (user_id) searchFilters.user_id = user_id;
-          
-          console.log('Searching with filters:', searchFilters);
-          
-          // Pass filters to enhanceSearch function with forceRefresh set to true on reset
-          const enhancedResults = await enhanceSearch(searchTerm, searchType || 'all', searchFilters, reset);
-          
-          if (enhancedResults && enhancedResults.length > 0) {
-            // Convert the search results to ExtendedPost format
-            const processedPosts = enhancedResults.map(post => {
-              // Start with the post's properties and override/add required properties
-              const postAny = post as any; // Use any type for flexible access to properties
-              const extendedPost = {
-                ...post, // Spread the post first
-                id: postAny.id || postAny.tx_id || '',
-                is_locked: Boolean(postAny.is_locked),
-                is_vote: Boolean(postAny.is_vote),
-                vote_options: Array.isArray(postAny.vote_options) ? postAny.vote_options : []
-              } as unknown as ExtendedPost;
-              
-              // Handle image URLs based on has_image and media_url flags
-              if (postAny.has_image && postAny.media_url) {
-                console.log(`Post ${postAny.id} has image with media_url: ${postAny.media_url}`);
-                extendedPost.imageUrl = postAny.media_url;
-                extendedPost.media_url = postAny.media_url; // Ensure media_url is copied too
-                imageUrlMap.current.set(postAny.id, postAny.media_url);
-              } else if (postAny.has_image) {
-                // Post has an image but no media_url, so generate one
-                const generatedMediaUrl = `/api/posts/${postAny.id}/media`;
-                console.log(`Post ${postAny.id} has image but no media_url. Using generated URL: ${generatedMediaUrl}`);
-                extendedPost.imageUrl = generatedMediaUrl;
-                extendedPost.media_url = generatedMediaUrl;
-                imageUrlMap.current.set(postAny.id, generatedMediaUrl);
-              } else if (postAny.raw_image_data) {
-                try {
-                  if (imageUrlMap.current.has(postAny.id)) {
-                    extendedPost.imageUrl = imageUrlMap.current.get(postAny.id);
-                  } else if (typeof postAny.raw_image_data === 'string') {
-                    extendedPost.imageUrl = `data:${postAny.media_type || 'image/jpeg'};base64,${postAny.raw_image_data}`;
-                    imageUrlMap.current.set(postAny.id, extendedPost.imageUrl);
-                  }
-                } catch (imageError) {
-                  console.error(`Error processing image for search result ${postAny.id}:`, imageError);
-                }
-              }
-              
-              return extendedPost;
-            });
-            
-            setSubmissions(processedPosts);
-            setHasMore(false); // Enhanced search doesn't support pagination yet
-            setNextCursor(null);
-            setLoading(false);
-            console.log(`Found ${enhancedResults.length} results with enhanced search`);
-            
-            // Call onStatsUpdate if available
-            if (onStatsUpdate && enhancedResults.length > 0) {
-              onStatsUpdate({
-                totalLocked: enhancedResults.length,
-                participantCount: 0,
-                roundNumber: 0
-              });
-            }
-            
-            // Update previous filters
-            prevFilters.current = {
-              time_filter,
-              ranking_filter,
-              personal_filter,
-              block_filter,
-              selected_tags: [...selected_tags],
-              user_id,
-              searchTerm: searchTerm || '',
-              searchType: searchType || ''
-            };
-            
-            // Reset fetch flag and return
-            isFetchInProgress.current = false;
-            return;
-          } else {
-            console.log('No results found with enhanced search');
-            // Continue with the regular API approach as fallback
-          }
-        } catch (error) {
-          console.error('Error with enhanced search:', error);
-          
-          // Show error message to user but continue with API fallback
-          if (error instanceof Error) {
-            // Only set error state if reset was true (new search)
-            if (reset) {
-              setError(error.message);
-            }
-          }
-          
-          // Continue with regular API approach as fallback
+        if (time_filter) {
+          queryParams.append('time_filter', time_filter);
+        }
+        
+        if (ranking_filter) {
+          queryParams.append('ranking_filter', ranking_filter);
+        }
+        
+        if (personal_filter) {
+          queryParams.append('personal_filter', personal_filter);
+        } else {
+          // Without a personal filter, we need server to include complete lock data
+        }
+        
+        if (block_filter) {
+          queryParams.append('block_filter', block_filter);
+        }
+        
+        if (selected_tags && selected_tags.length > 0) {
+          queryParams.append('tags', selected_tags.join(','));
+        }
+        
+        // Add user_id if available
+        if (user_id) {
+          queryParams.append('user_id', user_id);
+          console.log(`Adding user_id: ${user_id}`);
+        }
+        
+        // Add pagination support with a proper currentBatchIndex variable
+        const currentBatchIndex = submissions.length > 0 ? Math.floor(submissions.length / BATCH_SIZE) : 0;
+        if (currentBatchIndex > 0) {
+          queryParams.append('start', (currentBatchIndex * BATCH_SIZE).toString());
         }
       }
       
-      // This is the original code for fetching posts, used if we're not searching
-      // or if the enhanced search didn't return results
-
-      // Build the query parameters
-      const queryParams = new URLSearchParams();
-      
-      // Determine which endpoint to use based on whether we're searching
-      let endpoint = `${API_URL}/api/posts`;
-      
-      // Add search parameters if provided
-      if (searchTerm) {
-        // Use the dedicated search endpoint when search parameters are present
-        endpoint = `${API_URL}/api/posts/search`;
-        queryParams.append('q', searchTerm);
-        queryParams.append('type', searchType || 'all');
-        console.log(`SEARCH: Using search endpoint with query: "${searchTerm}", type: ${searchType || 'all'}`);
-      }
-      
-      // Add pagination for both regular posts and search (if not resetting)
-      if (nextCursor && !reset) {
-        queryParams.append('cursor', nextCursor);
-        console.log(`Adding cursor: ${nextCursor}`);
-      }
-      
-      // Apply all filters regardless of whether it's a search or regular fetch
-      // Filters
-      if (time_filter) {
-        queryParams.append('time_filter', time_filter);
-        console.log(`Adding time_filter: ${time_filter}`);
-      }
-      
-      if (ranking_filter) {
-        queryParams.append('ranking_filter', ranking_filter);
-        console.log(`Adding ranking_filter: ${ranking_filter}`);
-      }
-      
-      if (personal_filter) {
-        queryParams.append('personal_filter', personal_filter);
-        console.log(`Adding personal_filter: ${personal_filter}`);
+      // Only log in development mode
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug(`Fetching posts: ${queryParams.toString()}`);
       } else {
-        // NEW: Check if we need to explicitly request lock data when no filter is applied
-        // This is a diagnostic log to help understand why lock data might be missing
-        console.log('No personal_filter applied - verify server includes complete lock_likes data');
+        // No logging in production
       }
-      
-      if (block_filter) {
-        queryParams.append('block_filter', block_filter);
-        console.log(`Adding block_filter: ${block_filter}`);
-      }
-      
-      // Add tags if selected
-      if (selected_tags.length > 0) {
-        selected_tags.forEach(tag => {
-          queryParams.append('tags', tag);
-        });
-        console.log(`Adding tags: ${selected_tags.join(', ')}`);
-      }
-      
-      // Add user_id if available
-      if (user_id) {
-        queryParams.append('user_id', user_id);
-        console.log(`Adding user_id: ${user_id}`);
-      }
-      
-      console.log(`Fetching posts with endpoint: ${endpoint} and params: ${queryParams.toString()}`);
       
       // Add timeout and retry logic for fetch
       let retryCount = 0;
@@ -678,28 +545,17 @@ const PostGrid: React.FC<PostGridProps> = ({
             } : null
         });
         
-        // ADDED: Analyze all posts in the response to check for lock data differences between filtered and unfiltered requests
+        // Verify posts have valid lock data (without excessive logging)
         if (data && data.posts && Array.isArray(data.posts)) {
-          console.log("========== DETAILED LOCK DATA ANALYSIS ==========");
-          data.posts.forEach((post: any, index: number) => {
-            // Find posts with lock_likes
-            const hasLocks = post.lock_likes && Array.isArray(post.lock_likes) && post.lock_likes.length > 0;
-            if (hasLocks) {
-              console.log(`Post ${index} (${post.id}) has ${post.lock_likes.length} lock_likes:`);
-              
-              // Count how many locks have non-zero amounts
-              const nonZeroLocks = post.lock_likes.filter((lock: any) => typeof lock.amount === 'number' && lock.amount > 0);
-              console.log(`- ${nonZeroLocks.length} locks have non-zero amounts`);
-              
-              // Log the structure of the first few locks
-              post.lock_likes.slice(0, 3).forEach((lock: any, lockIndex: number) => {
-                console.log(`- Lock ${lockIndex}: amount=${lock.amount}, type=${typeof lock.amount}, unlockHeight=${lock.unlock_height}`);
-              });
-            } else {
-              console.log(`Post ${index} (${post.id}) has no lock_likes or they're empty`);
-            }
+          // Simple validation that lock data is present and valid
+          const postsWithInvalidLocks = data.posts.filter((post: any) => {
+            const hasLocks = post.lock_likes && Array.isArray(post.lock_likes);
+            return post.is_locked && !hasLocks;
           });
-          console.log("=================================================");
+          
+          if (postsWithInvalidLocks.length > 0) {
+            console.warn(`${postsWithInvalidLocks.length} locked posts have missing/invalid lock data`);
+          }
         }
       } catch (parseError) {
         console.error('Error parsing response:', parseError);
@@ -891,7 +747,8 @@ const PostGrid: React.FC<PostGridProps> = ({
       });
       
       // Now that we have successfully fetched new posts, we can clear the seen post IDs if resetting
-      if (reset) {
+      const isReset = isInitialFetch;
+      if (isReset) {
         seenpost_ids.current = new Set();
         setError(null); // Only clear error state after successful fetch
       }
@@ -908,9 +765,9 @@ const PostGrid: React.FC<PostGridProps> = ({
       console.log(`Received ${uniqueNewPosts.length} unique posts`);
       
       // Only update state if we have posts to show
-      if (uniqueNewPosts.length > 0 || reset) {
+      if (uniqueNewPosts.length > 0 || isReset) {
         // Update submissions state
-        if (reset) {
+        if (isReset) {
           // Clean up old blob URLs before replacing posts
           cleanupBlobUrls(submissions);
           setSubmissions([...uniqueNewPosts]); // Create a new array to ensure state update
@@ -943,7 +800,7 @@ const PostGrid: React.FC<PostGridProps> = ({
       // Don't clear existing posts on error
       // This ensures posts don't disappear when there's an error
     } finally {
-      if (reset) {
+      if (isInitialFetch) {
         setLoading(false);
       } else {
         setIsFetchingMore(false);
@@ -968,13 +825,21 @@ const PostGrid: React.FC<PostGridProps> = ({
 
   const fetchvote_optionsForPost = useCallback(async (post: any) => {
     try {
+      // Use the correct API endpoint pattern for vote options
       const response = await fetch(`${API_URL}/api/vote-options/${post.tx_id}`);
       
       if (!response.ok) {
-        throw new Error(`Failed to fetch vote options: ${response.status}`);
+        console.warn(`Failed to fetch vote options for post ${post.id}: ${response.status}`);
+        return;
       }
       
       const vote_options = await response.json();
+      
+      // Verify we received valid data
+      if (!Array.isArray(vote_options)) {
+        console.warn(`Received invalid vote_options data for post ${post.id}:`, vote_options);
+        return;
+      }
       
       // Update the post with the vote options
       setSubmissions(prevSubmissions => 
@@ -983,6 +848,7 @@ const PostGrid: React.FC<PostGridProps> = ({
         )
       );
     } catch (error) {
+      console.error(`Error fetching vote options for post ${post.id}:`, error);
     }
   }, []);
 
@@ -1112,31 +978,192 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
 
     try {
-      // Check balance - simplified approach
-      toast.loading('Checking wallet balance...');
+      // Debug: Log wallet methods to see what's available
+      console.log('Available wallet methods:', Object.keys(wallet));
+      console.log('wallet.lock exists?', typeof (wallet as any).lock === 'function');
+      console.log('wallet.lockBsv exists?', typeof wallet.lockBsv === 'function');
       
-      setIsLocking(true);
-      const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          vote_option_id: optionId,
-          amount,
-          lock_duration: duration,
-          author_address: user_id, // Use the user_id from props which should be the wallet address
-        }),
-      });
+      // Check for any method that might be related to locking
+      const possibleLockMethods = Object.keys(wallet).filter(method => 
+        method.toLowerCase().includes('lock')
+      );
+      console.log('Possible lock-related methods:', possibleLockMethods);
 
-      if (!response.ok) {
-        throw new Error('Failed to lock BSV on vote option');
+      // Also log the full wallet object to inspect in console
+      console.log('Full wallet object:', wallet);
+      
+      // Also check if window.yours has lock method
+      if (typeof window !== 'undefined' && window.yours) {
+        console.log('window.yours available:', Object.keys(window.yours));
+        console.log('window.yours.lock exists?', typeof (window.yours as any).lock === 'function');
+        
+        // Check for lock-related methods
+        const windowYoursLockMethods = Object.keys(window.yours).filter(method => 
+          method.toLowerCase().includes('lock')
+        );
+        console.log('Possible lock-related methods in window.yours:', windowYoursLockMethods);
+      }
+      
+      // Show loading toast
+      const toastId = toast.loading('Creating lock transaction...');
+      setIsLocking(true);
+
+      // Get wallet addresses to access the identity address
+      const addresses = await wallet.getAddresses();
+      console.log('Wallet addresses:', addresses);
+      
+      if (!addresses || !addresses.identityAddress) {
+        toast.error('Could not retrieve wallet identity address');
+        setIsLocking(false);
+        toast.dismiss(toastId);
+        return;
       }
 
-      toast.success('Successfully locked BSV on vote option');
-      fetchPosts(); // Refresh posts to show updated lock amounts
-    } catch (error) {
-      toast.error('Failed to lock BSV on vote option');
+      // Calculate unlock block height (current block height + duration)
+      const currentBlockHeight = current_block_height || 800000; // Fallback if we don't have current height
+      const unlockBlockHeight = currentBlockHeight + duration;
+      console.log('Current block height:', currentBlockHeight);
+      console.log('Unlock block height:', unlockBlockHeight);
+      
+      // Amount in satoshis
+      const satoshis = Math.floor(amount * 100000000);
+      console.log('Amount in satoshis:', satoshis);
+      
+      // Following exact pattern from documentation
+      console.log('Creating locks array for documentation pattern');
+      const locks = [
+        { 
+          address: addresses.identityAddress,
+          blockHeight: unlockBlockHeight,
+          sats: satoshis
+        }
+      ];
+      console.log('Locks array:', locks);
+      
+      let txid;
+      
+      // First try with wallet.lock
+      try {
+        console.log('Attempting wallet.lock with locks array');
+        // Use a type assertion with unknown first to satisfy TypeScript
+        const typedWallet = wallet as unknown as { lock: (locks: any[]) => Promise<{ txid: string }> };
+        const result = await typedWallet.lock(locks);
+        console.log('Lock result:', result);
+        
+        if (result && result.txid) {
+          txid = result.txid;
+          console.log('Lock successful with wallet.lock');
+        }
+      } catch (lockError: any) {
+        console.log('wallet.lock failed, error:', lockError);
+      }
+      
+      // If wallet.lock failed, try window.yours.lock
+      if (!txid && typeof window !== 'undefined' && window.yours && typeof window.yours.lock === 'function') {
+        try {
+          console.log('Attempting window.yours.lock');
+          const result = await (window.yours as any).lock(locks);
+          if (result && result.txid) {
+            txid = result.txid;
+            console.log('Lock successful with window.yours.lock');
+          }
+        } catch (windowLockError: any) {
+          console.log('window.yours.lock failed, error:', windowLockError);
+        }
+      }
+      
+      // If that didn't work, try lockBsv
+      let rawTx: string | undefined;
+      if (!txid && typeof wallet.lockBsv === 'function') {
+        console.log('Falling back to wallet.lockBsv');
+        try {
+          console.log('Calling wallet.lockBsv with locks:', locks);
+          const result = await wallet.lockBsv([
+            { 
+              address: addresses.identityAddress,
+              blockHeight: unlockBlockHeight,
+              sats: satoshis
+            }
+          ]);
+          
+          console.log('lockBsv result:', result);
+          
+          if (result && result.txid) {
+            txid = result.txid;
+            // Save the raw transaction for potential manual verification
+            rawTx = result.rawtx;
+            console.log('Lock successful with wallet.lockBsv, txid:', txid);
+          } else {
+            console.error('lockBsv successful but no txid in result:', result);
+          }
+        } catch (lockBsvError: any) {
+          console.error('wallet.lockBsv failed, error:', lockBsvError);
+          throw lockBsvError; // Re-throw the error
+        }
+      }
+      
+      if (!txid) {
+        throw new Error('Failed to create lock transaction - no txid returned');
+      }
+      
+      // Update loading toast
+      toast.dismiss(toastId);
+      const registerToastId = toast.loading('Transaction broadcasted, registering lock...');
+      
+      // *** REMOVED TRANSACTION VERIFICATION ***
+      // We now skip waiting and verification and go straight to registration
+      
+      try {
+        // Register the lock with our API
+        console.log('Registering lock with API. txid:', txid, 'optionId:', optionId, 'amount:', amount, 'duration:', duration);
+        
+        const apiResponse = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            vote_option_id: optionId,
+            amount: amount,
+            lock_duration: duration,
+            author_address: addresses.identityAddress,
+            tx_id: txid,
+            raw_tx: rawTx // Include raw transaction data if available
+          })
+        });
+        
+        console.log('API response status:', apiResponse.status);
+        
+        if (!apiResponse.ok) {
+          const errorText = await apiResponse.text();
+          console.error('API error response:', errorText);
+          throw new Error(`API error: ${apiResponse.status} - ${errorText}`);
+        }
+        
+        const apiResult = await apiResponse.json();
+        console.log('API response data:', apiResult);
+        
+        if (apiResult.success) {
+          console.log('Lock registration success');
+          toast.dismiss(registerToastId);
+          toast.success('BSV locked successfully!');
+          
+          // Refresh post data after successful lock
+          await fetchPosts();
+        } else {
+          console.error('API success=false in response:', apiResult);
+          toast.error(`Lock registration error: ${apiResult.message || 'Unknown error'}`);
+          console.error('API error in vote option lock process:', apiResult);
+        }
+      } catch (apiError: any) {
+        console.error('API error:', apiError);
+        toast.dismiss(registerToastId);
+        toast.error(`Failed to register lock: ${apiError.message || 'Unknown error'}`);
+      }
+      
+    } catch (error: any) {
+      console.error('Lock error:', error);
+      toast.error(`Lock failed: ${error.message || 'Unknown error'}`);
     } finally {
       setIsLocking(false);
     }
@@ -1146,12 +1173,9 @@ const PostGrid: React.FC<PostGridProps> = ({
     // Simple direct logging function for this specific function
     const logLock = (msg: string, data?: any) => {
       const now = new Date().toISOString();
-      const message = `[${now}] [PostGrid Lock] ${msg}`;
-      console.log(message, data || '');
+      console.log(`[${now}] [PostGrid Lock] ${msg}`, data || '');
     };
     
-    // Performance logging
-    const startTime = performance.now();
     logLock(`Starting lock operation for post ${postId}`, {amount, duration});
     
     // Check if wallet is connected
@@ -1161,71 +1185,195 @@ const PostGrid: React.FC<PostGridProps> = ({
       return;
     }
     
-    logLock('Wallet connected, proceeding');
+    // Debug: Log wallet methods to see what's available
+    logLock('Available wallet methods:', Object.keys(wallet));
+    logLock('wallet.lock exists?', typeof (wallet as any).lock === 'function');
+    logLock('wallet.lockBsv exists?', typeof wallet.lockBsv === 'function');
+    
+    // Check for any method that might be related to locking
+    const possibleLockMethods = Object.keys(wallet).filter(method => 
+      method.toLowerCase().includes('lock')
+    );
+    logLock('Possible lock-related methods:', possibleLockMethods);
+    
+    // Also log the full wallet object to inspect in console
+    logLock('Full wallet object:', wallet);
+    
+    // Also check if window.yours has lock method
+    if (typeof window !== 'undefined' && window.yours) {
+      logLock('window.yours available:', Object.keys(window.yours));
+      logLock('window.yours.lock exists?', typeof (window.yours as any).lock === 'function');
+      
+      // Check for lock-related methods
+      const windowYoursLockMethods = Object.keys(window.yours).filter(method => 
+        method.toLowerCase().includes('lock')
+      );
+      logLock('Possible lock-related methods in window.yours:', windowYoursLockMethods);
+    }
     
     try {
-      // Show loading toast, but don't wait for it
-      const toastId = toast.loading('Checking wallet balance...');
-      logLock('Checking wallet balance...');
-      
-      // Set locking state for UI feedback
+      // Show loading toast
+      const toastId = toast.loading('Creating lock transaction...');
       setIsLocking(true);
-      logLock('Set isLocking to true');
+
+      // Get wallet addresses to access the identity address
+      const addresses = await wallet.getAddresses();
+      logLock('Wallet addresses:', addresses);
       
-      // Start API call timing
-      const apiStartTime = performance.now();
-      logLock('Starting API call to lock-likes');
+      if (!addresses || !addresses.identityAddress) {
+        toast.error('Could not retrieve wallet identity address');
+        setIsLocking(false);
+        toast.dismiss(toastId);
+        return;
+      }
+
+      // Calculate unlock block height (current block height + duration)
+      const currentBlockHeight = current_block_height || 800000; // Fallback if we don't have current height
+      const unlockBlockHeight = currentBlockHeight + duration;
+      logLock('Current block height:', currentBlockHeight);
+      logLock('Unlock block height:', unlockBlockHeight);
       
-      // Prepare request payload
-      const requestPayload = {
-        post_id: postId,
-        amount,
-        lock_duration: duration,
-        author_address: user_id, // Use the user_id from props which should be the wallet address
-      };
+      // Amount in satoshis
+      const satoshis = Math.floor(amount * 100000000);
+      logLock('Amount in satoshis:', satoshis);
       
-      logLock('API request payload', requestPayload);
+      // Following exact pattern from documentation
+      logLock('Creating locks array for documentation pattern');
+      const locks = [
+        { 
+          address: addresses.identityAddress,
+          blockHeight: unlockBlockHeight,
+          sats: satoshis
+        }
+      ];
+      logLock('Locks array:', locks);
       
-      // Make API call
-      const response = await fetch(`${API_URL}/api/lock-likes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestPayload),
-      });
+      let txid;
       
-      const apiEndTime = performance.now();
-      logLock(`API call completed in ${Math.round(apiEndTime - apiStartTime)}ms`);
-      
-      // Process response
-      if (!response.ok) {
-        const errorText = await response.text();
-        logLock(`API error: ${response.status}`, errorText);
-        throw new Error(`Failed to lock BSV on post: ${response.status} ${errorText}`);
+      // First try with wallet.lock
+      try {
+        logLock('Attempting wallet.lock with locks array');
+        // Use a type assertion with unknown first to satisfy TypeScript
+        const typedWallet = wallet as unknown as { lock: (locks: any[]) => Promise<{ txid: string }> };
+        const result = await typedWallet.lock(locks);
+        logLock('Lock result:', result);
+        
+        if (result && result.txid) {
+          txid = result.txid;
+          logLock('Lock successful with wallet.lock');
+        }
+      } catch (lockError: any) {
+        logLock('wallet.lock failed, error:', lockError);
       }
       
-      const responseData = await response.json();
-      logLock('API response data', responseData);
+      // If wallet.lock failed, try window.yours.lock
+      if (!txid && typeof window !== 'undefined' && window.yours && typeof window.yours.lock === 'function') {
+        try {
+          logLock('Attempting window.yours.lock');
+          const result = await (window.yours as any).lock(locks);
+          if (result && result.txid) {
+            txid = result.txid;
+            logLock('Lock successful with window.yours.lock');
+          }
+        } catch (windowLockError: any) {
+          logLock('window.yours.lock failed, error:', windowLockError);
+        }
+      }
       
-      // Dismiss loading toast and show success
+      // If that didn't work, try lockBsv
+      let rawTx: string | undefined;
+      if (!txid && typeof wallet.lockBsv === 'function') {
+        logLock('Falling back to wallet.lockBsv');
+        try {
+          logLock('Calling wallet.lockBsv with locks:', locks);
+          const result = await wallet.lockBsv([
+            { 
+              address: addresses.identityAddress,
+              blockHeight: unlockBlockHeight,
+              sats: satoshis
+            }
+          ]);
+          
+          logLock('lockBsv result:', result);
+          
+          if (result && result.txid) {
+            txid = result.txid;
+            // Save the raw transaction for potential manual verification
+            rawTx = result.rawtx;
+            logLock('Lock successful with wallet.lockBsv, txid:', txid);
+          } else {
+            logLock('lockBsv successful but no txid in result:', result);
+          }
+        } catch (lockBsvError: any) {
+          logLock('wallet.lockBsv failed, error:', lockBsvError);
+          throw lockBsvError; // Re-throw the error
+        }
+      }
+      
+      if (!txid) {
+        throw new Error('Failed to create lock transaction - no txid returned');
+      }
+      
+      // Update loading toast
       toast.dismiss(toastId);
-      toast.success('Successfully locked BSV on post');
+      const registerToastId = toast.loading('Transaction broadcasted, registering lock...');
       
-      // Refresh posts to show updated lock amounts
-      logLock('Refreshing posts to show updated lock amounts');
-      fetchPosts();
+      // *** REMOVED TRANSACTION VERIFICATION ***
+      // We now skip waiting and verification and go straight to registration
       
-      // Log total operation time
-      const endTime = performance.now();
-      logLock(`Complete lock operation took ${Math.round(endTime - startTime)}ms`);
+      try {
+        // Register the lock with our API
+        logLock('Registering lock with API', { txid, postId, amount, duration });
+        
+        const apiResponse = await fetch(`${API_URL}/api/lock-likes/posts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            post_id: postId,
+            amount: amount,
+            lock_duration: duration,
+            author_address: addresses.identityAddress,
+            tx_id: txid,
+            raw_tx: rawTx // Include raw transaction data if available
+          })
+        });
+        
+        logLock('API response status:', apiResponse.status);
+        
+        if (!apiResponse.ok) {
+          const errorText = await apiResponse.text();
+          logLock('API error response:', errorText);
+          throw new Error(`API error: ${apiResponse.status} - ${errorText}`);
+        }
+        
+        const apiResult = await apiResponse.json();
+        logLock('API response data:', apiResult);
+        
+        if (apiResult.success) {
+          logLock('Lock registration success');
+          toast.dismiss(registerToastId);
+          toast.success('BSV locked successfully!');
+          
+          // Refresh post data after successful lock
+          await fetchPosts();
+        } else {
+          logLock('API success=false in response:', apiResult);
+          toast.error(`Lock registration error: ${apiResult.message || 'Unknown error'}`);
+          logLock('API error in post lock process:', apiResult);
+        }
+      } catch (apiError: any) {
+        logLock('API error:', apiError);
+        toast.dismiss(registerToastId);
+        toast.error(`Failed to register lock: ${apiError.message || 'Unknown error'}`);
+      }
       
-    } catch (error) {
-      logLock('Error during lock operation', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to lock BSV on post');
+    } catch (error: any) {
+      logLock('Lock error:', error);
+      toast.error(`Lock failed: ${error.message || 'Unknown error'}`);
     } finally {
       setIsLocking(false);
-      logLock('Set isLocking back to false, operation complete');
     }
   };
 
@@ -1504,24 +1652,20 @@ const PostGrid: React.FC<PostGridProps> = ({
                           }>;
                           
                           optionLockedAmount = calculate_active_locked_amount(typedLockLikes, currentBlockHeight);
-                          
-                          // Log the calculated amount for debugging
-                          console.log(`[VOTE DEBUG] Option "${option.content}" has active locked amount: ${optionLockedAmount} satoshis`);
                         }
                         
                         return sum + optionLockedAmount;
                       }, 0);
                       
                       const percentage = calculatePercentage(totalLocked, totalLocked);
-                      console.log(`[VOTE DEBUG] Total locked amount for post ${post.id}: ${totalLocked} satoshis`);
-                      console.log(`[VOTE DEBUG] Total locked percentage for post ${post.id}: ${percentage}%`);
                       
                       return (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
                           {post.vote_options.map((option: vote_option) => {
-                            // Calculate active locked amount for this option
+                            // Calculate active locked amount for this option using the lock_amount as base
                             let optionLockedAmount = option.lock_amount || 0;
                             
+                            // If we have lock_likes data, use that for a more accurate calculation
                             if (option.lock_likes && Array.isArray(option.lock_likes)) {
                               // Use type assertion to make TypeScript happy
                               const typedLockLikes = option.lock_likes as Array<{
@@ -1529,13 +1673,13 @@ const PostGrid: React.FC<PostGridProps> = ({
                                 unlock_height?: number | null;
                               }>;
                               optionLockedAmount = calculate_active_locked_amount(typedLockLikes, currentBlockHeight);
-                              
-                              // Log the calculated amount for debugging
-                              console.log(`[VOTE DEBUG] Option "${option.content}" has active locked amount: ${optionLockedAmount} satoshis`);
                             }
                             
-                            const percentage = calculatePercentage(optionLockedAmount, totalLocked);
-                            console.log(`[VOTE DEBUG] Option "${option.content}" has percentage: ${percentage}% of total: ${totalLocked}`);
+                            // Calculate percentage if we have some locked amount
+                            let percentage = 0;
+                            if (totalLocked > 0 && optionLockedAmount > 0) {
+                              percentage = calculatePercentage(optionLockedAmount, totalLocked);
+                            }
                             
                             // Determine color based on percentage
                             const getStatusColor = (pct: number) => {
@@ -1560,67 +1704,22 @@ const PostGrid: React.FC<PostGridProps> = ({
                             const lockStatus = getLockStatus();
                             
                             return (
-                              <div key={option.id} className="bg-white/5 rounded-lg border border-gray-800/20 hover:border-[#00ffa3]/20 transition-all duration-300 overflow-hidden shadow-lg">
-                                <div className="p-4">
-                                  {/* Simplified layout with only essential elements */}
-                                  <div className="flex items-center gap-4">
-                                    {/* Circular progress indicator */}
-                                    <div className="relative h-14 w-14 flex-shrink-0">
-                                      <svg className="w-full h-full" viewBox="0 0 36 36">
-                                        {/* Background circle */}
-                                        <circle 
-                                          cx="18" 
-                                          cy="18" 
-                                          r="16" 
-                                          fill="none" 
-                                          className="stroke-gray-700/30" 
-                                          strokeWidth="2"
-                                        />
-                                        {/* Progress circle */}
-                                        <circle 
-                                          cx="18" 
-                                          cy="18" 
-                                          r="16" 
-                                          fill="none" 
-                                          className={`stroke-current text-[#00ffa3]`}
-                                          strokeWidth="3"
-                                          strokeDasharray={`${percentage}, 100`}
-                                          strokeLinecap="round"
-                                          transform="rotate(-90 18 18)"
-                                        />
-                                        {/* Percentage text */}
-                                        <text 
-                                          x="18" 
-                                          y="18" 
-                                          dominantBaseline="middle" 
-                                          textAnchor="middle" 
-                                          className={`${percentage > 0 ? 'fill-[#00ffa3] font-bold' : 'fill-gray-400'} text-xs`}
-                                        >
-                                          {percentage}%
-                                        </text>
-                                      </svg>
-                                    </div>
-                                    
-                                    {/* Content area */}
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-base font-semibold text-white line-clamp-2 hover:line-clamp-none transition-all duration-300" title={option.content}>
-                                        {post.isSearchResult && post.matchInfo?.fields.includes('vote_options.content') && option.content.toLowerCase().includes(post.matchInfo.query.toLowerCase())
-                                          ? highlightSearchTerm(option.content, post.matchInfo.query)
-                                          : option.content
-                                        }
-                                      </p>
-                                    </div>
-                                    
-                                    {/* Lock button */}
-                                    <div className="flex-shrink-0 ml-2">
-                                      <VoteOptionLockInteraction 
-                                        optionId={option.id} 
-                                        onLock={handlevote_optionLock}
-                                        isLocking={isLocking}
-                                        connected={!!wallet}
-                                      />
-                                    </div>
-                                  </div>
+                              <div
+                                key={option.id}
+                                className="relative mb-2 p-2 rounded text-sm bg-[#1A1B23] border border-gray-800/60 hover:bg-[#13141B] transition-colors duration-150 ease-in-out"
+                              >
+                                {/* Simplified vote option display - only content and lock button */}
+                                <div className="flex justify-between items-center">
+                                  <span className="text-white">{option.content}</span>
+                                  
+                                  {/* Lock button */}
+                                  {wallet && (
+                                    <VoteOptionLockInteraction
+                                      optionId={option.id}
+                                      connected={!!wallet}
+                                      onLock={handlevote_optionLock}
+                                    />
+                                  )}
                                 </div>
                               </div>
                             );
@@ -1681,34 +1780,22 @@ const PostGrid: React.FC<PostGridProps> = ({
                     <div className="text-[#00ffa3] font-medium flex items-center text-sm">
                       <FiLock className="mr-1" size={14} />
                       {(() => {
-                        // Add debug logging for this specific post's lock data
+                        // Check for lock data
                         const locksExist = !!post.lock_likes;
                         const isArray = locksExist && Array.isArray(post.lock_likes);
                         const locksCount = isArray && post.lock_likes ? post.lock_likes.length : 0;
-                        console.log(`Rendering locks for post ${post.id}:`, {
-                          locksExist,
-                          isArray,
-                          locksCount,
-                          firstLock: locksCount > 0 && post.lock_likes ? JSON.stringify(post.lock_likes[0]) : null,
-                          current_block_height,
-                          rawData: post.lock_likes,
-                          fullLockData: post.lock_likes ? JSON.stringify(post.lock_likes) : null
-                        });
                         
                         // Calculate locked amount with better error handling
                         let lockedAmount = 0;
                         try {
                           lockedAmount = calculate_active_locked_amount(post.lock_likes || [], current_block_height);
-                          console.log(`Calculated locked amount for post ${post.id}: ${lockedAmount}`);
                         } catch (error) {
                           console.error(`Error calculating locked amount for post ${post.id}:`, error);
                           // Fall back to manually calculating
                           if (isArray && post.lock_likes) {
                             lockedAmount = post.lock_likes.reduce((sum: number, lock: any) => {
-                              console.log(`Lock amount type: ${typeof lock.amount}, value: ${lock.amount}`);
                               return sum + (typeof lock.amount === 'number' ? lock.amount : 0);
                             }, 0);
-                            console.log(`Manually calculated locked amount for post ${post.id}: ${lockedAmount}`);
                           }
                         }
                         
