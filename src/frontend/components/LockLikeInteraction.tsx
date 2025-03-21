@@ -1,7 +1,7 @@
 import { API_URL } from "../config";
 import * as React from 'react';
 import { SiBitcoinsv } from 'react-icons/si';
-import { FiX, FiLoader } from 'react-icons/fi';
+import { FiX, FiLoader, FiLock, FiCheck } from 'react-icons/fi';
 import { LockLike } from '../types';
 import { DEFAULT_LOCKLIKE_AMOUNT, DEFAULT_LOCKLIKE_BLOCKS } from '../types';
 import { useWallet } from '../providers/WalletProvider';
@@ -489,12 +489,12 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   };
 
   return (
-    <div className="relative inline-block" onClick={(e) => e.stopPropagation()}>
+    <div className="inline-flex items-center gap-2">
       {loading ? (
         <div role="status">
           <svg
             aria-hidden="true"
-            className="inline w-4 h-4 mr-2 text-gray-200 animate-spin dark:text-gray-600 fill-orange-400"
+            className="inline w-4 h-4 text-gray-200 animate-spin dark:text-gray-600 fill-orange-400"
             viewBox="0 0 100 101"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
@@ -512,110 +512,63 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
         </div>
       ) : (
         <>
-          <button
-            onClick={handleLockClick}
-            className="flex items-center space-x-1 text-gray-600 dark:text-gray-400 hover:text-[#00ffa3] dark:hover:text-[#00ffa3]"
-          >
-            <SiBitcoinsv className="h-4 w-4" />
-            <span>Lock</span>
-          </button>
-
-          {showInput && (
-            <div ref={formRef} className="absolute right-0 bottom-full mb-2 z-50 bg-[#1A1B23] rounded-lg border border-gray-800/60 shadow-xl shadow-black/30 w-64 animate-fadeIn">
-              <div className="relative">
-                {/* Top gradient border */}
-                <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d]"></div>
-                
-                {/* Header */}
-                <div className="p-3 flex justify-between items-center border-b border-gray-800/40">
-                  <div className="flex items-center space-x-2">
-                    <div className="p-1 bg-[#00ffa3]/10 rounded-md">
-                      <SiBitcoinsv className="text-[#00ffa3] w-3.5 h-3.5" />
-                    </div>
-                    <h3 className="text-sm font-medium text-white">Lock BSV</h3>
-                  </div>
-                  <button
-                    onClick={() => setShowInput(false)}
-                    className="text-gray-400 hover:text-[#00ffa3] transition-colors"
-                  >
-                    <FiX size={16} />
-                  </button>
+          {!showInput ? (
+            <button
+              onClick={handleLockClick}
+              className="flex items-center space-x-1 text-gray-600 dark:text-gray-400 hover:text-[#00ffa3] dark:hover:text-[#00ffa3]"
+            >
+              <SiBitcoinsv className="h-4 w-4" />
+              <span>Lock</span>
+            </button>
+          ) : (
+            <div className="inline-flex items-center gap-2 bg-[#1A1B23] rounded-lg border border-gray-800/60 px-2 py-1">
+              <div className="flex flex-col">
+                <div className="inline-flex items-center gap-1">
+                  <SiBitcoinsv className="text-[#00ffa3] w-3 h-3" />
+                  <input
+                    type="number"
+                    name="amount"
+                    id="amount"
+                    className="w-16 bg-[#13141B] border border-gray-800/60 rounded-md px-1 py-0.5 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50"
+                    placeholder="Amount"
+                    value={amount}
+                    onChange={handleAmountChange}
+                    step="0.00000001"
+                    min="0"
+                    max={balance.bsv.toString()}
+                  />
                 </div>
-                
-                {/* Form Body */}
-                <div className="p-3 space-y-3">
-                  <div>
-                    <label htmlFor="amount" className="block text-xs font-medium text-gray-300 mb-1.5">
-                      Amount (BSV)
-                    </label>
-                    <input
-                      type="number"
-                      name="amount"
-                      id="amount"
-                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-3 py-1.5 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors"
-                      placeholder="0.001"
-                      value={amount}
-                      onChange={handleAmountChange}
-                      step="0.00000001" 
-                      min="0"
-                      max={balance.bsv.toString()}
-                    />
-                    <p className="text-xs text-gray-400 mt-1">
-                      Available: {balance.bsv.toFixed(8)} BSV
-                    </p>
-                  </div>
-                  
-                  <div>
-                    <label htmlFor="lockDuration" className="block text-xs font-medium text-gray-300 mb-1.5">
-                      Lock Duration (blocks)
-                    </label>
-                    <input
-                      type="number"
-                      name="lockDuration"
-                      id="lockDuration"
-                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-3 py-1.5 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors"
-                      placeholder={DEFAULT_LOCKLIKE_BLOCKS.toString()}
-                      value={lockDuration}
-                      onChange={handleDurationChange}
-                      step="1"
-                      min="1"
-                    />
-                    <p className="text-xs text-gray-400 mt-1">
-                      ≈ {Math.round(parseInt(lockDuration, 10) * 10 / 60 / 24)} days
-                    </p>
-                  </div>
+                <div className="inline-flex items-center gap-1 mt-1">
+                  <FiLock className="text-[#00ffa3] w-3 h-3" />
+                  <input
+                    type="number"
+                    name="lockDuration"
+                    id="lockDuration"
+                    className="w-16 bg-[#13141B] border border-gray-800/60 rounded-md px-1 py-0.5 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50"
+                    placeholder="Blocks"
+                    value={lockDuration}
+                    onChange={handleDurationChange}
+                    step="1"
+                    min="1"
+                  />
                 </div>
-                
-                {/* Footer with Actions */}
-                <div className="p-3 border-t border-gray-800/40 bg-[#13141B]/30">
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={handleLockLike}
-                      disabled={loading || parseFloat(amount) <= 0}
-                      className="flex-1 group relative px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-md transition-all duration-300"></div>
-                      <div className="absolute inset-0 bg-gradient-to-r from-[#00ff9d] to-[#00ffa3] rounded-md opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
-                      <div className="relative flex items-center justify-center space-x-1 text-black">
-                        {loading ? (
-                          <>
-                            <FiLoader className="animate-spin w-3 h-3" /> 
-                            <span>Locking...</span>
-                          </>
-                        ) : (
-                          <span>Confirm</span>
-                        )}
-                      </div>
-                    </button>
-                    
-                    <button
-                      onClick={() => setShowInput(false)}
-                      className="flex-1 px-3 py-1.5 border border-gray-800/40 text-xs font-medium rounded-md shadow-sm text-gray-300 bg-[#13141B]/50 hover:bg-[#13141B] focus:outline-none transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={handleLockLike}
+                  disabled={loading || parseFloat(amount) <= 0}
+                  className="p-1 rounded-md bg-[#00ffa3]/10 hover:bg-[#00ffa3]/20 text-[#00ffa3] disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Confirm"
+                >
+                  {loading ? <FiLoader className="animate-spin w-3 h-3" /> : <FiCheck className="w-3 h-3" />}
+                </button>
+                <button
+                  onClick={() => setShowInput(false)}
+                  className="p-1 rounded-md bg-gray-800/30 hover:bg-gray-800/50 text-gray-400"
+                  title="Cancel"
+                >
+                  <FiX className="w-3 h-3" />
+                </button>
               </div>
             </div>
           )}
