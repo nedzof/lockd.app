@@ -115,6 +115,7 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   const [showInput, setShowInput] = React.useState(false);
   const [amount, setAmount] = React.useState(DEFAULT_LOCKLIKE_AMOUNT.toString());
   const [lockDuration, setLockDuration] = React.useState(DEFAULT_LOCKLIKE_BLOCKS.toString());
+  const formRef = React.useRef<HTMLDivElement>(null);
   
   // Add a ref to track the operation sequence
   const operationIdRef = React.useRef(0);
@@ -128,6 +129,23 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
       directLog('Component unmounting');
     };
   }, []);
+  
+  // Handle clicking outside to close the form
+  React.useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (formRef.current && !formRef.current.contains(event.target as Node)) {
+        setShowInput(false);
+      }
+    }
+
+    if (showInput) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showInput]);
   
   // Log state changes
   React.useEffect(() => {
@@ -148,7 +166,7 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
     getBlockHeight().catch(err => directLog("Failed to pre-fetch block height:", err));
   }, []);
 
-  // Handle escape key press and body scroll lock
+  // Handle escape key press
   React.useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && showInput) {
@@ -158,18 +176,14 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
     };
 
     if (showInput) {
-      directLog('Adding escape key listener and disabling body scroll');
+      directLog('Adding escape key listener');
       document.addEventListener('keydown', handleEscape);
-      // Prevent body scrolling when modal is open
-      document.body.style.overflow = 'hidden';
     }
 
     return () => {
       if (showInput) {
-        directLog('Removing escape key listener and enabling body scroll');
+        directLog('Removing escape key listener');
         document.removeEventListener('keydown', handleEscape);
-        // Restore body scrolling when modal is closed
-        document.body.style.overflow = 'unset';
       }
     };
   }, [showInput]);
@@ -475,7 +489,7 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
   };
 
   return (
-    <div className="flex gap-0 relative items-center" onClick={(e) => e.stopPropagation()}>
+    <div className="relative inline-block" onClick={(e) => e.stopPropagation()}>
       {loading ? (
         <div role="status">
           <svg
@@ -500,126 +514,110 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
         <>
           <button
             onClick={handleLockClick}
-            className="flex items-center space-x-1 text-gray-600 dark:text-gray-400 hover:text-orange-500 dark:hover:text-orange-400"
+            className="flex items-center space-x-1 text-gray-600 dark:text-gray-400 hover:text-[#00ffa3] dark:hover:text-[#00ffa3]"
           >
             <SiBitcoinsv className="h-4 w-4" />
             <span>Lock</span>
           </button>
 
-          {showInput && createPortal(
-            <div className="fixed inset-0 isolate z-[999999]">
-              {/* Modal backdrop */}
-              <div 
-                className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity duration-300 ease-in-out"
-                onClick={() => setShowInput(false)}
-                aria-hidden="true"
-              />
-              
-              {/* Modal container - centered with flex */}
-              <div className="fixed inset-0 flex items-center justify-center p-4 overflow-y-auto">
-                <div className="my-auto bg-[#1A1B23] rounded-xl overflow-hidden border border-gray-800/40 shadow-xl shadow-black/30 w-full max-w-sm max-h-[90vh] overflow-y-auto">
-                  {/* Modal header with gradient border */}
-                  <div className="relative">
-                    <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d]"></div>
-                    <div className="p-4 flex justify-between items-center border-b border-gray-800/40">
-                      <div className="flex items-center space-x-2">
-                        <div className="p-1.5 bg-[#00ffa3]/10 rounded-md">
-                          <SiBitcoinsv className="text-[#00ffa3] w-4 h-4" />
-                        </div>
-                        <h3 className="text-base font-semibold text-white">Lock BSV</h3>
-                      </div>
-                      <button
-                        onClick={() => setShowInput(false)}
-                        className="text-gray-400 hover:text-[#00ffa3] transition-colors duration-300"
-                      >
-                        <FiX size={18} />
-                      </button>
+          {showInput && (
+            <div ref={formRef} className="absolute right-0 bottom-full mb-2 z-50 bg-[#1A1B23] rounded-lg border border-gray-800/60 shadow-xl shadow-black/30 w-64 animate-fadeIn">
+              <div className="relative">
+                {/* Top gradient border */}
+                <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d]"></div>
+                
+                {/* Header */}
+                <div className="p-3 flex justify-between items-center border-b border-gray-800/40">
+                  <div className="flex items-center space-x-2">
+                    <div className="p-1 bg-[#00ffa3]/10 rounded-md">
+                      <SiBitcoinsv className="text-[#00ffa3] w-3.5 h-3.5" />
                     </div>
+                    <h3 className="text-sm font-medium text-white">Lock BSV</h3>
+                  </div>
+                  <button
+                    onClick={() => setShowInput(false)}
+                    className="text-gray-400 hover:text-[#00ffa3] transition-colors"
+                  >
+                    <FiX size={16} />
+                  </button>
+                </div>
+                
+                {/* Form Body */}
+                <div className="p-3 space-y-3">
+                  <div>
+                    <label htmlFor="amount" className="block text-xs font-medium text-gray-300 mb-1.5">
+                      Amount (BSV)
+                    </label>
+                    <input
+                      type="number"
+                      name="amount"
+                      id="amount"
+                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-3 py-1.5 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors"
+                      placeholder="0.001"
+                      value={amount}
+                      onChange={handleAmountChange}
+                      step="0.00000001" 
+                      min="0"
+                      max={balance.bsv.toString()}
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      Available: {balance.bsv.toFixed(8)} BSV
+                    </p>
                   </div>
                   
-                  {/* Modal body */}
-                  <div className="p-5 space-y-4">
-                    <div>
-                      <label htmlFor="amount" className="block text-sm font-medium text-gray-300 mb-2">
-                        Amount (BSV)
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          name="amount"
-                          id="amount"
-                          className="w-full bg-[#13141B] border border-gray-800/60 rounded-lg px-4 py-2.5 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
-                          placeholder="0.001"
-                          value={amount}
-                          onChange={handleAmountChange}
-                          step="0.00000001" // Allow for satoshi-level precision
-                          min="0"
-                          max={balance.bsv.toString()}
-                        />
+                  <div>
+                    <label htmlFor="lockDuration" className="block text-xs font-medium text-gray-300 mb-1.5">
+                      Lock Duration (blocks)
+                    </label>
+                    <input
+                      type="number"
+                      name="lockDuration"
+                      id="lockDuration"
+                      className="w-full bg-[#13141B] border border-gray-800/60 rounded-md px-3 py-1.5 text-xs text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors"
+                      placeholder={DEFAULT_LOCKLIKE_BLOCKS.toString()}
+                      value={lockDuration}
+                      onChange={handleDurationChange}
+                      step="1"
+                      min="1"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      ≈ {Math.round(parseInt(lockDuration, 10) * 10 / 60 / 24)} days
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Footer with Actions */}
+                <div className="p-3 border-t border-gray-800/40 bg-[#13141B]/30">
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={handleLockLike}
+                      disabled={loading || parseFloat(amount) <= 0}
+                      className="flex-1 group relative px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-md transition-all duration-300"></div>
+                      <div className="absolute inset-0 bg-gradient-to-r from-[#00ff9d] to-[#00ffa3] rounded-md opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
+                      <div className="relative flex items-center justify-center space-x-1 text-black">
+                        {loading ? (
+                          <>
+                            <FiLoader className="animate-spin w-3 h-3" /> 
+                            <span>Locking...</span>
+                          </>
+                        ) : (
+                          <span>Confirm</span>
+                        )}
                       </div>
-                      <p className="mt-1.5 text-sm text-gray-400">
-                        Available: {balance.bsv.toFixed(8)} BSV
-                      </p>
-                    </div>
+                    </button>
                     
-                    <div>
-                      <label htmlFor="lockDuration" className="block text-sm font-medium text-gray-300 mb-2">
-                        Lock Duration (blocks)
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          name="lockDuration"
-                          id="lockDuration"
-                          className="w-full bg-[#13141B] border border-gray-800/60 rounded-lg px-4 py-2.5 text-sm text-white focus:ring-[#00ffa3]/50 focus:border-[#00ffa3]/50 transition-colors duration-300"
-                          placeholder={DEFAULT_LOCKLIKE_BLOCKS.toString()}
-                          value={lockDuration}
-                          onChange={handleDurationChange}
-                          step="1"
-                          min="1"
-                        />
-                      </div>
-                      <p className="mt-1.5 text-sm text-gray-400">
-                        Approximately {Math.round(parseInt(lockDuration, 10) * 10 / 60 / 24)} days
-                      </p>
-                    </div>
-                  </div>
-                  
-                  {/* Modal footer */}
-                  <div className="p-4 border-t border-gray-800/40 bg-[#13141B]/30">
-                    <div className="flex space-x-3">
-                      <button
-                        onClick={handleLockLike}
-                        disabled={loading || parseFloat(amount) <= 0}
-                        className="flex-1 group relative px-4 py-2 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] rounded-lg transition-all duration-300"></div>
-                        <div className="absolute inset-0 bg-gradient-to-r from-[#00ff9d] to-[#00ffa3] rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
-                        <div className="relative flex items-center justify-center space-x-1 text-black">
-                          {loading ? (
-                            <>
-                              <FiLoader className="animate-spin w-4 h-4" /> 
-                              <span>Locking...</span>
-                            </>
-                          ) : (
-                            <span>Confirm</span>
-                          )}
-                        </div>
-                        <div className="absolute inset-0 bg-[#00ffa3] opacity-0 group-hover:opacity-20 blur-xl transition-all duration-300 rounded-lg"></div>
-                      </button>
-                      
-                      <button
-                        onClick={() => setShowInput(false)}
-                        className="flex-1 px-4 py-2 border border-gray-800/40 text-sm font-medium rounded-lg shadow-sm text-gray-300 bg-[#13141B]/50 hover:bg-[#13141B] focus:outline-none transition-colors duration-300"
-                      >
-                        Cancel
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => setShowInput(false)}
+                      className="flex-1 px-3 py-1.5 border border-gray-800/40 text-xs font-medium rounded-md shadow-sm text-gray-300 bg-[#13141B]/50 hover:bg-[#13141B] focus:outline-none transition-colors"
+                    >
+                      Cancel
+                    </button>
                   </div>
                 </div>
               </div>
-            </div>,
-            document.body
+            </div>
           )}
         </>
       )}
