@@ -21,6 +21,7 @@ interface LockLikeInteractionProps {
 export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLike }: LockLikeInteractionProps) {
   const { wallet, connect, isConnected, isWalletDetected, balance, refreshBalance } = useWallet();
   const [internalLoading, setInternalLoading] = useState(false);
+  const [isLocking, setIsLocking] = useState(false);
   
   const handleLock = async (id: string, amount: number, duration: number): Promise<void> => {
     if (!isConnected || !wallet) {
@@ -28,7 +29,7 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
       return;
     }
     
-    setInternalLoading(true);
+    setIsLocking(true);
     
     try {
       // Get current block height
@@ -115,7 +116,7 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
       toast.error(error instanceof Error ? error.message : 'Failed to lock BSV');
       throw error;
     } finally {
-      setInternalLoading(false);
+      setIsLocking(false);
     }
   };
   
@@ -128,15 +129,20 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
     }
   };
   
+  const handleCancel = () => {
+    setIsLocking(false);
+  };
+  
   return (
     <LockInteraction
       id={posttx_id || replytx_id || ''}
       connected={isConnected}
-      isLocking={internalLoading}
+      isLocking={isLocking}
       wallet={wallet}
       balance={balance}
       refreshBalance={refreshBalance}
       onLock={handleLock}
+      onCancel={handleCancel}
       onConnect={handleConnect}
       modalTitle="Lock BSV"
       type="like"

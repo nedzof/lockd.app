@@ -156,6 +156,12 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
     }
   };
 
+  // Add handleCancel function to reset internal locking state
+  const handleCancel = () => {
+    // Reset the internal locking state when user cancels
+    setInternalLocking(false);
+  };
+
   return (
     <LockInteraction
       id={postId}
@@ -165,6 +171,7 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
       balance={balance}
       refreshBalance={refreshBalance}
       onLock={handlePostLock}
+      onCancel={handleCancel}
       onConnect={handleConnect}
       modalTitle="Lock Bitcoin"
       type="post"

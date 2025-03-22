@@ -1084,7 +1084,8 @@ const PostGrid: React.FC<PostGridProps> = ({
       console.log('Starting vote option lock operation', { optionId, amount, duration });
       
       // Check balance - simplified approach
-      toast.loading('Processing lock transaction...', { id: 'voteLock' });
+      const loadingToastId = 'voteLock';
+      toast.loading('Processing lock transaction...', { id: loadingToastId });
       
       setIsLocking(true);
       
@@ -1181,6 +1182,13 @@ const PostGrid: React.FC<PostGridProps> = ({
       setIsLocking(false);
       toast.dismiss('voteLock');
     }
+  };
+
+  const handleVoteLockCancel = () => {
+    // Dismiss any loading toasts
+    toast.dismiss('voteLock');
+    // Reset locking state
+    setIsLocking(false);
   };
 
   const handlePostLock = async (postId: string, amount: number, duration: number) => {
@@ -1614,6 +1622,7 @@ const PostGrid: React.FC<PostGridProps> = ({
                                       <VoteOptionLockInteraction 
                                         optionId={option.id} 
                                         onLock={handlevote_optionLock}
+                                        onCancel={handleVoteLockCancel}
                                         isLocking={isLocking}
                                         connected={!!wallet}
                                       />
