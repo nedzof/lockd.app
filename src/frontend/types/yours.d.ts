@@ -32,7 +32,7 @@ declare module 'yours-wallet-provider' {
 
   export interface LockParams {
     address: string;
-    block_height: number;
+    blockHeight: number;
     sats: number;
   }
 
@@ -52,6 +52,7 @@ declare module 'yours-wallet-provider' {
     sendBsv: (params: PaymentParams[]) => Promise<SendResponse>;
     inscribe: (params: InscriptionParams[]) => Promise<SendResponse>;
     lockBsv: (params: LockParams[]) => Promise<SendResponse>;
+    lock: (params: LockParams[]) => Promise<SendResponse>;
     getPaymentUtxos: () => Promise<Array<{
       satoshis: number;
       script: string;

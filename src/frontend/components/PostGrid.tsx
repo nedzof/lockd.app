@@ -1081,10 +1081,77 @@ const PostGrid: React.FC<PostGridProps> = ({
     }
 
     try {
+      console.log('Starting vote option lock operation', { optionId, amount, duration });
+      
       // Check balance - simplified approach
-      toast.loading('Checking wallet balance...');
+      toast.loading('Processing lock transaction...', { id: 'voteLock' });
       
       setIsLocking(true);
+      
+      // Get current block height
+      const blockHeightResponse = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+      const blockHeightData = await blockHeightResponse.json();
+      const currentBlockHeight = blockHeightData.blocks;
+      
+      if (!currentBlockHeight) {
+        throw new Error('Failed to fetch current block height');
+      }
+      
+      // Get user's identity address
+      const addresses = await wallet.getAddresses();
+      
+      if (!addresses?.identityAddress) {
+        throw new Error('Could not get identity address');
+      }
+      
+      // Calculate unlock height and satoshi amount
+      const unlockHeight = currentBlockHeight + duration;
+      const satoshiAmount = Math.floor(amount * 100000000); // Convert BSV to satoshis
+      
+      // Create lock parameters
+      const locks = [
+        { 
+          address: addresses.identityAddress,
+          blockHeight: unlockHeight,
+          sats: satoshiAmount
+        }
+      ];
+      
+      console.log('Lock parameters:', locks);
+      
+      // Attempt lock transaction using wallet
+      let txResponse;
+      
+      // Try wallet.lock first (as in documentation)
+      if (typeof (wallet as any).lock === 'function') {
+        console.log('Using wallet.lock()');
+        txResponse = await (wallet as any).lock(locks);
+      }
+      // Fall back to lockBsv
+      else if (typeof wallet.lockBsv === 'function') {
+        console.log('Using wallet.lockBsv()');
+        txResponse = await wallet.lockBsv(locks);
+      }
+      // Try global window.yours as a last resort
+      else if (window.yours && typeof (window.yours as any).lock === 'function') {
+        console.log('Using window.yours.lock()');
+        txResponse = await (window.yours as any).lock(locks);
+      }
+      else if (window.yours && typeof (window.yours as any).lockBsv === 'function') {
+        console.log('Using window.yours.lockBsv()');
+        txResponse = await (window.yours as any).lockBsv(locks);
+      }
+      else {
+        throw new Error('No lock method available on wallet');
+      }
+      
+      if (!txResponse || !txResponse.txid) {
+        throw new Error('Failed to create lock transaction');
+      }
+      
+      console.log('Lock transaction created with txid:', txResponse.txid);
+      
+      // Send the transaction ID to the API
       const response = await fetch(`${API_URL}/api/lock-likes/vote-options`, {
         method: 'POST',
         headers: {
@@ -1092,22 +1159,27 @@ const PostGrid: React.FC<PostGridProps> = ({
         },
         body: JSON.stringify({
           vote_option_id: optionId,
-          amount,
+          amount: satoshiAmount,
           lock_duration: duration,
-          author_address: user_id, // Use the user_id from props which should be the wallet address
+          author_address: addresses.identityAddress,
+          tx_id: txResponse.txid,
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to lock BSV on vote option');
+        const errorText = await response.text();
+        console.error('API error:', errorText);
+        throw new Error(`API error: ${response.status} ${errorText}`);
       }
 
-      toast.success('Successfully locked BSV on vote option');
+      toast.success('Successfully locked BSV on vote option', { id: 'voteLock' });
       fetchPosts(); // Refresh posts to show updated lock amounts
     } catch (error) {
-      toast.error('Failed to lock BSV on vote option');
+      console.error('Error locking BSV on vote option:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to lock BSV on vote option', { id: 'voteLock' });
     } finally {
       setIsLocking(false);
+      toast.dismiss('voteLock');
     }
   };
 

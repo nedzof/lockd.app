@@ -375,16 +375,16 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
         // Get current block height from the network using our optimized cached getter
         directLog(`[${operationId}] Getting block height`);
         const blockHeightStartTime = logPerformance(`[${operationId}] Fetching current block height`);
-        const currentblock_height = await getBlockHeight();
-        directLog(`[${operationId}] Got block height: ${currentblock_height}`);
-        logPerformance(`[${operationId}] Got current block height: ${currentblock_height}`, blockHeightStartTime);
+        const currentBlockHeight = await getBlockHeight();
+        directLog(`[${operationId}] Got block height: ${currentBlockHeight}`);
+        logPerformance(`[${operationId}] Got current block height: ${currentBlockHeight}`, blockHeightStartTime);
 
-        if (!currentblock_height) {
+        if (!currentBlockHeight) {
           directLog(`[${operationId}] No block height received`);
           throw new Error('Could not get current block height');
         }
 
-        const nLockTime = currentblock_height + parsedDuration;
+        const nLockTime = currentBlockHeight + parsedDuration;
         directLog(`[${operationId}] Calculated nLockTime: ${nLockTime}`);
 
         // Create the lock transaction using the wallet's lockBsv function
@@ -400,11 +400,61 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
         }];
         directLog(`[${operationId}] Lock params:`, lockParams);
         
-        const lockResponse = await wallet.lockBsv(lockParams);
-        directLog(`[${operationId}] Lock response:`, lockResponse);
+        // Try both methods with enhanced error handling
+        let lockResponse;
+        try {
+          // Try using the global window.yours object directly first
+          if (window.yours) {
+            directLog(`[${operationId}] Using global window.yours object directly`);
+            
+            // Try lock method first (as in documentation)
+            if (typeof (window.yours as any).lock === 'function') {
+              directLog(`[${operationId}] window.yours.lock is a function, using it directly`);
+              lockResponse = await (window.yours as any).lock(lockParams);
+            }
+            // Fall back to lockBsv
+            else if (typeof (window.yours as any).lockBsv === 'function') {
+              directLog(`[${operationId}] window.yours.lock not found, trying window.yours.lockBsv`);
+              lockResponse = await (window.yours as any).lockBsv(lockParams);
+            }
+            else {
+              directLog(`[${operationId}] ❌ Neither lock nor lockBsv methods available on window.yours!`);
+              throw new Error('No lock methods available on global wallet object');
+            }
+          }
+          // Fall back to wallet provider
+          else {
+            directLog(`[${operationId}] window.yours not available, using provider wallet object`);
+            
+            // First try the method from documentation
+            if (typeof (wallet as any).lock === 'function') {
+              directLog(`[${operationId}] Using wallet.lock() as shown in documentation`);
+              lockResponse = await (wallet as any).lock(lockParams);
+            } 
+            // Fall back to lockBsv if lock isn't available
+            else if (typeof wallet.lockBsv === 'function') {
+              directLog(`[${operationId}] wallet.lock not found, trying wallet.lockBsv()`);
+              lockResponse = await wallet.lockBsv(lockParams);
+            }
+            else {
+              directLog(`[${operationId}] ❌ Neither lock nor lockBsv methods are available on wallet!`);
+              throw new Error('No locking method available on the wallet');
+            }
+          }
+          
+          directLog(`[${operationId}] Lock response:`, lockResponse);
+        } catch (error) {
+          directLog(`[${operationId}] Error during lock operation:`, error);
+          throw error;
+        }
+        
         logPerformance(`[${operationId}] Lock transaction created`, lockStartTime);
 
-        if (!lockResponse || !lockResponse.txid) {
+        // Handle both property name patterns (camelCase and snake_case)
+        const anyResponse = lockResponse as any;
+        const txid = anyResponse?.txid || anyResponse?.tx_id;
+
+        if (!lockResponse || !txid) {
           directLog(`[${operationId}] Lock response invalid:`, lockResponse);
           throw new Error('Failed to create lock transaction');
         }
@@ -417,7 +467,7 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
           author_address: addresses.identityAddress,
           amount: satoshiAmount,
           lock_duration: parsedDuration,
-          tx_id: lockResponse.txid,
+          tx_id: txid,
         };
         
         directLog(`[${operationId}] API request:`, apiRequestBody);
