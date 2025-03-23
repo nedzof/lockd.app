@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useWallet } from '../providers/WalletProvider';
 import { toast } from 'react-hot-toast';
 import { API_URL } from "../config";
 import { LockLike } from '../types';
 import LockInteraction from './LockInteraction';
+import { useLockHandler, WalletInterface } from './WalletConnectionHelper';
 
 interface LockLikeInteractionProps {
   posttx_id?: string;
@@ -19,118 +20,118 @@ interface LockLikeInteractionProps {
 }
 
 export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLike }: LockLikeInteractionProps) {
-  const { wallet, connect, isConnected, isWalletDetected, balance, refreshBalance } = useWallet();
-  const [internalLoading, setInternalLoading] = useState(false);
-  const [isLocking, setIsLocking] = useState(false);
+  const walletProvider = useWallet();
+  // Cast wallet to our interface to ensure compatibility
+  const wallet = walletProvider.wallet as unknown as WalletInterface;
+  const { isConnected, balance, refreshBalance } = walletProvider;
   
-  const handleLock = async (id: string, amount: number, duration: number): Promise<void> => {
-    if (!isConnected || !wallet) {
-      toast.error('Please connect your wallet first');
+  // Use our shared lock handler hook
+  const { 
+    isLocking, 
+    balance: localBalance, 
+    handleConnect, 
+    handleCancel, 
+    handleLock 
+  } = useLockHandler(wallet, isConnected, refreshBalance);
+  
+  // Implementation of the actual lock logic
+  const performLock = async (id: string, amount: number, duration: number) => {
+    if (!wallet) {
+      toast.error('Wallet is not available');
       return;
     }
     
-    setIsLocking(true);
+    // Check for required methods
+    const getAddresses = wallet.getAddresses;
+    if (!getAddresses) {
+      toast.error('Wallet get addresses functionality is not available');
+      return;
+    }
     
-    try {
-      // Get current block height
-      const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
-      const data = await response.json();
-      const currentBlockHeight = data.blocks || 800000;
-      
-      // Get user's identity address
-      const addresses = await wallet.getAddresses();
-      
-      if (!addresses?.identityAddress) {
-        throw new Error('Could not get identity address');
+    // Get current block height
+    const response = await fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+    const data = await response.json();
+    const currentBlockHeight = data.blocks || 800000;
+    
+    // Get user's identity address
+    const addresses = await getAddresses();
+    
+    if (!addresses?.identityAddress) {
+      throw new Error('Could not get identity address');
+    }
+    
+    // Calculate unlock height and satoshi amount
+    const unlockHeight = currentBlockHeight + duration;
+    const SATS_PER_BSV = 100000000;
+    const satoshiAmount = Math.floor(amount * SATS_PER_BSV);
+    
+    // Create lock parameters
+    const lockParams = [{
+      address: addresses.identityAddress,
+      blockHeight: unlockHeight,
+      sats: satoshiAmount,
+    }];
+    
+    // Try both methods with fallbacks
+    let lockResponse;
+    
+    // Try using the global window.yours object directly first
+    if (window.yours) {
+      // Try lock method first (as in documentation)
+      if (typeof (window.yours as any).lock === 'function') {
+        lockResponse = await (window.yours as any).lock(lockParams);
       }
-      
-      // Calculate unlock height and satoshi amount
-      const unlockHeight = currentBlockHeight + duration;
-      const SATS_PER_BSV = 100000000;
-      const satoshiAmount = Math.floor(amount * SATS_PER_BSV);
-      
-      // Create lock parameters
-      const lockParams = [{
-        address: addresses.identityAddress,
-        blockHeight: unlockHeight,
-        sats: satoshiAmount,
-      }];
-      
-      // Try both methods with fallbacks
-      let lockResponse;
-      
-      // Try using the global window.yours object directly first
-      if (window.yours) {
-        // Try lock method first (as in documentation)
-        if (typeof (window.yours as any).lock === 'function') {
-          lockResponse = await (window.yours as any).lock(lockParams);
-        }
-        // Fall back to lockBsv
-        else if (typeof (window.yours as any).lockBsv === 'function') {
-          lockResponse = await (window.yours as any).lockBsv(lockParams);
-        }
-        else {
-          throw new Error('No lock methods available on global wallet object');
-        }
+      // Fall back to lockBsv
+      else if (typeof (window.yours as any).lockBsv === 'function') {
+        lockResponse = await (window.yours as any).lockBsv(lockParams);
       }
-      // Fall back to wallet provider
       else {
-        // First try the method from documentation
-        if (typeof (wallet as any).lock === 'function') {
-          lockResponse = await (wallet as any).lock(lockParams);
-        } 
-        // Fall back to lockBsv if lock isn't available
-        else if (typeof wallet.lockBsv === 'function') {
-          lockResponse = await wallet.lockBsv(lockParams);
-        }
-        else {
-          throw new Error('No locking method available on the wallet');
-        }
+        throw new Error('No lock methods available on global wallet object');
       }
-      
-      // Handle both property name patterns (camelCase and snake_case)
-      const anyResponse = lockResponse as any;
-      const txid = anyResponse?.txid || anyResponse?.tx_id;
-      
-      if (!lockResponse || !txid) {
-        throw new Error('Failed to create lock transaction');
-      }
-      
-      // Call the parent component's postLockLike function
-      await postLockLike(
-        txid,
-        satoshiAmount,
-        unlockHeight,
-        addresses.identityAddress,
-        posttx_id,
-        replytx_id
-      );
-      
-      // Success
-      toast.success(`Successfully locked ${amount} BSV for ${duration} blocks!`);
-      
-      // Refresh balance after locking
-      await refreshBalance();
-      
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to lock BSV');
-      throw error;
-    } finally {
-      setIsLocking(false);
     }
+    // Fall back to wallet provider - we already checked wallet is defined above
+    else {
+      // First try the method from documentation
+      const lockMethod = (wallet as any).lock;
+      const lockBsvMethod = wallet.lockBsv;
+      
+      if (typeof lockMethod === 'function') {
+        lockResponse = await lockMethod(lockParams);
+      } 
+      // Fall back to lockBsv if lock isn't available
+      else if (typeof lockBsvMethod === 'function') {
+        lockResponse = await lockBsvMethod(lockParams);
+      }
+      else {
+        throw new Error('No locking method available on the wallet');
+      }
+    }
+    
+    // Handle both property name patterns (camelCase and snake_case)
+    const anyResponse = lockResponse as any;
+    const txid = anyResponse?.txid || anyResponse?.tx_id;
+    
+    if (!lockResponse || !txid) {
+      throw new Error('Failed to create lock transaction');
+    }
+    
+    // Call the parent component's postLockLike function
+    await postLockLike(
+      txid,
+      satoshiAmount,
+      unlockHeight,
+      addresses.identityAddress,
+      posttx_id,
+      replytx_id
+    );
+    
+    // Success
+    toast.success(`Successfully locked ${amount} BSV for ${duration} blocks!`);
   };
   
-  const handleConnect = async () => {
-    try {
-      await connect();
-      await refreshBalance();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to connect wallet');
-    }
-  };
-  
-  const handleCancel = () => {
-    setIsLocking(false);
+  // Wrapper around handleLock to provide our implementation
+  const onLock = async (id: string, amount: number, duration: number) => {
+    await handleLock(id, amount, duration, performLock);
   };
   
   return (
@@ -141,7 +142,7 @@ export default function LockLikeInteraction({ posttx_id, replytx_id, postLockLik
       wallet={wallet}
       balance={balance}
       refreshBalance={refreshBalance}
-      onLock={handleLock}
+      onLock={onLock}
       onCancel={handleCancel}
       onConnect={handleConnect}
       modalTitle="Lock BSV"

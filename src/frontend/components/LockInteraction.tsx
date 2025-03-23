@@ -4,6 +4,7 @@ import { SiBitcoinsv } from 'react-icons/si';
 import { toast } from 'react-hot-toast';
 import { API_URL } from '../config';
 import { createPortal } from 'react-dom';
+import { ensureWalletConnected, WalletInterface } from './WalletConnectionHelper';
 
 // Constants for locking
 const SATS_PER_BSV = 100000000;
@@ -49,7 +50,7 @@ interface LockInteractionProps {
   id: string;
   connected?: boolean;
   isLocking?: boolean;
-  wallet?: any; // Wallet instance, if available directly
+  wallet?: WalletInterface | null; // Use our typed interface
   balance?: { bsv: number }; // Wallet balance, if available
   refreshBalance?: () => Promise<void>; // For refreshing wallet balance
   onLock: (id: string, amount: number, duration: number) => Promise<void>;
@@ -144,16 +145,8 @@ const LockInteraction: React.FC<LockInteractionProps> = ({
   };
 
   const handleOpen = async () => {
-    // If not connected but we have a connect handler, connect first
-    if (!connected && onConnect) {
-      try {
-        await onConnect();
-      } catch (error) {
-        toast.error('Failed to connect wallet');
-        return;
-      }
-    }
-    
+    // When opening the modal, we don't need to verify connection again
+    // since handleButtonClick already did that for us
     setShowOptions(true);
   };
 
@@ -193,8 +186,9 @@ const LockInteraction: React.FC<LockInteractionProps> = ({
   };
 
   const handleLock = async () => {
-    if (!connected) {
-      toast.error('Please connect your wallet first');
+    const isConnected = await ensureWalletConnected(connected, wallet, refreshBalance);
+    
+    if (!isConnected) {
       return;
     }
     
@@ -305,34 +299,54 @@ const LockInteraction: React.FC<LockInteractionProps> = ({
 
   // Render either gradient button or icon-style button
   const renderButton = () => {
+    // Direct connect handler for disconnected state
+    const handleButtonClick = async () => {
+      if (!connected) {
+        // Try to verify actual connection status with the wallet
+        const actuallyConnected = await ensureWalletConnected(connected, wallet, refreshBalance);
+        
+        if (!actuallyConnected) {
+          // If still not connected after trying, don't proceed
+          return;
+        }
+      }
+      
+      // If we get here, we're either already connected or just connected successfully
+      handleOpen();
+    };
+
     if (buttonStyle === 'gradient') {
       return (
         <button
-          onClick={handleOpen}
+          onClick={handleButtonClick}
           disabled={isCurrentlyLocking}
-          className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium rounded-full shadow-sm text-gray-900 bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3] focus:outline-none focus:ring-1 focus:ring-[#00ffa3] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transform hover:scale-105"
+          className={`inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium rounded-full shadow-sm text-gray-900 ${
+            !connected ? 'bg-gradient-to-r from-gray-300 to-gray-200 hover:from-gray-300 hover:to-gray-200' : 'bg-gradient-to-r from-[#00ffa3] to-[#00ff9d] hover:from-[#00ff9d] hover:to-[#00ffa3]'
+          } focus:outline-none focus:ring-1 focus:ring-[#00ffa3] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transform hover:scale-105`}
+          title={!connected ? "Connect your wallet to lock" : "Lock Bitcoin"}
         >
           {isCurrentlyLocking ? (
             <FiLoader className="animate-spin mr-1" size={14} />
           ) : (
             <FiLock className="mr-1" size={14} />
           )}
-          <span>Lock</span>
+          <span>{!connected ? "Connect Wallet" : "Lock"}</span>
         </button>
       );
     } else {
       return (
         <button
-          onClick={handleOpen}
+          onClick={handleButtonClick}
           disabled={isCurrentlyLocking}
           className="flex items-center space-x-1 text-gray-600 dark:text-gray-400 hover:text-orange-500 dark:hover:text-orange-400"
+          title={!connected ? "Connect your wallet to lock" : "Lock Bitcoin"}
         >
           {isCurrentlyLocking ? (
             <FiLoader className="animate-spin h-4 w-4" />
           ) : (
             <SiBitcoinsv className="h-4 w-4" />
           )}
-          <span>Lock</span>
+          <span>{!connected ? "Connect Wallet" : "Lock"}</span>
         </button>
       );
     }
