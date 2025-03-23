@@ -2,12 +2,11 @@
 
 ## Authentication & Wallet Issues
 
-### 1. Wallet Balance Detection Failure on Locking
+### 1. Wallet Balance Detection Failure on Locking **Fixed**
 **Description**:  
 - Persistent "Checking wallet balance..." message regardless of connection state
 - No proper state handling for unconnected wallets
 
-**Fixed**
 **Resolution**: Implemented proper wallet connection state handling with appropriate user feedback
 
 **Expected Behavior**:  
@@ -21,12 +20,11 @@
 
 ## UI/UX Issues
 
-### 2. Modal Interaction Problems
+### 2. Modal Interaction Problems **Fixed**
 **Description**:  
 - Can't use Enter/Esc in locking modal
 - Keyboard navigation not functional
 
-**Fixed**
 **Resolution**: Added keyboard support - Enter to confirm and Esc to cancel in modals
 
 **Reproduction Steps**:  
