@@ -7,6 +7,9 @@
 - Persistent "Checking wallet balance..." message regardless of connection state
 - No proper state handling for unconnected wallets
 
+**Fixed**
+**Resolution**: Implemented proper wallet connection state handling with appropriate user feedback
+
 **Expected Behavior**:  
 - Clear wallet connection prompt when unconnected
 - Balance check timeout with user feedback
@@ -22,6 +25,9 @@
 **Description**:  
 - Can't use Enter/Esc in locking modal
 - Keyboard navigation not functional
+
+**Fixed**
+**Resolution**: Added keyboard support - Enter to confirm and Esc to cancel in modals
 
 **Reproduction Steps**:  
 1. Initiate locking process
@@ -213,3 +219,26 @@ interface StatsData {
 }
 ```
 </details>
+
+---
+
+## Missing Features
+
+### 12. User Lock Tracking (NEEDS IMPLEMENTATION)
+**Description**:  
+- No functionality to track individual user lock activities
+- Unable to monitor historical lock data per wallet
+
+**Required Functionality**:
+- Track lock events by user wallet address
+- Store timestamp, duration, and value data
+- Provide API endpoints for retrieving user-specific lock history
+- Implement UI components to display personalized lock statistics
+
+**Technical Specifications**:
+- Database schema needs user_id/wallet_address field in locks table
+- API endpoint for `/api/users/:address/locks`
+- Dashboard component for user lock history visualization
+- Filtering capabilities (time range, lock value, status)
+
+**Priority**: High
