@@ -15,6 +15,12 @@ const DEFAULT_LOCK_DURATION = 10; // Default lock duration in blocks
 const MIN_LOCK_DURATION = 1; // Minimum lock duration
 const TRANSACTION_TIMEOUT = 45000; // 45 seconds timeout for wallet transaction
 
+// Storage keys for preserving state across page refreshes
+const LOCK_STATE_KEY = 'lockd_lock_interaction_state';
+const LOCK_MODAL_OPEN_KEY = 'lockd_lock_modal_open';
+const LOCK_TYPE_KEY = 'lockd_lock_type';
+const LOCK_ID_KEY = 'lockd_lock_id';
+
 // Block height cache to prevent repeated network calls
 const BLOCK_HEIGHT_CACHE_DURATION = 600000; // 10 minutes
 let cachedBlockHeight: number | null = null;
@@ -58,7 +64,7 @@ interface LockInteractionProps {
   modalTitle?: string;
   type?: 'post' | 'vote' | 'like';
   buttonStyle?: 'gradient' | 'icon'; // Different button styles
-  onConnect?: () => Promise<void>; // Optional connect handler
+  onConnect?: () => Promise<boolean | void>; // Optional connect handler
 }
 
 const LockInteraction: React.FC<LockInteractionProps> = ({
@@ -75,6 +81,8 @@ const LockInteraction: React.FC<LockInteractionProps> = ({
   buttonStyle = 'gradient',
   onConnect,
 }) => {
+  // Check for saved state on component mount
+  const [initialStateRestored, setInitialStateRestored] = useState(false);
   const [amount, setAmount] = useState(DEFAULT_BSV_AMOUNT.toString());
   const [duration, setDuration] = useState(DEFAULT_LOCK_DURATION.toString());
   const [showOptions, setShowOptions] = useState(false);
@@ -83,6 +91,49 @@ const LockInteraction: React.FC<LockInteractionProps> = ({
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lockPromiseRef = useRef<Promise<void> | null>(null);
   const lockPromiseResolverRef = useRef<() => void>(() => {});
+
+  // Restore saved state when component mounts
+  useEffect(() => {
+    const savedShowOptions = localStorage.getItem(LOCK_MODAL_OPEN_KEY) === 'true';
+    const savedType = localStorage.getItem(LOCK_TYPE_KEY);
+    const savedId = localStorage.getItem(LOCK_ID_KEY);
+    
+    // Only restore if the saved ID and type match current props
+    if (savedShowOptions && savedType === type && savedId === id) {
+      try {
+        const savedState = localStorage.getItem(LOCK_STATE_KEY);
+        if (savedState) {
+          const { amount: savedAmount, duration: savedDuration } = JSON.parse(savedState);
+          setAmount(savedAmount || DEFAULT_BSV_AMOUNT.toString());
+          setDuration(savedDuration || DEFAULT_LOCK_DURATION.toString());
+          setShowOptions(true);
+        }
+      } catch (e) {
+        console.error('Error restoring lock state:', e);
+      }
+    }
+    setInitialStateRestored(true);
+  }, [id, type]);
+
+  // Save state when dialog is shown or values change
+  useEffect(() => {
+    if (!initialStateRestored) return;
+    
+    if (showOptions) {
+      localStorage.setItem(LOCK_MODAL_OPEN_KEY, 'true');
+      localStorage.setItem(LOCK_TYPE_KEY, type);
+      localStorage.setItem(LOCK_ID_KEY, id);
+      localStorage.setItem(LOCK_STATE_KEY, JSON.stringify({
+        amount,
+        duration
+      }));
+    } else {
+      localStorage.removeItem(LOCK_MODAL_OPEN_KEY);
+      localStorage.removeItem(LOCK_STATE_KEY);
+      localStorage.removeItem(LOCK_TYPE_KEY);
+      localStorage.removeItem(LOCK_ID_KEY);
+    }
+  }, [showOptions, amount, duration, id, type, initialStateRestored]);
 
   // Clear timeout on unmount
   useEffect(() => {
@@ -93,12 +144,61 @@ const LockInteraction: React.FC<LockInteractionProps> = ({
     };
   }, []);
 
+  // Listen for wallet connection events
+  useEffect(() => {
+    const handleWalletConnected = () => {
+      // If the modal was open and we get a connection event, refresh the balance
+      if (showOptions && refreshBalance) {
+        refreshBalance();
+      }
+    };
+    
+    window.addEventListener('walletConnected', handleWalletConnected);
+    return () => {
+      window.removeEventListener('walletConnected', handleWalletConnected);
+    };
+  }, [showOptions, refreshBalance]);
+
   // Refresh balance when modal is opened
   React.useEffect(() => {
     if (showOptions && connected && refreshBalance) {
       refreshBalance();
     }
   }, [showOptions, connected, refreshBalance]);
+
+  // Listen for visibility change (when user switches tabs or refreshes page)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // If we were in the middle of a transaction when page visibility changed
+        // We need to check if the transaction state was persisted in storage
+        const savedShowOptions = localStorage.getItem(LOCK_MODAL_OPEN_KEY) === 'true';
+        const savedType = localStorage.getItem(LOCK_TYPE_KEY);
+        const savedId = localStorage.getItem(LOCK_ID_KEY);
+        
+        // Only restore if the saved ID and type match current props
+        if (savedShowOptions && savedType === type && savedId === id) {
+          // If the modal should be open, refresh wallet balance if possible
+          if (connected && refreshBalance) {
+            refreshBalance();
+          }
+          
+          // Prompt the user if there might have been a pending transaction
+          if (timeoutRef.current) {
+            setTransactionTimedOut(true);
+            toast.success("Please confirm if you completed or canceled the transaction in your wallet.", {
+              duration: 5000,
+            });
+          }
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [id, type, connected, refreshBalance]);
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
@@ -224,29 +324,59 @@ const LockInteraction: React.FC<LockInteractionProps> = ({
         }
       }, TRANSACTION_TIMEOUT);
       
-      // Start the locking process
-      const lockPromise = onLock(id, parsedAmount, parsedDuration);
-      
-      // Race the actual lock promise against our cancelable promise
-      await Promise.race([
-        lockPromise,
-        lockPromiseRef.current
-      ]);
-      
-      // If we get here and the transaction hasn't been canceled, it's a success
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-        
-        // Only proceed if the cancelable promise didn't win the race
-        if (internalLoading) {
-          setShowOptions(false);
+      // Setup event listener for page refreshes that might happen during wallet connection
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible' && timeoutRef.current) {
+          // When page becomes visible again after being hidden (e.g., after wallet interactions)
+          // Check if we're still waiting (timeout still exists) and prompt user
+          setTransactionTimedOut(true);
+          toast.success("Please confirm if you completed or canceled the transaction in your wallet.", {
+            duration: 5000,
+          });
         }
+      };
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      
+      try {
+        // Start the locking process
+        const lockPromise = onLock(id, parsedAmount, parsedDuration);
+        
+        // Race the actual lock promise against our cancelable promise
+        await Promise.race([
+          lockPromise,
+          lockPromiseRef.current
+        ]);
+        
+        // If we get here and the transaction hasn't been canceled, it's a success
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
+          
+          // Only proceed if the cancelable promise didn't win the race
+          if (internalLoading) {
+            setShowOptions(false);
+          }
+        }
+      } finally {
+        // Clean up the event listener
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
       }
     } catch (error) {
       // Only show error if the operation wasn't manually canceled
       if (internalLoading) {
-        toast.error(error instanceof Error ? error.message : 'Failed to lock BSV');
+        if (error instanceof Error) {
+          // Filter out cancellation errors
+          if (!error.message.includes('canceled') && !error.message.includes('rejected')) {
+            toast.error(error.message);
+          } else {
+            // If it was a cancellation, we should reset the UI
+            cancelLockOperation();
+            return;
+          }
+        } else {
+          toast.error('Failed to lock BSV');
+        }
       }
     } finally {
       setInternalLoading(false);
@@ -261,7 +391,7 @@ const LockInteraction: React.FC<LockInteractionProps> = ({
   
   const isCurrentlyLocking = isLocking || internalLoading;
   
-  // Update the Escape key handler and add Enter key handler - MOVED to after all function declarations
+  // Update the Escape key handler and add Enter key handler
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && showOptions) {

@@ -419,6 +419,7 @@ export const useLockHandler = (
 ) => {
   const [isLocking, setIsLocking] = useState(false);
   const [balance, setBalance] = useState({ bsv: 0 });
+  const [connectionInProgress, setConnectionInProgress] = useState(false);
 
   // Function to refresh wallet balance
   const handleRefreshBalance = useCallback(async () => {
@@ -434,12 +435,19 @@ export const useLockHandler = (
 
   // Connect wallet handler
   const handleConnect = useCallback(async () => {
-    await connectWallet(wallet, handleRefreshBalance);
+    setConnectionInProgress(true);
+    try {
+      const success = await connectWallet(wallet, handleRefreshBalance);
+      return success;
+    } finally {
+      setConnectionInProgress(false);
+    }
   }, [wallet, handleRefreshBalance]);
 
   // Cancel lock operation handler
   const handleCancel = useCallback(() => {
     setIsLocking(false);
+    setConnectionInProgress(false);
   }, []);
 
   // Generic lock handler that can be customized by the implementing component
@@ -449,7 +457,14 @@ export const useLockHandler = (
     duration: number,
     lockImplementation?: (id: string, amount: number, duration: number) => Promise<void>
   ) => {
+    // If we're already in a locking state, don't start another operation
+    if (isLocking || connectionInProgress) {
+      return;
+    }
+    
+    setConnectionInProgress(true);
     const isWalletConnected = await ensureWalletConnected(isConnected, wallet, handleRefreshBalance);
+    setConnectionInProgress(false);
     
     if (!isWalletConnected) {
       return;
@@ -470,15 +485,19 @@ export const useLockHandler = (
       // Refresh balance after successful lock
       await handleRefreshBalance();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to lock BSV');
+      // Handle actual errors but allow cancellations to pass silently
+      if (error instanceof Error && !error.message.includes('canceled') && !error.message.includes('rejected')) {
+        toast.error(error.message);
+      }
       throw error;
     } finally {
       setIsLocking(false);
     }
-  }, [isConnected, wallet, handleRefreshBalance, onLockSuccess]);
+  }, [isConnected, wallet, handleRefreshBalance, onLockSuccess, isLocking, connectionInProgress]);
 
   return {
     isLocking,
+    connectionInProgress,
     balance,
     handleRefreshBalance,
     handleConnect,
