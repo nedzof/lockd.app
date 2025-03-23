@@ -26,6 +26,31 @@ export default function Layout({
   
   const location = useLocation();
   
+  // Add a state to track the last time we received a wallet update
+  const [lastWalletUpdate, setLastWalletUpdate] = React.useState(Date.now());
+  
+  // Listen for custom wallet connection events
+  React.useEffect(() => {
+    const handleWalletConnectionChange = () => {
+      console.log('Layout detected wallet connection change');
+      setLastWalletUpdate(Date.now());
+    };
+    
+    window.addEventListener('walletConnected', handleWalletConnectionChange);
+    
+    return () => {
+      window.removeEventListener('walletConnected', handleWalletConnectionChange);
+    };
+  }, []);
+  
+  // Force re-render when wallet update happens
+  React.useEffect(() => {
+    if (lastWalletUpdate) {
+      // This effect will run whenever lastWalletUpdate changes
+      console.log('Layout refreshing UI after wallet update');
+    }
+  }, [lastWalletUpdate, connected]);
+  
   const displayAddress = React.useMemo(() => {
     if (!connected || !bsvAddress) return null;
     return formatAddress(bsvAddress);

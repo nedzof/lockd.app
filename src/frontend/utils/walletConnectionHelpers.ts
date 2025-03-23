@@ -1,4 +1,22 @@
-import { useYoursWallet } from 'yours-wallet-provider';
+import { useYoursWallet, YoursProviderType, YoursEvents, YoursEventListeners } from 'yours-wallet-provider';
+import { toast } from 'react-hot-toast';
+import { useState, useEffect, useCallback } from 'react';
+
+// Add typings to the wallet object with more flexibility
+export interface WalletInterface {
+  connect?: () => Promise<string | undefined | void>;
+  getBalance?: () => Promise<{ bsv: number } | any>;
+  getAddresses?: () => Promise<{ identityAddress: string; bsvAddress?: string } | any>;
+  lockBsv?: (locks: any) => Promise<{ txid: string } | any>;
+  lock?: (locks: any) => Promise<{ txid: string } | any>;
+  isConnected?: boolean | (() => Promise<boolean>);
+  isReady?: boolean;
+  getPubKeys?: () => Promise<{ identityPubKey: string } | any>;
+  on?: ((event: string, callback: Function) => void) | ((event: YoursEvents, listener: YoursEventListeners) => void);
+  removeListener?: ((event: string, callback: Function) => void) | ((event: YoursEvents, listener: YoursEventListeners) => void);
+  disconnect?: () => Promise<void>;
+  [key: string]: any; // Allow additional properties
+}
 
 type YoursWallet = ReturnType<typeof useYoursWallet>;
 
@@ -7,17 +25,33 @@ type YoursWallet = ReturnType<typeof useYoursWallet>;
  * @param wallet The wallet instance
  * @returns The BSV address if found, otherwise null
  */
-export const getBsvAddress = async (wallet: YoursWallet): Promise<string | null> => {
+export const getBsvAddress = async (wallet: WalletInterface | YoursWallet): Promise<string | null> => {
   if (!wallet) {
     console.error('No wallet provided to getBsvAddress');
     return null;
   }
 
   try {
-    const addresses = await wallet.getAddresses();
-    if (addresses && typeof addresses === 'object' && 'bsvAddress' in addresses) {
-      return addresses.bsvAddress;
+    // Check if getAddresses exists before calling it
+    if (typeof wallet.getAddresses !== 'function') {
+      console.error('Wallet does not have getAddresses method');
+      return null;
     }
+    
+    const addresses = await wallet.getAddresses();
+    
+    // Check different property names that might contain the BSV address
+    if (addresses) {
+      if (typeof addresses === 'object') {
+        if ('bsvAddress' in addresses) {
+          return addresses.bsvAddress;
+        }
+        if ('identityAddress' in addresses) {
+          return addresses.identityAddress;
+        }
+      }
+    }
+    
     return null;
   } catch (error) {
     console.error('Error getting BSV address:', error);
@@ -33,7 +67,7 @@ export const getBsvAddress = async (wallet: YoursWallet): Promise<string | null>
  * @returns Object containing success status and address if successful
  */
 export const ensureWalletConnection = async (
-  wallet: YoursWallet,
+  wallet: WalletInterface | YoursWallet,
   connect: () => Promise<void>,
   maxRetries = 2
 ): Promise<{ success: boolean; address: string | null }> => {
@@ -101,13 +135,34 @@ export const ensureWalletConnection = async (
  * @param wallet The wallet instance
  * @returns True if wallet is connected, false otherwise
  */
-export const isWalletConnected = async (wallet?: YoursWallet): Promise<boolean> => {
+export const isWalletConnected = async (wallet?: WalletInterface | YoursWallet): Promise<boolean> => {
   if (!wallet) {
     return false;
   }
 
   try {
-    return wallet.isConnected ? await wallet.isConnected() : false;
+    // Handle both function and boolean property
+    if (typeof wallet.isConnected === 'function') {
+      return await wallet.isConnected();
+    } else if (typeof wallet.isConnected === 'boolean') {
+      return wallet.isConnected;
+    }
+    
+    // Fallback to checking getAddresses
+    try {
+      // Check if getAddresses exists before calling it
+      if (typeof wallet.getAddresses !== 'function') {
+        return false;
+      }
+      
+      const addresses = await wallet.getAddresses();
+      return !!addresses && (
+        ('bsvAddress' in addresses && !!addresses.bsvAddress) || 
+        ('identityAddress' in addresses && !!addresses.identityAddress)
+      );
+    } catch (e) {
+      return false;
+    }
   } catch (error) {
     console.error('Error checking wallet connection:', error);
     return false;
@@ -119,7 +174,7 @@ export const isWalletConnected = async (wallet?: YoursWallet): Promise<boolean> 
  * @param wallet The wallet instance
  * @returns Detailed wallet status object
  */
-export const getWalletStatus = async (wallet?: YoursWallet): Promise<{
+export const getWalletStatus = async (wallet?: WalletInterface | YoursWallet): Promise<{
   isReady: boolean;
   isConnected: boolean;
   hasAddress: boolean;
@@ -170,4 +225,264 @@ export const getWalletStatus = async (wallet?: YoursWallet): Promise<{
  */
 export const isWalletInstalled = (): boolean => {
   return 'yours' in window && !!window.yours?.isReady;
+};
+
+/**
+ * Helper function to refresh wallet balance with proper error handling
+ * @param wallet - The wallet instance
+ * @param setBalance - State setter function for balance
+ */
+export const refreshWalletBalance = async (
+  wallet: WalletInterface | null | undefined,
+  setBalance: (balance: { bsv: number }) => void
+): Promise<void> => {
+  if (!wallet || !wallet.getBalance) {
+    return;
+  }
+  
+  try {
+    const balanceInfo = await wallet.getBalance();
+    setBalance({ bsv: balanceInfo?.bsv || 0 });
+  } catch (error: unknown) {
+    // Don't display error in console if it's an authorization error
+    if (error && typeof error === 'object' && 'message' in error && 
+        typeof error.message === 'string' && error.message.includes('Unauthorized')) {
+      // Silently fail, this is expected when wallet is not connected
+      return;
+    }
+    console.error('Failed to refresh balance:', error);
+  }
+};
+
+/**
+ * Handles wallet connection with error handling
+ * @param wallet - The wallet instance
+ * @param refreshBalance - Function to refresh balance after connection
+ * @returns true if connection successful, false otherwise
+ */
+export const connectWallet = async (
+  wallet: WalletInterface | null | undefined,
+  refreshBalance: () => Promise<void>
+): Promise<boolean> => {
+  if (!wallet || !wallet.connect) {
+    toast.error('Wallet provider not available');
+    return false;
+  }
+  
+  try {
+    toast.success('Please connect your wallet to continue');
+    await wallet.connect();
+    
+    // Verify that connection was successful
+    const connected = await isWalletConnected(wallet as WalletInterface);
+    
+    if (connected) {
+      await refreshBalance();
+      
+      // Dispatch custom event for successful wallet connection
+      const walletConnectedEvent = new CustomEvent('walletConnected', { 
+        detail: { source: 'connectWallet' } 
+      });
+      window.dispatchEvent(walletConnectedEvent);
+      
+      return true;
+    } else {
+      toast.error('Wallet connection failed');
+      return false;
+    }
+  } catch (error) {
+    toast.error('Failed to connect wallet');
+    return false;
+  }
+};
+
+/**
+ * Checks if the user is connected to a wallet and attempts to connect if not
+ * @param connected - Current connection status
+ * @param wallet - The wallet instance
+ * @param refreshBalance - Function to refresh balance after connection
+ * @returns true if connected or successfully connected, false otherwise
+ */
+export const ensureWalletConnected = async (
+  connected: boolean,
+  wallet: WalletInterface | null | undefined,
+  refreshBalance: () => Promise<void>
+): Promise<boolean> => {
+  // First check if already connected according to props
+  if (connected) {
+    // Double-check by calling the wallet API
+    const actuallyConnected = await isWalletConnected(wallet as WalletInterface);
+    if (actuallyConnected) {
+      return true;
+    }
+    // If we're not actually connected despite the prop saying we are,
+    // continue to connection attempt
+  }
+  
+  if (wallet && wallet.connect) {
+    const success = await connectWallet(wallet, refreshBalance);
+    
+    // Dispatch a custom event to notify the application about the connection change
+    // This allows the Layout component to update its state
+    if (success) {
+      const walletConnectedEvent = new CustomEvent('walletConnected', { 
+        detail: { source: 'lockButton' } 
+      });
+      window.dispatchEvent(walletConnectedEvent);
+    }
+    
+    return success;
+  }
+  
+  toast.error('Please connect your wallet first');
+  return false;
+};
+
+/**
+ * React hook for handling wallet connection status
+ * @param wallet - The wallet instance
+ * @param initialConnected - Initial connection status
+ * @returns Object with connection state and methods
+ */
+export const useWalletConnection = (
+  wallet: WalletInterface | null | undefined,
+  initialConnected = false
+) => {
+  const [connected, setConnected] = useState(initialConnected);
+  const [balance, setBalance] = useState({ bsv: 0 });
+  const [isCheckingConnection, setIsCheckingConnection] = useState(false);
+  
+  const refreshBalance = useCallback(async () => {
+    await refreshWalletBalance(wallet, setBalance);
+  }, [wallet]);
+  
+  const checkConnection = useCallback(async () => {
+    if (isCheckingConnection) return connected;
+    
+    setIsCheckingConnection(true);
+    try {
+      // Handle null/undefined wallet appropriately
+      const isConnected = wallet ? await isWalletConnected(wallet as WalletInterface) : false;
+      setConnected(isConnected);
+      return isConnected;
+    } finally {
+      setIsCheckingConnection(false);
+    }
+  }, [wallet, connected, isCheckingConnection]);
+  
+  const connectToWallet = useCallback(async () => {
+    const success = await connectWallet(wallet, refreshBalance);
+    if (success) {
+      setConnected(true);
+    }
+    return success;
+  }, [wallet, refreshBalance]);
+  
+  const ensureConnected = useCallback(async () => {
+    if (connected) {
+      // Verify connection
+      const isConnected = await checkConnection();
+      if (isConnected) return true;
+    }
+    
+    return await connectToWallet();
+  }, [connected, checkConnection, connectToWallet]);
+  
+  // Check connection status when component mounts
+  useEffect(() => {
+    checkConnection();
+  }, [checkConnection]);
+  
+  return {
+    connected,
+    balance,
+    refreshBalance,
+    connectToWallet,
+    ensureConnected,
+    checkConnection
+  };
+};
+
+/**
+ * Shared lock handler hook to reduce duplication across components
+ * @param wallet - The wallet instance
+ * @param isConnected - Current connection status
+ * @param refreshBalance - Function to refresh wallet balance
+ * @param onLockSuccess - Optional callback for successful lock
+ * @returns Lock handler state and methods
+ */
+export const useLockHandler = (
+  wallet: WalletInterface | null | undefined,
+  isConnected: boolean,
+  refreshBalance: () => Promise<void>,
+  onLockSuccess?: (id: string, amount: number, duration: number) => Promise<void>
+) => {
+  const [isLocking, setIsLocking] = useState(false);
+  const [balance, setBalance] = useState({ bsv: 0 });
+
+  // Function to refresh wallet balance
+  const handleRefreshBalance = useCallback(async () => {
+    await refreshWalletBalance(wallet, setBalance);
+  }, [wallet]);
+  
+  // Effect to refresh balance on mount
+  useEffect(() => {
+    if (isConnected && wallet) {
+      handleRefreshBalance();
+    }
+  }, [isConnected, wallet, handleRefreshBalance]);
+
+  // Connect wallet handler
+  const handleConnect = useCallback(async () => {
+    await connectWallet(wallet, handleRefreshBalance);
+  }, [wallet, handleRefreshBalance]);
+
+  // Cancel lock operation handler
+  const handleCancel = useCallback(() => {
+    setIsLocking(false);
+  }, []);
+
+  // Generic lock handler that can be customized by the implementing component
+  const handleLock = useCallback(async (
+    id: string, 
+    amount: number, 
+    duration: number,
+    lockImplementation?: (id: string, amount: number, duration: number) => Promise<void>
+  ) => {
+    const isWalletConnected = await ensureWalletConnected(isConnected, wallet, handleRefreshBalance);
+    
+    if (!isWalletConnected) {
+      return;
+    }
+    
+    setIsLocking(true);
+    
+    try {
+      // If custom implementation is provided, use it
+      if (lockImplementation) {
+        await lockImplementation(id, amount, duration);
+      } 
+      // Otherwise use default callback if provided
+      else if (onLockSuccess) {
+        await onLockSuccess(id, amount, duration);
+      }
+      
+      // Refresh balance after successful lock
+      await handleRefreshBalance();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to lock BSV');
+      throw error;
+    } finally {
+      setIsLocking(false);
+    }
+  }, [isConnected, wallet, handleRefreshBalance, onLockSuccess]);
+
+  return {
+    isLocking,
+    balance,
+    handleRefreshBalance,
+    handleConnect,
+    handleCancel,
+    handleLock
+  };
 };

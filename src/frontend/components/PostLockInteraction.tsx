@@ -3,7 +3,7 @@ import { useYoursWallet } from 'yours-wallet-provider';
 import { toast } from 'react-hot-toast';
 import { API_URL } from '../config';
 import LockInteraction from './LockInteraction';
-import { useLockHandler, WalletInterface } from './WalletConnectionHelper';
+import { useLockHandler, WalletInterface } from '../utils/walletConnectionHelpers';
 
 // Constants for wallet integration
 const SATS_PER_BSV = 100000000;
@@ -53,7 +53,8 @@ const PostLockInteraction: React.FC<PostLockInteractionProps> = ({
   isLocking = false,
   onLock = async () => {},
 }) => {
-  const wallet = useYoursWallet() as WalletInterface;
+  // Cast the wallet to our interface to ensure compatibility
+  const wallet = useYoursWallet() as unknown as WalletInterface;
   
   // Use our shared lock handler hook
   const { 

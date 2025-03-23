@@ -4,7 +4,7 @@ import { SiBitcoinsv } from 'react-icons/si';
 import { toast } from 'react-hot-toast';
 import { API_URL } from '../config';
 import { createPortal } from 'react-dom';
-import { ensureWalletConnected, WalletInterface } from './WalletConnectionHelper';
+import { ensureWalletConnected, WalletInterface } from '../utils/walletConnectionHelpers';
 
 // Constants for locking
 const SATS_PER_BSV = 100000000;

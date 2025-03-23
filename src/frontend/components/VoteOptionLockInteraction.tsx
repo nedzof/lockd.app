@@ -1,7 +1,7 @@
 import React from 'react';
 import { useYoursWallet } from 'yours-wallet-provider';
 import LockInteraction from './LockInteraction';
-import { useLockHandler, WalletInterface } from './WalletConnectionHelper';
+import { useLockHandler, WalletInterface } from '../utils/walletConnectionHelpers';
 
 interface VoteOptionLockInteractionProps {
   optionId: string;
@@ -18,7 +18,8 @@ const VoteOptionLockInteraction: React.FC<VoteOptionLockInteractionProps> = ({
   onLock,
   onCancel = () => {},
 }) => {
-  const wallet = useYoursWallet() as WalletInterface;
+  // Cast the wallet to our interface to ensure compatibility
+  const wallet = useYoursWallet() as unknown as WalletInterface;
   
   // Use our shared lock handler hook
   const { 

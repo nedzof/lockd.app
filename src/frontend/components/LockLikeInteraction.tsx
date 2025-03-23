@@ -4,7 +4,7 @@ import { toast } from 'react-hot-toast';
 import { API_URL } from "../config";
 import { LockLike } from '../types';
 import LockInteraction from './LockInteraction';
-import { useLockHandler, WalletInterface } from './WalletConnectionHelper';
+import { useLockHandler, WalletInterface } from '../utils/walletConnectionHelpers';
 
 interface LockLikeInteractionProps {
   posttx_id?: string;

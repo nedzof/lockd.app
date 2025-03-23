@@ -192,6 +192,26 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     if (!wallet) return;
     
+    // Listen for custom wallet connection events from Lock buttons
+    const handleWalletConnectedEvent = async () => {
+      console.log('Received walletConnected event, refreshing connection state');
+      try {
+        const isConnectedResult = await isWalletConnected(wallet);
+        if (isConnectedResult) {
+          setIsConnected(true);
+          const address = await getWalletAddresses(wallet);
+          if (address) {
+            setBsvAddress(address);
+            await refreshBalance();
+          }
+        }
+      } catch (error) {
+        console.error('Error handling custom wallet connection event:', error);
+      }
+    };
+    
+    window.addEventListener('walletConnected', handleWalletConnectedEvent);
+    
     // Only set up listeners if the 'on' method exists
     if (safeWalletMethodCheck(wallet, 'on')) {
       // Handle account switch
@@ -216,6 +236,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       
       return () => {
+        // Remove the custom event listener
+        window.removeEventListener('walletConnected', handleWalletConnectedEvent);
+        
         // Clean up event listeners if possible
         try {
           if (safeWalletMethodCheck(wallet, 'removeAllListeners')) {
