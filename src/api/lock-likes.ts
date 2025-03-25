@@ -183,6 +183,7 @@ const handleLockLike = async (
         post_id: post.id,
         author_address,
         amount,
+        lock_height: currentBlockHeight, // Store current block height
         unlock_height // Store the lock_duration as unlock_height
       }
     });
@@ -289,6 +290,7 @@ const handlevote_optionLock = async (
         tx_id,
         author_address,
         amount: numericAmount, // Use the validated numeric amount
+        lock_height: currentBlockHeight, // Store current block height
         unlock_height,
         post_id: vote_option.post_id,
         vote_option_id: vote_option.id
