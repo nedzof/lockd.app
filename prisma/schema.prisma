@@ -16,6 +16,7 @@ model lock_like {
   author_address String?      @map("author_address")
   created_at     DateTime     @default(now()) @map("created_at")
   post_id        String       @map("post_id")
+  lock_height    Int?         @map("lock_height")
   unlock_height  Int?         @map("unlock_height")
   vote_option_id String?      @map("vote_option_id")
   post           post         @relation(fields: [post_id], references: [id], onDelete: Cascade)
