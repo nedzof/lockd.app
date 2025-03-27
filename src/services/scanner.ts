@@ -31,6 +31,14 @@ export class Scanner {
     
     console.log(chalk.cyan(`------- OUTPUT ${index + 1} -------`));
     
+    // Check if this is a JSON ordinal inscription
+    const isJsonOrdinal = output.content && output.content.trim().startsWith('{') && 
+                         output.content.includes('"protocol":"lockd.app"');
+    
+    if (isJsonOrdinal) {
+      console.log(chalk.magenta('🔷 JSON ORDINAL INSCRIPTION'));
+    }
+    
     // Check for vote-related content
     const isVoteQuestion = output.metadata?.is_vote === true && 
                           (output.metadata?.total_options || index === 0);
@@ -42,7 +50,22 @@ export class Scanner {
     const contentToDisplay = output.content || '';
     
     // Display content based on its type
-    if (contentToDisplay) {
+    if (isJsonOrdinal) {
+      try {
+        // Parse and pretty print the JSON
+        const parsed = JSON.parse(contentToDisplay);
+        console.log(chalk.green('📝 CONTENT: '));
+        // Only show the first 300 characters to keep output clean
+        const prettyJson = JSON.stringify(parsed, null, 2).substring(0, 300);
+        if (prettyJson.length >= 300) {
+          console.log(chalk.white(prettyJson + '...'));
+        } else {
+          console.log(chalk.white(prettyJson));
+        }
+      } catch (e) {
+        console.log(chalk.green('📝 CONTENT: ') + chalk.white(contentToDisplay.substring(0, 100) + '...'));
+      }
+    } else if (contentToDisplay) {
       if (isVoteQuestion) {
         console.log(chalk.magenta('📊 VOTE QUESTION: ') + chalk.white(contentToDisplay));
       } 
@@ -99,7 +122,9 @@ export class Scanner {
   }
   
   constructor() {
-    logger.info('Scanner initialized');
+    this.isRunning = false;
+    this.isWaiting = false;
+    logger.info('Scanner initialized for JSON ordinal inscriptions');
   }
   
   /**
@@ -207,6 +232,13 @@ export class Scanner {
         return;
       }
       
+      // Count JSON ordinal inscriptions
+      const jsonOrdinalCount = lockdOutputs.filter(output => 
+        output.content && 
+        output.content.trim().startsWith('{') && 
+        output.content.includes('"protocol":"lockd.app"')
+      ).length;
+      
       // Save the transaction to the database
       await tx_repository.saveProcessedTransaction(parsedTx);
       
@@ -235,6 +267,10 @@ export class Scanner {
       
       if (parsedTx.blockHeight) {
         console.log(chalk.green(`🧱 BLOCK: ${parsedTx.blockHeight}`));
+      }
+      
+      if (jsonOrdinalCount > 0) {
+        console.log(chalk.cyan(`🔷 Found ${jsonOrdinalCount} JSON ordinal inscription(s)`));
       }
       
       // Determine if this is a vote transaction

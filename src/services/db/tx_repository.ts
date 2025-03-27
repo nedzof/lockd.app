@@ -6,8 +6,12 @@
 
 import prisma from '../../db.js';
 import logger from '../logger.js';
-import type { ParsedTransaction } from '../tx/tx_parser.js';
+import { isJsonOrdinalInscription, parseOrdinalInscription } from '../tx/ordinal_parser.js';
 import { extractImageFromOutputs, extractImageFromOutput, extractImageFromRawTx } from '../utils/image_extractor.js';
+
+// Import types from tx_parser
+import type { ParsedTransaction } from '../tx/tx_parser.js';
+import type { OrdinalInscription } from '../../shared/types.js';
 
 /**
  * Transaction Repository class
@@ -146,23 +150,48 @@ export class TxRepository {
         const questionOutput = validOutputs.find(o => o.metadata?.total_options) || validOutputs[0];
         const optionOutputs = validOutputs.filter(o => o !== questionOutput && o.metadata?.is_vote === true);
         
-        // Start with question metadata
-        combinedMetadata = { ...questionOutput.metadata };
+        // Start with question metadata - cast to any to avoid TypeScript errors
+        const metadata = questionOutput.metadata as any;
+        combinedMetadata = { ...metadata };
         
         // Use question content as the primary content
         combinedMetadata.content = questionOutput.content || '';
         
-        // Add all contents to an array
-        combinedMetadata.contents = validOutputs
-          .filter(output => output.content)
-          .map(output => output.content || '');
-        
-        // Make sure vote-specific fields are set correctly
-        combinedMetadata.is_vote = true;
-        combinedMetadata.options = optionOutputs.map((option, index) => ({
-          content: option.content,
-          index: option._optionIndex || index + 1
-        }));
+        // Check for JSON ordinal format (options might be in vote_data)
+        if (metadata.vote_data && typeof metadata.vote_data === 'object') {
+          // Extract from vote_data for JSON ordinal format
+          combinedMetadata.vote_data = metadata.vote_data;
+          
+          // Set options from vote_data
+          if (Array.isArray(metadata.vote_data.options)) {
+            combinedMetadata.options = metadata.vote_data.options;
+          }
+        } else {
+          // Traditional format: Add all contents to an array
+          combinedMetadata.contents = validOutputs
+            .filter(output => output.content)
+            .map(output => output.content || '');
+          
+          // Make sure vote-specific fields are set correctly
+          combinedMetadata.is_vote = true;
+          
+          // Check different possible vote option formats
+          if (!combinedMetadata.options) {
+            // Extract from separate outputs if not already present
+            if (optionOutputs.length > 0) {
+              combinedMetadata.options = optionOutputs.map((option, index) => ({
+                content: option.content,
+                index: option._optionIndex || index + 1
+              }));
+            } 
+            // Check for vote_options array (string array format)
+            else if (Array.isArray(metadata.vote_options)) {
+              combinedMetadata.options = metadata.vote_options.map(
+                (content: string, i: number) => ({ content, index: i + 1 })
+              );
+            }
+          }
+        }
         
         // Add author address if available
         if (parsedTx.authorAddress) {
@@ -186,14 +215,50 @@ export class TxRepository {
           const newAcc = { ...acc };
           
           // Only copy fields that don't exist yet or are empty
-          for (const [key, value] of Object.entries(output.metadata)) {
+          const metadata = output.metadata as any;
+          for (const [key, value] of Object.entries(metadata)) {
             if (value !== undefined && (newAcc[key] === undefined || newAcc[key] === null || newAcc[key] === '')) {
               newAcc[key] = value;
             }
           }
           
+          // Check if this is a JSON ordinal
+          if (output.content && isJsonOrdinalInscription(output.content)) {
+            try {
+              const ordinal = parseOrdinalInscription(output.content);
+              if (ordinal) {
+                // Add JSON ordinal data to metadata
+                newAcc.ordinal_inscription = ordinal;
+                
+                // Extract metadata from ordinal
+                if (ordinal.metadata) {
+                  for (const [key, value] of Object.entries(ordinal.metadata)) {
+                    if (value !== undefined) {
+                      newAcc[key] = value;
+                    }
+                  }
+                }
+                
+                // Extract vote data if present
+                if (ordinal.vote_data) {
+                  newAcc.vote_data = ordinal.vote_data;
+                  if (!newAcc.is_vote) {
+                    newAcc.is_vote = true;
+                  }
+                }
+                
+                // Extract image metadata if present
+                if (ordinal.image_metadata) {
+                  newAcc.image_metadata = ordinal.image_metadata;
+                }
+              }
+            } catch (error) {
+              logger.warn(`Error parsing JSON ordinal: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+          
           // Add custom metadata fields if available
-          if ((output.metadata as any)._custom_metadata) {
+          if ((metadata)._custom_metadata) {
             if (!newAcc._custom_metadata) {
               newAcc._custom_metadata = {};
             }
@@ -201,7 +266,7 @@ export class TxRepository {
             // Merge custom metadata
             newAcc._custom_metadata = {
               ...newAcc._custom_metadata,
-              ...(output.metadata as any)._custom_metadata
+              ...(metadata)._custom_metadata
             };
           }
           

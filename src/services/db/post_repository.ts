@@ -7,6 +7,7 @@
 import prisma from '../../db.js';
 import logger from '../logger.js';
 import type { Prisma } from '@prisma/client';
+import type { OrdinalInscription } from '../../shared/types.js';
 
 /**
  * Post Repository class
@@ -17,6 +18,16 @@ export class PostRepository {
    * Convert raw image data from base64 to Bytes
    */
   private base64ToBytes(base64Data: string): Buffer {
+    if (!base64Data) return Buffer.from([]);
+    
+    // Handle data URLs by stripping the prefix
+    if (base64Data.startsWith('data:')) {
+      const parts = base64Data.split(',');
+      if (parts.length > 1) {
+        return Buffer.from(parts[1], 'base64');
+      }
+    }
+    
     return Buffer.from(base64Data, 'base64');
   }
 
@@ -50,7 +61,7 @@ export class PostRepository {
       
       // Check for custom metadata that might have been stored separately
       const customMetadata = metadata._custom_metadata || {};
-      const isLocked = customMetadata.is_locked === true;
+      const isLocked = customMetadata.is_locked === true || (metadata.lock_amount && metadata.lock_amount > 0);
       
       // Extract image data if available
       let mediaType = null;
@@ -60,12 +71,17 @@ export class PostRepository {
       
       if (metadata.image_metadata) {
         mediaType = 'image';
-        contentTypeValue = metadata.image_metadata.format || 'unknown';
+        contentTypeValue = metadata.image_metadata.content_type || 
+                           metadata.image_metadata.format || 
+                           metadata.content_type || 
+                           'image/jpeg';
         imageMetadata = metadata.image_metadata;
         
         // Convert base64 image data to bytes if available
         if (metadata.raw_image_data) {
           rawImageData = this.base64ToBytes(metadata.raw_image_data);
+        } else if (metadata.image && Buffer.isBuffer(metadata.image)) {
+          rawImageData = metadata.image;
         }
       }
 
@@ -89,24 +105,48 @@ export class PostRepository {
       const post = await prisma.post.create({ data: postData });
 
       // If this is a vote, create vote options
-      if (isVote && metadata.options && Array.isArray(metadata.options)) {
-        // Create vote options
-        for (const option of metadata.options) {
-          // Handle the updated structure where we use index instead of option_index
-          const optionIndex = option.index || option.option_index || 0;
-          
-          await prisma.vote_option.create({
-            data: {
-              post_id: post.id,
-              content: option.content || '',
-              tx_id: `${tx_id}-${optionIndex}`, // Generate a unique tx_id for each option
-              option_index: optionIndex,
-              author_address: metadata.author_address || txData.authorAddress
-            }
-          });
+      if (isVote) {
+        // Check different possible vote option formats
+        let voteOptions: any[] = [];
+        
+        if (Array.isArray(metadata.vote_options)) {
+          // Simple string array format
+          voteOptions = metadata.vote_options.map((content: string, i: number) => ({ 
+            content, 
+            index: i 
+          }));
+        } else if (metadata.options && Array.isArray(metadata.options)) {
+          // Object array format
+          voteOptions = metadata.options;
+        } else if (metadata.vote_data?.options && Array.isArray(metadata.vote_data.options)) {
+          // JSON ordinal format
+          voteOptions = metadata.vote_data.options;
         }
 
-        logger.info(`Created vote post with ${metadata.options.length} options for transaction ${tx_id}`);
+        if (voteOptions.length > 0) {
+          // Create vote options
+          for (let i = 0; i < voteOptions.length; i++) {
+            const option = voteOptions[i];
+            // Handle different formats
+            const content = typeof option === 'string' ? option : option.content || '';
+            const optionIndex = typeof option === 'object' ? (option.index || i) : i;
+            
+            await prisma.vote_option.create({
+              data: {
+                post_id: post.id,
+                content: content,
+                tx_id: `${tx_id}-${optionIndex}`, // Generate a unique tx_id for each option
+                option_index: optionIndex,
+                author_address: metadata.author_address || txData.authorAddress,
+                tags: []
+              }
+            });
+          }
+
+          logger.info(`Created vote post with ${voteOptions.length} options for transaction ${tx_id}`);
+        } else {
+          logger.warn(`Vote post created but no options found for transaction ${tx_id}`);
+        }
       } else {
         logger.info(`Created post for transaction ${tx_id}`);
       }

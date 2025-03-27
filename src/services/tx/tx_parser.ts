@@ -1,15 +1,14 @@
 /**
  * Transaction Parser
  * 
- * Main parser class that orchestrates the transaction parsing workflow
+ * Simplified parser class that processes JSON ordinal inscriptions
  */
 
 import { BMAP } from 'bmapjs';
 import logger from '../logger.js';
 import { tx_fetcher } from './tx_fetcher.js';
-import { extract_content_from_op_return } from './content_extractor.js';
-import { extract_key_value_pairs, build_metadata } from './metadata_builder.js';
 import { extract_timestamp } from './utils/timestamp_utils.js';
+import { parseOrdinalInscription, convertOrdinalToLockProtocolData, isJsonOrdinalInscription } from './ordinal_parser.js';
 
 // Import types
 import type { LockProtocolData } from '../../shared/types.js';
@@ -21,8 +20,8 @@ export interface TransactionOutput {
   metadata: LockProtocolData;
   type?: string;
   isValid: boolean;
-  _optionIndex?: number; // Add custom field for option index
-  _authorAddress?: string; // Add custom field for author address
+  _optionIndex?: number;
+  _authorAddress?: string;
 }
 
 export interface ParsedTransaction {
@@ -30,20 +29,20 @@ export interface ParsedTransaction {
   outputs: TransactionOutput[];
   timestamp?: string;
   blockHeight?: number;
-  rawTx?: string; // Raw transaction data in base64 format
-  authorAddress?: string; // Author address from transaction data
+  rawTx?: string;
+  authorAddress?: string;
 }
 
 /**
  * Transaction Parser class
- * Handles parsing Bitcoin transactions
+ * Handles parsing Bitcoin transactions with JSON ordinal inscriptions
  */
 export class TxParser {
   protected bmap: BMAP;
   
   constructor() {
     this.bmap = new BMAP();
-    logger.info('Transaction Parser initialized with bmapjs');
+    logger.info('Transaction Parser initialized with bmapjs for JSON ordinal format');
   }
   
   /**
@@ -69,7 +68,7 @@ export class TxParser {
   }
   
   /**
-   * Parse a script output
+   * Parse a script output for JSON ordinal inscription
    */
   async parse_output(outputHex: string): Promise<{
     content?: string;
@@ -90,18 +89,22 @@ export class TxParser {
           // Extract everything after OP_RETURN
           const opReturnData = cleanHex.substring(opReturnPos + 2);
           
-          // Check for lockd.app signature
-          if (opReturnData.includes('6c6f636b642e617070')) { // 'lockd.app' in hex
-            type = 'lockd';
+          // Decode hex to UTF-8 text to check for JSON content
+          const decodedText = this.decodeHexToUtf8(opReturnData);
+          
+          // Check if text contains a valid JSON structure
+          if (isJsonOrdinalInscription(decodedText)) {
+            // Parse the JSON content as an ordinal inscription
+            content = decodedText;
+            const ordinalInscription = parseOrdinalInscription(content);
             
-            // Extract all key-value pairs
-            const keyValuePairs = extract_key_value_pairs(opReturnData);
-            
-            // Extract content
-            content = extract_content_from_op_return(opReturnData);
-            
-            // Build metadata object
-            metadata = build_metadata(keyValuePairs, content);
+            if (ordinalInscription) {
+              // Convert the ordinal inscription to our internal format
+              metadata = convertOrdinalToLockProtocolData(ordinalInscription);
+              type = 'lockd';
+              logger.debug('Parsed JSON ordinal inscription successfully');
+              return { content, type, metadata };
+            }
           }
         }
       }
@@ -119,172 +122,24 @@ export class TxParser {
   }
   
   /**
-   * Detects if the transaction is a vote with multiple outputs
-   * where one is the question and others are vote options
+   * Decode hex string to UTF-8 text
    */
-  detect_vote_transaction(outputs: TransactionOutput[]): void {
-    // Only process if we have multiple valid outputs
-    if (outputs.length <= 1) return;
-    
+  private decodeHexToUtf8(hex: string): string {
     try {
-      // Check if any outputs already have is_vote = true
-      const explicitVoteOutputs = outputs.filter(o => o.isValid && o.metadata?.is_vote === true);
+      // Remove any non-hex characters
+      const cleanHex = hex.replace(/[^0-9a-f]/gi, '');
       
-      // If at least one output is explicitly marked as a vote, check if it's a multi-part vote
-      if (explicitVoteOutputs.length > 0) {
-        logger.debug(`Found ${explicitVoteOutputs.length} outputs explicitly marked as votes`);
-        
-        // Find the question output (might have total_options set or be the first output)
-        const questionOutput = explicitVoteOutputs.find(o => o.metadata?.total_options) || explicitVoteOutputs[0];
-        
-        // Ensure all outputs in this transaction are marked as votes
-        for (const output of outputs.filter(o => o.isValid)) {
-          output.metadata.is_vote = true;
-        }
-        
-        // Propagate post_id from question to all options if they don't have it
-        if (questionOutput.metadata?.post_id) {
-          const postId = questionOutput.metadata.post_id;
-          for (const output of outputs.filter(o => o.isValid && !o.metadata.post_id)) {
-            output.metadata.post_id = postId;
-          }
-        }
-        
-        // Propagate options_hash if present
-        const optionsHash = questionOutput.metadata?.options_hash;
-        if (optionsHash) {
-          for (const output of outputs.filter(o => o.isValid)) {
-            output.metadata.options_hash = optionsHash;
-          }
-        }
-        
-        // Find all option outputs
-        const optionOutputs = outputs.filter(o => 
-          o.isValid && 
-          o !== questionOutput && 
-          (o.metadata?.is_vote === true)
-        );
-        
-        // Create custom properties to track indices without modifying the strictly typed metadata
-        optionOutputs.forEach((output, index) => {
-          output._optionIndex = index + 1;
-        });
-        
-        // Set total_options on question output if not already set
-        if (!questionOutput.metadata.total_options && optionOutputs.length > 0) {
-          questionOutput.metadata.total_options = optionOutputs.length;
-        }
-        
-        logger.debug(`Vote transaction with ${optionOutputs.length} options processed`);
-        return;
+      // Convert hex to bytes
+      const bytes = [];
+      for (let i = 0; i < cleanHex.length; i += 2) {
+        bytes.push(parseInt(cleanHex.substring(i, i + 2), 16));
       }
       
-      // Check for outputs with consistent post_id - this is our traditional approach
-      // Get all unique post_ids
-      const postIdsMap = new Map<string, number>();
-      
-      // Count occurrences of each post_id
-      for (const output of outputs.filter(o => o.isValid && o.metadata?.post_id)) {
-        const postId = output.metadata.post_id;
-        postIdsMap.set(postId, (postIdsMap.get(postId) || 0) + 1);
-      }
-      
-      // If any post_id appears multiple times, it might be a vote
-      for (const [postId, count] of postIdsMap.entries()) {
-        if (count > 1 || outputs.length >= 3) { // Multi-part vote with shared post_id or many outputs
-          const relatedOutputs = outputs.filter(
-            o => o.isValid && (!o.metadata.post_id || o.metadata.post_id === postId)
-          );
-          
-          if (relatedOutputs.length >= 2) { // Enough to be a vote
-            // Mark all related outputs as part of a vote
-            for (const output of relatedOutputs) {
-              output.metadata.is_vote = true;
-              
-              // Set post_id for outputs that don't have it
-              if (!output.metadata.post_id) {
-                output.metadata.post_id = postId;
-              }
-            }
-            
-            // Assume first output is the question
-            const questionOutput = relatedOutputs[0];
-            const optionOutputs = relatedOutputs.slice(1);
-            
-            // Set option indices if not already set
-            optionOutputs.forEach((output, index) => {
-              // We're storing the index in a custom field instead of metadata
-              output._optionIndex = index + 1;
-            });
-            
-            // Set total_options on question
-            if (!questionOutput.metadata.total_options) {
-              questionOutput.metadata.total_options = optionOutputs.length;
-            }
-            
-            // Find an options hash to propagate
-            const optionsHash = relatedOutputs.find(o => o.metadata?.options_hash)?.metadata?.options_hash;
-            if (optionsHash) {
-              for (const output of relatedOutputs) {
-                output.metadata.options_hash = optionsHash;
-              }
-            }
-            
-            logger.debug(`Vote transaction detected with ${optionOutputs.length} options for post_id ${postId}`);
-            break;
-          }
-        }
-      }
-      
-      // If no vote was detected with post_id, check if multiple outputs might be a vote
-      // by looking at their structure (one question followed by multiple options)
-      if (!outputs.some(o => o.isValid && o.metadata?.is_vote === true) && outputs.length >= 3) {
-        const validOutputs = outputs.filter(o => o.isValid);
-        if (validOutputs.length >= 3) { // Enough outputs to likely be a vote
-          // Mark all valid outputs as vote
-          for (const output of validOutputs) {
-            output.metadata.is_vote = true;
-          }
-          
-          // Assume first output is the question
-          const questionOutput = validOutputs[0];
-          const optionOutputs = validOutputs.slice(1);
-          
-          // Set option indices
-          optionOutputs.forEach((output, index) => {
-            // Store in custom field to avoid type issues
-            output._optionIndex = index + 1;
-          });
-          
-          // Set total_options on question
-          if (!questionOutput.metadata.total_options) {
-            questionOutput.metadata.total_options = optionOutputs.length;
-          }
-          
-          // Find an options hash to propagate
-          const optionsHash = validOutputs.find(o => o.metadata?.options_hash)?.metadata?.options_hash;
-          if (optionsHash) {
-            for (const output of validOutputs) {
-              output.metadata.options_hash = optionsHash;
-            }
-          }
-          
-          // If a post_id exists anywhere, propagate it
-          const postId = validOutputs.find(o => o.metadata?.post_id)?.metadata?.post_id;
-          if (postId) {
-            for (const output of validOutputs) {
-              if (!output.metadata.post_id) {
-                output.metadata.post_id = postId;
-              }
-            }
-          }
-          
-          logger.debug(`Vote transaction detected with ${optionOutputs.length} options based on output structure`);
-        }
-      }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`Error detecting vote transaction: ${errorMessage}`);
+      // Convert bytes to UTF-8 string
+      return new TextDecoder('utf-8').decode(new Uint8Array(bytes));
+    } catch (error) {
+      logger.error(`Error decoding hex to UTF-8: ${error}`);
+      return '';
     }
   }
   
@@ -323,36 +178,30 @@ export class TxParser {
               content: parsed.content,
               metadata: parsed.metadata,
               type: parsed.type,
-              isValid: true
+              isValid: !!parsed.type // Only valid if type is set
             };
             
             // Add author address to metadata if available
             if (authorAddress) {
               outputObj._authorAddress = authorAddress;
+              
+              // Also set author_address in metadata if not already set
+              if (!(outputObj.metadata as any).author_address) {
+                (outputObj.metadata as any).author_address = authorAddress;
+              }
             }
             
-            outputs.push(outputObj);
+            // Only add valid JSON ordinal inscriptions
+            if (parsed.type) {
+              outputs.push(outputObj);
+            }
           } catch (parseError: unknown) {
             const errorMessage = parseError instanceof Error ? parseError.message : String(parseError);
             logger.error(`Failed to parse output: ${errorMessage}`);
-            outputs.push({
-              hex: output,
-              metadata: {} as LockProtocolData,
-              isValid: false
-            });
+            // Skip invalid outputs instead of adding them as invalid
           }
-        } else {
-          // Add invalid output to the list
-          outputs.push({
-            hex: output,
-            metadata: {} as LockProtocolData,
-            isValid: false
-          });
         }
       }
-      
-      // Check if this is a multi-part vote transaction
-      this.detect_vote_transaction(outputs);
       
       return {
         txId,
@@ -442,32 +291,6 @@ export class TxParser {
           if (input.addresses && Array.isArray(input.addresses) && input.addresses.length > 0) {
             return input.addresses[0];
           }
-        }
-      }
-      
-      // Try to extract from BMAP parser if available
-      if (txData.transaction) {
-        try {
-          // Use appropriate BMAP methods based on transaction format
-          // We'll skip this for now since method naming may vary
-          // This is a fallback approach only
-          logger.debug('Using raw transaction analysis for address extraction');
-          
-          // Direct parsing of P2PKH output scripts for addresses
-          if (txData.outputs && Array.isArray(txData.outputs)) {
-            for (const output of txData.outputs) {
-              // Look for a P2PKH pattern with OP_DUP OP_HASH160 <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
-              // In hex, this looks like: 76a914<pubKeyHash>88ac
-              if (typeof output === 'string' && output.startsWith('76a914') && output.endsWith('88ac')) {
-                const pubKeyHash = output.substring(6, output.length - 4);
-                logger.debug(`Found potential P2PKH output with pubKeyHash: ${pubKeyHash}`);
-                // We'd need a proper address encoder here, but we'll leave this as a placeholder
-                // since the addresses array should already provide this info
-              }
-            }
-          }
-        } catch (error) {
-          logger.debug(`Failed to extract address from transaction: ${error}`);
         }
       }
       

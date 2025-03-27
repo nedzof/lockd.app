@@ -1,7 +1,7 @@
 /**
  * Scanner Startup Script
  * 
- * This script starts the blockchain scanner that looks for lockd.app transactions
+ * This script starts the blockchain scanner that looks for lockd.app JSON ordinal inscriptions
  */
 
 import { scanner } from '../services/scanner.js';
@@ -22,7 +22,7 @@ async function main() {
 
     try {
         await scanner.start();
-        logger.info('Scanner started successfully');
+        logger.info('Scanner started successfully - watching for JSON ordinal inscriptions');
     } catch (error) {
         logger.error(`Failed to start scanner: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
