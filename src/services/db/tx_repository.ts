@@ -122,91 +122,55 @@ export class TxRepository {
    */
   async saveProcessedTransaction(parsedTx: ParsedTransaction): Promise<void> {
     try {
-      // Log start of transaction processing
-      logger.info(`🔄 Processing transaction ${parsedTx.txId} for database storage`);
-      
       // Extract relevant data from parsed transaction
       const { txId, outputs, blockHeight, timestamp, rawTx } = parsedTx;
       
       // Skip if no valid transaction ID
       if (!txId) {
-        logger.warn('❌ Cannot save transaction: No transaction ID provided');
+        logger.warn('Cannot save transaction: No transaction ID provided');
         return;
       }
 
       // Get valid outputs
       const validOutputs = outputs.filter(output => output.isValid);
-      logger.debug(`📊 Transaction has ${validOutputs.length} valid outputs out of ${outputs.length} total`);
       
       // Determine if this is a vote transaction
       const isVote = validOutputs.some(output => output.metadata?.is_vote === true);
-      
-      // Log transaction type detection
-      if (isVote) {
-        logger.info(`🗳️ Detected vote transaction: ${txId}`);
-      } else if (validOutputs.some(output => output.metadata?.content_type?.includes('image'))) {
-        logger.info(`🖼️ Detected image post transaction: ${txId}`);
-      } else {
-        logger.info(`📝 Detected text post transaction: ${txId}`);
-      }
       
       // Prepare metadata object
       let combinedMetadata: Record<string, any> = {};
       
       if (isVote) {
-        // We now exclusively use single-output votes with embedded options
-        const output = validOutputs[0];
-        const customMeta = (output.metadata as any)._custom_metadata || {};
+        // For votes, handle question and options separately
+        // Find question output (typically the first or the one with total_options)
+        const questionOutput = validOutputs.find(o => o.metadata?.total_options) || validOutputs[0];
+        const optionOutputs = validOutputs.filter(o => o !== questionOutput && o.metadata?.is_vote === true);
         
-        logger.debug('🔍 Processing vote with embedded options');
+        // Start with question metadata
+        combinedMetadata = { ...questionOutput.metadata };
         
-        // Start with output metadata
-        combinedMetadata = { ...output.metadata };
+        // Use question content as the primary content
+        combinedMetadata.content = questionOutput.content || '';
         
-        // Use content as the primary content (vote question)
-        combinedMetadata.content = output.content || '';
+        // Add all contents to an array
+        combinedMetadata.contents = validOutputs
+          .filter(output => output.content)
+          .map(output => output.content || '');
         
         // Make sure vote-specific fields are set correctly
         combinedMetadata.is_vote = true;
-        
-        // Extract vote options from custom metadata if available
-        if (customMeta.vote_option_objects && Array.isArray(customMeta.vote_option_objects)) {
-          combinedMetadata.options = customMeta.vote_option_objects.map((option: any, index: number) => ({
-            content: option.text || '',
-            index: option.optionIndex || index
-          }));
-          
-          logger.debug(`🗳️ Processed vote with ${combinedMetadata.options.length} embedded options`);
-          logger.debug(`👀 Vote question: "${combinedMetadata.content || 'No question'}" with options: ${JSON.stringify(combinedMetadata.options.map((o: any) => o.content))}`);
-        } 
-        // Otherwise, check for direct vote_options array
-        else if (output.metadata.vote_options && Array.isArray(output.metadata.vote_options)) {
-          combinedMetadata.options = output.metadata.vote_options.map((text: string, index: number) => ({
-            content: text,
-            index
-          }));
-          
-          logger.debug(`🗳️ Processed vote with ${combinedMetadata.options.length} options from vote_options array`);
-          logger.debug(`👀 Vote question: "${combinedMetadata.content || 'No question'}" with options: ${JSON.stringify(combinedMetadata.options.map((o: any) => o.content))}`);
-        }
-        // Fallback - create an empty options array
-        else {
-          combinedMetadata.options = [];
-          logger.warn('⚠️ Vote without options detected - may be incorrectly formatted');
-        }
+        combinedMetadata.options = optionOutputs.map((option, index) => ({
+          content: option.content,
+          index: option._optionIndex || index + 1
+        }));
         
         // Add author address if available
         if (parsedTx.authorAddress) {
           combinedMetadata.author_address = parsedTx.authorAddress;
-          logger.debug(`✍️ Author address: ${parsedTx.authorAddress}`);
-        } else {
-          logger.debug('⚠️ No author address found for vote transaction');
         }
       } else {
         // For regular posts, combine metadata from all outputs
-        logger.debug(`🔄 Combining metadata from ${validOutputs.length} outputs`);
-        
-        combinedMetadata = validOutputs.reduce((acc, output, index) => {
+        combinedMetadata = validOutputs.reduce((acc, output) => {
           // Add output content if available
           if (output.content) {
             if (!acc.contents) acc.contents = [];
@@ -215,7 +179,6 @@ export class TxRepository {
             // For non-votes, use the first content as main content
             if (!acc.content) {
               acc.content = output.content;
-              logger.debug(`📄 Main content from output #${index}: "${output.content.substring(0, 50)}${output.content.length > 50 ? '...' : ''}"`);
             }
           }
           
@@ -245,10 +208,8 @@ export class TxRepository {
           // Add author address if available
           if (output._authorAddress) {
             newAcc.author_address = output._authorAddress;
-            logger.debug(`✍️ Author address from output: ${output._authorAddress}`);
-          } else if (parsedTx.authorAddress && !newAcc.author_address) {
+          } else if (parsedTx.authorAddress) {
             newAcc.author_address = parsedTx.authorAddress;
-            logger.debug(`✍️ Author address from transaction: ${parsedTx.authorAddress}`);
           }
           
           return newAcc;
@@ -261,7 +222,7 @@ export class TxRepository {
         const outputHexes = outputs.map(output => output.hex).filter(Boolean);
         
         if (outputHexes.length > 0) {
-          logger.debug(`🔍 Checking ${outputHexes.length} outputs for image data`);
+          logger.debug(`Checking ${outputHexes.length} outputs for image data`);
           
           // Try extracting from each output individually
           let imageFound = false;
@@ -269,7 +230,7 @@ export class TxRepository {
           for (let i = 0; i < outputHexes.length; i++) {
             const image = extractImageFromOutput(outputHexes[i]);
             if (image) {
-              logger.info(`🖼️ Found ${image.format} image in output #${i}, size: ${image.size} bytes`);
+              logger.info(`Found ${image.format} image in output #${i}, size: ${image.size} bytes`);
               
               // Add image metadata to combined metadata
               combinedMetadata.image_metadata = {
@@ -297,7 +258,7 @@ export class TxRepository {
             const image = extractImageFromOutputs(outputHexes);
             
             if (image) {
-              logger.info(`🖼️ Found ${image.format} image across multiple outputs, size: ${image.size} bytes`);
+              logger.info(`Found ${image.format} image across multiple outputs, size: ${image.size} bytes`);
               
               // Add image metadata to combined metadata
               combinedMetadata.image_metadata = {
@@ -314,11 +275,11 @@ export class TxRepository {
               combinedMetadata.raw_image_data = image.data.toString('base64');
             } else if (rawTx) {
               // If no image found in outputs, try the raw transaction data
-              logger.debug('🔍 Checking raw transaction data for images');
+              logger.debug('Checking raw transaction data for images');
               const image = extractImageFromRawTx(rawTx);
               
               if (image) {
-                logger.info(`🖼️ Found ${image.format} image in raw transaction data, size: ${image.size} bytes`);
+                logger.info(`Found ${image.format} image in raw transaction data, size: ${image.size} bytes`);
                 
                 // Add image metadata to combined metadata
                 combinedMetadata.image_metadata = {
@@ -339,11 +300,10 @@ export class TxRepository {
           }
         }
       } catch (error) {
-        logger.warn(`⚠️ Error extracting image data from transaction ${txId}: ${error}`);
+        logger.warn(`Error extracting image data from transaction ${txId}: ${error}`);
       }
       
       // Sanitize metadata to prevent database errors
-      logger.debug('🧹 Sanitizing metadata for database storage');
       const sanitizedMetadata = this.sanitizeMetadata(combinedMetadata);
       
       // Convert timestamp to BigInt for block_time if available
@@ -351,14 +311,10 @@ export class TxRepository {
       if (timestamp) {
         try {
           blockTime = BigInt(Math.floor(new Date(timestamp).getTime() / 1000));
-          logger.debug(`⏰ Converted timestamp ${timestamp} to block_time ${blockTime}`);
         } catch (error) {
-          logger.warn(`⚠️ Invalid timestamp format: ${timestamp}`);
+          logger.warn(`Invalid timestamp format: ${timestamp}`);
         }
       }
-      
-      // Log DB operation details
-      logger.info(`💾 Saving transaction ${txId} to database (Block: ${blockHeight || 'unconfirmed'}, Type: ${isVote ? 'vote' : 'post'})`);
       
       // Save to database
       await prisma.processed_transaction.upsert({
@@ -383,24 +339,10 @@ export class TxRepository {
         }
       });
       
-      logger.info(`✅ Transaction ${txId} successfully saved to database as ${isVote ? 'vote' : 'post'}`);
-      
-      // Log summary of stored data
-      const metadataKeys = Object.keys(sanitizedMetadata);
-      logger.debug(`📊 Stored metadata contains ${metadataKeys.length} fields: ${metadataKeys.join(', ')}`);
-      
-      // Additional logging for vote transactions
-      if (isVote && sanitizedMetadata.options) {
-        const optionsCount = Array.isArray(sanitizedMetadata.options) ? sanitizedMetadata.options.length : 0;
-        logger.info(`🗳️ Stored vote with ${optionsCount} options`);
-      }
-      
+      logger.debug(`Saved transaction ${txId} to database as ${isVote ? 'vote' : 'post'}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`❌ Failed to save transaction to database: ${errorMessage}`, {
-        error_stack: error instanceof Error ? error.stack : undefined,
-        tx_id: parsedTx.txId
-      });
+      logger.error(`Failed to save transaction to database: ${errorMessage}`);
     }
   }
 
@@ -409,27 +351,16 @@ export class TxRepository {
    */
   async isTransactionSaved(txId: string): Promise<boolean> {
     try {
-      logger.debug(`🔍 Checking if transaction ${txId} is already in database`);
-      
       const transaction = await prisma.processed_transaction.findUnique({
         where: {
           tx_id: txId
         }
       });
       
-      if (transaction) {
-        logger.debug(`✓ Transaction ${txId} already exists in database (type: ${transaction.type})`);
-      } else {
-        logger.debug(`✗ Transaction ${txId} not found in database`);
-      }
-      
       return !!transaction;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`❌ Failed to check if transaction is saved: ${errorMessage}`, {
-        tx_id: txId,
-        error_stack: error instanceof Error ? error.stack : undefined
-      });
+      logger.error(`Failed to check if transaction is saved: ${errorMessage}`);
       return false;
     }
   }

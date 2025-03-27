@@ -7,7 +7,6 @@
 import type { LockProtocolData } from '../../shared/types.js';
 import { decode_hex_to_utf8 } from './utils/hex_utils.js';
 import { format_timestamp, is_valid_iso_timestamp } from './utils/timestamp_utils.js';
-import logger from '../logger.js';
 
 /**
  * Extract key-value pairs from hex
@@ -37,8 +36,6 @@ export function extract_key_value_pairs(hexString: string): Record<string, strin
     'content_type': '636f6e74656e745f74797065',  // 'content_type' in hex
     'media_type': '6d656469615f74797065',  // 'media_type' in hex
     'version': '76657273696f6e',  // 'version' in hex
-    'vote_data': '766f74655f64617461',  // 'vote_data' in hex
-    'vote_question': '766f74655f7175657374696f6e',  // 'vote_question' in hex
   };
   
   // Look for each key in the hex
@@ -54,26 +51,6 @@ export function extract_key_value_pairs(hexString: string): Record<string, strin
         const endPos = valueText.search(/[\x00-\x1F\x7F]/);
         const value = endPos > 0 ? valueText.substring(0, endPos) : valueText;
         result[key] = value.trim();
-      }
-    }
-  }
-  
-  // Also look for option0, option1, option2, etc. pattern
-  for (let i = 0; i < 10; i++) {  // Support up to 10 options
-    const optionKey = `option${i}`;
-    const optionHexKey = Buffer.from(optionKey).toString('hex');
-    
-    if (lowerHex.includes(optionHexKey)) {
-      const pos = lowerHex.indexOf(optionHexKey);
-      if (pos >= 0) {
-        // Extract value after the key
-        const valueHex = lowerHex.substring(pos + optionHexKey.length);
-        const valueText = decode_hex_to_utf8(valueHex);
-        
-        // Find end of value (next non-printable char or field)
-        const endPos = valueText.search(/[\x00-\x1F\x7F]/);
-        const value = endPos > 0 ? valueText.substring(0, endPos) : valueText;
-        result[optionKey] = value.trim();
       }
     }
   }
@@ -122,7 +99,8 @@ export function build_metadata(keyValuePairs: Record<string, string>, content: s
     }
   }
   
-  // Handle option_index for direct field access
+  // Handle both camelCase and snake_case variants for option_index
+  // Store in custom_metadata instead of directly in LockProtocolData
   if (keyValuePairs.option_index || keyValuePairs.optionIndex) {
     const optionIndexValue = keyValuePairs.option_index || keyValuePairs.optionIndex;
     const numMatch = optionIndexValue.match(/^(\d+)/);
@@ -177,87 +155,6 @@ export function build_metadata(keyValuePairs: Record<string, string>, content: s
         // If we can't parse the timestamp, don't set it
       }
     }
-  }
-  
-  // Process vote_data field (consolidated vote data format)
-  if (keyValuePairs.vote_data) {
-    try {
-      const voteData = JSON.parse(keyValuePairs.vote_data);
-      logger.debug('Found vote_data field in transaction', voteData);
-      
-      // Mark as a vote
-      metadata.is_vote = true;
-      
-      // Extract vote question
-      if (voteData.question) {
-        metadata.vote_question = voteData.question;
-        // Set content to the vote question for consistency
-        metadata.content = voteData.question;
-      }
-      
-      // Extract options
-      if (voteData.options && Array.isArray(voteData.options)) {
-        metadata.vote_options = voteData.options.map((option: any) => {
-          return typeof option === 'string' ? option : (option.text || '');
-        });
-        metadata.total_options = voteData.options.length;
-        
-        // Store the full option objects in custom metadata
-        custom_metadata.vote_option_objects = voteData.options;
-      }
-    } catch (error) {
-      logger.error('Error parsing vote_data:', error);
-    }
-  }
-  
-  // Process direct option fields (option0, option1, etc.)
-  const optionFields: string[] = [];
-  for (let i = 0; i < 10; i++) {
-    const optionKey = `option${i}`;
-    if (keyValuePairs[optionKey]) {
-      optionFields.push(optionKey);
-      
-      // If we find option fields, mark as a vote
-      metadata.is_vote = true;
-      
-      // Extract vote question - use the content if we don't have vote_question
-      if (!metadata.vote_question) {
-        metadata.vote_question = keyValuePairs.vote_question || content;
-      }
-    }
-  }
-  
-  // If we found option fields, process them
-  if (optionFields.length > 0) {
-    logger.debug(`Found ${optionFields.length} direct option fields`);
-    
-    const options: string[] = [];
-    const optionObjects: any[] = [];
-    
-    for (const optionKey of optionFields) {
-      const index = parseInt(optionKey.replace('option', ''), 10);
-      const optionText = keyValuePairs[optionKey];
-      options.push(optionText);
-      
-      const optionObject: any = {
-        text: optionText,
-        option_index: index
-      };
-      
-      optionObjects.push(optionObject);
-    }
-    
-    // Set the vote options and total options
-    metadata.vote_options = options;
-    metadata.total_options = options.length;
-    
-    // Store the full option objects in custom metadata
-    custom_metadata.vote_option_objects = optionObjects;
-  }
-  
-  // Set vote_question if we have it directly
-  if (keyValuePairs.vote_question) {
-    metadata.vote_question = keyValuePairs.vote_question;
   }
   
   // Attach custom metadata to the main metadata object as a custom field
